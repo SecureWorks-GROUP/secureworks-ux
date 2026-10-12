@@ -781,14 +781,19 @@ line that bills a trade's time carries `work_date`, `start_time`, `finish_time`
 and optional `break_minutes`; hours are worked out and NEVER typed, so do not
 add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
-(`time_entry_required`). One line is one job on one day: a second day is a
-second line ("+ Add another day on this job"), which rides `extra_items`, not
-`manual_assignments`. Lines that are not time carry none of the fields. Search
+(`time_entry_required`). One line is one job on one day: a second day is its
+own Extras row. The date worked cannot be after today (Perth) anywhere a trade
+gives it, and the app never invents, remembers or carries a time between lines
+(only real clock on and off times prefill a card), so do not add a default
+start or a device memory of times. Lines that are not time carry none of the
+fields. Search
 `// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
 `// <trade-time-entry-ops>` in `ops.html` (ops shows the times beside the hours
 only when a line carries them). The full contract, the list of every place a
 trade enters time and the defaults live in `trade-app.md` → "Pay tab: when the
-time was worked". Specs fill times through `tests/helpers/invoice-time.js`.
+time was worked". Specs fill times through `tests/helpers/invoice-time.js`, and
+a spec that enters times on the fixture week's jobs needs
+`test.use({ appWeekDay: 6 })` or it fails early in the week.
 Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.

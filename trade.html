@@ -706,8 +706,6 @@
     .jct-fixed { min-height: 44px; display: flex; align-items: center; font-size: 15px; font-weight: 700; color: var(--sw-dark); }
     .jct-err { margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--sw-red); }
     .jct-hint { margin-top: 4px; font-size: 11px; color: var(--sw-text-sec); }
-    .jct-add-day { display: block; width: 100%; min-height: 44px; margin-top: 8px; padding: 8px 12px; background: none; border: 1px dashed var(--sw-mid); border-radius: 8px; color: var(--sw-dark); font-family: var(--sw-font); font-size: 13px; font-weight: 700; cursor: pointer; }
-    .jct-add-day:active { background: var(--sw-light); }
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
     .inv-totals-row { display: flex; justify-content: space-between; font-size: 13px; line-height: 1.8; }
     .inv-totals-row.grand { font-size: 16px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.15); margin-top: 4px; padding-top: 6px; }
@@ -14902,7 +14900,7 @@
       h += '<div class="rr-hours-t">' + esc(ctx.title || 'Hours for this job') + '</div>';
       if (cur != null) {
         h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '.'
-          + (ctx.when ? ' ' + esc(ctx.when) + '. Change the times and save to change it.' : ' Add the times you worked.') + '</div>';
+          + (ctx.when ? ' ' + esc(ctx.when) + '. Change the times and save to change it.' : ' Save new times to change it.') + '</div>';
       } else {
         h += '<div class="rr-hours-s">Give the date you worked and your start and finish time. It goes on this week\'s invoice.</div>';
       }
@@ -15091,72 +15089,25 @@
     });
   };
   // ── Hours on the job view: date, start, finish [trade-time-entry] ──
-  // What the trade said here is kept on this device, per account and job, so
-  // the weekly invoice card for that job opens on the same times and they
-  // are not asked twice. The server holds the hours; this holds the when.
-  function _jobTimeMemoryKey() {
-    var id = _invDraftOwnerId();
-    return id ? 'sw_time_job_' + encodeURIComponent(id) : '';
-  }
-  function _jobTimeMemory() {
-    try {
-      var key = _jobTimeMemoryKey();
-      var map = key ? JSON.parse(localStorage.getItem(key) || '{}') : {};
-      return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
-    } catch (e) { return {}; }
-  }
-  function _jobTimeRecall(jobId) {
-    var hit = jobId ? _jobTimeMemory()[String(jobId)] : null;
-    if (!hit || !TradeTimeEntryCore.check(hit).ok) return null;
-    var entry = TradeTimeEntryCore.fields(hit);
-    entry.hours = Number(hit.hours);
-    return entry;
-  }
-  function _jobTimeRemember(jobId, entry, hours) {
-    try {
-      var key = _jobTimeMemoryKey();
-      if (!key || !jobId) return;
-      var map = _jobTimeMemory();
-      var row = TradeTimeEntryCore.fields(entry);
-      row.hours = Number(hours);
-      row.at = Date.now();
-      map[String(jobId)] = row;
-      // Keep the newest 60 jobs: a phone is not a filing cabinet.
-      var ids = Object.keys(map).sort(function (x, y) { return (map[y].at || 0) - (map[x].at || 0); });
-      ids.slice(60).forEach(function (id) { delete map[id]; });
-      localStorage.setItem(key, JSON.stringify(map));
-    } catch (e) {}
-  }
-  // The hours row for a job: the fields open on what the trade last said for
-  // this job, else the day it was scheduled (never a day still to come) and
-  // their usual start. Finish is always theirs to give.
+  // The hours row for a job opens on the day it was scheduled (never a day
+  // still to come). Start and finish are always the trade's to give.
   function rrHoursRowHTML(jobId, data, title, week) {
     var cur = data ? rrMyHours(data) : null;
     var today = clockPerthDay(new Date());
-    var said = _jobTimeRecall(jobId);
-    // What was said here only counts while it is still what is on the week.
-    if (said && cur != null && Math.abs(said.hours - cur) > 0.01) said = null;
-    if (said && cur == null) said = null;
     var mine = data ? getMyAssignment(data) : null;
     var sched = String((mine && mine.scheduled_date) || '').slice(0, 10);
-    var entry = said || {
-      work_date: (TradeTimeEntryCore.isDate(sched) && sched <= today) ? sched : today,
-      start_time: _timeLastStart(), finish_time: '', break_minutes: 0
-    };
     return RoofReportCore.hoursHTML(jobId, cur, {
-      title: title, week: week, entry: entry, maxDate: today,
-      when: said ? TradeTimeEntryCore.label(said) : '',
-      hoursText: TradeTimeEntryCore.hoursText(TradeTimeEntryCore.hoursFor(entry.start_time, entry.finish_time, entry.break_minutes)) || '0 hrs'
+      title: title, week: week, maxDate: today,
+      entry: { work_date: (TradeTimeEntryCore.isDate(sched) && sched <= today) ? sched : today, start_time: '', finish_time: '', break_minutes: 0 }
     });
   }
   function _rrHoursEntryFromDOM() {
     function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
-    var brk = String(val('rrHoursBreak') || '').trim();
     return {
       work_date: val('rrHoursDate'),
       start_time: TradeTimeEntryCore.normTime(val('rrHoursStart')),
       finish_time: TradeTimeEntryCore.normTime(val('rrHoursFinish')),
-      break_minutes: brk === '' ? 0 : (TradeTimeEntryCore.breakOf(brk) == null ? brk : Number(brk))
+      break_minutes: TradeTimeEntryCore.breakInput(val('rrHoursBreak'))
     };
   }
   function _rrHoursShowError(msg) {
@@ -15165,18 +15116,13 @@
   }
   window.rrHoursChanged = function () {
     var entry = _rrHoursEntryFromDOM();
-    var chk = TradeTimeEntryCore.check(entry);
     var calc = document.getElementById('rrHoursCalc');
-    if (calc) calc.textContent = (chk.ok && TradeTimeEntryCore.hoursText(chk.hours)) || '0 hrs';
-    // While typing, only say what is wrong with what is there. A field not
-    // reached yet is named when they press save.
-    var blank = (chk.field === 'work_date' && !entry.work_date) || chk.field === 'start_time' || (chk.field === 'finish_time' && !entry.finish_time);
-    _rrHoursShowError(chk.ok || blank ? '' : chk.error);
+    if (calc) calc.textContent = TradeTimeEntryCore.hoursText(TradeTimeEntryCore.hoursFor(entry.start_time, entry.finish_time, entry.break_minutes)) || '0 hrs';
+    _rrHoursShowError(_timeLiveError(entry));
   };
   window.rrLogHours = function (jobId) {
     var entry = _rrHoursEntryFromDOM();
-    var chk = TradeTimeEntryCore.check(entry);
-    if (chk.ok && entry.work_date > clockPerthDay(new Date())) chk = { ok: false, error: 'The date worked cannot be after today.' };
+    var chk = _timeCheck(entry);
     if (!chk.ok) { _rrHoursShowError(chk.error); toast(chk.error, true); return Promise.resolve(); }
     _rrHoursShowError('');
     var controls = document.querySelectorAll('#rrHours input, #rrHours button');
@@ -15199,8 +15145,6 @@
       else if (_currentJob && res.assignment && _user) {
         _currentJob.crew = (_currentJob.crew || []).concat([{ id: res.assignment.id, user_id: _user.id, status: res.assignment.status, hours_worked: hours, scheduled_date: res.assignment.scheduled_date }]);
       }
-      _timeRememberStart(sent.start_time);
-      _jobTimeRemember(jobId, sent, hours);
       var week = RoofReportCore.weekLabel(res.week_ending);
       var cur = document.getElementById('rrHours');
       if (cur) {
@@ -20727,7 +20671,7 @@
     if (c.wo_mode || c.commission_mode) return true;
     if (String(c.description || '').trim()) return true;
     if ((c.wo_lump_lines || []).length) return true;
-    return _jobCardTimeTouched(c) && !(c.hours_prefilled && !c.hours_user_edited);
+    return TradeTimeEntryCore.touched(c) && !(c.hours_prefilled && !c.hours_user_edited);
   }
 
   // Move the open invoice to another week. Jobs the trade added by search move
@@ -21905,7 +21849,7 @@
       _invGst = _invoiceGstDefault(inv);
       // Restore all lines into _invRows
       (inv.lines || []).forEach(function(l) {
-        _invRows.push({
+        _invRows.push(_invRowSyncHours({
           date: l.line_date || l.scheduled_date || '',
           job_id: l.job_id || null,
           job_text: l.job_number || '',
@@ -21919,7 +21863,7 @@
           amount: l.line_total_ex || 0,
           _source: l.line_type === 'labour' ? 'clock' : 'manual',
           _misc: l.line_type !== 'labour'
-        });
+        }));
       });
       if (_invRows.length === 0) {
         var defRate = (_hoursData && _hoursData.rate) || _tradeRate || 0;
@@ -23033,15 +22977,9 @@
       var st = document.getElementById('ir_start_' + i);
       var fin = document.getElementById('ir_fin_' + i);
       var brk = document.getElementById('ir_brk_' + i);
-      if (st) {
-        var stv = TradeTimeEntryCore.normTime(st.value);
-        if (stv !== (row.start_time || '')) { row.start_time = stv; row.start_auto = false; }
-      }
+      if (st) row.start_time = TradeTimeEntryCore.normTime(st.value);
       if (fin) row.finish_time = TradeTimeEntryCore.normTime(fin.value);
-      if (brk) {
-        var bv = String(brk.value || '').trim();
-        row.break_minutes = bv === '' ? 0 : (TradeTimeEntryCore.breakOf(bv) == null ? bv : Number(bv));
-      }
+      if (brk) row.break_minutes = TradeTimeEntryCore.breakInput(brk.value);
       if (r) row.rate = parseFloat(r.value) || 0;
       // Hours are worked out from the times on every row the trade entered.
       // A clocked row keeps the hours the server gave it.
@@ -23078,11 +23016,8 @@
     row.amount = Math.round(row.hours * (Number(row.rate) || 0) * 100) / 100;
     return row;
   }
-  function _invRowTimeTouched(row) {
-    return !!(row && (row.finish_time || (row.start_time && !row.start_auto) || Number(row.break_minutes) > 0));
-  }
   function _invRowHasWork(row) {
-    return !!(row && (row.hours > 0 || row.description || _invRowTimeTouched(row)));
+    return !!(row && (row.hours > 0 || row.description || TradeTimeEntryCore.touched(row)));
   }
   function _invRowTimeEntry(row) {
     return { work_date: row.date || '', start_time: row.start_time, finish_time: row.finish_time, break_minutes: row.break_minutes };
@@ -23090,7 +23025,7 @@
   // First extras row that does not say when it was worked, in plain words.
   function _invRowsTimeError(rows) {
     for (var i = 0; i < (rows || []).length; i++) {
-      var chk = TradeTimeEntryCore.check(_invRowTimeEntry(rows[i]));
+      var chk = _timeCheck(_invRowTimeEntry(rows[i]));
       if (!chk.ok) return 'Extra ' + (rows[i].job_text || 'row ' + (i + 1)) + ': ' + chk.error;
     }
     return '';
@@ -23148,17 +23083,14 @@
 
   window.invRowChanged = function(idx) {
     var row = _invRows[idx]; if (!row) return;
-    var prevStart = row.start_time || '';
     _syncRowsFromDOM();
-    if (row.start_time && row.start_time !== prevStart) _timeRememberStart(row.start_time);
     var amt = row.amount || 0;
     var he = document.getElementById('ir_hrs_' + idx);
     if (he) he.textContent = TradeTimeEntryCore.hoursText(row.hours) || '0 hrs';
     var ee = document.getElementById('ir_timeerr_' + idx);
     if (ee) {
-      var chk = _invRowTimeTouched(row) ? TradeTimeEntryCore.check(_invRowTimeEntry(row)) : null;
-      var live = chk && !chk.ok && chk.field !== 'start_time' && !(chk.field === 'finish_time' && !row.finish_time) && !(chk.field === 'work_date' && !row.date);
-      ee.textContent = live ? chk.error : '';
+      var live = _timeLiveError(_invRowTimeEntry(row));
+      ee.textContent = live;
       ee.hidden = !live;
     }
     var ae = document.getElementById('ir_amt_' + idx);
@@ -23234,7 +23166,7 @@
     h += '</div>';
 
     h += '<div style="display:flex;gap:6px;margin-bottom:5px;align-items:center">';
-    if (showDate) h += '<input type="date" id="ir_date_' + i + '" aria-label="Date worked" value="' + (row.date || '') + '" onchange="invRowChanged(' + i + ')" style="flex:0 0 132px;min-height:44px;padding:5px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
+    if (showDate) h += '<input type="date" id="ir_date_' + i + '" aria-label="Date worked" value="' + (row.date || '') + '" max="' + clockPerthDay(new Date()) + '" onchange="invRowChanged(' + i + ')" style="flex:0 0 132px;min-height:44px;padding:5px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
     h += '<input type="text" id="ir_job_' + i + '" value="' + esc(row.job_text || '') + '" list="invJobList" placeholder="Job number" oninput="invJobSearch(' + i + ')" onchange="invJobChanged(' + i + ')" style="flex:1;padding:7px 9px;border:1px solid ' + jobBorder + ';border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
     h += '</div>';
 
@@ -23248,8 +23180,7 @@
     h += '<input type="text" id="ir_desc_' + i + '" value="' + esc(row.description || '') + '" placeholder="Description of work" style="width:100%;padding:7px 9px;margin-bottom:5px;border:1px solid ' + descBorder + ';border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
 
     // When it was worked. Hours are worked out, never typed. [trade-time-entry]
-    var rowChk = _invRowTimeTouched(row) ? TradeTimeEntryCore.check(_invRowTimeEntry(row)) : null;
-    var rowErr = rowChk && !rowChk.ok && rowChk.field !== 'start_time' && !(rowChk.field === 'finish_time' && !row.finish_time) && !(rowChk.field === 'work_date' && !row.date) ? rowChk.error : '';
+    var rowErr = _timeLiveError(_invRowTimeEntry(row));
     h += '<div class="jct" style="margin:0 0 5px">';
     if (!showDate) h += '<div class="jct-f jct-date"><span>Date worked</span><div class="jct-fixed">' + esc(TradeTimeEntryCore.dayText(row.date) || row.date || '') + '</div></div>';
     h += '<label class="jct-f"><span>Start</span><input type="time" id="ir_start_' + i + '" value="' + esc(row.start_time || '') + '" oninput="invRowChanged(' + i + ')" onchange="invRowChanged(' + i + ')"></label>';
@@ -23347,18 +23278,13 @@
     }).catch(function() {});
   }
 
-  // A new extras row opens on the trade's usual start. It still needs its
-  // own finish time before it can be saved or sent. [trade-time-entry]
+  // A new extras row opens with blank times: start and finish are the
+  // trade's to give before it can be saved or sent. [trade-time-entry]
   function _newInvRow(fields) {
-    var row = Object.assign({
+    return Object.assign({
       date: '', job_id: null, job_text: '', description: '', division: '', hours: 0, rate: 0, amount: 0,
-      start_time: '', finish_time: '', break_minutes: 0, start_auto: false, _source: 'manual'
+      start_time: '', finish_time: '', break_minutes: 0, _source: 'manual'
     }, fields || {});
-    if (!row.start_time && !row.finish_time) {
-      var lastStart = _timeLastStart();
-      if (lastStart) { row.start_time = lastStart; row.start_auto = true; }
-    }
-    return row;
   }
 
   window.addInvRow = function() {
@@ -23446,24 +23372,13 @@
   }
 
   // ── When the time was worked [trade-time-entry] ─────────────────────────
-  // The start a trade last used, per account, is what the next card opens on.
-  // It is only a starting point: a card still needs its own finish time.
-  function _timeLastStartKey() {
-    var id = _invDraftOwnerId();
-    return id ? 'sw_time_last_start_' + encodeURIComponent(id) : '';
+  // One rule everywhere a trade gives a time: the date worked cannot be
+  // after today (Perth).
+  function _timeCheck(entry) {
+    return TradeTimeEntryCore.check(entry, clockPerthDay(new Date()));
   }
-  function _timeLastStart() {
-    try {
-      var key = _timeLastStartKey();
-      return key ? TradeTimeEntryCore.normTime(localStorage.getItem(key)) : '';
-    } catch (e) { return ''; }
-  }
-  function _timeRememberStart(value) {
-    try {
-      var key = _timeLastStartKey();
-      var t = TradeTimeEntryCore.normTime(value);
-      if (key && t) localStorage.setItem(key, t);
-    } catch (e) {}
+  function _timeLiveError(entry) {
+    return TradeTimeEntryCore.liveError(entry, clockPerthDay(new Date()));
   }
   // Perth calendar day and HH:MM of a server timestamp.
   function _perthDayTime(value) {
@@ -23488,24 +23403,6 @@
     var entry = { work_date: on.day, start_time: on.time, finish_time: off.time, break_minutes: brk == null ? 0 : brk };
     return TradeTimeEntryCore.check(entry).ok ? entry : null;
   }
-  // Times the trade gave on the job view (kept on this device) for the job
-  // this assignment is on. Used only while they are still what the server
-  // holds for it, and only for the day they were given for: the scheduled day,
-  // or another day of this invoice week when the job has one visit in it.
-  function _jobCardTimeFromJobView(a, all) {
-    if (!a || a.hours_worked == null) return null;
-    var jobId = a.job_id || (a.jobs && a.jobs.id) || '';
-    var said = _jobTimeRecall(jobId);
-    if (!said || Math.abs(said.hours - Number(a.hours_worked)) > 0.01) return null;
-    var sched = String(a.scheduled_date || '').slice(0, 10);
-    if (said.work_date !== sched) {
-      var visits = (all || []).filter(function(x) { return x && (x.job_id || (x.jobs && x.jobs.id) || '') === jobId; }).length;
-      var start = _hoursWeekStart || '';
-      var end = _hoursWeekEnd || (start ? _weeklyDatePlusDays(start, 6) : '');
-      if (visits !== 1 || !start || said.work_date < start || said.work_date > end) return null;
-    }
-    return { work_date: said.work_date, start_time: said.start_time, finish_time: said.finish_time, break_minutes: said.break_minutes };
-  }
   // Hours on a card are whatever its start, finish and break work out to.
   function _jobCardSyncHours(c) {
     if (c) c.hours = TradeTimeEntryCore.hoursFor(c.start_time, c.finish_time, c.break_minutes);
@@ -23517,12 +23414,13 @@
     var end = _hoursWeekEnd || (start ? _weeklyDatePlusDays(start, 6) : '');
     // A job the office assigned was worked in the week it was scheduled. A
     // line the trade added may be an older job claimed late, so only the
-    // week's last day caps it.
-    return { min: c && c.assignment_id ? start : '', max: end };
+    // week's last day caps it. No date is ever after today.
+    var today = clockPerthDay(new Date());
+    return { min: c && c.assignment_id ? start : '', max: end && end < today ? end : today };
   }
   function _jobCardTimeHint(c) {
     if (c.hours_prefilled && !c.hours_user_edited) {
-      return (c.time_source === 'job_view' ? 'From the times you gave on the job.' : 'From your clock on and off.') + ' Change it if it is wrong.';
+      return 'From your clock on and off. Change it if it is wrong.';
     }
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
       return TradeTimeEntryCore.hoursText(c.logged_hours) + ' on record for this job. Add the times you worked.';
@@ -23572,18 +23470,12 @@
       start_time: '',
       finish_time: '',
       break_minutes: 0,
-      start_auto: false,
-      logged_hours: null,
-      extra_day: false
+      logged_hours: null
     }, fields || {});
     if (card.work_date == null) card.work_date = String(card.scheduled_date || '').slice(0, 10);
     // A figure typed before times were required (an older saved draft) is kept
     // only as a reminder; it bills nothing until the times are entered.
     if (!card.finish_time && card.logged_hours == null && Number(card.hours) > 0) card.logged_hours = Number(card.hours);
-    if (!card.start_time && !card.finish_time) {
-      var lastStart = _timeLastStart();
-      if (lastStart) { card.start_time = lastStart; card.start_auto = true; }
-    }
     return _jobCardSyncHours(card);
   }
 
@@ -24180,10 +24072,7 @@
       var job = a.jobs || {};
       // Clocked on and off that day: the card opens on those times. Otherwise
       // the times are blank and required. [trade-time-entry]
-      // Times the trade already gave on the job view win over the clock:
-      // they are what put the hours on this assignment.
-      var saidTime = _jobCardTimeFromJobView(a, data.assignments);
-      var clockTime = saidTime || _jobCardTimeFromClock(a);
+      var clockTime = _jobCardTimeFromClock(a);
       // FIX4: assignments for jobs with no job_number AND no client_name are
       // phantom/unlinked — auto-include silently blocks submit. Render them
       // unchecked so the trade cannot accidentally submit a blank card.
@@ -24210,7 +24099,6 @@
         rate_source: 'server_resolved',
         description: '',
         hours_prefilled: !!clockTime,
-        time_source: saidTime ? 'job_view' : (clockTime ? 'clock' : ''),
         included: !isBlankJob,
         _blank_job: isBlankJob
       }));
@@ -24222,10 +24110,7 @@
   function _jobCardTimeHtml(c) {
     var i = c._idx;
     var bounds = _jobCardDateBounds(c);
-    var chk = _jobCardTimeTouched(c) ? TradeTimeEntryCore.check(c) : null;
-    // While typing, only say what is wrong with what is there. A field not
-    // reached yet is named at submit, not nagged about on every keystroke.
-    var err = chk && !chk.ok && _jobCardTimeLiveError(c, chk) ? chk.error : '';
+    var err = _timeLiveError(c);
     var hint = _jobCardTimeHint(c);
     var h = '<div class="jct" data-cardtime="' + i + '">';
     h += '<label class="jct-f jct-date"><span>Date worked</span>'
@@ -24246,21 +24131,14 @@
     h += '<div class="jct-hint" data-cardtimehint="' + i + '"' + (hint ? '' : ' hidden') + '>' + esc(hint) + '</div>';
     return h;
   }
-  function _jobCardTimeLiveError(c, chk) {
-    if (!chk || chk.ok) return false;
-    if (chk.field === 'work_date') return !c.work_date ? false : true;
-    if (chk.field === 'start_time') return false;
-    if (chk.field === 'finish_time') return !!c.finish_time;
-    return true;
-  }
   // At submit every ticked hours card says what it still needs.
   function _refreshJobCardTimeAtSubmit(idx) {
     var c = _jobCards[idx];
     if (!c || !c.included || c.wo_mode || c.commission_mode) return;
     var errEl = document.querySelector('[data-cardtimeerr="' + idx + '"]');
     if (!errEl) return;
-    if (!_jobCardTimeTouched(c) && _woLumpSum(c) > 0) return;
-    var chk = TradeTimeEntryCore.check(c);
+    if (!TradeTimeEntryCore.touched(c) && _woLumpSum(c) > 0) return;
+    var chk = _timeCheck(c);
     errEl.textContent = chk.ok ? '' : chk.error;
     errEl.hidden = chk.ok;
   }
@@ -24268,34 +24146,25 @@
     var c = _jobCards[idx]; if (!c) return;
     var hrsEl = document.querySelector('[data-cardhours="' + idx + '"]');
     if (hrsEl) hrsEl.textContent = TradeTimeEntryCore.hoursText(c.hours) || '0 hrs';
-    var chk = _jobCardTimeTouched(c) ? TradeTimeEntryCore.check(c) : null;
-    var err = chk && !chk.ok && _jobCardTimeLiveError(c, chk) ? chk.error : '';
+    var err = _timeLiveError(c);
     var errEl = document.querySelector('[data-cardtimeerr="' + idx + '"]');
     if (errEl) { errEl.textContent = err; errEl.hidden = !err; }
     var hint = _jobCardTimeHint(c);
     var hintEl = document.querySelector('[data-cardtimehint="' + idx + '"]');
     if (hintEl) { hintEl.textContent = hint; hintEl.hidden = !hint; }
   }
-  // Reads one card's time fields back from the screen. Returns true when the
-  // card's day changed and the card list must be laid out again.
+  // Reads one card's time fields back from the screen.
   function _readJobCardTimeFromDOM(c, idx) {
     var dateEl = document.querySelector('[data-carddate="' + idx + '"]');
     var startEl = document.querySelector('[data-cardstart="' + idx + '"]');
     var finEl = document.querySelector('[data-cardfinish="' + idx + '"]');
     var brkEl = document.querySelector('[data-cardbreak="' + idx + '"]');
-    if (!dateEl && !startEl && !finEl && !brkEl) return false;
+    if (!dateEl && !startEl && !finEl && !brkEl) return;
     var before = [c.work_date, c.start_time, c.finish_time, c.break_minutes].join('|');
-    var moved = false;
-    if (dateEl && dateEl.value !== String(c.work_date || '')) moved = _setJobCardWorkDate(c, dateEl.value) && !c.assignment_id;
-    if (startEl) {
-      var st = TradeTimeEntryCore.normTime(startEl.value);
-      if (st !== c.start_time) { c.start_time = st; c.start_auto = false; }
-    }
+    if (dateEl && dateEl.value !== String(c.work_date || '')) _setJobCardWorkDate(c, dateEl.value);
+    if (startEl) c.start_time = TradeTimeEntryCore.normTime(startEl.value);
     if (finEl) c.finish_time = TradeTimeEntryCore.normTime(finEl.value);
-    if (brkEl) {
-      var bv = String(brkEl.value || '').trim();
-      c.break_minutes = bv === '' ? 0 : (TradeTimeEntryCore.breakOf(bv) == null ? bv : Number(bv));
-    }
+    if (brkEl) c.break_minutes = TradeTimeEntryCore.breakInput(brkEl.value);
     // A time field the trade is in, or has changed, is their own entry: the
     // work-order hydrate must not flip this card out of Hours under them.
     var hoursFocused = !!document.activeElement && [dateEl, startEl, finEl, brkEl].indexOf(document.activeElement) !== -1;
@@ -24303,7 +24172,6 @@
       _markJobCardHoursEdited(c);
     }
     _jobCardSyncHours(c);
-    return moved;
   }
   // The date worked on a card. A job the office assigned stays under its
   // scheduled day; a line the trade added sits under the day it was worked.
@@ -24336,68 +24204,18 @@
       if (!ok || !c.assignment_id) { _syncJobCardsFromDOM(true); renderInvoiceBuilder(); return; }
     } else if (field === 'start_time') {
       c.start_time = TradeTimeEntryCore.normTime(value);
-      c.start_auto = false;
-      if (c.start_time) _timeRememberStart(c.start_time);
       _markJobCardHoursEdited(c);
     } else if (field === 'finish_time') {
       c.finish_time = TradeTimeEntryCore.normTime(value);
       _markJobCardHoursEdited(c);
-      _chainNextJobCardStart(idx);
     } else if (field === 'break_minutes') {
-      var bv = String(value == null ? '' : value).trim();
-      c.break_minutes = bv === '' ? 0 : (TradeTimeEntryCore.breakOf(bv) == null ? bv : Number(bv));
+      c.break_minutes = TradeTimeEntryCore.breakInput(value);
       _markJobCardHoursEdited(c);
     }
     _jobCardSyncHours(c);
     _refreshJobCardTime(idx);
     _refreshJobCardLine(idx);
   };
-  // A day of several jobs: the next job that day opens on this one's finish,
-  // unless the trade has already given it a start of their own.
-  function _chainNextJobCardStart(idx) {
-    var c = _jobCards[idx];
-    if (!c || !c.finish_time || !c.work_date) return;
-    for (var i = idx + 1; i < _jobCards.length; i++) {
-      var n = _jobCards[i];
-      if (!n || n.wo_mode || n.commission_mode || String(n.work_date || '') !== String(c.work_date)) continue;
-      if (n.finish_time || (n.start_time && !n.start_auto)) return;
-      n.start_time = c.finish_time;
-      n.start_auto = true;
-      var el = document.querySelector('[data-cardstart="' + i + '"]');
-      if (el) el.value = n.start_time;
-      return;
-    }
-  }
-  // A second day on the same job is a second line. It has no assignment row
-  // of its own, so it rides the same office-verified lane as a job the trade
-  // searched in, at the rate already on the card it was added from.
-  window.addJobCardDay = function(idx) {
-    var src = _jobCards[idx]; if (!src) return;
-    _syncJobCardsFromDOM();
-    _jobCards.splice(idx + 1, 0, _newJobCard({
-      assignment_id: null,
-      extra_day: true,
-      manually_added: !!src.manually_added,
-      job_id: src.job_id || null,
-      job_number: src.job_number || '',
-      client_name: src.client_name || '',
-      site_suburb: src.site_suburb || '',
-      job_type: src.job_type || '',
-      is_makesafe: src.is_makesafe,
-      external_ref: src.external_ref || '',
-      // Sits under the card it came from until the trade picks its day.
-      scheduled_date: src.scheduled_date || '',
-      work_date: '',
-      rate: Number(src.rate || 0),
-      rate_source: src.manually_added ? 'client_entered' : 'server_resolved',
-      description: src.description || '',
-      included: true
-    }));
-    renderInvoiceBuilder();
-    var dateEl = document.querySelector('[data-carddate="' + (idx + 1) + '"]');
-    if (dateEl) dateEl.focus();
-  };
-
   // Returns the job-centric cards HTML (rate display-only, day-grouped).
   // Assigned cards always carry the office-set rate (a restored draft may hold
   // an older typed value). Searched-in cards keep their flagged manual rate.
@@ -24630,9 +24448,6 @@
           }
           html += '<span data-cardamt="' + c._idx + '" style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-left:auto">$' + (_hoursCardNet(c, rowRate)).toFixed(2) + '</span>';
           html += '</div>';
-          if (!c._blank_job) {
-            html += '<button type="button" class="jct-add-day" data-cardaddday="' + c._idx + '" onclick="addJobCardDay(' + c._idx + ')">+ Add another day on this job</button>';
-          }
           html += _renderCardLumpLinesHtml(c);
         }
         // Description: auto-filled for commission; optional annotation for WO; required for hours.
@@ -24640,8 +24455,8 @@
         var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional — breakdown auto-added)' : 'Description of work');
         var descVal = cardMode === 'commission' ? commAutoDesc : esc(c.description || '');
         html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
-        if (c.manually_added || c.extra_day) {
-          html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">' + (c.extra_day ? 'Another day you added' : 'Added by you') + ' — the office will verify. <a href="#" data-cardremove="' + c._idx + '" onclick="event.preventDefault();removeManualJobCard(' + c._idx + ')" style="color:var(--sw-red);font-weight:600">Remove</a></div>';
+        if (c.manually_added) {
+          html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">Added by you — the office will verify. <a href="#" data-cardremove="' + c._idx + '" onclick="event.preventDefault();removeManualJobCard(' + c._idx + ')" style="color:var(--sw-red);font-weight:600">Remove</a></div>';
         }
         // [M4 U2] Over-allowance make-safe variation prompt (hours mode only). Capture, never blocks.
         if (_isMakesafeCard(c) && cardMode === 'hours' && Number(c.hours) > 2) {
@@ -25017,7 +24832,7 @@
 
   window.removeManualJobCard = function(idx) {
     var c = _jobCards[idx];
-    if (!c || !(c.manually_added || c.extra_day)) return;
+    if (!c || !c.manually_added) return;
     _syncJobCardsFromDOM();
     _jobCards.splice(idx, 1);
     renderInvoiceBuilder();
@@ -25354,18 +25169,41 @@
       if (s == null || f == null || b == null || f <= s || f - s - b <= 0) return null;
       return Math.round((f - s - b) / 60 * 100) / 100;
     }
+    // Blank means no break; a value that is not whole minutes is kept as typed
+    // so check() can name it.
+    function breakInput(v) {
+      var s = String(v == null ? '' : v).trim();
+      return s === '' ? 0 : (breakOf(s) == null ? s : Number(s));
+    }
+    // A line bills time once it has been given a time: a start, a finish or a
+    // break.
+    function touched(entry) {
+      return !!(entry && (entry.start_time || entry.finish_time || Number(entry.break_minutes) > 0));
+    }
     // First thing wrong with an entry, in plain words, or ok with its hours.
-    function check(entry) {
+    // `today` is the Perth day (YYYY-MM-DD): the date worked cannot be after it.
+    function check(entry, today) {
       entry = entry || {};
       var s = minutesOf(entry.start_time), f = minutesOf(entry.finish_time), b = breakOf(entry.break_minutes);
       function bad(field, error) { return { ok: false, hours: null, field: field, error: error }; }
       if (!isDate(entry.work_date)) return bad('work_date', 'Add the date you worked.');
+      if (today && String(entry.work_date) > String(today)) return bad('work_date', 'The date worked cannot be after today.');
       if (s == null) return bad('start_time', 'Add your start time.');
       if (f == null) return bad('finish_time', 'Add your finish time.');
       if (f <= s) return bad('finish_time', 'Finish time must be after start time. If you worked past midnight, add the next day as its own line.');
       if (b == null) return bad('break_minutes', 'Break must be whole minutes, 0 or more.');
       if (f - s - b <= 0) return bad('break_minutes', 'The break is as long as the time worked. Check the break.');
       return { ok: true, hours: hoursFor(entry.start_time, entry.finish_time, entry.break_minutes), field: '', error: '' };
+    }
+    // While typing, only what is wrong with what is there. A field not
+    // reached yet is named at save or submit, not on every keystroke.
+    function liveError(entry, today) {
+      if (!touched(entry)) return '';
+      var chk = check(entry, today);
+      if (chk.ok || chk.field === 'start_time') return '';
+      if (chk.field === 'work_date' && !entry.work_date) return '';
+      if (chk.field === 'finish_time' && !entry.finish_time) return '';
+      return chk.error;
     }
     // The four contract fields, exactly as ops-api names them.
     function fields(entry) {
@@ -25405,17 +25243,11 @@
     }
     return {
       REFUSAL_CODE: REFUSAL_CODE, REFUSAL_MSG: REFUSAL_MSG,
-      isDate: isDate, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, hoursFor: hoursFor,
-      check: check, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused
+      isDate: isDate, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
+      touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused
     };
   })();
   // </trade-time-entry>
-
-  // An hours card bills time once the trade has given it a time of their own.
-  // The remembered start that a new card opens on does not count.
-  function _jobCardTimeTouched(c) {
-    return !!(c && (c.finish_time || (c.start_time && !c.start_auto) || Number(c.break_minutes) > 0));
-  }
 
   // _woCleanLabourLines: canonical view of a card's labour lines. Names are
   // trimmed + inner whitespace collapsed (production had "Tendo  " ≠ "Tendo"),
@@ -25649,7 +25481,7 @@
     var timeSeen = {};
     included.forEach(function(c) {
       if (!_isTimeCard(c)) return;
-      var touched = _jobCardTimeTouched(c);
+      var touched = TradeTimeEntryCore.touched(c);
       // An amount-only card bills no time, so it owes no times.
       if (!touched && _completeLumps(c).length > 0) return;
       var lbl = _timeCardLabel(c);
@@ -25657,7 +25489,7 @@
         timeBad.push({ idx: c._idx, msg: lbl + ': add the date, start time and finish time you worked, or add an amount.' });
         return;
       }
-      var chk = TradeTimeEntryCore.check(c);
+      var chk = TradeTimeEntryCore.check(c, opts.today);
       if (!chk.ok) {
         timeBad.push({ idx: c._idx, msg: lbl + ': ' + chk.error });
         return;
@@ -25692,21 +25524,15 @@
       return { error: _timeShown.join(' · '), missingIndices: timeBad.map(function(b) { return b.idx; }) };
     }
     function _cardHours(c) {
-      if (!_jobCardTimeTouched(c)) return 0;
-      var chk = TradeTimeEntryCore.check(c);
+      if (!TradeTimeEntryCore.touched(c)) return 0;
+      var chk = TradeTimeEntryCore.check(c, opts.today);
       return chk.ok ? chk.hours : 0;
-    }
-    // A line the trade added for another day has no assignment row. The
-    // office still needs to know what it was for, so it never goes blank.
-    function _cardDescription(c) {
-      if (c.description) return c.description;
-      return c.extra_day ? 'Another day on this job' : '';
     }
     var missing = included.filter(function(c) {
       if (!_isTimeCard(c)) return false;
       var hasHours = _cardHours(c) > 0 && Number(c.rate) > 0;
       if (hasHours) {
-        if (c.manually_added && !_cardDescription(c)) return true;
+        if (c.manually_added && !c.description) return true;
         return false;
       }
       if (_completeLumps(c).length > 0) return false;
@@ -25716,7 +25542,7 @@
       var _msgs = missing.map(function(c) {
         var _lbl = _timeCardLabel(c);
         var _noRate = !(Number(c.rate) > 0);
-        var _noDesc = c.manually_added && !_cardDescription(c);
+        var _noDesc = c.manually_added && !c.description;
         if (!c.manually_added && _noRate) return RATE_NOT_SET_MSG;
         if (_noDesc && _noRate) return _lbl + ': add a description and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
@@ -25792,7 +25618,7 @@
           cardExtraItems.push({
             type: 'Labour',
             row_type: 'labour',
-            description: _cardDescription(c),
+            description: c.description || '',
             quantity: searchedQty,
             unit: 'hr',
             rate: Number(c.rate || 0),
@@ -25806,7 +25632,7 @@
             division: c.job_type || '',
             client_name: c.client_name || '',
             manually_added: true,
-            source: c.extra_day && !c.manually_added ? 'extra_day' : 'manual_job_search',
+            source: 'manual_job_search',
             rate_source: 'client_entered',
             client_rate_entered: true,
             // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
@@ -26033,7 +25859,7 @@
     // the old invoice and the form said "Submitted". Block it here by date.
     var postWeekStart = _hoursWeekStart || getWeekStartMonday(0);
     var postWeekEnd = _hoursWeekEnd || _weeklyDatePlusDays(postWeekStart, 6) || getWeekEndSunday(0);
-    var timeBounds = { weekStart: postWeekStart, weekEnd: postWeekEnd };
+    var timeBounds = { weekStart: postWeekStart, weekEnd: postWeekEnd, today: clockPerthDay(new Date()) };
     var built = _buildJobCentricPayload(_jobCards, timeBounds);
     if (built.error) {
       toast(built.error, true);
@@ -26650,7 +26476,7 @@
         if (!r.division) errors.push('Extra row ' + (idx + 1) + ': select type of work');
         if (!r.job_text) errors.push('Extra row ' + (idx + 1) + ': select a job number');
         if (!r.description) errors.push('Extra row ' + (idx + 1) + ': enter a description');
-        var rowChk = TradeTimeEntryCore.check(_invRowTimeEntry(r));
+        var rowChk = _timeCheck(_invRowTimeEntry(r));
         if (!rowChk.ok) errors.push('Extra row ' + (idx + 1) + ': ' + rowChk.error);
         if (!(Number(r.rate) > 0)) errors.push('Extra row ' + (idx + 1) + ': enter rate');
       });

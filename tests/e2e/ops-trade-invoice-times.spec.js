@@ -1,6 +1,6 @@
 // Ops sees WHEN a trade says the hours were worked (Captain, 2026-10-12):
 // the date, start and finish sit beside the hours on a trade invoice and on a
-// job's labour when the line carries them, and an older line with no times
+// job's trade lines when the line carries them, and an older line with no times
 // shows exactly what it always did. Search `// <trade-time-entry-ops>` in
 // ops.html. The page makes no network request it is not handed here.
 const path = require('node:path');
@@ -61,32 +61,4 @@ test('job P&L trade lines: the times sit beside the hours when the line carries 
   await expect(rows.nth(0).locator('[data-line-when]')).toHaveText('07:00 to 15:30, 30 min break');
   await expect(rows.nth(1).locator('[data-line-when]')).toHaveCount(0);
   await expect(rows.nth(1).locator('td').nth(3)).toHaveText('6.0');
-});
-
-test('job labour: the days and times sit under the trade when the labour read carries them', async ({ page }) => {
-  await bootOps(page, {
-    labour_reconciliation: {
-      reconciliation: {
-        labour_budget: 1000, hours_logged: 18, labour_cost: 990,
-        trades: [
-          { name: 'New Trade', hours: 12, rate: 55, cost: 660, lines: [SECOND_DAY, TIMED] },
-          { name: 'Older Trade', hours: 6, rate: 55, cost: 330 }
-        ]
-      }
-    }
-  });
-  await page.evaluate(async () => {
-    const host = document.createElement('div');
-    host.id = 'jdLabourRecon';
-    document.body.appendChild(host);
-    await window.loadLabourReconciliation('job-1');
-  });
-
-  const panel = page.locator('#jdLabourRecon');
-  await expect(panel).toContainText('Labour Reconciliation');
-  await expect(panel.locator('[data-labour-when]')).toHaveCount(1);
-  await expect(panel.locator('[data-labour-when] div')).toHaveText([
-    'Wed 7 Oct, 07:00 to 15:30, 30 min break · 8h',
-    'Thu 8 Oct, 08:00 to 12:00 · 4h'
-  ]);
 });

@@ -33,7 +33,7 @@ function invoicePosts(feedRequests) {
 }
 
 test.describe('weekly invoice: a line of hours says when it was worked', () => {
-  test.use({ persona: 'fencing_manager', feedScenario: 'henry-wo-hydrate-fail', timezoneId: 'Australia/Perth', ...PHONE });
+  test.use({ persona: 'fencing_manager', feedScenario: 'henry-wo-hydrate-fail', timezoneId: 'Australia/Perth', appWeekDay: 6, ...PHONE });
 
   test('date, start and finish are required, hours are worked out, and the fields are posted as the contract names them', async ({ appPage: page, feedRequests }) => {
     const jobDate = addIsoDays(perthWeekMonday(), 1);
@@ -98,52 +98,6 @@ test.describe('weekly invoice: a line of hours says when it was worked', () => {
     }]);
   });
 
-  test('a second day on the same job is a second line, added from the card', async ({ appPage: page, feedRequests }) => {
-    const weekStart = perthWeekMonday();
-    const jobDate = addIsoDays(weekStart, 1);
-    const secondDay = addIsoDays(weekStart, 2);
-    const card = await openHenryBuilder(page);
-    await card.locator('[data-cardstart]').fill('07:00');
-    await card.locator('[data-cardfinish]').fill('15:00');
-
-    await card.getByRole('button', { name: '+ Add another day on this job' }).click();
-    const cards = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
-    const second = cards.filter({ hasText: 'Another day you added' });
-    await expect(second).toHaveCount(1);
-    // The new line opens with no date: the trade says which day it was.
-    await expect(second.locator('[data-carddate]')).toHaveValue('');
-    // What was typed on the first card is still there.
-    await expect(cards.first().locator('[data-cardfinish]')).toHaveValue('15:00');
-
-    // One line is one job on one day: the same day again is refused.
-    await second.locator('[data-carddate]').fill(jobDate);
-    await expect(page.locator('#toast')).toContainText('That job already has a line for that day');
-    await expect(second.locator('[data-carddate]')).toHaveValue('');
-
-    await second.locator('[data-carddate]').fill(secondDay);
-    const moved = page.locator('.jc-card').filter({ hasText: 'Another day you added' });
-    await moved.locator('[data-cardstart]').fill('08:00');
-    await moved.locator('[data-cardfinish]').fill('12:00');
-    await moved.locator('[data-cardfinish]').blur();
-    await expect(moved.locator('[data-cardhours]')).toHaveText('4 hrs');
-
-    await confirmSubmit(page);
-    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
-    const body = invoicePosts(feedRequests)[0].body;
-    expect(body.manual_assignments).toEqual([
-      expect.objectContaining({ assignment_id: 'e2e-henry-assignment', hours: 8, work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0 })
-    ]);
-    // The added day has no assignment row of its own, so it rides the
-    // office-verified extras lane with the same four fields.
-    expect(body.extra_items).toEqual([
-      expect.objectContaining({
-        type: 'Labour', unit: 'hr', quantity: 4, rate: 55, source: 'extra_day',
-        job_id: 'fence-job-henry', job_number: 'FENCE-HENRY-001',
-        date: secondDay, work_date: secondDay, start_time: '08:00', finish_time: '12:00', break_minutes: 0
-      })
-    ]);
-  });
-
   test('the server refusing a line with no times reads in plain words and keeps the form', async ({ appPage: page }) => {
     let refused = 0;
     const card = await openHenryBuilder(page);
@@ -168,12 +122,58 @@ test.describe('weekly invoice: a line of hours says when it was worked', () => {
   });
 });
 
-test.describe('weekly invoice: times already given are not asked for twice', () => {
-  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', timezoneId: 'Australia/Perth', ...PHONE });
+test.describe('weekly invoice: the date worked cannot be after today', () => {
+  // The app's clock is on the Monday; Henry's job is scheduled for the Tuesday.
+  test.use({ persona: 'fencing_manager', feedScenario: 'henry-wo-hydrate-fail', timezoneId: 'Australia/Perth', appWeekDay: 0, ...PHONE });
 
-  async function openInstallerBuilder(page, seed) {
+  test('a job card dated after today is not sent until its date is today or earlier', async ({ appPage: page, feedRequests }) => {
+    const today = perthWeekMonday();
+    const card = await openHenryBuilder(page);
+    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(today, 1));
+    await expect(card.locator('[data-carddate]')).toHaveAttribute('max', today);
+
+    await card.locator('[data-cardstart]').fill('07:00');
+    await card.locator('[data-cardfinish]').fill('15:00');
+    await expect(card.locator('[data-cardtimeerr]')).toHaveText('The date worked cannot be after today.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: The date worked cannot be after today.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+
+    await card.locator('[data-carddate]').fill(today);
+    await expect(card.locator('[data-cardtimeerr]')).toBeHidden();
+    await confirmSubmit(page);
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+    expect(invoicePosts(feedRequests)[0].body.manual_assignments).toEqual([
+      expect.objectContaining({ assignment_id: 'e2e-henry-assignment', hours: 8, work_date: today, start_time: '07:00', finish_time: '15:00' })
+    ]);
+  });
+
+  test('an Extras row dated after today is not sent', async ({ appPage: page, feedRequests }) => {
+    const today = perthWeekMonday();
+    const card = await openHenryBuilder(page);
+    await card.locator('[data-carddate]').fill(today);
+    await card.locator('[data-cardstart]').fill('07:00');
+    await card.locator('[data-cardfinish]').fill('15:00');
+
+    await page.getByRole('button', { name: '+ Add extra / adjustment' }).click();
+    await expect(page.locator('#ir_date_0')).toHaveValue(today);
+    await expect(page.locator('#ir_date_0')).toHaveAttribute('max', today);
+    await page.locator('#ir_desc_0').fill('Second day on the job');
+    await page.locator('#ir_date_0').fill(addIsoDays(today, 2));
+    await page.locator('#ir_start_0').fill('08:00');
+    await page.locator('#ir_fin_0').fill('12:00');
+    await expect(page.locator('#ir_timeerr_0')).toHaveText('The date worked cannot be after today.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('The date worked cannot be after today.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+  });
+});
+
+test.describe('weekly invoice: a job clocked on and off', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', timezoneId: 'Australia/Perth', appWeekDay: 6, ...PHONE });
+
+  async function openInstallerBuilder(page) {
     await signIn(page, PERSONAS.installer);
-    if (seed) await page.evaluate(seed.fn, seed.arg);
     await page.locator('[data-view="hours"]').click();
     await page.getByRole('button', { name: /Weekly Invoice/ }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
@@ -182,7 +182,7 @@ test.describe('weekly invoice: times already given are not asked for twice', () 
     return card;
   }
 
-  test('a job clocked on and off opens on those times', async ({ appPage: page, feedRequests }) => {
+  test('opens on those times', async ({ appPage: page, feedRequests }) => {
     const jobDate = addIsoDays(perthWeekMonday(), 1);
     const card = await openInstallerBuilder(page);
     await expect(card.locator('[data-carddate]')).toHaveValue(jobDate);
@@ -196,33 +196,5 @@ test.describe('weekly invoice: times already given are not asked for twice', () 
     expect(invoicePosts(feedRequests)[0].body.manual_assignments).toEqual([
       expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 8, work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0 })
     ]);
-  });
-
-  test('times the trade gave on the job view carry onto that job\'s card', async ({ appPage: page }) => {
-    const jobDate = addIsoDays(perthWeekMonday(), 1);
-    const card = await openInstallerBuilder(page, {
-      arg: jobDate,
-      fn: (day) => localStorage.setItem('sw_time_job_' + encodeURIComponent('e2e-installer'), JSON.stringify({
-        'e2e-wo-holder-job': { work_date: day, start_time: '06:30', finish_time: '15:00', break_minutes: 30, hours: 8, at: Date.now() }
-      }))
-    });
-    await expect(card.locator('[data-cardstart]')).toHaveValue('06:30');
-    await expect(card.locator('[data-cardfinish]')).toHaveValue('15:00');
-    await expect(card.locator('[data-cardbreak]')).toHaveValue('30');
-    await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
-    await expect(card.locator('[data-cardtimehint]')).toHaveText('From the times you gave on the job. Change it if it is wrong.');
-  });
-
-  test('times given on the job view that no longer match the hours on record are not used', async ({ appPage: page }) => {
-    const jobDate = addIsoDays(perthWeekMonday(), 1);
-    const card = await openInstallerBuilder(page, {
-      arg: jobDate,
-      fn: (day) => localStorage.setItem('sw_time_job_' + encodeURIComponent('e2e-installer'), JSON.stringify({
-        'e2e-wo-holder-job': { work_date: day, start_time: '09:00', finish_time: '11:00', break_minutes: 0, hours: 2, at: Date.now() }
-      }))
-    });
-    // The server holds 8 hrs for this job, so the 2 hr memory is stale: the clock wins.
-    await expect(card.locator('[data-cardstart]')).toHaveValue('07:00');
-    await expect(card.locator('[data-cardfinish]')).toHaveValue('15:00');
   });
 });

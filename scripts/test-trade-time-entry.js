@@ -62,6 +62,35 @@ assert.strictEqual(refusal({ break_minutes: -5 }).field, 'break_minutes')
 assert.strictEqual(refusal({ break_minutes: 510 }).field, 'break_minutes')
 assert.strictEqual(refusal({ break_minutes: undefined }).ok, true, 'break is optional')
 
+// The date worked cannot be after today (Perth), in the same words everywhere.
+assert.deepStrictEqual(
+  [Core.check(good, '2026-10-06').ok, Core.check(good, '2026-10-06').field, Core.check(good, '2026-10-06').error],
+  [false, 'work_date', 'The date worked cannot be after today.'])
+assert.strictEqual(Core.check(good, '2026-10-07').ok, true, 'today itself is a day worked')
+assert.strictEqual(Core.check(good, '2026-10-08').ok, true)
+
+// A line bills time once it has a start, a finish or a break.
+assert.strictEqual(Core.touched({ work_date: '2026-10-07', start_time: '', finish_time: '', break_minutes: 0 }), false)
+assert.strictEqual(Core.touched({ start_time: '07:00' }), true)
+assert.strictEqual(Core.touched({ finish_time: '15:00' }), true)
+assert.strictEqual(Core.touched({ break_minutes: 30 }), true)
+assert.strictEqual(Core.touched(null), false)
+
+// A break field as typed: blank is no break, a bad value is kept to be named.
+assert.strictEqual(Core.breakInput(''), 0)
+assert.strictEqual(Core.breakInput(' 30 '), 30)
+assert.strictEqual(Core.breakInput('1.5'), '1.5')
+assert.strictEqual(Core.check(Object.assign({}, good, { break_minutes: Core.breakInput('1.5') })).field, 'break_minutes')
+
+// While typing, only what is wrong with what is already there is said.
+assert.strictEqual(Core.liveError({ work_date: '2026-10-09', start_time: '', finish_time: '', break_minutes: 0 }, '2026-10-07'), '', 'nothing entered yet')
+assert.strictEqual(Core.liveError(Object.assign({}, good, { finish_time: '' }), '2026-10-07'), '', 'finish not reached yet')
+assert.strictEqual(Core.liveError(Object.assign({}, good, { start_time: '' }), '2026-10-07'), '')
+assert.strictEqual(Core.liveError(Object.assign({}, good, { work_date: '' }), '2026-10-07'), '')
+assert.match(Core.liveError(Object.assign({}, good, { finish_time: '06:00' }), '2026-10-07'), /after start time/)
+assert.strictEqual(Core.liveError(good, '2026-10-06'), 'The date worked cannot be after today.')
+assert.strictEqual(Core.liveError(good, '2026-10-07'), '')
+
 // The four fields, named exactly as the contract names them.
 assert.deepStrictEqual(Object.assign({}, Core.fields({ work_date: '2026-10-07', start_time: '7:05', finish_time: '15:30:00', break_minutes: '' })),
   { work_date: '2026-10-07', start_time: '07:05', finish_time: '15:30', break_minutes: 0 })
@@ -98,10 +127,10 @@ const WEEK = { weekStart: '2026-10-05', weekEnd: '2026-10-11' }
 
 function card(overrides) {
   return Object.assign({
-    _idx: 0, included: true, assignment_id: 'a-1', manually_added: false, extra_day: false,
+    _idx: 0, included: true, assignment_id: 'a-1', manually_added: false,
     job_id: 'j-1', job_number: 'SWF-26001', job_type: 'fencing', client_name: 'Test Client',
     scheduled_date: '2026-10-07', work_date: '2026-10-07',
-    start_time: '07:00', finish_time: '15:30', break_minutes: 30, start_auto: false,
+    start_time: '07:00', finish_time: '15:30', break_minutes: 30,
     rate: 45, rate_source: 'server_resolved', description: '',
     wo_mode: false, commission_mode: false, wo_lump_lines: [], wo_labour_lines: [],
   }, overrides || {})
@@ -124,9 +153,6 @@ assert.strictEqual(out.cardExtraItems.length, 0)
 out = build([card({ start_time: '', finish_time: '', break_minutes: 0, hours: 8 })], WEEK)
 assert.match(out.error, /SWF-26001: add the date, start time and finish time you worked/)
 assert.deepStrictEqual(plain(out.missingIndices), [0])
-// The remembered start a card opens on is not the trade's own entry.
-out = build([card({ start_time: '07:00', start_auto: true, finish_time: '', break_minutes: 0 })], WEEK)
-assert.match(out.error, /add the date, start time and finish time you worked/)
 
 // Each missing piece is named.
 assert.match(build([card({ finish_time: '' })], WEEK).error, /SWF-26001: Add your finish time\./)
@@ -134,6 +160,11 @@ assert.match(build([card({ start_time: '' })], WEEK).error, /SWF-26001: Add your
 assert.match(build([card({ work_date: '' })], WEEK).error, /SWF-26001: Add the date you worked\./)
 assert.match(build([card({ finish_time: '06:00' })], WEEK).error, /Finish time must be after start time/)
 assert.match(build([card({ break_minutes: 600 })], WEEK).error, /break is as long as the time worked/)
+// The date worked cannot be after today.
+out = build([card()], Object.assign({ today: '2026-10-06' }, WEEK))
+assert.match(out.error, /SWF-26001: The date worked cannot be after today\./)
+assert.deepStrictEqual(plain(out.missingIndices), [0])
+assert(!build([card()], Object.assign({ today: '2026-10-07' }, WEEK)).error)
 // An unticked card owes nothing.
 assert(!build([card(), card({ _idx: 1, assignment_id: 'a-2', job_id: 'j-2', included: false, start_time: '', finish_time: '' })], WEEK).error)
 
@@ -152,26 +183,11 @@ assert.deepStrictEqual(
   ['Labour', 'hr', 8, 50, '2026-09-29', '2026-09-29', '07:00', '15:30', 30, 'manual_job_search', 'client_entered'])
 assert.match(build([card({ assignment_id: null, manually_added: true, description: 'x', work_date: '2026-10-12' })], WEEK).error, /after this invoice week/)
 
-// A second day on the same job is a second line. It has no assignment row,
-// so it rides the office-verified extras lane and never the assignment lane
-// (ops-api keys manual_assignments by assignment_id: two would collapse).
+// One line is one job on one day: a job the trade searched in cannot double
+// up a day the job already has a line for.
 out = build([
   card(),
-  card({ _idx: 1, assignment_id: null, extra_day: true, work_date: '2026-10-08', scheduled_date: '2026-10-08', start_time: '08:00', finish_time: '12:00', break_minutes: 0 }),
-], WEEK)
-assert(!out.error, out.error)
-assert.strictEqual(out.manualAssignments.length, 1)
-assert.strictEqual(out.cardExtraItems.length, 1)
-const second = plain(out.cardExtraItems[0])
-assert.deepStrictEqual(
-  [second.job_id, second.quantity, second.work_date, second.start_time, second.finish_time, second.break_minutes, second.source, second.rate_source, second.description],
-  ['j-1', 4, '2026-10-08', '08:00', '12:00', 0, 'extra_day', 'client_entered', 'Another day on this job'])
-assert.strictEqual(out.subtotal, 360 + 180)
-
-// One line is one job on one day: an added line cannot double a day up.
-out = build([
-  card(),
-  card({ _idx: 1, assignment_id: null, extra_day: true, work_date: '2026-10-07', start_time: '16:00', finish_time: '18:00', break_minutes: 0 }),
+  card({ _idx: 1, assignment_id: null, manually_added: true, description: 'Came back', work_date: '2026-10-07', start_time: '16:00', finish_time: '18:00', break_minutes: 0 }),
 ], WEEK)
 assert.match(out.error, /two lines for 2026-10-07/)
 assert.deepStrictEqual(plain(out.missingIndices), [1])

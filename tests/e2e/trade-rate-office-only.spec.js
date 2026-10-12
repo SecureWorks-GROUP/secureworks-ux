@@ -6,7 +6,7 @@ const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 // Rates are office only (captain ruling 2026-09-23, trade app audit finding 7).
 // The trade sees the rate the office set, read-only, and nothing the trade does
 // on Profile or in the invoice builder may call set_trade_rate.
-test.use({ persona: 'fencing_manager', feedScenario: 'henry-wo-hydrate-fail' });
+test.use({ persona: 'fencing_manager', feedScenario: 'henry-wo-hydrate-fail', appWeekDay: 6 });
 
 test('Profile and the invoice builder show the office rate read-only and never save a rate', async ({ appPage: page, feedRequests }) => {
   await signIn(page, PERSONAS.fencing_manager);

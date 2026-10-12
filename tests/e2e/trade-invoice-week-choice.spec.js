@@ -13,6 +13,7 @@
 //    carrying searched-in jobs to the same weekday of the new week.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 test.use({
@@ -55,8 +56,7 @@ async function addSearchedJob(page, dayIndex, query, jobNumber, hours, descripti
   const card = page.locator('.jc-card').filter({ hasText: jobNumber });
   await card.locator('input[type="text"]').fill(description);
   await card.locator('input[type="text"]').blur();
-  await card.locator('[data-cardhours]').fill(String(hours));
-  await card.locator('[data-cardhours]').blur();
+  await fillCardTime(card, hours);
   return card;
 }
 
@@ -146,7 +146,7 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     await expect(page.locator('[data-invoice-week-taken]')).toContainText('is already invoiced');
     await expect(page.locator('[data-invoice-week-taken]')).toContainText('SW-INV-N-260923-017');
     const card = page.locator('.jc-card').filter({ hasText: 'SWP-261183' });
-    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await expect(card.locator('input[type="text"]')).toHaveValue('Material order');
 
     // Submitting on a done week is stopped before any confirm or POST.
@@ -157,7 +157,7 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     await page.locator('[data-invoice-week-next]').click();
     await expect(bar.locator('[data-invoice-week-label]')).toHaveText(weekLabel(thisMonday));
     await expect(page.locator('[data-invoice-week-taken]')).toHaveCount(0);
-    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
 
     await page.locator('#invSubmitBtn').click();
     await confirmOneInvoice(page, thisMonday);

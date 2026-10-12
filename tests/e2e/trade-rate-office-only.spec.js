@@ -1,5 +1,6 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 // Rates are office only (captain ruling 2026-09-23, trade app audit finding 7).
@@ -29,7 +30,7 @@ test('Profile and the invoice builder show the office rate read-only and never s
 
   // A direct call cannot change an assigned card's rate either.
   await page.evaluate(() => window.setJobCardRate(0, '99'));
-  await card.locator('[data-cardhours]').fill('3');
+  await fillCardTime(card, 3);
   await page.locator('#invSubmitBtn').click();
   await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
@@ -74,6 +75,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
+          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false
@@ -85,7 +87,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
 
     await page.locator('[data-view="hours"]').click();
     const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await expect(card.locator('[data-cardrate]')).toHaveCount(0);
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('Not set');
     await expect(card).not.toContainText('$99.00/hr');
@@ -141,6 +143,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
+          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false
@@ -157,7 +160,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     const notes = page.locator('#invNotes');
     const extraDesc = page.locator('[data-invlumpdesc="0"]');
     const extraAmt = page.locator('[data-invlumpamt="0"]');
-    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await notes.fill('Side gate access');
     await desc.fill('Replaced palings on the street side');
     await page.getByRole('button', { name: '+ Add extra / adjustment' }).click();
@@ -168,6 +171,9 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     await extraAmt.fill('15');
     await adjDesc.fill('Travel to second site');
     await adjType.selectOption('Fencing');
+    // An extras row is a line of hours: it says when it was worked too.
+    await page.locator('#ir_start_0').fill('15:00');
+    await page.locator('#ir_fin_0').fill('16:00');
 
     releaseHours();
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$50.00/hr');
@@ -177,6 +183,8 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     await expect(extraAmt).toHaveValue('15');
     await expect(adjDesc).toHaveValue('Travel to second site');
     await expect(adjType).toHaveValue('Fencing');
+    await expect(page.locator('#ir_start_0')).toHaveValue('15:00');
+    await expect(page.locator('#ir_fin_0')).toHaveValue('16:00');
 
     await page.locator('#invSubmitBtn').click();
     await page.locator('#confirmAck').check();
@@ -202,7 +210,11 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
       expect.objectContaining({
         description: 'Travel to second site',
         division: 'Fencing',
-        source: 'manual'
+        source: 'manual',
+        quantity: 1,
+        start_time: '15:00',
+        finish_time: '16:00',
+        break_minutes: 0
       })
     ]));
   });
@@ -269,6 +281,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
+          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false
@@ -280,7 +293,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
 
     await page.locator('[data-view="hours"]').click();
     const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await expect(card.locator('[data-cardrate]')).toHaveCount(0);
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('Not set');
     await expect(card).not.toContainText('$55.00/hr');

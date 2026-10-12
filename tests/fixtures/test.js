@@ -139,6 +139,11 @@ const test = base.extend({
           job_id: 'e2e-wo-holder-job',
           scheduled_date: addIsoDays(weekStart, 1),
           hours_worked: 8,
+          // Clocked on and off that day: the invoice card opens on these
+          // times (07:00 to 15:00 Perth) instead of asking for them.
+          clocked_on_at: addIsoDays(weekStart, 1) + 'T07:00:00+08:00',
+          clocked_off_at: addIsoDays(weekStart, 1) + 'T15:00:00+08:00',
+          break_minutes: 0,
           jobs: {
             id: 'e2e-wo-holder-job',
             job_number: 'SWF-26767',
@@ -1048,7 +1053,12 @@ const test = base.extend({
               // Stale-week guard fixture: the card belongs to LAST week while the
               // builder is on this week, the exact shape that lost Alyx a week.
               ...(feedScenario === 'trade-invoice-stale-week'
-                ? { assignments: labourExplainerHours.assignments.map((a) => ({ ...a, scheduled_date: addIsoDays(weekStart, -6) })) }
+                ? { assignments: labourExplainerHours.assignments.map((a) => ({
+                  ...a,
+                  scheduled_date: addIsoDays(weekStart, -6),
+                  clocked_on_at: addIsoDays(weekStart, -6) + 'T07:00:00+08:00',
+                  clocked_off_at: addIsoDays(weekStart, -6) + 'T15:00:00+08:00'
+                })) }
                 : {}),
               super_rate: 0.12,
               gross_earned: 400,

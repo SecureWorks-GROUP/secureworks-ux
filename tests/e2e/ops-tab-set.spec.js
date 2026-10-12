@@ -5,7 +5,8 @@
 //  - Financials keeps Purchase Orders, Work Orders and Bill Reconciliation, with
 //    Finance Health and Job P&L hidden, and Purchase Orders carries the Supplier
 //    Price Updates queue that used to sit on Materials;
-//  - Dispatch is a labelled concept on sample data that makes no network request.
+//  - Dispatch is a labelled concept on sample data that makes no network request,
+//    with the live Purchase orders board (the old Materials view) below it.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
@@ -56,7 +57,7 @@ for (const hidden of ['today', 'inbox', 'approvals', 'materials']) {
   test(`an old #${hidden} link and a saved ${hidden} tab both land on Jobs`, async ({ page }) => {
     await bootOps(page, { hash: hidden, savedTab: 'calendar' });
     await expect(page.locator('#viewJobs')).toHaveClass(/active/);
-    await expect(page.locator(`#view${hidden[0].toUpperCase()}${hidden.slice(1)}`)).not.toHaveClass(/active/);
+    expect(await page.locator('.view.active').evaluateAll((els) => els.map((el) => el.id))).toEqual(['viewJobs']);
     expect(new URL(page.url()).hash).toBe('#jobs');
 
     await page.evaluate((tab) => { localStorage.setItem('sw_ops_tab', tab); }, hidden);
@@ -94,11 +95,14 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
 });
 
 test('Dispatch is a labelled concept on sample data and makes no network call', async ({ page }) => {
-  const { requests } = await bootOps(page);
+  const { apiCalls, requests } = await bootOps(page);
   await page.locator('.header-nav button[data-view="dispatch"]').click();
   const root = page.locator('#dispatchConceptRoot');
   await expect(root.locator('.dpc-banner')).toContainText('Concept preview');
   await expect(root.locator('.dpc-banner')).toContainText('cannot order, save or send anything');
+  // The live PO board below the concept loads when the tab opens; let it settle
+  // so only the concept's own interactions are measured.
+  await expect.poll(() => apiCalls.includes('list_pos')).toBe(true);
   await page.waitForLoadState('networkidle');
   const before = requests.length;
 
@@ -117,4 +121,31 @@ test('Dispatch is a labelled concept on sample data and makes no network call', 
 
   expect(requests.slice(before)).toEqual([]);
   expect(await root.innerText()).not.toMatch(/\u2014/);
+});
+
+test('Dispatch carries the live Purchase orders board below the concept', async ({ page }) => {
+  const { apiCalls } = await bootOps(page, {
+    responses: {
+      list_pos: {
+        purchase_orders: [
+          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
+        ],
+      },
+    },
+  });
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  const section = page.locator('#viewDispatch #dispatchPurchaseOrders');
+  await expect(section.locator('.section-heading')).toContainText('Purchase orders');
+  await expect(section).toContainText('Live purchase orders');
+  await expect(section.getByRole('button', { name: '+ New PO' })).toBeVisible();
+  const card = section.locator('#materialsKanban .kanban-card', { hasText: 'Demo Supplier' });
+  await expect(card).toBeVisible();
+  await expect(card.locator('button[title="Delete PO"]')).toBeVisible();
+  expect(apiCalls).toContain('list_pos');
+  const below = await page.evaluate(() => {
+    const concept = document.getElementById('dispatchConceptRoot');
+    const board = document.getElementById('dispatchPurchaseOrders');
+    return Boolean(concept.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(below).toBe(true);
 });

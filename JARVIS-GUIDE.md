@@ -160,7 +160,7 @@ MIDDLE: Changes based on which tab you're on:
 - Jobs tab: "24 active jobs in pipeline"
 - Calendar tab: "12 events this week"
 - Financials tab: "$24,612 outstanding"
-- Materials tab: "15 purchase orders tracked"
+- Dispatch tab: "15 purchase orders tracked"
 
 RIGHT SIDE: Chat button + keyboard shortcut (Shift+J)
 

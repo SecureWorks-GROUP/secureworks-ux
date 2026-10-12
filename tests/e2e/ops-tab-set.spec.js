@@ -191,3 +191,16 @@ test('the Jarvis bar alert badges fill in when Ops opens on Jobs', async ({ page
   await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
   await expect(badges).toHaveText(['1 urgent', '2 warnings']);
 });
+
+test('the Jarvis bar alert badges pick up a new alert without a reload', async ({ page }) => {
+  const digest = { alerts: [] };
+  await page.clock.install();
+  await bootOps(page, { digest });
+  const badges = page.locator('#jarvisBadges .jarvis-badge');
+  await expect(badges).toHaveText(['All clear']);
+
+  digest.alerts = [{ severity: 'red', title: 'Deposit overdue', description: 'Sample alert' }];
+  // Past the digest's 30 minute cache, so the next 5 minute refresh tick refetches.
+  await page.clock.fastForward('35:00');
+  await expect(badges).toHaveText(['1 urgent']);
+});

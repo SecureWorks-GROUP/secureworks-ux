@@ -26016,6 +26016,7 @@ setInterval(function() {
   else if (view === 'financials') loadFinancials();
   else if (view === 'dispatch') loadMaterials();
   else if (view === 'inbox') loadInbox();
+  loadAiAlerts();
   _jarvisLastUpdate = Date.now();
 }, 300000); // 5 minutes
 

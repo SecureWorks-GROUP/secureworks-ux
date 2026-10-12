@@ -10,7 +10,7 @@
 1. **Today** — AI morning brief, attention items (actionable), today's assignments, upcoming week
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar
 3. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
-4. **Financials** — Job P&L, PO tracking, invoice status, Xero push
+4. **Financials** — Job profit (owner-only sub-tab; contract in `ops.html` `// <job-profit>`), PO tracking, invoice status, Xero push
 5. **Materials** — PO creation, supplier list, delivery tracking, scope-to-PO extraction
 
 ## Key Features
@@ -54,6 +54,7 @@ See edge-functions.md for full list. Key ones:
 - `morning_brief` — AI-generated daily summary
 - `complete_and_invoice` — compound action (mark complete + Xero invoice)
 - `scope_to_po` — extract materials from scope_json into PO line items
+- `job_profit_list` (+ `view=rollup`), `job_profit` — read-only profit engine behind Financials > Job profit (owner/admin only)
 
 ## Data Quality Issues (audit 3 March 2026)
 - **site_suburb/site_address**: NULL on 100% of jobs — location features non-functional

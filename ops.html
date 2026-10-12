@@ -7281,8 +7281,9 @@ function jobDetailIsOpen() {
 // the Materials view below it. The hidden views, loaders and ops-api actions
 // all stay, so bringing one back is its nav button plus its key here. Any route
 // into a hidden view (an old #today link, a stale button) lands on Jobs instead
-// of an empty screen. Ops always opens on Jobs: only a URL hash deep link opens
-// another tab, the last-used tab is never restored.
+// of an empty screen. A fresh open of the plain address lands on Jobs. showView
+// writes the tab into the address bar, so a refresh, a restored browser tab or a
+// bookmark stays on the tab it names.
 var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
 function opsVisibleView(view) {
   return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;

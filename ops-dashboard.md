@@ -7,7 +7,7 @@
 **API**: `ops-api` edge function (--no-verify-jwt)
 
 ## 5 Tabs
-Ops always opens on Jobs (Captain 2026-10-06); a URL hash link still opens its tab, the last-used tab is not restored.
+A fresh open of the plain address lands on Jobs (Captain 2026-10-06). Every tab switch writes the tab into the address bar, so a refresh, a restored browser tab or a bookmark stays on the tab it names.
 1. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar
 3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Clear Debt, Xero push

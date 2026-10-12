@@ -1,6 +1,6 @@
 // Guard for the Ops tab set (Captain 2026-10-06, `<ops-tab-set>` in ops.html):
-//  - the nav is Jobs, Calendar, Financials, Dispatch, Sales, and Ops always opens
-//    on Jobs (the last-used tab is not restored; a URL hash link still opens its tab);
+//  - the nav is Jobs, Calendar, Financials, Dispatch, Sales, and a fresh open of
+//    the plain address lands on Jobs (an address that names a tab opens that tab);
 //  - Today, Inbox and Approvals are off the front end, and any old deep link or
 //    saved tab pointing at them (or at Materials) lands on Jobs;
 //  - Financials keeps Purchase Orders, Work Orders and Bill Reconciliation, with

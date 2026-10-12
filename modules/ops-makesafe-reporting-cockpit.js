@@ -4320,6 +4320,10 @@ function _msIsPortalBuilder(d) {
 }
 
 // SMOKE TEST (manual, run in browser console):
+// The Approvals tab is hidden (ops.html <ops-tab-set>): showView('approvals')
+// now lands on Jobs, so steps 1-3 no longer reach the inline host from the nav.
+// Start at step 4 from a Docs Ready card's "Review job pack" on the make-safe
+// board, which opens the same pane in the board overlay.
 // 1. showView('approvals') -- approvals view loads
 // 2. Click "MakeSafe Reporting" tab -- reporting cockpit renders, loading state
 // 3. loadMakesafeReportingCockpit() returns the SES queue count (0 or N); cards

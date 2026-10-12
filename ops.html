@@ -4544,7 +4544,8 @@
 <script>
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
-  {t:'css', u:'modules/ops-sales-booking.css?v=3'}
+  {t:'css', u:'modules/ops-sales-booking.css?v=3'},
+  {t:'css', u:'modules/ops-dispatch-concept.css?v=1'}
 ]);
 </script>
 </head>
@@ -4556,16 +4557,15 @@ __swOpsStampAssets([
   <!-- Header -->
   <div class="header">
     <div class="header-left">
-      <div class="header-brand" onclick="showView('today')" style="cursor:pointer;">SecureWorks <span>Ops</span></div>
+      <div class="header-brand" onclick="showView('jobs')" style="cursor:pointer;">SecureWorks <span>Ops</span></div>
+      <!-- <ops-tab-set> Jobs, Calendar, Financials, Dispatch, Sales. Today, Inbox and
+           Approvals are off the front end (Captain 2026-10-06); see OPS_HIDDEN_VIEWS. -->
       <div class="header-nav">
-        <button class="active" onclick="showView('today')" data-view="today">Today</button>
+        <button class="active" onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
-        <button onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
-        <button onclick="showView('materials')" data-view="materials">Materials</button>
+        <button onclick="showView('dispatch')" data-view="dispatch">Dispatch</button>
         <button onclick="showView('sales')" data-view="sales">Sales</button>
-        <button onclick="showView('inbox')" data-view="inbox">Inbox <span id="inboxBadge" class="nav-badge" style="display:none;"></span></button>
-        <button onclick="showView('approvals')" data-view="approvals">Approvals</button>
       </div>
       <!-- Persistent search bar -->
       <div style="margin-left:16px;position:relative;flex-shrink:0">
@@ -4584,7 +4584,7 @@ __swOpsStampAssets([
   <div class="container">
 
     <!-- ═══════════ TODAY TAB ═══════════ -->
-    <div id="viewToday" class="view active">
+    <div id="viewToday" class="view">
 
       <!-- Morning Brief (Feature 2) — AI-generated, cached 30min -->
       <div id="morningBrief" class="morning-brief" style="display:none;">
@@ -4674,7 +4674,7 @@ __swOpsStampAssets([
           <div style="display:flex; flex-direction:column; gap:6px;">
             <button class="btn btn-primary btn-sm" onclick="showView('calendar'); openAssignmentModal();">+ Schedule Job</button>
             <button class="btn btn-secondary btn-sm" onclick="openQuickQuote();">+ Quick Quote</button>
-            <button class="btn btn-secondary btn-sm" onclick="showView('materials'); openPOModal();">+ New PO</button>
+            <button class="btn btn-secondary btn-sm" onclick="showView('financials'); showSubTab('pos'); openPOModal();">+ New PO</button>
           </div>
         </div>
       </div>
@@ -4775,6 +4775,9 @@ __swOpsStampAssets([
     </div>
 
     <!-- ═══════════ JOBS TAB ═══════════ -->
+    <!-- Not active in markup: restoreTab() opens Jobs once the operator is signed
+         in. #viewJobs.active is a fixed full-screen layer, so a pre-boot active
+         class would sit over every static renderer fixture. -->
     <div id="viewJobs" class="view">
       <div class="filter-bar">
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
@@ -4808,10 +4811,11 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('quotes')" data-sub="quotes">Quotes</button>
         <button class="sub-tab" onclick="showSubTab('pos')" data-sub="pos">Purchase Orders</button>
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
+        <button class="sub-tab" onclick="showSubTab('billrecon')" data-sub="billrecon">Bill Reconciliation</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
-        <button class="sub-tab" onclick="showSubTab('financehealth')" data-sub="financehealth" title="Read-only invoice-data-quality holes">Finance Health</button>
-        <button class="sub-tab" onclick="showSubTab('jobpnl')" data-sub="jobpnl" title="Per-job P&amp;L — revenue, labour cost, margin (make-safe v1)">Job P&amp;L</button>
+        <!-- Finance Health and Job P&L sub-tabs are hidden (Captain 2026-10-06). Their
+             panels, loaders and ops-api actions stay. -->
       </div>
 
       <!-- Invoices -->
@@ -4878,6 +4882,12 @@ __swOpsStampAssets([
 
       <!-- Purchase Orders -->
       <div id="subPos" class="sub-view">
+        <!-- Supplier Price Updates: moved here from the retired Materials tab
+             (Captain 2026-10-06). Panel unchanged. -->
+        <div id="pendingPricesPanel" style="display:none; margin-bottom:20px;">
+          <div class="section-heading">Supplier Price Updates <span class="badge" id="pendingPriceCount">0</span></div>
+          <div id="pendingPricesList"></div>
+        </div>
         <div class="filter-bar">
           <button class="filter-chip active" onclick="filterPOStatus('all')" data-po-status="all">All</button>
           <button class="filter-chip" onclick="filterPOStatus('draft')" data-po-status="draft">Draft</button>
@@ -4911,6 +4921,42 @@ __swOpsStampAssets([
             <tbody id="woTableBody"></tbody>
           </table>
         </div>
+      </div>
+
+      <!-- Bill Reconciliation: moved here from the retired Materials tab so finance
+           can still reach it (Firstmate 2026-10-06). Panel unchanged. -->
+      <div id="subBillrecon" class="sub-view">
+      <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
+           Ops worklist that drains U3's materials_reconciliation_queue by hand.
+           accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
+           closes the row with no fact. Every action is auditable (who + when + manual marker). -->
+      <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
+          <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
+          <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
+          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
+          <div style="flex:1;"></div>
+          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
+          <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
+        </div>
+        <div class="data-table-wrap" style="overflow-x:auto;">
+          <table class="pnl-table" style="width:100%; font-size:12px;">
+            <thead>
+              <tr>
+                <th>Supplier</th>
+                <th>Invoice #</th>
+                <th style="text-align:right;">Amount (inc)</th>
+                <th>Date</th>
+                <th>Suggested job</th>
+                <th style="min-width:280px;">Assign to job</th>
+              </tr>
+            </thead>
+            <tbody id="matReconTableBody">
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
       </div>
 
       <!-- Trade Bills -->
@@ -4975,53 +5021,23 @@ __swOpsStampAssets([
       </div>
     </div>
 
-    <!-- ═══════════ MATERIALS TAB ═══════════ -->
-    <div id="viewMaterials" class="view">
+    <!-- ═══════════ DISPATCH TAB ═══════════
+         Replaced Materials in the nav (Captain 2026-10-06). The concept is sample
+         data only with no network calls: see <ops-dispatch-concept> in
+         modules/ops-dispatch-concept.js. Below it sits the LIVE purchase order
+         board that used to be the Materials view (Captain ruling); it reads and
+         writes real POs through loadMaterials(). -->
+    <div id="viewDispatch" class="view">
+      <div id="dispatchConceptRoot"></div>
 
-      <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
-           Ops worklist that drains U3's materials_reconciliation_queue by hand.
-           accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
-           closes the row with no fact. Every action is auditable (who + when + manual marker). -->
-      <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
-          <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
-          <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
-          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
-          <div style="flex:1;"></div>
-          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
-          <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
-        </div>
-        <div class="data-table-wrap" style="overflow-x:auto;">
-          <table class="pnl-table" style="width:100%; font-size:12px;">
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>Invoice #</th>
-                <th style="text-align:right;">Amount (inc)</th>
-                <th>Date</th>
-                <th>Suggested job</th>
-                <th style="min-width:280px;">Assign to job</th>
-              </tr>
-            </thead>
-            <tbody id="matReconTableBody">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+      <div id="dispatchPurchaseOrders" style="margin-top:28px;">
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        Materials Pipeline <span class="badge" id="materialsCount">0</span>
+        Purchase orders <span class="badge" id="materialsCount">0</span>
         <div style="flex:1;"></div>
         <button class="btn btn-secondary btn-sm" id="matFilterToggle" onclick="toggleMatFilters()" style="font-size:11px;">Filters <span id="matFilterBadge"></span></button>
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
       </div>
-
-      <!-- Pending Price Reviews -->
-      <div id="pendingPricesPanel" style="display:none; margin-bottom:20px;">
-        <div class="section-heading">Supplier Price Updates <span class="badge" id="pendingPriceCount">0</span></div>
-        <div id="pendingPricesList"></div>
-      </div>
+      <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Unlike the concept above, changes made here are real.</div>
 
       <!-- Threshold alerts -->
       <div id="matAlerts" style="margin-bottom:8px;"></div>
@@ -5065,6 +5081,7 @@ __swOpsStampAssets([
       </div>
 
       <div class="materials-kanban" id="materialsKanban"></div>
+      </div>
     </div>
 
     <!-- ═══════════ INBOX TAB ═══════════ -->
@@ -5149,14 +5166,11 @@ __swOpsStampAssets([
 
   <!-- Mobile Nav -->
   <div class="mobile-nav">
-    <button class="active" onclick="showView('today')" data-view="today"><span class="nav-icon">&#9776;</span>Today</button>
+    <button class="active" onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
-    <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
-    <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
+    <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#128666;</span>Dispatch</button>
     <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
-    <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
-    <button onclick="showView('approvals')" data-view="approvals"><span class="nav-icon">&#127963;</span>Approvals</button>
   </div>
 
   <!-- ══════════ FULL JOB DETAIL VIEW ══════════ -->
@@ -6217,8 +6231,13 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-intake-cockpit.js?v=1'},
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
-  {t:'js', u:'modules/ops-modals.js?v=4'}
+  {t:'js', u:'modules/ops-modals.js?v=4'},
+  {t:'js', u:'modules/ops-dispatch-concept.js?v=1'}
 ]);
+</script>
+<!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 </script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
@@ -6304,6 +6323,8 @@ var _allQuotes = [];
 var _invJobCache = null; // cached job data for invoice modal
 var _calEvents = [];
 var _calDeliveries = [];
+// Every purchase order from list_pos, null until that read lands. See <calendar-delivery-row>.
+var _calPOs = null;
 var _pipelineData = null;
 var _jobsCache = [];
 var _suppliers = [];
@@ -7255,7 +7276,23 @@ function jobDetailIsOpen() {
   return !!(detail && detail.classList.contains('active'));
 }
 
+// <ops-tab-set> Captain 2026-10-06: the Ops tabs are Jobs (the page Ops opens
+// on), Calendar, Financials, Dispatch, then Sales. Today, Inbox (AI
+// annotations) and Approvals are off the front end only. The Materials tab
+// became Dispatch: the concept on top, the live purchase order board that was
+// the Materials view below it. The hidden views, loaders and ops-api actions
+// all stay, so bringing one back is its nav button plus its key here. Any route
+// into a hidden view (an old #today link, a stale button) lands on Jobs instead
+// of an empty screen. A fresh open of the plain address lands on Jobs. showView
+// writes the tab into the address bar, so a refresh, a restored browser tab or a
+// bookmark stays on the tab it names.
+var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
+function opsVisibleView(view) {
+  return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;
+}
+
 function showView(view) {
+  view = opsVisibleView(view);
   var salesTab = null;
   if (view === 'performance' || view === 'booking' || view === 'sales') {
     salesTab = (view === 'sales')
@@ -7301,7 +7338,10 @@ function showView(view) {
   if (view === 'calendar') loadCalendar();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
-  if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
+  if (view === 'dispatch') {
+    if (typeof OpsDispatchConcept !== 'undefined') OpsDispatchConcept.show();
+    loadMaterials();
+  }
   if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);
   if (view === 'inbox') loadInbox();
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
@@ -7357,11 +7397,8 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'performance', 'booking', 'sales', 'inbox'];
-  if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
-  var saved = localStorage.getItem('sw_ops_tab');
-  if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }
-  showView('today');
+  var validTabs = ['jobs', 'calendar', 'financials', 'dispatch', 'performance', 'booking', 'sales'];
+  showView(validTabs.indexOf(hash) >= 0 ? hash : 'jobs');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -7954,7 +7991,7 @@ function renderActionableItems(pipelineData, summaryData) {
           jobId: j.id,
           btnLabel: 'Create PO',
           btnClass: 'red',
-          btnAction: 'showView(\'materials\'); openPOModal(\'' + j.id + '\')',
+          btnAction: 'showView(\'financials\'); showSubTab(\'pos\'); openPOModal(\'' + j.id + '\')',
         });
       }
     }
@@ -7989,7 +8026,7 @@ function renderActionableItems(pipelineData, summaryData) {
         jobId: (item.job_ids && item.job_ids[0]) || null,
         btnLabel: 'View POs',
         btnClass: 'outline',
-        btnAction: 'showView(\'materials\')',
+        btnAction: 'showView(\'financials\'); showSubTab(\'pos\')',
       });
     }
   });
@@ -8098,7 +8135,7 @@ function renderAttention(items) {
       actionFn = 'onclick="openJobPeek(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#128269;';
     } else if (type === 'material_conflict' && item.job_ids && item.job_ids.length) {
-      actionFn = 'onclick="showView(\'materials\'); openJobPeek(\'' + item.job_ids[0] + '\')"';
+      actionFn = 'onclick="showView(\'financials\'); showSubTab(\'pos\'); openJobPeek(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#128230;';
     } else if (type === 'scope_pending') {
       actionFn = 'onclick="showView(\'jobs\')"';
@@ -8113,7 +8150,7 @@ function renderAttention(items) {
       actionFn = 'onclick="openCascadeModal(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#9989;';
     } else if (type === 'overdue_delivery' || type === 'stuck_draft_po' || type === 'unconfirmed_delivery' || type.indexOf('po') !== -1) {
-      actionFn = 'onclick="showView(\'materials\')"';
+      actionFn = 'onclick="showView(\'financials\'); showSubTab(\'pos\')"';
       actionIcon = '&#128230;';
     } else if (type === 'unsent_wo') {
       actionFn = 'onclick="showView(\'financials\'); showSubTab(\'workorders\')"';
@@ -8541,6 +8578,17 @@ async function loadCalendar() {
       if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
     }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
 
+    // Delivery row top-up: the calendar feed only sends draft / submitted /
+    // authorised orders, so the row reads the full order list too.
+    // See <calendar-delivery-row>.
+    opsFetch('list_pos').catch(function(e) {
+      console.error('calendar deliveries enrich failed:', e);
+      return null;
+    }).then(function(p) {
+      _calPOs = p ? (p.purchase_orders || []) : null;
+      renderCalendar();
+    });
+
     // Crew availability shading
     opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
       _calAvailability = {};
@@ -8575,6 +8623,33 @@ async function loadCalendar() {
     ]);
   }
 }
+
+// <calendar-delivery-row>
+// The Crew view's Deliveries row shows every purchase order the board shows
+// (see <po-board-columns>) that has a delivery day. The calendar feed's own
+// `deliveries` list carries only draft / submitted / authorised orders (ops-api
+// calendarEvents), which hid every sent, confirmed, delivered, approved, quoted
+// and billed order. So the row is built from list_pos and keeps any feed row
+// list_pos did not return. A cancelled order stays off the row, as it stays off
+// the board. An order with no requested date sits on the day the supplier
+// confirmed.
+function calDeliveryDay(po) {
+  return (po && (po.delivery_date || po.confirmed_delivery_date)) || '';
+}
+function calDeliveryList(feedDeliveries, allPOs) {
+  var seen = {};
+  var out = [];
+  (allPOs || []).concat(feedDeliveries || []).forEach(function(po) {
+    if (!po || !poBoardColumnOf(po.status) || !calDeliveryDay(po)) return;
+    if (po.id) {
+      if (seen[po.id]) return;
+      seen[po.id] = true;
+    }
+    out.push(po);
+  });
+  return out;
+}
+// </calendar-delivery-row>
 
 // <calendar-ops-core>
 // M3c calendar 80/20 — pure, dependency-free helpers, extracted verbatim by the
@@ -9100,9 +9175,10 @@ function renderSwimlaneView(container, range) {
 
   // Build delivery lookup
   var deliveryMap = {};
-  _calDeliveries.forEach(function(del) {
-    if (!deliveryMap[del.delivery_date]) deliveryMap[del.delivery_date] = [];
-    deliveryMap[del.delivery_date].push(del);
+  calDeliveryList(_calDeliveries, _calPOs).forEach(function(del) {
+    var day = calDeliveryDay(del);
+    if (!deliveryMap[day]) deliveryMap[day] = [];
+    deliveryMap[day].push(del);
   });
 
   // Detect conflicts: same crew, same date, 2+ different jobs
@@ -9341,9 +9417,12 @@ function renderSwimlaneView(container, range) {
       html += '<div class="' + cellClass + '">';
       var dels = deliveryMap[dateStr] || [];
       dels.forEach(function(del) {
-        var isWarning = del.job_id && jobStartDates[del.job_id] && del.delivery_date > jobStartDates[del.job_id];
-        html += '<div class="cal-delivery-block' + (isWarning ? ' warning' : '') + '" title="' + del.po_number + ' — ' + del.supplier_name + '">';
-        html += del.supplier_name;
+        var isWarning = del.job_id && jobStartDates[del.job_id] && dateStr > jobStartDates[del.job_id];
+        var delSupplier = escapeAttr(del.supplier_name || 'No supplier');
+        html += '<div class="cal-delivery-block' + (isWarning ? ' warning' : '') + '"' +
+          ' data-po-id="' + escapeAttr(del.id) + '"' +
+          ' title="' + escapeAttr(del.po_number) + ' — ' + delSupplier + ' — ' + escapeAttr(poStatusLabel(del.status)) + '">';
+        html += delSupplier;
         if (isWarning) html += ' &#9888;';
         html += '</div>';
       });
@@ -12540,7 +12619,7 @@ function openMakesafeReviewOverlay(overlayId, panelId, title) {
   var rect = container.getBoundingClientRect();
   overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;z-index:120;background:#fff;display:flex;flex-direction:column;';
   var closeFn = (overlayId === 'makesafeIntakeOverlay') ? 'closeMakesafeIntakeOverlay()' : 'closeMakesafeReportingOverlay()';
-  overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board — approve here moves the card to the next stage. The Approvals tab remains available as a fallback.', closeFn)
+  overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board: approve here moves the card to the next stage.', closeFn)
     + '<div id="' + panelId + '" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fff;"></div>';
   container.appendChild(overlay);
 }
@@ -14789,7 +14868,7 @@ function renderMakesafeCard(j, status) {
   // opens the EXISTING reporting review overlay through openMakesafeJob. This is
   // intentionally independent of family-specific substatus wording.
   if (showReviewAffordance) {
-    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the same approval/reporting pack used by the Approvals tab" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
+    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the approval and reporting pack for this job" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
   }
   // M-F W2-C — cancelled card: reason/who/date + admin-only Reopen. The cancel_*
   // fields ride on the make-safe payload; absent fields render nothing.
@@ -16817,8 +16896,9 @@ function showSubTab(tab) {
   if (view) view.classList.add('active');
 
   if (tab === 'invoices') loadInvoices();
-  if (tab === 'pos') loadPOs();
+  if (tab === 'pos') { loadPOs(); loadPendingPrices(); }
   if (tab === 'workorders') loadWOs();
+  if (tab === 'billrecon') loadMaterialsRecon();
   if (tab === 'quotes') loadQuotes();
   if (tab === 'tradebills') loadTradeBills();
   if (tab === 'cleardebt') loadClearDebt();
@@ -17331,10 +17411,12 @@ async function sendInvoice(xeroId, invNumber) {
 }
 
 var _allPOs = [];
+var _allPOsLoaded = false;
 async function loadPOs() {
   try {
     var data = await opsFetch('list_pos');
     _allPOs = data.purchase_orders || [];
+    _allPOsLoaded = true;
     renderPOTable(_allPOs);
   } catch (e) {
     console.error('loadPOs error:', e);
@@ -17347,7 +17429,7 @@ function renderPOTable(pos) {
   // Apply status filter
   var filtered = pos || [];
   if (_poStatusFilter !== 'all') {
-    filtered = filtered.filter(function(po) { return po.status === _poStatusFilter; });
+    filtered = filtered.filter(function(po) { return poBoardColumnOf(po.status) === _poStatusFilter; });
   }
 
   if (filtered.length === 0) {
@@ -17355,18 +17437,17 @@ function renderPOTable(pos) {
     return;
   }
 
-  var PO_STATUS_LABELS = { draft: 'Draft', approved: 'Approved', submitted: 'Sent', quote_requested: 'Quoted', authorised: 'Confirmed', billed: 'Delivered' };
   var html = '';
   filtered.forEach(function(po) {
-    html += '<tr>';
+    html += '<tr data-po-id="' + escapeAttr(po.id) + '">';
     html += '<td><strong>' + po.po_number + '</strong></td>';
     html += '<td>' + (po.reference || '-') + '</td>';
     html += '<td>' + (po.supplier_name || '-') + '</td>';
     html += '<td style="font-family:var(--sw-font-num);">' + fmt$(po.total) + '</td>';
     html += '<td>' + fmtDate(po.delivery_date) + '</td>';
-    html += '<td><span class="status-badge ' + po.status + '">' + (PO_STATUS_LABELS[po.status] || po.status) + '</span></td>';
+    html += '<td>' + poStatusBadge(po.status) + '</td>';
     html += '<td>';
-    if (po.status === 'draft' && !po.xero_po_id) {
+    if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
       html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Push to Xero</button>';
     }
     if (po.job_id) {
@@ -17501,7 +17582,7 @@ async function loadQuotes() {
 }
 
 // ════════════════════════════════════════════════════════════
-// JOB P&L PANEL (Financials > Job P&L tab)
+// JOB P&L PANEL (Financials > Job P&L; sub-tab button hidden 2026-10-06)
 //
 // Data source: ops-api action 'job_financials' (list, GET) and
 //              'job_financials_detail' (single job, GET with jobId param).
@@ -18119,7 +18200,7 @@ function submitRateModal() {
 }
 
 // ════════════════════════════════════════════════════════════
-// MATERIALS TAB
+// PURCHASE ORDER BOARD (Dispatch tab; was the Materials tab, see <ops-tab-set>)
 // ════════════════════════════════════════════════════════════
 
 var _matTypeFilter = 'all';
@@ -18130,11 +18211,13 @@ async function loadMaterials() {
   try {
     var data = await opsFetch('list_pos');
     _allPOs = data.purchase_orders || [];
+    _allPOsLoaded = true;
+    updateJarvisSummary();
     renderMaterialsKanban();
     loadPendingPrices();
   } catch (e) {
     console.error('loadMaterials error:', e);
-    showToast('Failed to load materials', 'warning', [
+    showToast('Failed to load purchase orders', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadMaterials()' }
     ]);
   }
@@ -18328,6 +18411,53 @@ function dismissPriceItem(id) {
   });
 }
 
+// <po-board-columns>
+// Which column a purchase order sits in is decided HERE and nowhere else, so a
+// status can never again match no column and drop off the board.
+// The back end allows eleven statuses (purchase_orders_status_check):
+// quote_requested, draft, approved, submitted, authorised, sent, confirmed,
+// delivered, billed, cancelled, deleted. submitted / authorised / billed are the
+// older words for sent / confirmed / delivered, so each pair shares a column.
+// The six main columns are always drawn. Other is drawn only when it holds an
+// order: it catches every status this page does not know, and a blank one.
+// A cancelled order is off the board on purpose and has no column. list_pos
+// never returns a soft-deleted order; one that arrived anyway stays off too.
+var PO_BOARD_COLUMNS = [
+  { key: 'draft', label: 'Draft', color: '#95A5A6', statuses: ['draft'] },
+  { key: 'approved', label: 'Approved', color: '#2980B9', statuses: ['approved'] },
+  { key: 'submitted', label: 'Sent', color: '#3498DB', statuses: ['submitted', 'sent'] },
+  { key: 'quote_requested', label: 'Quoted', color: '#8E44AD', statuses: ['quote_requested'] },
+  { key: 'authorised', label: 'Confirmed', color: '#E67E22', statuses: ['authorised', 'confirmed'] },
+  { key: 'billed', label: 'Delivered', color: '#27AE60', statuses: ['billed', 'delivered'] },
+];
+var PO_BOARD_OTHER_COLUMN = { key: 'other', label: 'Other', color: '#7F8C8D', statuses: [] };
+var PO_OFF_BOARD_STATUSES = ['cancelled', 'deleted'];
+// The column key for a status, or '' for an order that is kept off the board.
+function poBoardColumnOf(status) {
+  if (PO_OFF_BOARD_STATUSES.indexOf(status) >= 0) return '';
+  for (var i = 0; i < PO_BOARD_COLUMNS.length; i++) {
+    if (PO_BOARD_COLUMNS[i].statuses.indexOf(status) >= 0) return PO_BOARD_COLUMNS[i].key;
+  }
+  return 'other';
+}
+// The word shown for a status: its column's word, or the stored status itself
+// for one with no main column.
+function poStatusLabel(status) {
+  var key = poBoardColumnOf(status);
+  for (var i = 0; i < PO_BOARD_COLUMNS.length; i++) {
+    if (PO_BOARD_COLUMNS[i].key === key) return PO_BOARD_COLUMNS[i].label;
+  }
+  return status ? String(status).replace(/_/g, ' ') : 'No status';
+}
+// The one badge for a purchase order's status, wherever it is printed: the
+// column's word and the column's colour.
+function poStatusBadge(status) {
+  var key = poBoardColumnOf(status);
+  var cls = key && key !== 'other' ? key : status;
+  return '<span class="status-badge ' + escapeAttr(cls) + '">' + escapeAttr(poStatusLabel(status)) + '</span>';
+}
+// </po-board-columns>
+
 // ── Materials Advanced Filter State ──
 var _matFilterJob = '';
 var _matFilterSupplier = '';
@@ -18420,7 +18550,7 @@ function renderMatAlerts() {
   var alerts = [];
 
   _allPOs.forEach(function(po) {
-    if (['draft', 'quote_requested', 'cancelled', 'deleted'].indexOf(po.status) >= 0) return;
+    if (['', 'draft', 'quote_requested'].indexOf(poBoardColumnOf(po.status)) >= 0) return;
     if (po.invoice_received_at || po.paid_at) return;
     var sinceDate = po.confirmed_at || po.ordered_at || po.created_at;
     if (!sinceDate) return;
@@ -18453,17 +18583,12 @@ function renderMaterialsKanban() {
   // Also render threshold alerts
   renderMatAlerts();
 
-  var stages = [
-    { key: 'draft', label: 'Draft', color: '#95A5A6' },
-    { key: 'approved', label: 'Approved', color: '#2980B9' },
-    { key: 'submitted', label: 'Sent', color: '#3498DB' },
-    { key: 'quote_requested', label: 'Quoted', color: '#8E44AD' },
-    { key: 'authorised', label: 'Confirmed', color: '#E67E22' },
-    { key: 'billed', label: 'Delivered', color: '#27AE60' },
-  ];
+  // See <po-board-columns>.
+  var stages = PO_BOARD_COLUMNS.concat([PO_BOARD_OTHER_COLUMN]);
+  var mainKeys = PO_BOARD_COLUMNS.map(function(c) { return c.key; });
 
   // Apply type filter
-  var filtered = _allPOs.filter(function(po) { return po.status !== 'cancelled' && po.status !== 'deleted'; });
+  var filtered = _allPOs.filter(function(po) { return poBoardColumnOf(po.status) !== ''; });
   if (_matTypeFilter !== 'all') {
     filtered = filtered.filter(function(po) { return po.job_type === _matTypeFilter; });
   }
@@ -18485,8 +18610,13 @@ function renderMaterialsKanban() {
   if (_matFilterSupplier) {
     filtered = filtered.filter(function(po) { return po.supplier_name === _matFilterSupplier; });
   }
+  // The six tick boxes are the six main columns. Other has no tick box, so the
+  // status filter never hides it.
   if (_matFilterStatuses.length < 6) {
-    filtered = filtered.filter(function(po) { return _matFilterStatuses.indexOf(po.status) >= 0; });
+    filtered = filtered.filter(function(po) {
+      var col = poBoardColumnOf(po.status);
+      return mainKeys.indexOf(col) < 0 || _matFilterStatuses.indexOf(col) >= 0;
+    });
   }
 
   var container = document.getElementById('materialsKanban');
@@ -18495,8 +18625,10 @@ function renderMaterialsKanban() {
 
   var html = '';
   stages.forEach(function(stage) {
-    var items = filtered.filter(function(po) { return po.status === stage.key; });
-    html += '<div class="kanban-col" style="background:var(--sw-bg);">';
+    var items = filtered.filter(function(po) { return poBoardColumnOf(po.status) === stage.key; });
+    var isMainCol = mainKeys.indexOf(stage.key) >= 0;
+    if (!isMainCol && items.length === 0) return;
+    html += '<div class="kanban-col" data-po-col="' + stage.key + '" style="background:var(--sw-bg);">';
     html += '<div class="kanban-col-header" style="border-bottom-color:' + stage.color + ';">' +
       stage.label + '<span class="count">' + items.length + '</span></div>';
     html += '<div class="kanban-body">';
@@ -18516,10 +18648,10 @@ function renderMaterialsKanban() {
         jobRef = (po.job_number || '') + (po.job_number && surname ? ' — ' + surname : surname || '');
       }
 
-      html += '<div class="kanban-card" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
+      html += '<div class="kanban-card" data-po-id="' + escapeAttr(po.id) + '" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
 
       // BUG 2: Delete button (top-right)
-      var canDelete = po.status === 'draft' || po.status === 'quote_requested';
+      var canDelete = stage.key === 'draft' || stage.key === 'quote_requested';
       html += '<button onclick="event.stopPropagation();deletePO(\'' + po.id + '\',\'' + escapeHtml(po.po_number || '').replace(/'/g, "\\'") + '\',\'' + escapeHtml(po.supplier_name || '').replace(/'/g, "\\'") + '\',' + canDelete + ')" style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:13px;color:var(--sw-text-sec);padding:2px;" title="Delete PO">&#128465;</button>';
 
       // Header: supplier + total
@@ -18542,17 +18674,21 @@ function renderMaterialsKanban() {
       var wfSteps = ['draft','approved','sent','quoted','confirmed','delivered'];
       var wfLabels = ['Draft','Approved','Sent','Quoted','Confirmed','Delivered'];
       var wfColors = ['#95A5A6','#2980B9','#3498DB','#8E44AD','#E67E22','#27AE60'];
-      var wfMap = { draft:'draft', approved:'approved', submitted:'sent', quote_requested:'quoted', authorised:'confirmed', billed:'delivered' };
-      var currentWf = wfMap[po.status] || 'draft';
-      var currentIdx = wfSteps.indexOf(currentWf);
-      html += '<div style="display:flex;gap:2px;align-items:center;margin:6px 0 4px;">';
-      wfSteps.forEach(function(step, idx) {
-        var active = idx <= currentIdx;
-        var bg = active ? wfColors[idx] : '#E0E0E0';
-        html += '<div title="' + wfLabels[idx] + '" style="flex:1;height:4px;border-radius:2px;background:' + bg + ';"></div>';
-      });
-      html += '</div>';
-      html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
+      // The steps are the six main columns in order. An unknown status has no
+      // step, so it shows its own word and no progress bar.
+      var currentIdx = mainKeys.indexOf(stage.key);
+      if (currentIdx >= 0) {
+        html += '<div style="display:flex;gap:2px;align-items:center;margin:6px 0 4px;">';
+        wfSteps.forEach(function(step, idx) {
+          var active = idx <= currentIdx;
+          var bg = active ? wfColors[idx] : '#E0E0E0';
+          html += '<div title="' + wfLabels[idx] + '" style="flex:1;height:4px;border-radius:2px;background:' + bg + ';"></div>';
+        });
+        html += '</div>';
+        html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
+      } else {
+        html += '<div class="po-status-word" style="font-size:10px;color:var(--sw-text-sec);font-weight:600;margin:6px 0 4px;">Status: ' + escapeAttr(poStatusLabel(po.status)) + '</div>';
+      }
 
       // Delivery/pickup date
       if (po.delivery_date) {
@@ -18780,7 +18916,7 @@ function renderJobPeek(data) {
     data.purchase_orders.forEach(function(po) {
       html += '<div style="padding:8px 0; border-bottom:1px solid var(--sw-border); font-size:13px;">';
       html += '<strong>' + po.po_number + '</strong> — ' + po.supplier_name;
-      html += ' <span class="status-badge ' + po.status + '">' + po.status + '</span>';
+      html += ' ' + poStatusBadge(po.status);
       html += ' ' + fmt$(po.total);
       html += '</div>';
     });
@@ -20151,7 +20287,7 @@ function evaluateJobAlerts(data) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   var tomorrowStr = tomorrow.toISOString().slice(0, 10);
   (data.purchase_orders || []).forEach(function(po) {
-    if (po.delivery_date === tomorrowStr && ['authorised','billed'].indexOf(po.status) < 0) {
+    if (po.delivery_date === tomorrowStr && ['authorised','billed'].indexOf(poBoardColumnOf(po.status)) < 0) {
       alerts.push({ level: 'amber', icon: '&#9888;', message: 'Delivery tomorrow — not confirmed', target: 'build' });
     }
   });
@@ -21150,6 +21286,9 @@ function renderOverviewView(data) {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
     return;
   }
+  // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below
+  if (window.JobOverviewV2 && JobOverviewV2.render(data)) return;
+  // </job-overview-v2-switch>
   var html = '';
   // Section 1: Client Card
   html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
@@ -21392,6 +21531,7 @@ function renderOverviewView(data) {
   if (evts.length > 5) html += '<div style="margin-top:6px;"><a href="#" onclick="event.preventDefault();showJobSubView(\x27history\x27)" style="font-size:11px;color:var(--sw-mid);">View full history &#8594;</a></div>';
   html += '</div>';
   document.getElementById('jdOverview').innerHTML = html;
+  if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
 
   // Load job actions async
   loadJobActions(j.id);
@@ -21556,7 +21696,7 @@ function buildTimelineEvents(data) {
       date: (po.created_at || '').slice(0, 10),
       datetime: po.created_at,
       label: 'PO created — ' + (po.supplier_name || 'Unknown'),
-      detail: po.po_number + ' | ' + fmt$(po.total) + ' | ' + (po.status || ''),
+      detail: po.po_number + ' | ' + fmt$(po.total) + ' | ' + poStatusLabel(po.status),
       source: 'po'
     });
     // Future: delivery date
@@ -21973,7 +22113,7 @@ function renderMoneyView(data) {
       html += '<div class="jd-money-card"><div class="jd-money-card-head">';
       html += '<span>' + (po.po_number || '') + ' — ' + escapeHtml(po.supplier_name || '') + '</span>';
       html += '<strong>' + fmt$(po.total) + '</strong></div>';
-      html += '<div class="jd-money-card-sub"><span class="status-badge ' + po.status + '">' + (po.status || '') + '</span>';
+      html += '<div class="jd-money-card-sub">' + poStatusBadge(po.status);
       if (po.delivery_date) html += ' &middot; Delivery ' + fmtDate(po.delivery_date);
       html += '</div></div>';
     });
@@ -22070,7 +22210,7 @@ function renderBuildView(data) {
       html += '<div style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;display:flex;align-items:center;gap:6px;">';
       html += '<div style="flex:1;">';
       html += '<strong>' + (po.po_number || '') + '</strong> — ' + escapeHtml(po.supplier_name || '') + ' ';
-      html += '<span class="status-badge ' + (po.status || '') + '">' + (po.status || '') + '</span> ';
+      html += poStatusBadge(po.status) + ' ';
       html += '<span style="color:var(--sw-green);font-family:var(--sw-font-num);">' + fmt$(po.total) + '</span>';
       html += '</div>';
       html += '<button onclick="openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993;</button>';
@@ -22655,7 +22795,7 @@ function renderDispatchCards(job, pos) {
     var ms = matchMaterialStatus(cat, pos);
     var icon = ms.status === 'delivered' ? '&#9989;' : ms.status === 'confirmed' ? '&#128994;' : ms.status === 'sent' || ms.status === 'quoted' || ms.status === 'draft' ? '&#9203;' : '&#128308;';
     var borderColor = ms.status === 'delivered' ? 'var(--sw-green)' : ms.status === 'confirmed' ? 'var(--sw-green)' : ms.status === 'missing' ? 'var(--sw-red)' : 'var(--sw-mid)';
-    html += '<div style="border:1px solid var(--sw-border);border-left:3px solid ' + borderColor + ';border-radius:6px;padding:10px 12px;">';
+    html += '<div class="mat-order-card" data-mat-state="' + ms.status + '" style="border:1px solid var(--sw-border);border-left:3px solid ' + borderColor + ';border-radius:6px;padding:10px 12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
     html += '<span style="font-size:13px;font-weight:700;">' + icon + ' ' + escapeHtml(cat.name) + '</span>';
     if (ms.poNumber) html += '<span style="font-size:10px;color:var(--sw-text-sec);">' + ms.poNumber + '</span>';
@@ -22665,7 +22805,7 @@ function renderDispatchCards(job, pos) {
       html += '<div style="font-size:11px;color:var(--sw-text-sec);">' + escapeHtml(ms.supplier || '') + ' &middot; ' + fmt$(ms.total) + '</div>';
       var details = [];
       if (ms.deliveryDate) details.push('&#128230; ' + new Date(ms.deliveryDate + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }));
-      details.push('<span class="status-badge ' + ms.poStatus + '">' + ms.poStatus + '</span>');
+      details.push(poStatusBadge(ms.poStatus));
       if (ms.emailCount > 0) details.push('&#128233; ' + ms.emailCount);
       html += '<div style="font-size:11px;margin-top:3px;">' + details.join(' &middot; ') + '</div>';
       html += '<div style="display:flex;gap:4px;margin-top:6px;">';
@@ -22769,11 +22909,8 @@ function matchMaterialStatus(category, purchaseOrders) {
   var s = (matchedPO.status || '').toLowerCase();
   var emailCount = (matchedPO.communications || []).length;
   var base = { poId: matchedPO.id, poNumber: matchedPO.po_number, supplier: matchedPO.supplier_name, total: matchedPO.total || 0, deliveryDate: matchedPO.delivery_date || matchedPO.confirmed_delivery_date, emailCount: emailCount, poStatus: s };
-  if (s === 'billed') return Object.assign(base, { status: 'delivered' });
-  if (s === 'authorised') return Object.assign(base, { status: 'confirmed' });
-  if (s === 'submitted') return Object.assign(base, { status: 'sent' });
-  if (s === 'quote_requested') return Object.assign(base, { status: 'quoted' });
-  return Object.assign(base, { status: 'draft' });
+  var stateByColumn = { billed: 'delivered', authorised: 'confirmed', submitted: 'sent', quote_requested: 'quoted' };
+  return Object.assign(base, { status: stateByColumn[poBoardColumnOf(s)] || 'draft' });
 }
 
 // ── Shared Notes Section (appended to Overview, Money, Build, Files) ──
@@ -24151,7 +24288,7 @@ async function openJobQuickView(jobId) {
           job_context: data.job_context || [],
           deposit: { deposit_paid: !!j.deposit_paid }
         };
-        var sgr = window.SW_STAGE_GATE_ENGINE.evaluateStageGates({ id: j.id, type: j.type }, sgPacket, sgSupplemental);
+        var sgr = window.SW_STAGE_GATE_ENGINE.evaluateStageGates({ id: j.id, type: j.type }, sgPacket, sgSupplemental, { po_column_of: poBoardColumnOf });
 
         var ledger = '<details class="cap1b-gate-ledger" style="margin-top:12px;border:1px solid var(--sw-border);border-radius:6px;padding:8px 10px;background:#fafbfc;">';
         ledger += '<summary style="cursor:pointer;font-weight:600;font-size:12px;color:var(--sw-text);">';
@@ -25352,7 +25489,7 @@ async function openPOEdit(poId) {
     if (notes) document.getElementById('poNotes').value = notes;
 
     // Show mode bar for quote_requested POs
-    if (po.status === 'quote_requested') {
+    if (poBoardColumnOf(po.status) === 'quote_requested') {
       var modeBar = document.getElementById('poModeBar');
       modeBar.style.display = 'block';
       modeBar.style.background = 'rgba(230,126,34,0.1)';
@@ -25515,9 +25652,8 @@ function scanSupplierQuote(poId) {
           if (alerts.length > 0) {
             msg += ' ' + alerts.length + ' price difference(s) found >5%.';
           }
-          msg += ' Check Pending Prices in Materials tab.';
+          msg += ' Check Supplier Price Updates in Financials > Purchase Orders.';
           showToast(msg, 'success');
-          // Refresh materials tab if we're on it
           if (typeof loadPendingPrices === 'function') loadPendingPrices();
         } else {
           showToast('Failed to analyse: ' + (result.error || 'unknown'), 'error');
@@ -25937,14 +26073,19 @@ function updateJarvisSummary() {
   var badges = document.getElementById('jarvisBadges');
   if (!summary) return;
 
-  var view = localStorage.getItem('sw_ops_tab') || 'today';
+  var view = localStorage.getItem('sw_ops_tab') || 'jobs';
   var text = '';
 
-  if (view === 'today' && _digestCache) {
+  var red = 0;
+  var amber = 0;
+  if (_digestCache) {
     var alerts = (_digestCache.alerts || []);
-    var red = alerts.filter(function(a) { return a.severity === 'red'; }).length;
-    var amber = alerts.filter(function(a) { return a.severity === 'amber'; }).length;
+    red = alerts.filter(function(a) { return a.severity === 'red'; }).length;
+    amber = alerts.filter(function(a) { return a.severity === 'amber'; }).length;
     _jarvisAlertCount = { red: red, amber: amber };
+  }
+
+  if (view === 'today' && _digestCache) {
     text = (red + amber) > 0 ? (red + ' critical, ' + amber + ' warnings') : 'All clear — no issues';
   } else if (view === 'jobs' && _jobsCache && _jobsCache.length > 0) {
     var active = _jobsCache.filter(function(j) { return j.status !== 'cancelled' && j.status !== 'complete'; }).length;
@@ -25961,9 +26102,10 @@ function updateJarvisSummary() {
     } else {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
     }
-  } else if (view === 'materials') {
+  } else if (view === 'dispatch') {
     var poCount = _allPOs ? _allPOs.length : 0;
-    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'Materials loading...';
+    if (!_allPOsLoaded) text = 'Purchase orders loading...';
+    else text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
   } else if (view === 'inbox') {
     var inboxData = _annotationCache['global'];
     if (inboxData && inboxData.data) {
@@ -26011,15 +26153,18 @@ setInterval(function() { if (_opsAppStarted) updateJarvisSummary(); }, 30000);
 // Auto-refresh active tab data every 5 minutes (keeps dashboard live all day)
 setInterval(function() {
   if (!_opsAppStarted) return;
-  var view = localStorage.getItem('sw_ops_tab') || 'today';
+  var view = localStorage.getItem('sw_ops_tab') || 'jobs';
   if (view === 'today') { loadToday(); }
   else if (view === 'calendar') loadCalendar();
   // Nobody pressed this: it stands down under an open review overlay and
   // retries once silently before it is allowed to say anything.
   else if (view === 'jobs') loadJobs({ background: true });
   else if (view === 'financials') loadFinancials();
-  else if (view === 'materials') loadMaterials();
+  else if (view === 'dispatch') loadMaterials();
   else if (view === 'inbox') loadInbox();
+  // Today is hidden, so this is the only refresh of the Jarvis bar alert
+  // badges. loadAiAlerts caches for 30 minutes.
+  loadAiAlerts();
   _jarvisLastUpdate = Date.now();
 }, 300000); // 5 minutes
 
@@ -27327,7 +27472,7 @@ function renderCommsView(data) {
       html += '<div class="supplier-thread-body">';
       spos.forEach(function(po) {
         html += '<div style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;display:flex;align-items:center;gap:8px;">';
-        html += '<div style="flex:1;"><strong>' + (po.po_number || '') + '</strong> <span class="status-badge ' + (po.status || '') + '">' + (po.status || '') + '</span> ' + fmt$(po.total) + '</div>';
+        html += '<div style="flex:1;"><strong>' + (po.po_number || '') + '</strong> ' + poStatusBadge(po.status) + ' ' + fmt$(po.total) + '</div>';
         html += '<button onclick="openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);white-space:nowrap;">&#9993; Email</button>';
         html += '</div>';
         html += '<div class="po-email-thread" id="poThreadComms_' + po.id + '"></div>';
@@ -28222,6 +28367,9 @@ function initApp() {
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
   loadCrewList(); // Pre-cache crew list for dropdowns
   restoreTab();
+  // Today is hidden and no longer loads the alert digest, so fetch it here
+  // for the Jarvis bar badges on every tab.
+  loadAiAlerts();
   // Initialize Jarvis bar summary after data loads
   setTimeout(updateJarvisSummary, 2000);
   // Supabase Realtime: subscribe to ai_alerts for proactive notifications

@@ -33,6 +33,43 @@ Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs o
 
 Any fixture whose app logic compares a date against "now"/"this week" (e.g. trade.html's weekly-invoice week matching) will date-rot if the fixture's dates are hard-coded absolute strings — it passes until the real week moves past them, then fails identically on every branch with no code change. Derive such dates at test-run time from `perthDate()`/`perthWeekMonday()`/`addIsoDays()` in `tests/helpers/feed-stub.js` (already used this way throughout `tests/fixtures/test.js`), not literals. This bit `tests/e2e/trade-complete-to-invoice.spec.js`'s per-metre scenario in 2026-09: its hard-coded work-order week no longer matched the dynamically-dated `weeklyInvoiceWorkOrders` fixture in `tests/fixtures/test.js` once the real week moved on.
 
+## Ops Dash tab set (`ops.html`)
+
+Captain 2026-10-06: the nav is Jobs, Calendar, Financials, Dispatch, Sales. A
+fresh open of the plain address lands on Jobs. Every tab switch writes the tab
+into the address bar, so a refresh, a restored browser tab or a bookmark stays on
+the tab it names. Today, Inbox (AI annotations) and Approvals are hidden on the
+front end only, and Materials became Dispatch; their views, loaders and ops-api
+actions stay. `OPS_HIDDEN_VIEWS` / `opsVisibleView` (search `// <ops-tab-set>`)
+send every route into a hidden view to Jobs; Finance Health and Job P&L only
+lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
+moved from Materials to its own Financials sub-tab, and Supplier Price Updates
+(`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
+concept on sample data in `modules/ops-dispatch-concept.js` with no network
+call; do not wire it to live data without a Captain ruling. Below the concept,
+`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
+Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
+`tests/e2e/ops-tab-set.spec.js`.
+
+EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
+an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
+`confirmed` / `delivered` share the Sent / Confirmed / Delivered columns of the
+older `submitted` / `authorised` / `billed`, and any status the page does not
+know lands in a visible Other column. Cancelled orders stay off the board and
+the Calendar row on purpose (`poBoardColumnOf` answers `''` for them). Never
+match a column on the raw status again; that hid 6 of 22 orders. Every other
+read of an order's status in `ops.html` goes through the same function (the
+Financials > Purchase Orders chips, the job's material ordering cards, its
+"Delivery tomorrow" alert, the awaiting-invoice alerts), and every status badge
+is `poStatusBadge`. The stage gate module's "materials ordered" gate takes it as
+`options.po_column_of`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
+is built from `list_pos`, because the `calendar` feed's own `deliveries` carries
+only draft / submitted / authorised orders; it repaints every time that read
+lands, and a failed read falls back to the feed's fresh rows.
+Guard: `tests/e2e/ops-po-all-statuses.spec.js`.
+
 ## Ops Dash calendar drag (`ops.html`)
 
 CP1 drag-to-reschedule is behind a feature flag that is now DEFAULT ON. Kill
@@ -590,6 +627,27 @@ terminal jobs and submitted/post-trade reports cannot leak back in. A live
 make-safe that still owes the trade's report remains visible even after the
 attendance assignment is complete. All and History keep their historical scope.
 Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
+
+## Job page Overview v2 (`modules/ops-job-overview-v2.js`)
+
+The job page Overview rebuilt around the job context system (customer and money,
+files strip, timeline, story, conversation). Off by default: `?overview=v2` or
+`localStorage.sw_overview_v2 = '1'`, `?overview=classic` wins; staff get a
+Try / Back to classic link. `renderOverviewView` calls `JobOverviewV2.render(data)`
+after the make-safe branch (`// <job-overview-v2-switch>`) and paints the classic
+Overview whenever it returns false, so a throw there must keep returning false,
+never break the page. It reads `job_detail` plus ops-api `job_overview` (slow:
+cached per job for 3 minutes, one read at a time, stale answers dropped) and
+writes only `request_job_story` and the Comms tab's own `send_sms` request. Keep
+its ids `ov2`-prefixed and its CSS under `.ov2` (injected on first render); never
+reuse Comms ids, which the Comms poll writes into. Pure rules live between
+`// <job-overview-v2-core>` sentinels, run in node by
+`tests/e2e/ops-job-overview-v2-core.spec.js`. Contract, data rules and states:
+`docs/job-overview-v2.md`. Guard: `tests/e2e/ops-job-overview-v2.spec.js`.
+The middle Job Story card reads the live card's `now`, timeline, money and loops;
+the Quoted band uses only a recorded current-quote value. Backend `notes` is an
+object with `items[]`, and its invoice rows need the matching `job_detail` row
+for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 

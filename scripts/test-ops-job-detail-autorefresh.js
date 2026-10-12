@@ -75,6 +75,7 @@ check('the five-minute jobs timer calls the background board loader', () => {
   );
   const loaders = { today: 0, calendar: 0, financials: 0, materials: 0, inbox: 0 };
   const loadJobsArgs = [];
+  let alertLoads = 0;
   let currentView = 'jobs';
   const captured = {};
   runSnippet(timerSrc, {
@@ -89,6 +90,8 @@ check('the five-minute jobs timer calls the background board loader', () => {
     loadFinancials() { loaders.financials += 1; },
     loadMaterials() { loaders.materials += 1; },
     loadInbox() { loaders.inbox += 1; },
+    // The tick also keeps the Jarvis bar alert badges current on every tab.
+    loadAiAlerts() { alertLoads += 1; },
   });
   assert.equal(typeof captured.tick, 'function', 'timer callback was registered');
 
@@ -98,11 +101,13 @@ check('the five-minute jobs timer calls the background board loader', () => {
   assert.equal(loadJobsArgs[0] && loadJobsArgs[0].background, true, 'the jobs load is marked background');
   assert.deepEqual(Object.keys(loadJobsArgs[0]), ['background'], 'the jobs load carries only the background flag');
   assert.equal(loaders.today + loaders.calendar + loaders.financials + loaders.materials + loaders.inbox, 0);
+  assert.equal(alertLoads, 1, 'the jobs tick refreshed the alert digest once');
 
   currentView = 'today';
   captured.tick();
   assert.equal(loaders.today, 1, 'today tab drove loadToday, not the board');
   assert.equal(loadJobsArgs.length, 1, 'the today tick did not touch the board loader');
+  assert.equal(alertLoads, 2, 'every tick refreshes the alert digest, whichever tab is saved');
 });
 
 check('the page auth-state handler caches the email and never navigates', () => {

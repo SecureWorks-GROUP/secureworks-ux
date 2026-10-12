@@ -114,7 +114,8 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
     },
   });
   await page.locator('.header-nav button[data-view="financials"]').click();
-  const subTabs = page.locator('#viewFinancials .sub-tab');
+  // Job profit is an owner-only sub-tab: it stays hidden for this non-owner session.
+  const subTabs = page.locator('#viewFinancials .sub-tab:visible');
   await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills']);
   await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
   await expect(page.locator('#subPos')).toHaveClass(/active/);

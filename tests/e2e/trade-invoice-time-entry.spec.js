@@ -169,32 +169,39 @@ test.describe('weekly invoice: the date worked cannot be after today', () => {
   });
 });
 
-test.describe('weekly invoice: a job clocked on and off', () => {
+test.describe('weekly invoice: a job with hours on record and a clock on and off', () => {
   test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', timezoneId: 'Australia/Perth', appWeekDay: 6, ...PHONE });
 
-  async function openInstallerBuilder(page) {
+  test('opens blank with the hours on record as a reminder, and bills only the times the trade types', async ({ appPage: page, feedRequests }) => {
+    const jobDate = addIsoDays(perthWeekMonday(), 1);
     await signIn(page, PERSONAS.installer);
     await page.locator('[data-view="hours"]').click();
     await page.getByRole('button', { name: /Weekly Invoice/ }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
     const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-    await expect(card.locator('[data-cardstart]')).toBeVisible();
-    return card;
-  }
 
-  test('opens on those times', async ({ appPage: page, feedRequests }) => {
-    const jobDate = addIsoDays(perthWeekMonday(), 1);
-    const card = await openInstallerBuilder(page);
+    // The fixture clocks this job 07:00 to 15:00 with 8 hrs on record. None of
+    // it is carried onto the card.
     await expect(card.locator('[data-carddate]')).toHaveValue(jobDate);
-    await expect(card.locator('[data-cardstart]')).toHaveValue('07:00');
-    await expect(card.locator('[data-cardfinish]')).toHaveValue('15:00');
-    await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
-    await expect(card.locator('[data-cardtimehint]')).toHaveText('From your clock on and off. Change it if it is wrong.');
+    await expect(card.locator('[data-cardstart]')).toHaveValue('');
+    await expect(card.locator('[data-cardfinish]')).toHaveValue('');
+    await expect(card.locator('[data-cardhours]')).toHaveText('0 hrs');
+    await expect(card.locator('[data-cardtimehint]')).toHaveText('8 hrs on record for this job. Add the times you worked.');
+
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('SWF-26767: add the date, start time and finish time you worked');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+
+    await card.locator('[data-cardstart]').fill('07:30');
+    await card.locator('[data-cardfinish]').fill('09:30');
+    await card.locator('[data-cardfinish]').blur();
+    await expect(card.locator('[data-cardhours]')).toHaveText('2 hrs');
+    await expect(card.locator('[data-cardtimehint]')).toBeHidden();
 
     await confirmSubmit(page);
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
     expect(invoicePosts(feedRequests)[0].body.manual_assignments).toEqual([
-      expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 8, work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0 })
+      expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 2, work_date: jobDate, start_time: '07:30', finish_time: '09:30', break_minutes: 0 })
     ]);
   });
 });

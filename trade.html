@@ -14896,7 +14896,7 @@
       var e = ctx.entry || {};
       var cur = (current == null || current === '') ? null : Number(current);
       var brk = Number(e.break_minutes) > 0 ? String(e.break_minutes) : '';
-      var h = '<div class="rr-hours" id="rrHours" data-rr-hours data-rr-job="' + esc(jobId) + '"' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
+      var h = '<div class="rr-hours" id="rrHours" data-rr-hours' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
       h += '<div class="rr-hours-t">' + esc(ctx.title || 'Hours for this job') + '</div>';
       if (cur != null) {
         h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '.'
@@ -20664,14 +20664,13 @@
     return h;
   }
 
-  // Did the trade type anything on an assigned card? Clocked (prefilled)
-  // hours come back from the server for that week, so they do not count.
+  // Did the trade type anything on an assigned card?
   function _assignedCardHasTradeInput(c) {
     if (!c || c.manually_added || !c.included) return false;
     if (c.wo_mode || c.commission_mode) return true;
     if (String(c.description || '').trim()) return true;
     if ((c.wo_lump_lines || []).length) return true;
-    return TradeTimeEntryCore.touched(c) && !(c.hours_prefilled && !c.hours_user_edited);
+    return TradeTimeEntryCore.touched(c);
   }
 
   // Move the open invoice to another week. Jobs the trade added by search move
@@ -21723,7 +21722,7 @@
       _financialInvoiceApi('submit_trade_invoice', null, hoursBody, ctx).then(function(res) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) {
-          throw new Error(_timeEntryRefusalMessage(res, true) || (res && (res.userMessage || res.error)) || 'Invoice submission failed');
+          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         }
         toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as draft bill'));
         loadHoursView(); // reload to show submitted state
@@ -21766,7 +21765,7 @@
     return true;
   }
   // Job-centric card state: { assignment_id, job_id, job_number, client_name,
-  //   site_suburb, job_type, scheduled_date, hours, hours_prefilled, included }
+  //   site_suburb, job_type, scheduled_date, hours, included }
   var _jobCards = [];
   // Invoice-level freeform deducts (description + amount, no job). Every
   // job-centric trade can add these as a peer to hours; submit keeps them as
@@ -22965,7 +22964,6 @@
       var j = document.getElementById('ir_job_' + i);
       var desc = document.getElementById('ir_desc_' + i);
       var div = document.getElementById('ir_div_' + i);
-      var h = document.getElementById('ir_hrs_' + i);
       var r = document.getElementById('ir_rate_' + i);
       if (j) row.job_text = j.value;
       if (desc) row.description = desc.value;
@@ -22984,7 +22982,6 @@
       // Hours are worked out from the times on every row the trade entered.
       // A clocked row keeps the hours the server gave it.
       if (row._source === 'clock' || row._source === 'server_labour') {
-        if (h) row.hours = parseFloat(h.value) || 0;
         row.amount = Math.round(row.hours * row.rate * 100) / 100;
       } else {
         _invRowSyncHours(row);
@@ -23000,13 +22997,9 @@
   }
 
   // The server's time_entry_required refusal in plain words, or '' when the
-  // answer is something else. `noEntry` is for the older one-press submits
-  // that have nowhere to enter times: they point the trade at Weekly Invoice.
-  function _timeEntryRefusalMessage(res, noEntry) {
-    if (!TradeTimeEntryCore.refused(res)) return '';
-    return noEntry
-      ? 'Every line of hours now needs the date you worked, a start time and a finish time. Nothing was sent. Open Weekly Invoice to enter them.'
-      : TradeTimeEntryCore.REFUSAL_MSG;
+  // answer is something else.
+  function _timeEntryRefusalMessage(res) {
+    return TradeTimeEntryCore.refused(res) ? TradeTimeEntryCore.REFUSAL_MSG : '';
   }
   // An extras row is a line of hours, so it says when too. [trade-time-entry]
   function _invRowSyncHours(row) {
@@ -23380,29 +23373,6 @@
   function _timeLiveError(entry) {
     return TradeTimeEntryCore.liveError(entry, clockPerthDay(new Date()));
   }
-  // Perth calendar day and HH:MM of a server timestamp.
-  function _perthDayTime(value) {
-    var d = new Date(value);
-    if (!value || Number.isNaN(d.getTime())) return null;
-    var byType = {};
-    new Intl.DateTimeFormat('en-AU', {
-      timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-    }).formatToParts(d).forEach(function(p) { byType[p.type] = p.value; });
-    return { day: byType.year + '-' + byType.month + '-' + byType.day, time: byType.hour + ':' + byType.minute };
-  }
-  // A job the trade clocked on and off opens with those times, on the day it
-  // was scheduled. Anything else (no clock, wrong day, past midnight) is left
-  // for the trade to enter.
-  function _jobCardTimeFromClock(a) {
-    var on = a ? _perthDayTime(a.clocked_on_at) : null;
-    var off = a ? _perthDayTime(a.clocked_off_at) : null;
-    if (!on || !off || on.day !== off.day) return null;
-    if (on.day !== String(a.scheduled_date || '').slice(0, 10)) return null;
-    var brk = TradeTimeEntryCore.breakOf(a.break_minutes == null ? 0 : Math.round(Number(a.break_minutes)));
-    var entry = { work_date: on.day, start_time: on.time, finish_time: off.time, break_minutes: brk == null ? 0 : brk };
-    return TradeTimeEntryCore.check(entry).ok ? entry : null;
-  }
   // Hours on a card are whatever its start, finish and break work out to.
   function _jobCardSyncHours(c) {
     if (c) c.hours = TradeTimeEntryCore.hoursFor(c.start_time, c.finish_time, c.break_minutes);
@@ -23419,9 +23389,6 @@
     return { min: c && c.assignment_id ? start : '', max: end && end < today ? end : today };
   }
   function _jobCardTimeHint(c) {
-    if (c.hours_prefilled && !c.hours_user_edited) {
-      return 'From your clock on and off. Change it if it is wrong.';
-    }
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
       return TradeTimeEntryCore.hoursText(c.logged_hours) + ' on record for this job. Add the times you worked.';
     }
@@ -23445,7 +23412,6 @@
       rate: Number((_hoursData && _hoursData.rate) || _tradeRate || 0),
       rate_source: 'server_resolved',
       description: '',
-      hours_prefilled: false,
       included: true,
       _blank_job: false,
       wo_mode: _defaultJobCardWoMode(),
@@ -24070,9 +24036,6 @@
       // null scheduled_date. Put that job on a chosen Mon–Sun day via + Add job.
       if (!(a.scheduled_date || '')) return;
       var job = a.jobs || {};
-      // Clocked on and off that day: the card opens on those times. Otherwise
-      // the times are blank and required. [trade-time-entry]
-      var clockTime = _jobCardTimeFromClock(a);
       // FIX4: assignments for jobs with no job_number AND no client_name are
       // phantom/unlinked — auto-include silently blocks submit. Render them
       // unchecked so the trade cannot accidentally submit a blank card.
@@ -24090,15 +24053,10 @@
         // FIX5: store external_ref from assignment or joined job when present.
         external_ref: a.external_ref || job.external_ref || '',
         scheduled_date: a.scheduled_date || '',
-        work_date: clockTime ? clockTime.work_date : String(a.scheduled_date || '').slice(0, 10),
-        start_time: clockTime ? clockTime.start_time : '',
-        finish_time: clockTime ? clockTime.finish_time : '',
-        break_minutes: clockTime ? clockTime.break_minutes : 0,
         logged_hours: a.hours_worked != null ? Number(a.hours_worked) : null,
         rate: Number(data.rate || _tradeRate || 0),
         rate_source: 'server_resolved',
         description: '',
-        hours_prefilled: !!clockTime,
         included: !isBlankJob,
         _blank_job: isBlankJob
       }));
@@ -24820,7 +24778,6 @@
       rate: defRate,
       rate_source: 'client_entered',
       description: '',
-      hours_prefilled: false,
       included: true
     }));
     _jcSearch.day = null;
@@ -26914,7 +26871,7 @@
       _financialInvoiceApi('generate_trade_invoice', {}, legacyBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(result)) {
-          toast(_timeEntryRefusalMessage(result, true) || (result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
+          toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
           return;
         }
         toast(_invoiceGeneratedStatusMessage(result));

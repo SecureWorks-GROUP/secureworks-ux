@@ -114,7 +114,7 @@
 .dpc-photos-many { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .dpc-photos-many .dpc-photo:first-child { grid-column: span 2; }
 .dpc .dpc-photo { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: linear-gradient(140deg, #9DB3BF, #C9D6DD 55%, #DCE4E9); }
-.dpc .dpc-photo:first-child { aspect-ratio: auto; min-height: 100%; }
+.dpc .dpc-photo:first-child:not(:only-child) { aspect-ratio: auto; min-height: 100%; }
 .dpc-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 .dpc-photo span { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; text-align: left; font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: #fff; background: linear-gradient(to top, rgba(26,39,46,.55), transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dpc-scope-state { margin: 12px 0; }
@@ -147,7 +147,7 @@
   .dpc-sec-body { padding: 0 16px 16px; }
   .dpc-photos, .dpc-photos-many { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .dpc-photos-many .dpc-photo:first-child { grid-column: auto; }
-  .dpc .dpc-photo:first-child { aspect-ratio: 4 / 3; min-height: 0; }
+  .dpc .dpc-photo:first-child:not(:only-child) { aspect-ratio: 4 / 3; min-height: 0; }
   .dpc-rail { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; padding: 10px; }
   .dpc-rail-list { flex-direction: row; flex-wrap: wrap; align-items: flex-start; max-height: 132px; flex: 1 1 100%; }
 }

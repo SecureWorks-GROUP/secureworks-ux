@@ -18064,6 +18064,25 @@ function swTradeInvoiceWhenHtml(inv) {
   });
   return h + '</details>';
 }
+// One trade's labour on a job: the days and times behind the hours, as an
+// extra table row under the trade. Reads the same four fields off the trade's
+// `lines` when the job's labour read carries them; nothing at all otherwise.
+function swTradeLabourWhenRowHtml(trade, colspan) {
+  var timed = (Array.isArray(trade && trade.lines) ? trade.lines : []).map(function(li) {
+    return { line: li, when: swTradeTimeEntry(li) };
+  }).filter(function(x) { return x.when; });
+  if (!timed.length) return '';
+  timed.sort(function(a, b) {
+    return (String(a.line.work_date) + String(a.line.start_time)).localeCompare(String(b.line.work_date) + String(b.line.start_time));
+  });
+  var h = '<tr data-labour-when><td colspan="' + (colspan || 4) + '" style="padding-top:0;font-size:11px;color:var(--sw-text-sec)">';
+  timed.forEach(function(x) {
+    var hrs = x.line.total_hours != null ? x.line.total_hours : (x.line.hours != null ? x.line.hours : x.line.quantity);
+    h += '<div style="padding:1px 0;white-space:nowrap">' + escapeHtml(x.when.text)
+      + (hrs != null && !isNaN(Number(hrs)) ? ' · ' + Number(hrs).toFixed(2).replace(/\.?0+$/, '') + 'h' : '') + '</div>';
+  });
+  return h + '</td></tr>';
+}
 // </trade-time-entry-ops>
 
 async function loadTradeBills() {
@@ -22791,6 +22810,8 @@ async function loadLabourReconciliation(jobId) {
         html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (t.hours || 0).toFixed(1) + '</td>';
         html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(t.rate || 0) + '/h</td>';
         html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(t.cost || 0) + '</td></tr>';
+        // When the trade says the hours were worked, under their row.
+        html += swTradeLabourWhenRowHtml(t, 4);
       });
       html += '</tbody></table>';
     } else if (budget === 0 && hoursLogged === 0) {

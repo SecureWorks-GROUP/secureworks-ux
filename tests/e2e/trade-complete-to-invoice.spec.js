@@ -81,7 +81,7 @@ function baseRoutes(page, log, detail, queue) {
 test.describe('Complete-to-invoice: hourly trade', () => {
   test.use({ persona: 'installer' });
 
-  test('after Job complete an hourly trade gets one-tap hours on the success screen', async ({ appPage: page }) => {
+  test('after Job complete an hourly trade says when they worked on the success screen', async ({ appPage: page }) => {
     const log = [];
     await page.route(`${UPLOAD_URL}**`, (route) => route.fulfill({ status: 200, body: '' }));
     await baseRoutes(page, log, fenceDetail('e2e-job-1', 'e2e-installer', 'E2E Installer'), { lane: 'hours', hours_logged: null, work_orders: [] });
@@ -90,10 +90,20 @@ test.describe('Complete-to-invoice: hourly trade', () => {
     await runWizardToComplete(page);
     const hours = page.locator('#wizBody #rrHours');
     await expect(hours).toBeVisible();
-    await hours.locator('[data-rr-hour="2"]').click();
+    // Hours are worked out from the times; there is no figure to type or tap.
+    await expect(hours.locator('#rrHoursInput, [data-rr-hour]')).toHaveCount(0);
+    await hours.locator('#rrHoursDate').fill('2026-09-09');
+    await hours.locator('#rrHoursStart').fill('07:00');
+    await hours.locator('#rrHoursFinish').fill('09:00');
+    await expect(hours.locator('#rrHoursCalc')).toHaveText('2 hrs');
+    await hours.locator('#rrHoursSave').click();
     await expect.poll(() => log.filter((e) => e[0] === 'log_my_job_hours').length).toBe(1);
-    expect(log.find((e) => e[0] === 'log_my_job_hours')[1]).toMatchObject({ job_id: 'e2e-job-1', hours: 2 });
-    await expect(page.locator('#wizBody #rrHours')).toContainText('2 hrs on your week (w/e Sun 13 Sep)');
+    expect(log.find((e) => e[0] === 'log_my_job_hours')[1]).toEqual({
+      job_id: 'e2e-job-1', hours: 2,
+      work_date: '2026-09-09', start_time: '07:00', finish_time: '09:00', break_minutes: 0,
+      source: 'job_view'
+    });
+    await expect(page.locator('#wizBody #rrHours')).toContainText('2 hrs on your week (w/e Sun 13 Sep). Wed 9 Sep, 07:00 to 09:00.');
   });
 
   test('hours already clocked are shown instead of the chips', async ({ appPage: page }) => {

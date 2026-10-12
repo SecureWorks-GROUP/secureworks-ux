@@ -774,6 +774,25 @@ on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
 next trade before that user's `my_hours` lands. Guard:
 `tests/e2e/trade-rate-office-only.spec.js`.
 
+## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
+
+Trades say when they worked when they invoice (Captain ruling 2026-10-12). Every
+line that bills a trade's time carries `work_date`, `start_time`, `finish_time`
+and optional `break_minutes`; hours are worked out and NEVER typed, so do not
+add an hours input back to an invoice card, an extras row or the job-view hours
+row. ops-api recomputes the hours and refuses a time line without the fields
+(`time_entry_required`). One line is one job on one day: a second day is a
+second line ("+ Add another day on this job"), which rides `extra_items`, not
+`manual_assignments`. Lines that are not time carry none of the fields. Search
+`// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
+`// <trade-time-entry-ops>` in `ops.html` (ops shows the times beside the hours
+only when a line carries them). The full contract, the list of every place a
+trade enters time and the defaults live in `trade-app.md` → "Pay tab: when the
+time was worked". Specs fill times through `tests/helpers/invoice-time.js`.
+Guards: `scripts/test-trade-time-entry.js`,
+`tests/e2e/trade-invoice-time-entry.spec.js`,
+`tests/e2e/ops-trade-invoice-times.spec.js`.
+
 ## Trade own work: Today, History, Calendar default (`trade.html`)
 
 "My work" is ONE list: `ownAssignmentRows` (`// <trade-own-work>`) keeps the

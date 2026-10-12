@@ -115,12 +115,15 @@ check('submitted card offers Rebuild PDF with the photo count', /data-rr-rebuild
 check('option copy escapes', R.optionHTML({ status: 'none' }, "j'1", { title: '<x>' }).indexOf('&lt;x&gt;') !== -1);
 
 // ── hours ──
-const hrs = R.hoursHTML('j1', null, {});
-check('hours row has 1 to 4 chips + Other', [1, 2, 3, 4].every(function (n) { return hrs.indexOf('data-rr-hour="' + n + '"') !== -1; }) && hrs.indexOf('data-rr-hour="other"') !== -1);
-check('2 hrs chip calls rrLogHours with 2', hrs.indexOf("rrLogHours('j1',2)") !== -1);
-const hrs2 = R.hoursHTML('j1', 2, { week: 'w/e Sun 13 Sep' });
-check('current hours highlight the chip and name the week', /data-rr-hour="2"[^>]*class="rr-chip on"|class="rr-chip on" data-rr-hour="2"/.test(hrs2) && hrs2.indexOf('w/e Sun 13 Sep') !== -1);
-check('custom hours land on the Other chip', R.hoursHTML('j1', 2.5, {}).indexOf('>2.5 hrs<') !== -1);
+// Hours are never typed: the row asks for the date worked, start and finish.
+const hrs = R.hoursHTML('j1', null, { entry: { work_date: '2026-09-08', start_time: '07:00', finish_time: '', break_minutes: 0 }, maxDate: '2026-09-08' });
+check('hours row asks for date, start, finish and break', ['rrHoursDate', 'rrHoursStart', 'rrHoursFinish', 'rrHoursBreak'].every(function (id) { return hrs.indexOf('id="' + id + '"') !== -1; }));
+check('hours row has no typed hours field and no hour chips', hrs.indexOf('rrHoursInput') === -1 && hrs.indexOf('data-rr-hour=') === -1);
+check('hours row opens on the given date and start, capped at today', hrs.indexOf('type="date" id="rrHoursDate" value="2026-09-08" max="2026-09-08"') !== -1 && hrs.indexOf('id="rrHoursStart" value="07:00"') !== -1);
+check('hours are shown read-only and saved through rrLogHours', /id="rrHoursCalc"[^>]*>0 hrs</.test(hrs) && hrs.indexOf("rrLogHours('j1')") !== -1);
+const hrs2 = R.hoursHTML('j1', 2, { week: 'w/e Sun 13 Sep', when: 'Tue 8 Sep, 07:00 to 09:00', hoursText: '2 hrs', entry: { work_date: '2026-09-08', start_time: '07:00', finish_time: '09:00', break_minutes: 0 } });
+check('logged hours name the week and when they were worked', hrs2.indexOf('data-rr-hours-current="2"') !== -1 && hrs2.indexOf('<strong>2 hrs</strong> on your week (w/e Sun 13 Sep). Tue 8 Sep, 07:00 to 09:00.') !== -1);
+check('logged hours with no times on this device ask for them', R.hoursHTML('j1', 2.5, {}).indexOf('<strong>2.5 hrs</strong> on your week. Add the times you worked.') !== -1);
 check('hoursLabel singular/plural', R.hoursLabel(1) === '1 hr' && R.hoursLabel(2) === '2 hrs' && R.hoursLabel(1.25) === '1.25 hrs');
 check('weekLabel names the Sunday', /^w\/e Sun/.test(R.weekLabel('2026-09-13')) && R.weekLabel('nope') === '');
 

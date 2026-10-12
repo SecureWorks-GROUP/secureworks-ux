@@ -2591,7 +2591,7 @@
     .mm-empty { font-size: 13px; color: var(--sw-text-sec); padding: 8px 0; }
     .mm-foot { font-size: 11px; color: var(--sw-text-sec); line-height: 1.5; padding: 4px 2px 20px; }
     .td-gst { margin: 4px 0 14px; }
-    /* ── Roof report + one-tap hours (2026-09-08) ── */
+    /* ── Roof report + hours for this job (2026-09-08) ── */
     .rr-option { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 14px; margin: 0 0 14px; }
     .rr-option.rr-loading { font-size: 12px; color: var(--sw-text-sec); }
     .rr-opt-t { font-size: 15px; font-weight: 800; color: var(--sw-dark); }
@@ -14741,7 +14741,8 @@
   };
 
   // ══════════════════════════════════════════════════════════════════════
-  // 2026-09-08 (Marnin) — SecureWorks roof report in the app + one-tap hours.
+  // 2026-09-08 (Marnin) — SecureWorks roof report in the app + the hours row
+  // (date, start and finish since 2026-10-12; see <trade-time-entry>).
   // "There should be an ability for them to do a custom roof report if
   // required" (151 Deanmore Rd) and "they mark it as complete, put the 2
   // hours on their invoice, and we see it is done on our end". The backend
@@ -31042,8 +31043,9 @@
   // "When they say job complete it should tie to their weekly invoice
   // automatically; end of week is a review." The server marks the trade's own
   // work orders complete and names the lane. Per-metre trades get the work
-  // order added to this week's draft here; hourly trades get the one-tap
-  // hours row when nothing is clocked yet.
+  // order added to this week's draft here; hourly trades get the hours row
+  // (date, start, finish) when no hours are on record yet. That row records
+  // against the job; the Weekly Invoice still asks for the times.
   // <trade-complete-invoice>
   var CompleteInvoiceCore = (function () {
     'use strict';

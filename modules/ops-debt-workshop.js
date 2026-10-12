@@ -75,7 +75,6 @@ var DebtWorkshopCore = (function () {
     already_sent: 'This was already sent, so it was not sent again.',
     step_not_due: 'That step is not due now. Read the job again.',
     payer_not_linked: 'The person who owes this has no GoHighLevel contact linked. Link theirs first.',
-    neighbour_send_unsupported: 'Texts to a neighbour on a shared job cannot go from here yet, so nothing was sent. Text them from GoHighLevel.',
     contact_belongs_to_other_payer: 'That GoHighLevel contact belongs to someone else on this job. Pick the contact of the person who owes this.',
     payer_not_on_job: 'This person has no contact row on the job, so there is nowhere to link them. Add them to the job\'s contacts first.',
     job_mismatch: 'That invoice is not on this job. Read the job again.',
@@ -318,7 +317,7 @@ var DebtWorkshopCore = (function () {
   }
 
   // Can the suggested message be sent from here? Checked in the order the backend refuses.
-  // ctx.who: the payer's first name; ctx.block: the backend's send_block code for the payer.
+  // ctx.who: the payer's first name. A linked neighbour on a shared fence is texted at their own contact.
   function sendGate(ctx) {
     ctx = ctx || {};
     var s = ctx.settings || {};
@@ -326,7 +325,6 @@ var DebtWorkshopCore = (function () {
     if (!s.sending_on) return { ok: false, reason: SENDING_OFF_WORDS, code: 'sending_off' };
     if (!s.viewer_is_owner) return { ok: false, reason: 'Only an owner can send', code: 'not_owner' };
     if (ctx.channel !== 'email' && !ctx.linked) return { ok: false, reason: 'Link ' + who + ' contact first', code: 'payer_not_linked' };
-    if (ctx.channel !== 'email' && ctx.block === 'neighbour_send_unsupported') return { ok: false, reason: 'Texts to a neighbour cannot go from here yet. Text ' + (ctx.who || 'them') + ' from GoHighLevel', code: 'neighbour_send_unsupported' };
     if (ctx.possible && ctx.possible.length) return { ok: false, reason: 'Possible payment found', code: 'possible_payment', override: true };
     return { ok: true, reason: '', code: '' };
   }
@@ -1151,10 +1149,10 @@ function dwLinked(J) {
   if (J.payer_contact) return !!J.payer_contact.ghl_contact_id;
   return !!(job.ghl_contact_id || (J.contact && J.contact.ghl_contact_id) || (row.ghl_linked && !('ghl_contact_id' in job)));
 }
-// The payer can be texted from here: linked, and not a neighbour the guarded text path refuses.
+// The payer can be texted from here once linked: a neighbour on a shared fence is texted at
+// their own contact, and the backend checks it is on this job's contact list.
 function dwCanText(J) {
-  var b = J && J.send_block;
-  return dwLinked(J) && !(b && b.code === 'neighbour_send_unsupported');
+  return dwLinked(J);
 }
 function dwJobHtml() {
   var C = DebtWorkshopCore, crumb = dwCrumbHtml();
@@ -1326,7 +1324,7 @@ function dwSuggestionHtml(J, s, linked) {
     var replyOk = !!text.trim() && s.sending_on && canText;
     var label = 'Move to ' + cat.name + (replyOk ? ' + send reply' : '');
     var lab = sug.proposed_category === 'says_paid' ? 'Looks like they have paid' : 'Looks like something to fix';
-    var gate = !s.viewer_is_owner ? '' : (text.trim() && !s.sending_on ? 'Sending is off until you switch it on, so only the move happens.' : text.trim() && !linked ? 'No contact is linked, so only the move happens.' : text.trim() && !canText ? 'Texts to a neighbour cannot go from here yet, so only the move happens.' : '');
+    var gate = !s.viewer_is_owner ? '' : (text.trim() && !s.sending_on ? 'Sending is off until you switch it on, so only the move happens.' : text.trim() && !linked ? 'No contact is linked, so only the move happens.' : '');
     return '<div class="dw-move" id="dwMove"><div class="dw-lab"><span>' + dwEsc(lab) + '</span><span class="src">' + dwEsc(src) + '</span></div>' +
       (sug.why ? '<p>' + dwEsc(sug.why) + '</p>' : '') +
       '<p>Move this job to <b style="color:' + cat.color + '">' + dwEsc(cat.name) + '</b>? The follow-ups stop while it is there.</p>' +
@@ -1344,7 +1342,7 @@ function dwSuggestionHtml(J, s, linked) {
   if (email) stepWords = stepWords.replace(/ text/, ' email');
   var title = stepWords ? 'Suggested ' + stepWords.charAt(0).toLowerCase() + stepWords.slice(1) : 'Suggested reply';
   var possible = Array.isArray(J.possible_payments) ? J.possible_payments : [];
-  var g = C.sendGate({ settings: s, channel: sug.channel, linked: linked, possible: possible, who: C.firstName(C.payerOf(J).name), block: J.send_block && J.send_block.code });
+  var g = C.sendGate({ settings: s, channel: sug.channel, linked: linked, possible: possible, who: C.firstName(C.payerOf(J).name) });
   var warn = possible.length ? '<div class="dw-warn" id="dwPossible"><b>Possible payment in the bank feed</b>' + possible.map(function (p) { return dwEsc(C.paymentWords(p)) + (p.reason ? ' (' + dwEsc(p.reason) + ')' : ''); }).join('<br>') + '<br>Match it in Xero before chasing. If it is not theirs, you can send anyway.</div>' : '';
   var sendBtn;
   if (g.code === 'possible_payment') {

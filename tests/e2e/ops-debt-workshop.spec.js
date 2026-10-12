@@ -391,20 +391,23 @@ test('W2: a shared fence is the neighbour\'s own: their phone, the shares, no bo
   await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.xero_invoice_id, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', fixture.ids.riley, fixture.ids.rileyContact]]);
 });
 
-test('W2: a linked neighbour cannot be texted from here yet, and the screen says why', async ({ page }) => {
+test('W2: a linked neighbour is texted from here, at their own contact', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
   const J = fixture.jobs[fixture.ids.riley];
   J.payer_contact.ghl_contact_id = fixture.ids.rileyContact;
   J.contact.ghl_contact_id = fixture.ids.rileyContact;
-  J.send_block = { code: 'neighbour_send_unsupported', message: 'Riley is a neighbour on this job.' };
+  J.send_block = null;
   J.conversation = { messages: [{ id: 'bev:r1', channel: 'sms', direction: 'inbound', occurred_at: fixture.overview.read_at, author: 'Riley Shaw', body: 'Will pay next week.', is_payer: true, party_name: 'Riley Shaw' }], mode: 'payer', all_job_messages_count: 4, payer_messages_count: 1, reason: null };
-  await openDebt(page, { fixture });
+  await openDebt(page, { fixture, posts: { debt_ws_decide: { resolve: { ok: true, sent: true } } } });
   await openJob(page, 'Riley Shaw', 'Escalating');
   await expect(page.locator('#dwThread .dw-msg')).toHaveCount(1);
   await expect(page.locator('#dwThread')).toContainText('Will pay next week.');
   await expect(page.locator('#dwLinkCard')).toHaveCount(0);
-  await expect(page.locator('#dwSend')).toBeDisabled();
-  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Texts to a neighbour cannot go from here yet. Text Riley from GoHighLevel');
+  await expect(page.locator('#dwSuggestion .dw-gate')).toHaveCount(0);
+  await expect(page.locator('#dwSend')).toBeEnabled();
+  await page.locator('#dwSend').click();
+  // The send names Riley's invoice only; the backend texts Riley's own contact and checks it is on the job.
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send').map((p) => p.body.xero_invoice_id)).toEqual([fixture.ids.riley]);
   await expect(page.locator('#dwConvToggle')).toHaveText('Show the whole job\'s conversation (4 messages)');
 });
 

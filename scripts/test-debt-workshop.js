@@ -154,8 +154,8 @@ check('send gate: sending off first, then owner, then contact, then a possible p
   assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'sms' }).code, 'payer_not_linked');
   assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'sms', who: 'Peter' }).reason, 'Link Peter\'s contact first', 'names the payer');
   assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'email' }).ok, true, 'an email needs no GHL contact');
-  const nb = C.sendGate({ settings: s, linked: true, channel: 'sms', who: 'Peter', block: 'neighbour_send_unsupported' });
-  assert.deepStrictEqual([nb.ok, nb.code], [false, 'neighbour_send_unsupported'], 'a neighbour is never texted from here');
+  const nb = C.sendGate({ settings: s, linked: true, channel: 'sms', who: 'Peter' });
+  assert.deepStrictEqual([nb.ok, nb.code], [true, ''], 'a linked neighbour is texted at their own contact');
   const pp = C.sendGate({ settings: s, linked: true, possible: [{ amount: 1 }] });
   assert.deepStrictEqual([pp.ok, pp.code, pp.override], [false, 'possible_payment', true]);
   assert.strictEqual(C.sendGate({ settings: s, linked: true, possible: [] }).ok, true);
@@ -297,7 +297,7 @@ const BACKEND_CODES = [
   'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
   'contact_belongs_to_other_payer', 'contact_row_not_found',
   'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
-  'jan_list_closed', 'job_mismatch', 'job_not_found', 'neighbour_send_unsupported', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
+  'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
   'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',
   'part_paid', 'payer_not_linked', 'payer_not_on_job', 'possible_payment', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
   'server_key_required', 'step_not_due', 'suggestion_mismatch', 'suggestion_not_pending', 'text_not_allowed',

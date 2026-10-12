@@ -213,8 +213,31 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
 });
 
 test.describe('a date worked typed on a keyboard, on a job the trade searched in', () => {
-  // Day, month, year: the order the date field takes keys in for this locale.
-  test.use({ feedScenario: 'trade-invoice-multi-week', locale: 'en-AU' });
+  test.use({ feedScenario: 'trade-invoice-multi-week' });
+
+  // A date field takes its keys in the order of the machine the browser runs
+  // on (day first on an Australian machine, month first on the CI runner), and
+  // Playwright's `locale` does not change that. So a scratch field is asked.
+  async function dateKeys(page, iso) {
+    const [year, month, day] = iso.split('-');
+    await page.evaluate(() => {
+      const probe = document.createElement('input');
+      probe.type = 'date';
+      probe.id = 'dateKeyOrderProbe';
+      document.body.appendChild(probe);
+      probe.focus();
+    });
+    await page.keyboard.type('01022003');
+    const probed = await page.evaluate(() => {
+      const probe = document.getElementById('dateKeyOrderProbe');
+      const value = probe.value;
+      probe.remove();
+      return value;
+    });
+    if (probed === '2003-02-01') return day + month + year;
+    if (probed === '2003-01-02') return month + day + year;
+    throw new Error(`Date field key order not recognised: 01022003 typed as "${probed}"`);
+  }
 
   const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   function dayHeading(iso) {
@@ -235,9 +258,9 @@ test.describe('a date worked typed on a keyboard, on a job the trade searched in
     const heading = card.locator('xpath=preceding-sibling::div[contains(@class,"hours-day-header")][1]');
     await expect(heading).toContainText(dayHeading(addedOn));
 
-    const [year, month, day] = worked.split('-');
+    const keys = await dateKeys(page, worked);
     await card.locator('[data-carddate]').focus();
-    await page.keyboard.type(day + month + year);
+    await page.keyboard.type(keys);
     // Every key landed in the one field: it was never repainted mid-date.
     await expect(card.locator('[data-carddate]')).toBeFocused();
     await expect(card.locator('[data-carddate]')).toHaveValue(worked);

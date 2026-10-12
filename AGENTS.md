@@ -45,7 +45,10 @@ moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
 concept on sample data in `modules/ops-dispatch-concept.js` with no network
-call; do not wire it to live data without a Captain ruling. Guard:
+call; do not wire it to live data without a Captain ruling. Below the concept,
+`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
+Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.
 
 ## Ops Dash calendar drag (`ops.html`)

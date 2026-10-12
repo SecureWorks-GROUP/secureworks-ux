@@ -5021,17 +5021,23 @@ __swOpsStampAssets([
       </div>
     </div>
 
-    <!-- ═══════════ MATERIALS TAB ═══════════ -->
-    <div id="viewMaterials" class="view">
-      <!-- Bill Reconciliation moved to Financials > Bill Reconciliation (#subBillrecon);
-           Supplier Price Updates moved to Financials > Purchase Orders (#subPos). -->
+    <!-- ═══════════ DISPATCH TAB ═══════════
+         Replaced Materials in the nav (Captain 2026-10-06). The concept is sample
+         data only with no network calls: see <ops-dispatch-concept> in
+         modules/ops-dispatch-concept.js. Below it sits the LIVE purchase order
+         board that used to be the Materials view (Captain ruling); it reads and
+         writes real POs through loadMaterials(). -->
+    <div id="viewDispatch" class="view">
+      <div id="dispatchConceptRoot"></div>
 
+      <div id="dispatchPurchaseOrders" style="margin-top:28px;">
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        Materials Pipeline <span class="badge" id="materialsCount">0</span>
+        Purchase orders <span class="badge" id="materialsCount">0</span>
         <div style="flex:1;"></div>
         <button class="btn btn-secondary btn-sm" id="matFilterToggle" onclick="toggleMatFilters()" style="font-size:11px;">Filters <span id="matFilterBadge"></span></button>
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
       </div>
+      <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Unlike the concept above, changes made here are real.</div>
 
       <!-- Threshold alerts -->
       <div id="matAlerts" style="margin-bottom:8px;"></div>
@@ -5075,13 +5081,7 @@ __swOpsStampAssets([
       </div>
 
       <div class="materials-kanban" id="materialsKanban"></div>
-    </div>
-
-    <!-- ═══════════ DISPATCH TAB (concept) ═══════════
-         Replaced Materials in the nav (Captain 2026-10-06). Sample data only, no
-         network calls: see <ops-dispatch-concept> in modules/ops-dispatch-concept.js. -->
-    <div id="viewDispatch" class="view">
-      <div id="dispatchConceptRoot"></div>
+      </div>
     </div>
 
     <!-- ═══════════ INBOX TAB ═══════════ -->
@@ -7272,9 +7272,10 @@ function jobDetailIsOpen() {
 
 // <ops-tab-set> Captain 2026-10-06: the Ops tabs are Jobs (the page Ops opens
 // on), Calendar, Financials, Dispatch, then Sales. Today, Inbox (AI
-// annotations) and Approvals are off the front end only, and the Materials tab
-// became the Dispatch concept. Their views, loaders and ops-api actions all
-// stay, so bringing one back is its nav button plus its key here. Any route
+// annotations) and Approvals are off the front end only. The Materials tab
+// became Dispatch: the concept on top, the live purchase order board that was
+// the Materials view below it. The hidden views, loaders and ops-api actions
+// all stay, so bringing one back is its nav button plus its key here. Any route
 // into a hidden view (an old #today link, a saved sw_ops_tab, a stale button)
 // lands on Jobs instead of an empty screen.
 var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
@@ -7329,8 +7330,10 @@ function showView(view) {
   if (view === 'calendar') loadCalendar();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
-  if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
-  if (view === 'dispatch' && typeof OpsDispatchConcept !== 'undefined') OpsDispatchConcept.show();
+  if (view === 'dispatch') {
+    if (typeof OpsDispatchConcept !== 'undefined') OpsDispatchConcept.show();
+    loadMaterials();
+  }
   if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);
   if (view === 'inbox') loadInbox();
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
@@ -18122,7 +18125,7 @@ async function loadMaterials() {
     loadPendingPrices();
   } catch (e) {
     console.error('loadMaterials error:', e);
-    showToast('Failed to load materials', 'warning', [
+    showToast('Failed to load purchase orders', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadMaterials()' }
     ]);
   }
@@ -25949,10 +25952,8 @@ function updateJarvisSummary() {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
     }
   } else if (view === 'dispatch') {
-    text = 'Dispatch concept, sample data only';
-  } else if (view === 'materials') {
     var poCount = _allPOs ? _allPOs.length : 0;
-    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'Materials loading...';
+    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'Dispatch concept, sample data only';
   } else if (view === 'inbox') {
     var inboxData = _annotationCache['global'];
     if (inboxData && inboxData.data) {
@@ -26007,7 +26008,7 @@ setInterval(function() {
   // retries once silently before it is allowed to say anything.
   else if (view === 'jobs') loadJobs({ background: true });
   else if (view === 'financials') loadFinancials();
-  else if (view === 'materials') loadMaterials();
+  else if (view === 'dispatch') loadMaterials();
   else if (view === 'inbox') loadInbox();
   _jarvisLastUpdate = Date.now();
 }, 300000); // 5 minutes

@@ -51,6 +51,7 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
   - the payer (with the neighbour part), the job type badge, and the category pill with its day. A paid invoice (`row.open === false`) reads **Paid** in green;
   - **Change** beside the pill, a small quiet menu (owner only; disabled for staff, hidden once paid). It sets or clears a category by hand, with or without the agent: **Says paid**, **Clear says paid** (when it is set), and **Move to Rectification**, which first asks "This moves the job card to Rectification". Each posts `debt_ws_set_category {xero_invoice_id, category}` with no `suggestion_id` (`category` is `says_paid`, `rectification` or `clear`);
   - the site, job number and invoice line;
+  - on a shared fence, one quiet line from `job.shares[]`, the payer's share first: "Shared fence: Peter (B) owes $1,420.37 · Ashlea (A) paid". A job with one share shows nothing;
   - "Follow-ups paused until ..." while a promise holds (the promised date is still ahead: `paused_until > today`, as the backend counts it);
   - the amount owing, big.
 - **Ladder:** the invoice, then `ladder[]`: done (green tick), due (orange, "ready now"), upcoming (date), skipped, not needed. On a phone it scrolls sideways, with the due step brought into view.
@@ -58,13 +59,16 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
   - the job story in a few plain lines from `story`: `now.line`, `now.next`, `now.blockers`, and the last four `timeline` entries;
   - a money box: job value from `story.money.job_value`, each invoice paid or owing, and the total owing;
   - documents and invoices. An invoice opens through `get_invoice_pdf`; a document opens through `debt_ws_document {job_id, document_id}`. Each opens in a modal from a blob URL: PDFs in a frame, images inline, anything else as a download.
-- **Middle column:**
-  - **The conversation** (`conversation.messages`), oldest first and newest at the bottom, with a day line whenever the Perth day changes. It scrolls, and opens scrolled to the bottom. Calls read "Call out · 0:31 · no answer", with the transcript behind **Show transcript**. Emails show their subject; very long messages fold behind Show all.
+- **Middle column.** Everything here is about the **payer** (`payer_contact`): the person who owes THIS invoice. On a shared fence that is the neighbour, with their own phone, contact and messages, never the job's (the job's are the primary client's). An older backend without `payer_contact` reads as the job's client.
+  - The header shows the payer's phone (`payer_contact.phone`), not the job's.
+  - **The conversation** (`conversation.messages`, the payer's own messages), oldest first and newest at the bottom, with a day line whenever the Perth day changes. It scrolls, and opens scrolled to the bottom. Calls read "Call out · 0:31 · no answer", with the transcript behind **Show transcript**. Emails show their subject; very long messages fold behind Show all.
+  - When the job's thread holds more (`conversation.all_job_messages_count`), a quiet link reads **Show the whole job's conversation (N messages)**. It reads `debt_ws_job {xero_invoice_id, conversation: "all"}`; other people's messages are muted and carry their name (`party_name`: "Taylor Brooks · text", "Shaun to Taylor Brooks"). **Show only Peter's messages** goes back.
+  - When the payer has no GHL contact (`conversation.reason = "payer_not_linked"`): "No conversation with Peter yet. Link Peter's GoHighLevel contact to see it and text them."
   - **Agent notices** (`flags[]`) sit below it as calm amber cards, each with its text, why and date. **Dismiss** (owner only) posts `debt_ws_decide {xero_invoice_id, suggestion_id: flag.id, action: "dismiss"}`.
-  - **Link contact** (no GHL contact on the job) lists `contact.candidates` with **Link**, which posts `debt_ws_link_contact {job_id, ghl_contact_id}`.
+  - **Link contact** (the payer has no GHL contact) lists the payer's `contact.candidates` (searched by the payer's own phone and email) with **Link**, which posts `debt_ws_link_contact {xero_invoice_id, job_id, ghl_contact_id}`. The backend links the invoice's payer: a neighbour's contact goes on their own `job_contacts` row and never replaces the job's. When `contact.linkable` is false (a neighbour with no contact row on the job), the card says to add them to the job's contacts first.
   - **The suggestion** (`suggestion`), one of three kinds:
     - **draft:** a dashed orange card with the text, Edit (a text box; an edit is kept for that suggestion until it is sent), Send, Skip and **Why this one**.
-      - Send is disabled while `settings.sending_on` is false, and then reads **Sending is off until you switch it on**. It is also disabled for staff, and without a linked contact for a text.
+      - Send is disabled while `settings.sending_on` is false, and then reads **Sending is off until you switch it on**. It is also disabled for staff; without a linked payer for a text ("Link Peter's contact first"); and for a neighbour on a shared fence (`send_block.code = "neighbour_send_unsupported"`: "Texts to a neighbour cannot go from here yet. Text Peter from GoHighLevel"), because the backend's guarded text path only accepts the job's own client contact.
       - When `possible_payments` is not empty, a warning shows the date, amount and payer, and Send becomes **Send anyway**, which posts `override_possible_payment: true`.
       - Day 7 adds a line to ring them too.
     - **move:** a purple card with why and the proposed category, the suggested reply (editable), **Move to Rectification + send reply** and **Keep chasing**.
@@ -101,7 +105,8 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
   - W1, the footer, Insurance (preview, approve, refusal) and Jan's list;
   - W2 (strip, ladder, story, thread, transcript, notice, suggestion, notes, Back and Next);
   - edit and send with a refusal, dismiss, a promise note;
-  - the possible payment (send and statement), the move card, Change (Says paid, Rectification with its confirm, Clear says paid), the Paid pill, Jan's list while locked and once sent, Link contact, documents, staff read only, not deployed, and the phone layout.
+  - the possible payment (send and statement), the move card, Change (Says paid, Rectification with its confirm, Clear says paid), the Paid pill, Jan's list while locked and once sent, Link contact, documents, staff read only, not deployed, and the phone layout;
+  - a shared fence (Riley Shaw, share B, the SWF-26624 shape): the neighbour's phone, the share line, no borrowed conversation, the whole-thread toggle with names, Send off until linked, Link posting the invoice; and a linked neighbour refused with `neighbour_send_unsupported`.
 - The fixture is `tests/fixtures/debt-workshop.js`: made-up names, with dates from today's Perth date. It uses the backend's real shapes: job invoices carry `number`, ids are UUIDs, GoHighLevel contact ids are letters and digits only, and the move suggestion has its `reply_problem` step.
 - To write the screenshots: `DEBT_WS_EVIDENCE_DIR=docs/evidence/debt-workshop-2026-10-08 npx playwright test tests/e2e/ops-debt-workshop.spec.js`.
 - Latest screenshots: `docs/evidence/debt-workshop-2026-10-08/` (`09-change-category.png` is the Change menu open on the strip).

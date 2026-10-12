@@ -11,7 +11,7 @@ A fresh open of the plain address lands on Jobs (Captain 2026-10-06). Every tab 
 1. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar
 3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Clear Debt, Xero push
-4. **Dispatch** — Dispatch concept on sample data, with the live purchase order board (PO creation, delivery tracking, scope-to-PO extraction) below it
+4. **Dispatch** — The Dispatch view of any accepted job (job list with search and work type buttons, job header, Scope and notes with Save note), with the live purchase order board (PO creation, delivery tracking, scope-to-PO extraction) below it
 5. **Sales** — Booking and Performance
 
 Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Health and Job P&L are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".

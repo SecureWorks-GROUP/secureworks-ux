@@ -45,10 +45,13 @@ send every route into a hidden view to Jobs; Finance Health and Job P&L only
 lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
-inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
-concept on sample data in `modules/ops-dispatch-concept.js` with no network
-call; do not wire it to live data without a Captain ruling. Below the concept,
-`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slice 1
+of the approved design: job list, job header, Scope and notes). It reads
+`pipeline&dispatch=1`, `job_detail` (once per job open) and `job_notes`, and its
+only write is `add_note`, always `visibility: 'internal_only'`; a failed read
+never renders as empty, and a later slice is not drawn until it is real. Below
+it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.

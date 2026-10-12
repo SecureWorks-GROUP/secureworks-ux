@@ -75,7 +75,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
-          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
+          work_date: scheduled, start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false
@@ -143,7 +143,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
-          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
+          work_date: scheduled, start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false
@@ -172,6 +172,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     await adjDesc.fill('Travel to second site');
     await adjType.selectOption('Fencing');
     // An extras row is a line of hours: it says when it was worked too.
+    await page.locator('#ir_date_0').fill(jobDate);
     await page.locator('#ir_start_0').fill('15:00');
     await page.locator('#ir_fin_0').fill('16:00');
 
@@ -212,6 +213,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
         division: 'Fencing',
         source: 'manual',
         quantity: 1,
+        work_date: jobDate,
         start_time: '15:00',
         finish_time: '16:00',
         break_minutes: 0
@@ -281,7 +283,7 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
           included: true,
           wo_mode: false,
           hours: 3,
-          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
+          work_date: scheduled, start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 99,
           rate_source: 'client_entered',
           manually_added: false

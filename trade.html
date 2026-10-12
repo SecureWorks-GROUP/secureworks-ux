@@ -14754,6 +14754,7 @@
   var RoofReportCore = (function () {
     'use strict';
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    var INVOICE_STILL_ASKS = 'Your Weekly Invoice will still ask for the times you worked.';
     var INPUT_STYLE = 'width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:15px;box-sizing:border-box;background:#fff;font-family:var(--sw-font);';
     // Server payload {template, job, draft} -> a small state object the panels read.
     function stateOf(tpl) {
@@ -14889,8 +14890,9 @@
     }
     // Hours row on the job view. current = hours already on the trade's
     // assignment. Hours are never typed here: the trade gives the date worked,
-    // a start and a finish (ctx.entry holds what the fields open on) and the
-    // figure is worked out. [trade-time-entry]
+    // a start and a finish (ctx.entry holds what the fields show) and the
+    // figure is worked out. What is saved here is recorded against the job; it
+    // is not the invoice, which asks for the times itself. [trade-time-entry]
     function hoursHTML(jobId, current, ctx) {
       ctx = ctx || {};
       var e = ctx.entry || {};
@@ -14899,10 +14901,10 @@
       var h = '<div class="rr-hours" id="rrHours" data-rr-hours' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
       h += '<div class="rr-hours-t">' + esc(ctx.title || 'Hours for this job') + '</div>';
       if (cur != null) {
-        h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '.'
-          + (ctx.when ? ' ' + esc(ctx.when) + '. Change the times and save to change it.' : ' Save new times to change it.') + '</div>';
+        h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> recorded against this job' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '.'
+          + (ctx.when ? ' ' + esc(ctx.when) + '. Change the times and save to change it.' : ' Save new times to change it.') + ' ' + INVOICE_STILL_ASKS + '</div>';
       } else {
-        h += '<div class="rr-hours-s">Give the date you worked and your start and finish time. It goes on this week\'s invoice.</div>';
+        h += '<div class="rr-hours-s">Give the date you worked and your start and finish time. They are recorded against this job. ' + INVOICE_STILL_ASKS + '</div>';
       }
       h += '<div class="jct">';
       h += '<label class="jct-f jct-date"><span>Date worked</span><input type="date" id="rrHoursDate" value="' + esc(e.work_date || '') + '"' + (ctx.maxDate ? ' max="' + esc(ctx.maxDate) + '"' : '') + ' onchange="rrHoursChanged()"></label>';
@@ -14912,7 +14914,7 @@
       h += '<div class="jct-f"><span>Hours</span><div class="jct-fixed" id="rrHoursCalc" data-rr-hours-calc>' + esc(ctx.hoursText || '0 hrs') + '</div></div>';
       h += '</div>';
       h += '<div class="jct-err" id="rrHoursErr" role="alert" hidden></div>';
-      h += '<button type="button" class="rr-chip on rr-hours-save" id="rrHoursSave" data-rr-hours-save onclick="rrLogHours(\'' + esc(jobId) + '\')">' + (cur != null ? 'Save times' : 'Add to my week') + '</button>';
+      h += '<button type="button" class="rr-chip on rr-hours-save" id="rrHoursSave" data-rr-hours-save onclick="rrLogHours(\'' + esc(jobId) + '\')">' + 'Save times</button>';
       h += '</div>';
       return h;
     }
@@ -14920,7 +14922,7 @@
     return {
       stateOf: stateOf, fieldsOf: fieldsOf, sectionsOf: sectionsOf, toggleValue: toggleValue,
       formHTML: formHTML, collect: collect, validate: validate, optionHTML: optionHTML,
-      hoursHTML: hoursHTML, hoursLabel: hoursLabel, weekLabel: weekLabel, isOk: isOk
+      hoursHTML: hoursHTML, hoursLabel: hoursLabel, weekLabel: weekLabel, isOk: isOk, INVOICE_STILL_ASKS: INVOICE_STILL_ASKS
     };
   })();
   // </trade-roof-report>
@@ -15089,17 +15091,10 @@
     });
   };
   // ── Hours on the job view: date, start, finish [trade-time-entry] ──
-  // The hours row for a job opens on the day it was scheduled (never a day
-  // still to come). Start and finish are always the trade's to give.
-  function rrHoursRowHTML(jobId, data, title, week) {
-    var cur = data ? rrMyHours(data) : null;
-    var today = clockPerthDay(new Date());
-    var mine = data ? getMyAssignment(data) : null;
-    var sched = String((mine && mine.scheduled_date) || '').slice(0, 10);
-    return RoofReportCore.hoursHTML(jobId, cur, {
-      title: title, week: week, maxDate: today,
-      entry: { work_date: (TradeTimeEntryCore.isDate(sched) && sched <= today) ? sched : today, start_time: '', finish_time: '', break_minutes: 0 }
-    });
+  // The hours row for a job opens blank: the date, start and finish are
+  // always the trade's to give.
+  function rrHoursRowHTML(jobId, data, title) {
+    return RoofReportCore.hoursHTML(jobId, data ? rrMyHours(data) : null, { title: title, maxDate: clockPerthDay(new Date()) });
   }
   function _rrHoursEntryFromDOM() {
     function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
@@ -15153,7 +15148,7 @@
           when: TradeTimeEntryCore.label(sent), hoursText: TradeTimeEntryCore.hoursText(hours) || '0 hrs'
         });
       }
-      toast(RoofReportCore.hoursLabel(hours) + ' added to your week' + (week ? ' (' + week + ')' : ''));
+      toast(RoofReportCore.hoursLabel(hours) + ' recorded against this job' + (week ? ' (' + week + ')' : '') + '. ' + RoofReportCore.INVOICE_STILL_ASKS);
     }).catch(function (err) {
       Array.prototype.forEach.call(document.querySelectorAll('#rrHours input, #rrHours button'), function (b) { b.disabled = false; });
       toast('Could not log hours: ' + friendlyError(err), true);
@@ -20696,9 +20691,6 @@
       var carried = _jobCards.filter(function(c) { return c && c.manually_added; }).map(function(c) {
         var moved = Object.assign({}, c);
         moved.scheduled_date = c.scheduled_date ? (_weeklyDatePlusDays(String(c.scheduled_date).slice(0, 10), shift) || c.scheduled_date) : c.scheduled_date;
-        // The date worked moves with it: a job carried to another week is
-        // being claimed for the same weekday of that week. [trade-time-entry]
-        if (c.work_date) moved.work_date = _weeklyDatePlusDays(String(c.work_date).slice(0, 10), shift) || c.work_date;
         delete moved._idx;
         return moved;
       });
@@ -21866,7 +21858,7 @@
       });
       if (_invRows.length === 0) {
         var defRate = (_hoursData && _hoursData.rate) || _tradeRate || 0;
-        _invRows.push(_newInvRow({ date: clockPerthDay(new Date()), rate: defRate }));
+        _invRows.push(_newInvRow({ rate: defRate }));
       }
       _invoiceBuilderOpen = true;
       renderInvoiceBuilder();
@@ -23271,7 +23263,7 @@
     }).catch(function() {});
   }
 
-  // A new extras row opens with blank times: start and finish are the
+  // A new extras row opens blank: the date, start and finish are the
   // trade's to give before it can be saved or sent. [trade-time-entry]
   function _newInvRow(fields) {
     return Object.assign({
@@ -23282,10 +23274,8 @@
 
   window.addInvRow = function() {
     _syncRowsFromDOM();
-    // Today in Perth. A UTC date is still yesterday here before 8am.
-    var today = clockPerthDay(new Date());
     var defRate = (_hoursData && _hoursData.rate) || _tradeRate || 0;
-    _invRows.push(_newInvRow({ date: today, rate: defRate, _misc: true, _expanded: true }));
+    _invRows.push(_newInvRow({ rate: defRate, _misc: true, _expanded: true }));
     renderInvoiceBuilder();
   };
 
@@ -23432,13 +23422,12 @@
       hours_user_edited: false,
       hours_mode_locked: false,
       // When the time was worked. hours is always derived from these.
-      work_date: null,
+      work_date: '',
       start_time: '',
       finish_time: '',
       break_minutes: 0,
       logged_hours: null
     }, fields || {});
-    if (card.work_date == null) card.work_date = String(card.scheduled_date || '').slice(0, 10);
     // A figure typed before times were required (an older saved draft) is kept
     // only as a reminder; it bills nothing until the times are entered.
     if (!card.finish_time && card.logged_hours == null && Number(card.hours) > 0) card.logged_hours = Number(card.hours);
@@ -24774,7 +24763,6 @@
       // FIX5: carry external_ref from search result when the backend returns it.
       external_ref: j.external_ref || '',
       scheduled_date: dk,
-      work_date: dk,
       rate: defRate,
       rate_source: 'client_entered',
       description: '',
@@ -31093,7 +31081,7 @@
       return h;
     }
     function hoursIntroHTML(hoursLogged) {
-      if (hoursLogged != null) return '<div class="wiz-inv"><div class="wiz-inv-t">' + esc(String(hoursLogged)) + (Number(hoursLogged) === 1 ? ' hr' : ' hrs') + ' on your week for this job</div><div class="wiz-inv-s">Change it under Hours if that is not right.</div></div>';
+      if (hoursLogged != null) return '<div class="wiz-inv"><div class="wiz-inv-t">' + esc(String(hoursLogged)) + (Number(hoursLogged) === 1 ? ' hr' : ' hrs') + ' recorded against this job</div><div class="wiz-inv-s">Your Weekly Invoice will still ask for the times you worked.</div></div>';
       return '';
     }
     return { plan: plan, weeklyCardHTML: weeklyCardHTML, hoursIntroHTML: hoursIntroHTML, weekLabel: weekLabel };

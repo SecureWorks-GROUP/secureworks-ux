@@ -167,7 +167,7 @@ test('a partial work-order money payload keeps restored deductions and blocks WO
           source_line_id: 'wo-fence-charge-israel'
         }],
         hours: 8,
-        start_time: '07:00', finish_time: '15:00', break_minutes: 0,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -245,7 +245,7 @@ test('a truncated work-order listing keeps restored deductions and blocks WO sub
           source_line_id: 'wo-fence-charge-israel'
         }],
         hours: 8,
-        start_time: '07:00', finish_time: '15:00', break_minutes: 0,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -469,7 +469,7 @@ test.describe('Henry job-centric submit', () => {
     await expect(anyCard).toBeVisible();
     // Work Order mode is open on any job, with or without an ops work order.
     await expect(anyCard.getByRole('button', { name: 'Work Order', exact: true })).toBeEnabled();
-    await fillCardTime(anyCard, 2);
+    await fillCardTime(anyCard, 2, { date: perthWeekMonday() });
     await anyCard.locator('[data-cardrate]').fill('55');
     await anyCard.locator('input[placeholder="Description of work"]').fill('Install extra panels');
     await anyCard.locator('input[placeholder="Description of work"]').press('Tab');
@@ -842,7 +842,7 @@ test.describe('stale restored work-order id', () => {
           wo_allocated: 99,
           wo_labour_lines: [],
           hours: 2,
-          start_time: '07:00', finish_time: '09:00', break_minutes: 0,
+          work_date: start, start_time: '07:00', finish_time: '09:00', break_minutes: 0,
           rate: 55,
           description: 'stale wo hours',
           manually_added: true
@@ -923,7 +923,7 @@ test('hydrate overwrites stale allocated money and rematches server pass-through
         }],
         wo_lump_lines: [{ description: 'Materials', amount: 10 }],
         hours: 8,
-        start_time: '07:00', finish_time: '15:00', break_minutes: 0,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -1007,7 +1007,7 @@ test.describe('already-invoiced work order stays blocked', () => {
             source_line_id: 'wo-already-israel'
           }],
           hours: 3,
-          start_time: '07:00', finish_time: '10:00', break_minutes: 0,
+          work_date: date, start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 55,
           description: 'already invoiced hours',
           manually_added: true
@@ -1088,7 +1088,7 @@ test.describe('hydrate ignores out-of-week work orders', () => {
           wo_allocated: 250,
           wo_labour_lines: [],
           hours: 2,
-          start_time: '07:00', finish_time: '09:00', break_minutes: 0,
+          work_date: last, start_time: '07:00', finish_time: '09:00', break_minutes: 0,
           rate: 55,
           description: 'last week wo',
           manually_added: true

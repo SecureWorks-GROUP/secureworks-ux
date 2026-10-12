@@ -42,7 +42,13 @@ test.describe('weekly invoice: a line of hours says when it was worked', () => {
     // No hours figure to type: the card shows a calculated, read-only figure.
     await expect(card.locator('input[data-cardhours]')).toHaveCount(0);
     await expect(card.locator('[data-cardhours]')).toHaveText('0 hrs');
-    await expect(card.locator('[data-carddate]')).toHaveValue(jobDate);
+    // The date worked opens blank, like start and finish: the card sits under
+    // its scheduled day, but that day is never put in the field for the trade.
+    await expect(card.locator('[data-carddate]')).toHaveValue('');
+    await expect(card.locator('[data-cardstart]')).toHaveValue('');
+    await expect(card.locator('[data-cardfinish]')).toHaveValue('');
+    await expect(card.locator('[data-carddate]')).toHaveAttribute('min', perthWeekMonday());
+    await expect(card.locator('[data-carddate]')).toHaveAttribute('max', addIsoDays(perthWeekMonday(), 6));
     await expect(card.locator('[data-carddate]')).toHaveAttribute('type', 'date');
     await expect(card.locator('[data-cardstart]')).toHaveAttribute('type', 'time');
     await expect(card.locator('[data-cardfinish]')).toHaveAttribute('type', 'time');
@@ -56,8 +62,15 @@ test.describe('weekly invoice: a line of hours says when it was worked', () => {
     await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: add the date, start time and finish time you worked');
     expect(invoicePosts(feedRequests)).toEqual([]);
 
-    // A start with no finish is not hours.
+    // Times with no date worked are not a line of hours.
     await card.locator('[data-cardstart]').fill('07:00');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: Add the date you worked.');
+    await expect(card.locator('[data-cardtimeerr]')).toHaveText('Add the date you worked.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+
+    // A start with no finish is not hours.
+    await card.locator('[data-carddate]').fill(jobDate);
     await page.locator('#invSubmitBtn').click();
     await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: Add your finish time.');
     await expect(card.locator('[data-cardtimeerr]')).toHaveText('Add your finish time.');
@@ -106,6 +119,7 @@ test.describe('weekly invoice: a line of hours says when it was worked', () => {
       refused += 1;
       return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ success: false, code: 'time_entry_required', error: 'time_entry_required' }) });
     });
+    await card.locator('[data-carddate]').fill(addIsoDays(perthWeekMonday(), 1));
     await card.locator('[data-cardstart]').fill('07:00');
     await card.locator('[data-cardfinish]').fill('15:00');
     await confirmSubmit(page);
@@ -129,9 +143,10 @@ test.describe('weekly invoice: the date worked cannot be after today', () => {
   test('a job card dated after today is not sent until its date is today or earlier', async ({ appPage: page, feedRequests }) => {
     const today = perthWeekMonday();
     const card = await openHenryBuilder(page);
-    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(today, 1));
+    await expect(card.locator('[data-carddate]')).toHaveValue('');
     await expect(card.locator('[data-carddate]')).toHaveAttribute('max', today);
 
+    await card.locator('[data-carddate]').fill(addIsoDays(today, 1));
     await card.locator('[data-cardstart]').fill('07:00');
     await card.locator('[data-cardfinish]').fill('15:00');
     await expect(card.locator('[data-cardtimeerr]')).toHaveText('The date worked cannot be after today.');
@@ -156,12 +171,17 @@ test.describe('weekly invoice: the date worked cannot be after today', () => {
     await card.locator('[data-cardfinish]').fill('15:00');
 
     await page.getByRole('button', { name: '+ Add extra / adjustment' }).click();
-    await expect(page.locator('#ir_date_0')).toHaveValue(today);
+    // An Extras row opens with no date either.
+    await expect(page.locator('#ir_date_0')).toHaveValue('');
     await expect(page.locator('#ir_date_0')).toHaveAttribute('max', today);
     await page.locator('#ir_desc_0').fill('Second day on the job');
-    await page.locator('#ir_date_0').fill(addIsoDays(today, 2));
     await page.locator('#ir_start_0').fill('08:00');
     await page.locator('#ir_fin_0').fill('12:00');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('Add the date you worked.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+
+    await page.locator('#ir_date_0').fill(addIsoDays(today, 2));
     await expect(page.locator('#ir_timeerr_0')).toHaveText('The date worked cannot be after today.');
     await page.locator('#invSubmitBtn').click();
     await expect(page.locator('#toast')).toContainText('The date worked cannot be after today.');
@@ -180,9 +200,9 @@ test.describe('weekly invoice: a job with hours on record and a clock on and off
     await page.getByRole('button', { name: 'Continue' }).click();
     const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
 
-    // The fixture clocks this job 07:00 to 15:00 with 8 hrs on record. None of
-    // it is carried onto the card.
-    await expect(card.locator('[data-carddate]')).toHaveValue(jobDate);
+    // The fixture schedules this job on the Tuesday and clocks it 07:00 to
+    // 15:00 with 8 hrs on record. None of it is carried onto the card.
+    await expect(card.locator('[data-carddate]')).toHaveValue('');
     await expect(card.locator('[data-cardstart]')).toHaveValue('');
     await expect(card.locator('[data-cardfinish]')).toHaveValue('');
     await expect(card.locator('[data-cardhours]')).toHaveText('0 hrs');
@@ -192,6 +212,7 @@ test.describe('weekly invoice: a job with hours on record and a clock on and off
     await expect(page.locator('#toast')).toContainText('SWF-26767: add the date, start time and finish time you worked');
     expect(invoicePosts(feedRequests)).toEqual([]);
 
+    await card.locator('[data-carddate]').fill(jobDate);
     await card.locator('[data-cardstart]').fill('07:30');
     await card.locator('[data-cardfinish]').fill('09:30');
     await card.locator('[data-cardfinish]').blur();

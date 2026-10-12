@@ -148,14 +148,16 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 - **Hours for this job (2026-09-08, times required 2026-10-12)**: once a
   report is done (make-safe report submitted, portal report marked done, or
   roof report submitted) the tab shows an "Hours for this job/report" row:
-  date worked, start, finish and an optional break, with the hours worked out
-  and shown read-only. Save posts `log_my_job_hours {job_id, hours, work_date,
-  start_time, finish_time, break_minutes, source}`; the server writes the hours
-  onto the trade's own assignment (replace, not add), marks it complete and
-  the week view / weekly invoice pick it up. The row then reads "2 hrs on your
-  week (w/e Sun 13 Sep). Tue 8 Sep, 07:00 to 09:00." The times are kept on the
-  device per account and job so the weekly invoice card opens on them (see
-  "Pay tab: when the time was worked"). Guard:
+  date worked, start, finish and an optional break, all opening blank, with
+  the hours worked out and shown read-only. Save posts `log_my_job_hours
+  {job_id, hours, work_date, start_time, finish_time, break_minutes, source}`;
+  the server writes the hours onto the trade's own assignment (replace, not
+  add) and marks it complete. This records the times against the job; it is
+  not the invoice. The row, its save toast and the completion wizard line all
+  say so: "2 hrs recorded against this job (w/e Sun 13 Sep). Tue 8 Sep, 07:00
+  to 09:00. ... Your Weekly Invoice will still ask for the times you worked."
+  The Weekly Invoice card shows those hours only as a reminder and asks for
+  the date and times again (see "Pay tab: when the time was worked"). Guard:
   `tests/e2e/trade-makesafe-roof-report-hours.spec.js`.
 - **My money (2026-09-08)**: Hours view and Invoice history carry a "My money"
   button (`openMyMoney` → `my_money`). It shows ABN and GST status, this month
@@ -318,11 +320,12 @@ Trades say when they worked when they invoice, so the office can spot inconsiste
 - **Where a trade enters time, and what each sends.**
   1. Weekly Invoice job card, Hours mode (`_jobCardTimeHtml`, `setJobCardTime`): an assigned job posts the fields on its `manual_assignments` row beside `hours`; a job the trade searched in posts them on its `Labour` `extra_items` row.
   2. Extras / adjustments rows in the builder (`_renderInvRow`, `_rowToExtraItem`): hours-by-rate rows, so they carry the fields too. This covers Save Draft and the older builder submit. A second day on a job is entered here, as its own row with its date, job and times.
-  3. The job-view "Hours for this job/report" row and the completion wizard's success screen (`rrHoursRowHTML`, `rrLogHours`): `log_my_job_hours`, as above.
+  3. The job-view "Hours for this job/report" row and the completion wizard's success screen (`rrHoursRowHTML`, `rrLogHours`): `log_my_job_hours`, as above. This stamps the job; it puts nothing on the invoice, and its wording must never promise the week or the invoice.
 - **Not time entry, unchanged:** clock on and off (already real timestamps), Work Order mode labour-deduct lines and the weekly work-order invoice's crew hours (other people's labour on a work order), the make-safe report's "Hours each trade" (a report field for the builder), and the one-press `submit_trade_invoice` for a fully clocked week (it posts no lines).
 - **Form rules.** There is no hours field to type anywhere above: hours are a read-only figure. A ticked Hours card cannot be submitted, and an extras row cannot be saved or submitted, without date, start and finish; each missing piece is named on the card and in the toast. The day-level "Set all hours" control is gone (one time stamped across a day's jobs would overlap them). The date worked cannot be after today (Perth) on a job card, an Extras row or the job-view row: one rule, `TradeTimeEntryCore.check(entry, today)`, one wording ("The date worked cannot be after today."), and the date pickers stop at today. An assigned card's date must stay inside the invoice week; a job the trade searched in may be an older job claimed late, capped only by the week's last day. A job the trade searched in cannot land on a day that job already has a line for.
-- **Defaults.** Native date and time pickers at 44px and 16px type. A card opens on its scheduled day with start and finish blank: the app never invents, remembers or carries a time from one line to another, so every time on a line is one the trade typed for it. That includes the clock: a job clocked on and off still opens blank, so the trade's statement can be compared against the clock and the hours on record instead of being copied from them. Hours already on record for an assignment (clocked or logged on the job view) show on the card only as a reminder ("8 hrs on record for this job. Add the times you worked.") and bill nothing. The job-view row keeps nothing on the device.
+- **Defaults.** Native date and time pickers at 44px and 16px type. Date worked, start and finish all open blank on a job card, an Extras row and the job-view row: the app never invents, remembers or carries a date or a time onto a line, so every one on a line is one the trade typed for it. An assigned card sits under its scheduled day's heading, which is a hint only and never the value (a job attended on another day would otherwise be stamped with the wrong day unnoticed); a job the trade searched in sits under the day they added it on until they give the date, then under the day worked. Changing the invoice week keeps the date the trade typed on a searched-in job as typed. The pickers stay bounded (not after today; an assigned card within its week). That includes the clock: a job clocked on and off still opens blank, so the trade's statement can be compared against the clock and the hours on record instead of being copied from them. Hours already on record for an assignment (clocked or logged on the job view) show on the card only as a reminder ("8 hrs on record for this job. Add the times you worked.") and bill nothing. The job-view row keeps nothing on the device.
 - **Older data.** A draft or assignment that holds only a typed hours figure keeps it as a reminder ("8 hrs on record for this job. Add the times you worked.") and bills nothing until times are entered. Invoice detail shows "Wed 7 Oct, 07:00 to 15:30, 30 min break" under a line's hours when the stored line carries the fields, and nothing extra when it does not.
+- **Follow-up, not built here.** Times a trade saves on the job view are not carried onto the Weekly Invoice card, so they are typed twice and the two statements can differ. Once the back end stores the job-view times and returns them on `my_hours`, the card can open on the trade's own saved times from the server (never from the device, the clock or the schedule). Until then do not add any carry-over.
 - **Before and after the back end stores them.** Today's ops-api ignores the extra fields and the invoice saves as before; once the paired change is deployed they are stored and stamped against the job. Guards: `scripts/test-trade-time-entry.js` (rules and payload shape against the shipped code), `tests/e2e/trade-invoice-time-entry.spec.js`, `tests/helpers/invoice-time.js` for other specs. Because a date after today is refused, a spec that enters times on the fixture week's jobs sets `test.use({ appWeekDay: 6 })` (`tests/fixtures/test.js`), which starts the app's clock on that week's Sunday; without it the spec fails early in the week.
 
 ### Pay tab — Work Order mode labour lines (reconciliation and direct billing)

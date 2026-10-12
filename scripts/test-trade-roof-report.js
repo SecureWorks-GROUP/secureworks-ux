@@ -119,11 +119,14 @@ check('option copy escapes', R.optionHTML({ status: 'none' }, "j'1", { title: '<
 const hrs = R.hoursHTML('j1', null, { entry: { work_date: '2026-09-08', start_time: '07:00', finish_time: '', break_minutes: 0 }, maxDate: '2026-09-08' });
 check('hours row asks for date, start, finish and break', ['rrHoursDate', 'rrHoursStart', 'rrHoursFinish', 'rrHoursBreak'].every(function (id) { return hrs.indexOf('id="' + id + '"') !== -1; }));
 check('hours row has no typed hours field and no hour chips', hrs.indexOf('rrHoursInput') === -1 && hrs.indexOf('data-rr-hour=') === -1);
-check('hours row opens on the given date and start, capped at today', hrs.indexOf('type="date" id="rrHoursDate" value="2026-09-08" max="2026-09-08"') !== -1 && hrs.indexOf('id="rrHoursStart" value="07:00"') !== -1);
+const blank = R.hoursHTML('j1', null, { maxDate: '2026-09-08' });
+check('hours row opens with no date, start or finish, capped at today', blank.indexOf('type="date" id="rrHoursDate" value="" max="2026-09-08"') !== -1 && blank.indexOf('id="rrHoursStart" value=""') !== -1 && blank.indexOf('id="rrHoursFinish" value=""') !== -1);
+check('an empty hours row says the times are recorded against the job and the invoice still asks', blank.indexOf('They are recorded against this job. Your Weekly Invoice will still ask for the times you worked.') !== -1 && blank.indexOf('invoice.') === -1 && />Save times<\/button>/.test(blank));
+check('hours row shows the entry it is given, capped at today', hrs.indexOf('type="date" id="rrHoursDate" value="2026-09-08" max="2026-09-08"') !== -1 && hrs.indexOf('id="rrHoursStart" value="07:00"') !== -1);
 check('hours are shown read-only and saved through rrLogHours', /id="rrHoursCalc"[^>]*>0 hrs</.test(hrs) && hrs.indexOf("rrLogHours('j1')") !== -1);
 const hrs2 = R.hoursHTML('j1', 2, { week: 'w/e Sun 13 Sep', when: 'Tue 8 Sep, 07:00 to 09:00', hoursText: '2 hrs', entry: { work_date: '2026-09-08', start_time: '07:00', finish_time: '09:00', break_minutes: 0 } });
-check('logged hours name the week and when they were worked', hrs2.indexOf('data-rr-hours-current="2"') !== -1 && hrs2.indexOf('<strong>2 hrs</strong> on your week (w/e Sun 13 Sep). Tue 8 Sep, 07:00 to 09:00.') !== -1);
-check('logged hours with no times to show say how to change them', R.hoursHTML('j1', 2.5, {}).indexOf('<strong>2.5 hrs</strong> on your week. Save new times to change it.') !== -1);
+check('logged hours are recorded against the job, name the week and when, and do not promise the invoice', hrs2.indexOf('data-rr-hours-current="2"') !== -1 && hrs2.indexOf('<strong>2 hrs</strong> recorded against this job (w/e Sun 13 Sep). Tue 8 Sep, 07:00 to 09:00. Change the times and save to change it. Your Weekly Invoice will still ask for the times you worked.') !== -1 && hrs2.indexOf('on your week') === -1);
+check('logged hours with no times to show say how to change them', R.hoursHTML('j1', 2.5, {}).indexOf('<strong>2.5 hrs</strong> recorded against this job. Save new times to change it. Your Weekly Invoice will still ask for the times you worked.') !== -1);
 check('hoursLabel singular/plural', R.hoursLabel(1) === '1 hr' && R.hoursLabel(2) === '2 hrs' && R.hoursLabel(1.25) === '1.25 hrs');
 check('weekLabel names the Sunday', /^w\/e Sun/.test(R.weekLabel('2026-09-13')) && R.weekLabel('nope') === '');
 

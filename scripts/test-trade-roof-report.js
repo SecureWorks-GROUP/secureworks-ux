@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 2026-09-08 — SecureWorks roof report in the trade app + one-tap hours.
+// 2026-09-08 — SecureWorks roof report in the trade app + the "Hours for this
+// job" row (date, start and finish since 2026-10-12; hours are worked out).
 // Extracts the shipped // <trade-roof-report> block from trade.html so the
 // assertions run against the real RoofReportCore, not a copy.
 const fs = require('fs');

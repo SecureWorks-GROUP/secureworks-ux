@@ -899,6 +899,11 @@
       background: rgba(231,76,60,0.12); color: var(--sw-red); border-left-color: var(--sw-red);
       font-weight: 700; font-style: normal;
     }
+    /* A cancelled order stays on the row but must not read as a truck on its way. */
+    .cal-delivery-block.cancelled {
+      background: rgba(127,140,141,0.10); color: var(--sw-text-sec); border-left-color: var(--sw-text-sec);
+      text-decoration: line-through;
+    }
 
     /* Unscheduled sidebar */
     .cal-unsched-sidebar {
@@ -6323,6 +6328,8 @@ var _allQuotes = [];
 var _invJobCache = null; // cached job data for invoice modal
 var _calEvents = [];
 var _calDeliveries = [];
+// Every purchase order from list_pos, null until that read lands. See <calendar-delivery-row>.
+var _calPOs = null;
 var _pipelineData = null;
 var _jobsCache = [];
 var _suppliers = [];
@@ -8576,6 +8583,14 @@ async function loadCalendar() {
       if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
     }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
 
+    // Delivery row top-up: the calendar feed only sends draft / submitted /
+    // authorised orders, so the row reads the full order list too.
+    // See <calendar-delivery-row>.
+    opsFetch('list_pos').then(function(p) {
+      _calPOs = (p && p.purchase_orders) || [];
+      if (_calPOs.some(calDeliveryDay)) renderCalendar();
+    }).catch(function(e) { console.error('calendar deliveries enrich failed:', e); });
+
     // Crew availability shading
     opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
       _calAvailability = {};
@@ -8610,6 +8625,32 @@ async function loadCalendar() {
     ]);
   }
 }
+
+// <calendar-delivery-row>
+// The Crew view's Deliveries row shows EVERY purchase order that has a delivery
+// day, whatever its status. The calendar feed's own `deliveries` list carries
+// only draft / submitted / authorised orders (ops-api calendarEvents), which
+// hid every sent, confirmed, delivered, approved, quoted and billed order. So
+// the row is built from list_pos (every order except soft-deleted ones) and
+// keeps any feed row list_pos did not return. An order with no requested date
+// sits on the day the supplier confirmed.
+function calDeliveryDay(po) {
+  return (po && (po.delivery_date || po.confirmed_delivery_date)) || '';
+}
+function calDeliveryList(feedDeliveries, allPOs) {
+  var seen = {};
+  var out = [];
+  (allPOs || []).concat(feedDeliveries || []).forEach(function(po) {
+    if (!po || po.status === 'deleted' || !calDeliveryDay(po)) return;
+    if (po.id) {
+      if (seen[po.id]) return;
+      seen[po.id] = true;
+    }
+    out.push(po);
+  });
+  return out;
+}
+// </calendar-delivery-row>
 
 // <calendar-ops-core>
 // M3c calendar 80/20 — pure, dependency-free helpers, extracted verbatim by the
@@ -9135,9 +9176,10 @@ function renderSwimlaneView(container, range) {
 
   // Build delivery lookup
   var deliveryMap = {};
-  _calDeliveries.forEach(function(del) {
-    if (!deliveryMap[del.delivery_date]) deliveryMap[del.delivery_date] = [];
-    deliveryMap[del.delivery_date].push(del);
+  calDeliveryList(_calDeliveries, _calPOs).forEach(function(del) {
+    var day = calDeliveryDay(del);
+    if (!deliveryMap[day]) deliveryMap[day] = [];
+    deliveryMap[day].push(del);
   });
 
   // Detect conflicts: same crew, same date, 2+ different jobs
@@ -9376,9 +9418,13 @@ function renderSwimlaneView(container, range) {
       html += '<div class="' + cellClass + '">';
       var dels = deliveryMap[dateStr] || [];
       dels.forEach(function(del) {
-        var isWarning = del.job_id && jobStartDates[del.job_id] && del.delivery_date > jobStartDates[del.job_id];
-        html += '<div class="cal-delivery-block' + (isWarning ? ' warning' : '') + '" title="' + del.po_number + ' — ' + del.supplier_name + '">';
-        html += del.supplier_name;
+        var isCancelled = del.status === 'cancelled';
+        var isWarning = !isCancelled && del.job_id && jobStartDates[del.job_id] && dateStr > jobStartDates[del.job_id];
+        var delSupplier = poAttrText(del.supplier_name || 'No supplier');
+        html += '<div class="cal-delivery-block' + (isCancelled ? ' cancelled' : isWarning ? ' warning' : '') + '"' +
+          ' data-po-id="' + poAttrText(del.id) + '" data-po-status="' + poAttrText(del.status) + '"' +
+          ' title="' + poAttrText(del.po_number) + ' — ' + delSupplier + ' — ' + poAttrText(poStatusLabel(del.status)) + '">';
+        html += delSupplier;
         if (isWarning) html += ' &#9888;';
         html += '</div>';
       });
@@ -18322,6 +18368,53 @@ function dismissPriceItem(id) {
   });
 }
 
+// <po-board-columns>
+// Which column a purchase order sits in is decided HERE and nowhere else, so a
+// status can never again match no column and drop off the board.
+// The back end allows eleven statuses (purchase_orders_status_check):
+// quote_requested, draft, approved, submitted, authorised, sent, confirmed,
+// delivered, billed, cancelled, deleted. submitted / authorised / billed are the
+// older words for sent / confirmed / delivered, so each pair shares a column.
+// The six main columns are always drawn. Cancelled and Other are drawn only
+// when they hold an order. Other catches every status this page does not know,
+// and a blank one. list_pos never returns a soft-deleted order; one that
+// arrived anyway stays off the board.
+var PO_BOARD_COLUMNS = [
+  { key: 'draft', label: 'Draft', color: '#95A5A6', statuses: ['draft'] },
+  { key: 'approved', label: 'Approved', color: '#2980B9', statuses: ['approved'] },
+  { key: 'submitted', label: 'Sent', color: '#3498DB', statuses: ['submitted', 'sent'] },
+  { key: 'quote_requested', label: 'Quoted', color: '#8E44AD', statuses: ['quote_requested'] },
+  { key: 'authorised', label: 'Confirmed', color: '#E67E22', statuses: ['authorised', 'confirmed'] },
+  { key: 'billed', label: 'Delivered', color: '#27AE60', statuses: ['billed', 'delivered'] },
+];
+var PO_BOARD_EXTRA_COLUMNS = [
+  { key: 'cancelled', label: 'Cancelled', color: '#7F8C8D', statuses: ['cancelled'] },
+  { key: 'other', label: 'Other', color: '#7F8C8D', statuses: [] },
+];
+function poBoardColumnOf(status) {
+  var cols = PO_BOARD_COLUMNS.concat(PO_BOARD_EXTRA_COLUMNS);
+  for (var i = 0; i < cols.length; i++) {
+    if (cols[i].statuses.indexOf(status) >= 0) return cols[i].key;
+  }
+  return 'other';
+}
+// The word shown for a status: its column's word, or the stored status itself
+// for one this page does not know.
+function poStatusLabel(status) {
+  var key = poBoardColumnOf(status);
+  if (key === 'other') return status ? String(status).replace(/_/g, ' ') : 'No status';
+  var cols = PO_BOARD_COLUMNS.concat(PO_BOARD_EXTRA_COLUMNS);
+  for (var i = 0; i < cols.length; i++) {
+    if (cols[i].key === key) return cols[i].label;
+  }
+  return 'Other';
+}
+// escapeHtml leaves quotes alone and throws on a non-string; this is safe in an attribute.
+function poAttrText(val) {
+  return escapeHtml(val == null ? '' : String(val)).replace(/"/g, '&quot;');
+}
+// </po-board-columns>
+
 // ── Materials Advanced Filter State ──
 var _matFilterJob = '';
 var _matFilterSupplier = '';
@@ -18447,17 +18540,12 @@ function renderMaterialsKanban() {
   // Also render threshold alerts
   renderMatAlerts();
 
-  var stages = [
-    { key: 'draft', label: 'Draft', color: '#95A5A6' },
-    { key: 'approved', label: 'Approved', color: '#2980B9' },
-    { key: 'submitted', label: 'Sent', color: '#3498DB' },
-    { key: 'quote_requested', label: 'Quoted', color: '#8E44AD' },
-    { key: 'authorised', label: 'Confirmed', color: '#E67E22' },
-    { key: 'billed', label: 'Delivered', color: '#27AE60' },
-  ];
+  // See <po-board-columns>.
+  var stages = PO_BOARD_COLUMNS.concat(PO_BOARD_EXTRA_COLUMNS);
+  var mainKeys = PO_BOARD_COLUMNS.map(function(c) { return c.key; });
 
   // Apply type filter
-  var filtered = _allPOs.filter(function(po) { return po.status !== 'cancelled' && po.status !== 'deleted'; });
+  var filtered = _allPOs.filter(function(po) { return po.status !== 'deleted'; });
   if (_matTypeFilter !== 'all') {
     filtered = filtered.filter(function(po) { return po.job_type === _matTypeFilter; });
   }
@@ -18479,8 +18567,13 @@ function renderMaterialsKanban() {
   if (_matFilterSupplier) {
     filtered = filtered.filter(function(po) { return po.supplier_name === _matFilterSupplier; });
   }
+  // The six tick boxes are the six main columns. Cancelled and Other have no
+  // tick box, so the status filter never hides them.
   if (_matFilterStatuses.length < 6) {
-    filtered = filtered.filter(function(po) { return _matFilterStatuses.indexOf(po.status) >= 0; });
+    filtered = filtered.filter(function(po) {
+      var col = poBoardColumnOf(po.status);
+      return mainKeys.indexOf(col) < 0 || _matFilterStatuses.indexOf(col) >= 0;
+    });
   }
 
   var container = document.getElementById('materialsKanban');
@@ -18489,8 +18582,10 @@ function renderMaterialsKanban() {
 
   var html = '';
   stages.forEach(function(stage) {
-    var items = filtered.filter(function(po) { return po.status === stage.key; });
-    html += '<div class="kanban-col" style="background:var(--sw-bg);">';
+    var items = filtered.filter(function(po) { return poBoardColumnOf(po.status) === stage.key; });
+    var isMainCol = mainKeys.indexOf(stage.key) >= 0;
+    if (!isMainCol && items.length === 0) return;
+    html += '<div class="kanban-col" data-po-col="' + stage.key + '" style="background:var(--sw-bg);">';
     html += '<div class="kanban-col-header" style="border-bottom-color:' + stage.color + ';">' +
       stage.label + '<span class="count">' + items.length + '</span></div>';
     html += '<div class="kanban-body">';
@@ -18510,7 +18605,7 @@ function renderMaterialsKanban() {
         jobRef = (po.job_number || '') + (po.job_number && surname ? ' — ' + surname : surname || '');
       }
 
-      html += '<div class="kanban-card" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
+      html += '<div class="kanban-card" data-po-id="' + poAttrText(po.id) + '" data-po-status="' + poAttrText(po.status) + '" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
 
       // BUG 2: Delete button (top-right)
       var canDelete = po.status === 'draft' || po.status === 'quote_requested';
@@ -18536,17 +18631,21 @@ function renderMaterialsKanban() {
       var wfSteps = ['draft','approved','sent','quoted','confirmed','delivered'];
       var wfLabels = ['Draft','Approved','Sent','Quoted','Confirmed','Delivered'];
       var wfColors = ['#95A5A6','#2980B9','#3498DB','#8E44AD','#E67E22','#27AE60'];
-      var wfMap = { draft:'draft', approved:'approved', submitted:'sent', quote_requested:'quoted', authorised:'confirmed', billed:'delivered' };
-      var currentWf = wfMap[po.status] || 'draft';
-      var currentIdx = wfSteps.indexOf(currentWf);
-      html += '<div style="display:flex;gap:2px;align-items:center;margin:6px 0 4px;">';
-      wfSteps.forEach(function(step, idx) {
-        var active = idx <= currentIdx;
-        var bg = active ? wfColors[idx] : '#E0E0E0';
-        html += '<div title="' + wfLabels[idx] + '" style="flex:1;height:4px;border-radius:2px;background:' + bg + ';"></div>';
-      });
-      html += '</div>';
-      html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
+      // The steps are the six main columns in order. A cancelled or unknown
+      // status has no step, so it shows its own word and no progress bar.
+      var currentIdx = mainKeys.indexOf(stage.key);
+      if (currentIdx >= 0) {
+        html += '<div style="display:flex;gap:2px;align-items:center;margin:6px 0 4px;">';
+        wfSteps.forEach(function(step, idx) {
+          var active = idx <= currentIdx;
+          var bg = active ? wfColors[idx] : '#E0E0E0';
+          html += '<div title="' + wfLabels[idx] + '" style="flex:1;height:4px;border-radius:2px;background:' + bg + ';"></div>';
+        });
+        html += '</div>';
+        html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
+      } else {
+        html += '<div class="po-status-word" style="font-size:10px;color:var(--sw-text-sec);font-weight:600;margin:6px 0 4px;">Status: ' + poAttrText(poStatusLabel(po.status)) + '</div>';
+      }
 
       // Delivery/pickup date
       if (po.delivery_date) {
@@ -18563,7 +18662,7 @@ function renderMaterialsKanban() {
         invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Paid</span>';
       } else if (po.invoice_received_at) {
         invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Invoice received</span>';
-      } else if (stage.key !== 'draft') {
+      } else if (stage.key !== 'draft' && stage.key !== 'cancelled') {
         var sinceDate = po.confirmed_at || po.ordered_at || po.created_at;
         var invDays = sinceDate ? Math.floor((Date.now() - new Date(sinceDate).getTime()) / 86400000) : 0;
         if (invDays > 0) {

@@ -53,6 +53,16 @@ Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.
 
+EVERY PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for an
+order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
+`confirmed` / `delivered` share the Sent / Confirmed / Delivered columns of the
+older `submitted` / `authorised` / `billed`, and any status the page does not
+know lands in a visible Other column. Never match a column on the raw status
+again; that hid 6 of 22 orders. The Calendar's Deliveries row
+(`// <calendar-delivery-row>`) is built from `list_pos`, because the `calendar`
+feed's own `deliveries` carries only draft / submitted / authorised orders.
+Guard: `tests/e2e/ops-po-all-statuses.spec.js`.
+
 ## Ops Dash calendar drag (`ops.html`)
 
 CP1 drag-to-reschedule is behind a feature flag that is now DEFAULT ON. Kill

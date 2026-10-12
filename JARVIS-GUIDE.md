@@ -113,7 +113,7 @@ WARNINGS (AMBER) — Needs Attention:
 14. Travel time conflicts
 15. Price variance alerts
 
-JARVIS generates a plain-English summary ("Good morning. Two urgent items today...") and shows it in the Today tab on your ops dashboard.
+JARVIS generates a plain-English summary ("Good morning. Two urgent items today..."). The ops dashboard Today tab that showed it is hidden (6 Oct 2026); the ambient bar still shows the urgent and warning counts on every tab.
 
 ---
 
@@ -124,7 +124,7 @@ JARVIS generates proactive suggestions like:
 - "This invoice is 35 days overdue — send a reminder"
 - "SWP-25047 has no deposit — follow up"
 
-119+ nudges have been generated but ZERO have been delivered to Telegram. This is the number 1 thing that needs fixing. You can see them in the ops dashboard Today tab but you don't get push notifications on your phone yet.
+119+ nudges have been generated but ZERO have been delivered to Telegram. This is the number 1 thing that needs fixing. The ops dashboard Today tab that listed them is hidden (6 Oct 2026), and you don't get push notifications on your phone yet.
 
 ---
 
@@ -156,7 +156,6 @@ Dark bar fixed to the bottom of your screen. Always visible.
 LEFT SIDE: Pulsing lightning bolt + "Jarvis" + status (Live or 3m ago)
 
 MIDDLE: Changes based on which tab you're on:
-- Today tab: "2 critical, 3 warnings" or "All clear"
 - Jobs tab: "24 active jobs in pipeline"
 - Calendar tab: "12 events this week"
 - Financials tab: "$24,612 outstanding"
@@ -164,7 +163,7 @@ MIDDLE: Changes based on which tab you're on:
 
 RIGHT SIDE: Chat button + keyboard shortcut (Shift+J)
 
-Colour-coded badges: red = urgent, amber = warnings, green = all clear.
+Colour-coded badges on every tab: red = urgent, amber = warnings, green = all clear.
 Auto-refreshes every 30 seconds. Full dashboard auto-refreshes every 5 minutes.
 
 ---
@@ -234,7 +233,7 @@ The DUAL-WRITE PATTERN: Every key action (create assignment, update status, crea
 ## What's Working Right Now
 
 - Dashboard chat (Shift+J) — ask anything, get real answers
-- Morning brief generation and display in Today tab
+- Morning brief generation (the Today tab that displayed it is hidden, 6 Oct 2026)
 - Daily digest with 15 alert rules (7am trigger)
 - Smart nudge generation (shows in dashboard)
 - Job intelligence and risk scoring
@@ -274,7 +273,7 @@ These are all being fixed in the Cohesion Sprint.
 
 2. OPEN OPS DASHBOARD: Glance at the ambient bar — tells you instantly if anything needs attention.
 
-3. TODAY TAB: Check smart nudges panel. Dismiss or act on what JARVIS flagged.
+3. BADGES: If the bar shows a red or amber badge, click it to open the chat and ask what it is. The Today tab and its nudges panel are hidden (6 Oct 2026).
 
 4. THROUGHOUT THE DAY: Press Shift+J to chat with JARVIS. Ask anything:
    - "What invoices are overdue?"

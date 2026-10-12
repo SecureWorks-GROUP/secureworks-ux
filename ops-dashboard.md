@@ -7,11 +7,14 @@
 **API**: `ops-api` edge function (--no-verify-jwt)
 
 ## 5 Tabs
-1. **Today** — AI morning brief, attention items (actionable), today's assignments, upcoming week
+Ops opens on Jobs (Captain 2026-10-06).
+1. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar
-3. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
-4. **Financials** — Job P&L, PO tracking, invoice status, Xero push
-5. **Materials** — PO creation, supplier list, delivery tracking, scope-to-PO extraction
+3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Clear Debt, Xero push
+4. **Dispatch** — Dispatch concept on sample data, with the live purchase order board (PO creation, delivery tracking, scope-to-PO extraction) below it
+5. **Sales** — Booking and Performance
+
+Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Health and Job P&L are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
 
 ## Key Features
 - AI chat sidebar (Claude sonnet via ops-ai)

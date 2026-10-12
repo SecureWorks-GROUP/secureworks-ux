@@ -146,8 +146,8 @@ const test = base.extend({
           job_id: 'e2e-wo-holder-job',
           scheduled_date: addIsoDays(weekStart, 1),
           hours_worked: 8,
-          // Clocked on and off that day: the invoice card opens on these
-          // times (07:00 to 15:00 Perth) instead of asking for them.
+          // Clocked on and off that day. The invoice card never copies these:
+          // the trade types the times they worked.
           clocked_on_at: addIsoDays(weekStart, 1) + 'T07:00:00+08:00',
           clocked_off_at: addIsoDays(weekStart, 1) + 'T15:00:00+08:00',
           break_minutes: 0,

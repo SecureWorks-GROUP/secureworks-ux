@@ -769,9 +769,9 @@ add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
 (`time_entry_required`). One line is one job on one day: a second day is its
 own Extras row. The date worked cannot be after today (Perth) anywhere a trade
-gives it, and the app never invents, remembers or carries a time between lines
-(only real clock on and off times prefill a card), so do not add a default
-start or a device memory of times. Lines that are not time carry none of the
+gives it, and the app never invents, remembers or carries a time onto a line:
+no default start, no device memory, no prefill from clock on and off. A card
+opens blank and shows any hours on record only as a reminder. Lines that are not time carry none of the
 fields. Search
 `// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
 `// <trade-time-entry-ops>` in `ops.html` (ops shows the times beside the hours

@@ -13,6 +13,7 @@
 // the shared feed stub fails the test on an unapproved ops-api write.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 
 test.use({
   persona: 'installer',
@@ -27,6 +28,7 @@ async function openBuilder(page) {
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
+  await fillCardTime(page.locator('.jc-card').filter({ hasText: 'SWF-26767' }), 8);
   await expect(page.locator('[data-invoice-money-summary]')).toContainText('Earned$400.00');
 }
 

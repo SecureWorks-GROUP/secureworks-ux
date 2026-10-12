@@ -657,8 +657,10 @@ for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 The fence-designer scoping tool writes every internal note into
 `jobs.scope_json.job` (`siteNotes`, `checklist.finalNotes`, `removal.notes`,
 `supplierNotes`) — `job_detail`/`trade_job_detail` already deliver that blob to
-both apps. `renderFenceScopingNotes(scope_json)` (`ops.html`, next to
-`renderScopeSummary`) is the ONE reader for all four fields; it is called from
+both apps. `fenceScopingNoteFields(scope_json)` (`ops.html`, next to
+`renderScopeSummary`) is the ONE list of those four fields: add a field there,
+never in a caller. Dispatch's scoper lines (`modules/ops-dispatch.js`) read it,
+and so does `renderFenceScopingNotes(scope_json)`, which is called from
 the job detail drawer's Overview tab (default tab, does not go through
 `renderScopeSummary`), the pinned read-only header of the Notes rail
 (`buildNotesHTML` — distinct from the deletable two-way `job_events` notes

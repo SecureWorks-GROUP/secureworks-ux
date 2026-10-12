@@ -19176,15 +19176,7 @@ function renderDocumentLinks(documents, types, heading) {
 // removal.notes, supplierNotes) — these are saved into jobs.scope_json.job but until now
 // had no reader anywhere on the OpsDash. See fence-scoping-notes-surface.
 function renderFenceScopingNotes(scope_json) {
-  var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
-  if (!scope || !scope.job) return '';
-  var job = scope.job;
-  var fields = [
-    { label: 'Site notes', text: job.siteNotes },
-    { label: 'Final notes', text: job.checklist && job.checklist.finalNotes },
-    { label: 'Removal notes', text: job.removal && job.removal.notes },
-    { label: 'Supplier notes', text: job.supplierNotes }
-  ].filter(function (f) { return f.text && String(f.text).trim(); });
+  var fields = fenceScopingNoteFields(scope_json);
   if (!fields.length) return '';
 
   var html = '<div class="fence-scoping-notes" style="font-size:12px;padding:6px 0;line-height:1.6;">';
@@ -19197,6 +19189,18 @@ function renderFenceScopingNotes(scope_json) {
   html += '<div style="font-size:11px;color:var(--sw-text-sec);">from the scoping tool</div>';
   html += '</div>';
   return html;
+}
+
+function fenceScopingNoteFields(scope_json) {
+  var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
+  if (!scope || !scope.job) return [];
+  var job = scope.job;
+  return [
+    { key: 'site', label: 'Site notes', text: job.siteNotes },
+    { key: 'final', label: 'Final notes', text: job.checklist && job.checklist.finalNotes },
+    { key: 'removal', label: 'Removal notes', text: job.removal && job.removal.notes },
+    { key: 'supplier', label: 'Supplier notes', text: job.supplierNotes }
+  ].filter(function (f) { return f.text && String(f.text).trim(); });
 }
 
 function renderScopeSummary(scope_json, jobType, jobId) {

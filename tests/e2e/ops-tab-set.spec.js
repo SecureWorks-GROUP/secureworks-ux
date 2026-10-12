@@ -192,6 +192,12 @@ const D_NOTES = {
   ] },
 };
 
+const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
+  id: 'job-n' + i, job_number: 'SWF-' + (910000 + i), type: i % 3 ? 'fencing' : 'patio', site_suburb: 'Suburb ' + i,
+  description: i % 2 ? 'A deliberately long one line description to wrap on a narrow phone screen ' + i : null,
+  value: 1000 + i, value_inc_gst: true, updated_at: new Date(Date.UTC(2026, 9, 12) - i * 60000).toISOString(),
+}));
+
 // Boots Ops on the Dispatch tab against a stubbed ops-api. `api[action]` is a
 // function (url, postBody) returning the JSON body, or { status, body }.
 async function bootDispatch(page, api = {}, { viewport = null, open = true } = {}) {
@@ -431,6 +437,74 @@ test('Dispatch: Scope and notes shows the scope facts, scope photos, quote, scop
   await expect(lines).toHaveCount(0);
 });
 
+test('Dispatch: one scope photo is drawn at its own size, and two photos share a row', async ({ page }) => {
+  const { root } = await bootDispatch(page, {
+    job_detail: (url) => {
+      const id = url.searchParams.get('jobId');
+      if (id === 'job-f1') return Object.assign({}, D_DETAIL[id], { media: [photo(1)] });
+      if (id === 'job-p1') return Object.assign({}, D_DETAIL[id], { media: [photo(1), photo(2)] });
+      return D_DETAIL[id];
+    },
+  });
+  const photos = root.locator('.dpc-photo');
+  await expect(photos).toHaveCount(1);
+  const one = await photos.first().boundingBox();
+  expect(one.width).toBeGreaterThan(100);
+  expect(Math.abs(one.height - one.width * 0.75)).toBeLessThan(1);
+
+  await root.locator('.dpc-job', { hasText: 'SWP-900201' }).click();
+  await expect(photos).toHaveCount(2);
+  const first = await photos.nth(0).boundingBox();
+  const second = await photos.nth(1).boundingBox();
+  expect(second.height).toBeGreaterThan(50);
+  expect(Math.abs(first.height - second.height)).toBeLessThan(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await root.locator('.dpc-job', { hasText: 'SWF-900101' }).click();
+  await expect(photos).toHaveCount(1);
+  const phone = await photos.first().boundingBox();
+  expect(phone.width).toBeGreaterThan(50);
+  expect(Math.abs(phone.height - phone.width * 0.75)).toBeLessThan(1);
+});
+
+test('Dispatch: the fence tool note fields are one list, read by the Jobs tab and by Dispatch', async ({ page }) => {
+  const scope = { job: {
+    runs: [{ length: 10 }], siteNotes: 'Narrow side access\nSmall truck only', checklist: { finalNotes: 'Confirm the colour' },
+    removal: { notes: 'Old fence to the skip' }, supplierNotes: 'Deliver to the rear lane',
+  } };
+  const { root } = await bootDispatch(page, {
+    job_detail: (url) => Object.assign({}, D_DETAIL[url.searchParams.get('jobId')], { job: { id: 'job-f1', type: 'fencing', scope_json: scope } }),
+  });
+  const lines = root.locator('.dpc-scope-line', { hasText: 'Scoper notes' });
+  await expect(lines).toHaveText([
+    'Scoper notes (site): Narrow side access Small truck only',
+    'Scoper notes (final): Confirm the colour',
+    'Scoper notes (removal): Old fence to the skip',
+    'Scoper notes (supplier): Deliver to the rear lane',
+  ]);
+
+  // The Jobs tab's notes block, exactly as it printed before the list was shared.
+  const block = (label, text) => '<div style="margin-bottom:8px;"><div style="font-weight:600;color:var(--sw-dark);">' + label + '</div><div style="color:var(--sw-text);">' + text + '</div></div>';
+  expect(await page.evaluate((s) => renderFenceScopingNotes(s), scope)).toBe(
+    '<div class="fence-scoping-notes" style="font-size:12px;padding:6px 0;line-height:1.6;">' +
+    block('Site notes', 'Narrow side access<br>Small truck only') + block('Final notes', 'Confirm the colour') +
+    block('Removal notes', 'Old fence to the skip') + block('Supplier notes', 'Deliver to the rear lane') +
+    '<div style="font-size:11px;color:var(--sw-text-sec);">from the scoping tool</div></div>');
+  expect(await page.evaluate((s) => renderFenceScopingNotes(JSON.stringify(s)), scope)).toBe(await page.evaluate((s) => renderFenceScopingNotes(s), scope));
+  expect(await page.evaluate(() => [renderFenceScopingNotes(null), renderFenceScopingNotes({}), renderFenceScopingNotes({ job: { siteNotes: '   ' } })])).toEqual(['', '', '']);
+
+  // A field added to the one list shows on both screens.
+  await page.evaluate(() => {
+    const listed = window.fenceScopingNoteFields;
+    window.fenceScopingNoteFields = (s) => listed(s).concat([{ key: 'access', label: 'Access notes', text: 'Gate code is at the office' }]);
+  });
+  expect(await page.evaluate((s) => renderFenceScopingNotes(s), scope)).toContain(block('Access notes', 'Gate code is at the office'));
+  await root.locator('[data-dpc-toggle]').click();
+  await root.locator('[data-dpc-toggle]').click();
+  await expect(lines).toHaveCount(5);
+  await expect(lines.last()).toHaveText('Scoper notes (access): Gate code is at the office');
+});
+
 test('Dispatch: saved notes show every note, an author only when there is one, and each state', async ({ page }) => {
   let notesDown = true;
   const { root, of } = await bootDispatch(page, {
@@ -590,7 +664,15 @@ test('Dispatch: an empty list, a degraded read and a failed job read each say so
 });
 
 test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail once per job open', async ({ page }) => {
-  const { root, calls, of } = await bootDispatch(page);
+  let notesDown = false;
+  const { root, calls, of } = await bootDispatch(page, {
+    job_notes: (url) => {
+      const id = url.searchParams.get('jobId');
+      if (notesDown) return { status: 500, body: { error: 'e2e failure' } };
+      return D_NOTES[id] || { job_id: id, total: 0, notes: [] };
+    },
+    add_note: (url, body) => ({ note: { id: 'n-new', created_at: `${PERTH_YEAR}-10-12T05:16:00+00:00`, detail_json: { text: body.text } }, visibility: 'internal_only', ghl_synced: false }),
+  });
   await expect(root.locator('.dpc-photo')).toHaveCount(6);
   await page.waitForLoadState('networkidle');
   const dispatchCalls = () => calls.filter((c) => ['pipeline', 'job_detail', 'job_notes', 'add_note'].includes(c.action));
@@ -613,12 +695,102 @@ test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail on
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900201 · Yokine');
   await expect(root.locator('.dpc-facts > div')).toHaveCount(5);
   expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1']);
-  // Nothing was written, and the module itself names no other ops-api action.
+  // Nothing was written.
   expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
-  const moduleSource = require('node:fs').readFileSync(path.resolve(__dirname, '..', '..', 'modules', 'ops-dispatch.js'), 'utf8');
-  const actionsInModule = [...moduleSource.matchAll(/ops(?:Fetch|Post)\('([a-z_]+)'/g)].map((m) => m[1]).sort();
-  expect(actionsInModule).toEqual(['add_note', 'job_detail', 'job_notes', 'pipeline', 'pipeline']);
-  expect(moduleSource).not.toMatch(/\bfetch\(|XMLHttpRequest|sendBeacon/);
+
+  // Search, a retry and Save note: every ops-api call they make is one of the four.
+  await page.waitForLoadState('networkidle');
+  const mark = calls.length;
+  await root.locator('[data-dpc-search]').fill('Gwelup');
+  await expect(root.locator('.dpc-job-list')).toHaveText('No jobs match.');
+  await root.locator('[data-dpc-search]').fill('');
+  await expect(root.locator('.dpc-job')).toHaveCount(5);
+  notesDown = true;
+  await root.locator('.dpc-job', { hasText: 'SWP-900202' }).click();
+  await expect(root.locator('[data-dpc-region="notes"] [role="alert"]')).toContainText('Could not load notes.');
+  notesDown = false;
+  await root.locator('[data-dpc-retry="notes"]').click();
+  await expect(root.locator('[data-dpc-region="notes"]')).toHaveText('No notes saved on this job yet.');
+  await root.locator('[data-dpc-note]').fill('Call before delivery');
+  await root.locator('[data-dpc-save]').click();
+  await expect(root.locator('.dpc-note-msg')).toHaveText('Note saved.');
+  // The failed read, its retry, and the re-read after the save.
+  await expect.poll(() => calls.slice(mark).filter((c) => c.action === 'job_notes').length).toBe(3);
+  const since = calls.slice(mark);
+  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'job_detail', 'job_notes', 'pipeline']);
+  expect(since.filter((c) => c.method !== 'GET').map((c) => c.action)).toEqual(['add_note']);
+  expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1', 'job-p2']);
+});
+
+test('Dispatch: typing in the search box is not interrupted when the first list read lands', async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { root, of } = await bootDispatch(page, {
+    pipeline: async (url) => {
+      const q = url.searchParams.get('search');
+      if (q) return D_FOUND(/^gwelup$/i.test(q) ? [D_JOBS.f1] : []);
+      await held;
+      return D_LIST();
+    },
+  });
+  const box = root.locator('[data-dpc-search]');
+  await box.click();
+  await page.keyboard.type('Gwel');
+  await box.evaluate((el) => { el.dataset.e2eKept = '1'; });
+  release();
+  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
+  // Still the same box, still holding the keyboard: the rest of the word lands in it.
+  await expect(box).toBeFocused();
+  await expect(box).toHaveAttribute('data-e2e-kept', '1');
+  await page.keyboard.type('up');
+  await expect(box).toHaveValue('Gwelup');
+  await expect(root.locator('.dpc-job strong')).toHaveText(['SWF-900101 · Gwelup']);
+  expect(of('pipeline').some((c) => c.search === 'Gwelup')).toBe(true);
+});
+
+test('Dispatch: coming back to the tab keeps the note being typed, the list place and the photos', async ({ page }) => {
+  const many = D_MANY();
+  let held = null;
+  let price = 1000;
+  const { root, of } = await bootDispatch(page, {
+    pipeline: async () => {
+      if (held) await held;
+      return { columns: { accepted: many.map((row, i) => (i === 0 ? Object.assign({}, row, { value: price }) : row)) }, total: many.length };
+    },
+    job_detail: () => D_DETAIL['job-f1'],
+  });
+  await expect(root.locator('.dpc-job')).toHaveCount(420);
+  await expect(root.locator('.dpc-price')).toHaveText('$1,000 inc GST');
+  await expect(root.locator('.dpc-photo')).toHaveCount(6);
+
+  // Leave and come back while the re-read is still in flight.
+  let release;
+  held = new Promise((resolve) => { release = resolve; });
+  price = 1250;
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  const list = root.locator('.dpc-job-list');
+  await list.evaluate((el) => { el.scrollTop = 4000; });
+  const place = await list.evaluate((el) => el.scrollTop);
+  expect(place).toBeGreaterThan(1000);
+  const note = root.locator('[data-dpc-note]');
+  await note.click();
+  await page.keyboard.type('Call before');
+  await note.evaluate((el) => { el.dataset.e2eKept = '1'; });
+  await root.locator('.dpc-photo').first().evaluate((el) => { el.dataset.e2eKept = '1'; });
+  release();
+  // The header took the new read; the note box, the photos and the list place did not move.
+  await expect(root.locator('.dpc-price')).toHaveText('$1,250 inc GST');
+  await expect(note).toBeFocused();
+  await expect(note).toHaveAttribute('data-e2e-kept', '1');
+  await page.keyboard.type(' delivery');
+  await expect(note).toHaveValue('Call before delivery');
+  await expect(root.locator('[data-dpc-save]')).toBeEnabled();
+  await expect(root.locator('.dpc-photo').first()).toHaveAttribute('data-e2e-kept', '1');
+  await expect(root.locator('.dpc-job')).toHaveCount(420);
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(place);
+  expect(of('job_detail').length).toBe(1);
 });
 
 test('Dispatch: the sidebar collapses to a strip and the section folds, and both are remembered', async ({ page }) => {
@@ -662,11 +834,7 @@ test('Dispatch: the sidebar collapses to a strip and the section folds, and both
 });
 
 test('Dispatch: a long list is drawn whole, and the phone layout has no sideways scroll', async ({ page }) => {
-  const many = Array.from({ length: 420 }, (_, i) => D_ROW({
-    id: 'job-n' + i, job_number: 'SWF-' + (910000 + i), type: i % 3 ? 'fencing' : 'patio', site_suburb: 'Suburb ' + i,
-    description: i % 2 ? 'A deliberately long one line description to wrap on a narrow phone screen ' + i : null,
-    value: 1000 + i, value_inc_gst: true, updated_at: new Date(Date.UTC(2026, 9, 12) - i * 60000).toISOString(),
-  }));
+  const many = D_MANY();
   const { root } = await bootDispatch(page, {
     pipeline: () => ({ columns: { accepted: many }, total: many.length }),
     job_detail: () => D_DETAIL['job-f1'],
@@ -696,6 +864,33 @@ test('Dispatch: a long list is drawn whole, and the phone layout has no sideways
   await expect(root.locator('.dpc-rail-job')).toHaveCount(420);
   const closed = await measure();
   expect(closed.past).toEqual([]);
+});
+
+test('Dispatch carries the live Purchase orders board below the Dispatch view', async ({ page }) => {
+  const { apiCalls } = await bootOps(page, {
+    responses: {
+      list_pos: {
+        purchase_orders: [
+          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
+        ],
+      },
+    },
+  });
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  const section = page.locator('#viewDispatch #dispatchPurchaseOrders');
+  await expect(section.locator('.section-heading')).toContainText('Purchase orders');
+  await expect(section).toContainText('Live purchase orders');
+  await expect(section.getByRole('button', { name: '+ New PO' })).toBeVisible();
+  const card = section.locator('#materialsKanban .kanban-card', { hasText: 'Demo Supplier' });
+  await expect(card).toBeVisible();
+  await expect(card.locator('button[title="Delete PO"]')).toBeVisible();
+  expect(apiCalls).toContain('list_pos');
+  const below = await page.evaluate(() => {
+    const view = document.getElementById('dispatchRoot');
+    const board = document.getElementById('dispatchPurchaseOrders');
+    return Boolean(view.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(below).toBe(true);
 });
 
 test('the Jarvis bar counts purchase orders as soon as a slow list arrives on Dispatch', async ({ page }) => {

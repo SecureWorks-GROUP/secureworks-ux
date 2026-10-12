@@ -251,20 +251,15 @@
     return facts;
   }
 
-  // The scoper's own notes from the scope tools. Fence tool: the four fields
-  // renderFenceScopingNotes (ops.html) reads. Patio tool: its notes key.
+  // The scoper's own notes from the scope tools. Fence tool: the field list
+  // fenceScopingNoteFields (ops.html) owns, shared with the Jobs tab. Patio
+  // tool: its notes key.
   function scoperNotes(scope_json) {
     var scope = parseScope(scope_json);
     if (!scope || typeof scope !== 'object') return [];
     var out = [];
     var add = function (label, v) { var s = plain(v); if (s) out.push([label, s]); };
-    if (scope.job && typeof scope.job === 'object') {
-      var job = scope.job;
-      add('site', job.siteNotes);
-      add('final', job.checklist && job.checklist.finalNotes);
-      add('removal', job.removal && job.removal.notes);
-      add('supplier', job.supplierNotes);
-    }
+    global.fenceScopingNoteFields(scope).forEach(function (f) { add(f.key, f.text); });
     var notes = scope.notes;
     if (typeof notes === 'string') add('', notes);
     else if (notes && typeof notes === 'object') {
@@ -369,7 +364,7 @@
 
   function loadBase() {
     var token = ++tokens.base;
-    if (state.base.status !== 'ok') { state.base.status = 'loading'; paintQueue(); paintWorkspace(); }
+    if (state.base.status !== 'ok') { state.base.status = 'loading'; paintList(); paintWorkspace(); }
     return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1 }); }).then(function (resp) {
       if (token !== tokens.base) return;
       var got = rowsFromPipeline(resp);
@@ -378,27 +373,23 @@
     }).catch(function () {
       if (token !== tokens.base) return;
       state.base = { status: 'error', rows: [], total: null, degraded: false };
-      paintQueue();
+      paintList();
       paintWorkspace();
     });
   }
 
   // After a list read: keep the open job if it is still known, else open the
-  // one remembered for this session, else the first job in the list.
+  // one remembered for this session, else the first job in the list. An open
+  // job (one reached by search included) keeps its section as drawn: only the
+  // list and the header are redrawn, so typing and the list's place are kept.
   function adoptSelection() {
     var rows = state.base.rows;
     var byId = function (id) { for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]; return null; };
     var current = state.jobId ? byId(state.jobId) : null;
-    if (current) {
-      state.row = current;
-      paintQueue();
-      paintWorkspace();
-      return;
-    }
-    if (state.jobId && state.row) { paintQueue(); paintWorkspace(); return; } // a job reached by search
-    var remembered = byId(readStore('sessionStorage', SS_JOB));
-    var pick = remembered || rows[0] || null;
-    paintQueue();
+    if (current) state.row = current;
+    paintList(true);
+    if (state.jobId && state.row) { paintHead(); return; }
+    var pick = byId(readStore('sessionStorage', SS_JOB)) || rows[0] || null;
     if (pick) selectJob(pick); else paintWorkspace();
   }
 
@@ -517,19 +508,18 @@
 
   // The whole list is always drawn, never capped: the first cards at once and
   // the rest over the next frames, so a long list does not stall the tab.
-  function fill(container, rows, toHtml) {
+  function fill(container, rows, toHtml, first) {
     var token = ++tokens.fill;
-    container.insertAdjacentHTML('beforeend', rows.slice(0, FIRST_CHUNK).map(toHtml).join(''));
-    var at = FIRST_CHUNK;
+    var at = Math.max(FIRST_CHUNK, first || 0);
+    container.insertAdjacentHTML('beforeend', rows.slice(0, at).map(toHtml).join(''));
     var step = function () {
       if (token !== tokens.fill || at >= rows.length || !container.isConnected) return;
       container.insertAdjacentHTML('beforeend', rows.slice(at, at + NEXT_CHUNK).map(toHtml).join(''));
       at += NEXT_CHUNK;
-      schedule(step);
+      global.requestAnimationFrame(step);
     };
-    if (at < rows.length) schedule(step);
+    if (at < rows.length) global.requestAnimationFrame(step);
   }
-  function schedule(fn) { (global.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(fn); }
 
   // What the list area says when it is not showing jobs, or '' when it is.
   function listState() {
@@ -580,11 +570,14 @@
   }
 
   // Repaints the list (or the strip's buttons) without touching the search
-  // box, so typing is never interrupted.
-  function paintList() {
+  // box, so typing is never interrupted. keepPlace redraws as many jobs at
+  // once as were drawn and puts the list back where it was scrolled to.
+  function paintList(keepPlace) {
     var list = region('list');
     if (!list) return;
     tokens.fill++;
+    var drawn = keepPlace ? list.querySelectorAll('[data-dpc-job]').length : 0;
+    var top = list.scrollTop;
     // Updated in place so a pressed button keeps the keyboard focus.
     var mode = region('mode');
     if (mode && mode.innerHTML !== modeHtml()) {
@@ -608,11 +601,13 @@
           : ready ? '<span class="dpc-rail-count" title="Jobs listed">' + rows.length + '</span>' : '';
       }
       list.innerHTML = '';
-      if (rows.length) { var labels = railLabels(rows); fill(list, rows, function (row) { return railHtml(row, labels); }); }
+      if (rows.length) { var labels = railLabels(rows); fill(list, rows, function (row) { return railHtml(row, labels); }, drawn); }
+      if (keepPlace) list.scrollTop = top;
       return;
     }
     list.innerHTML = stateHtml || (degradedNow() ? failLine('Some job details did not load.', searching() ? 'search' : 'list') : '');
-    if (rows.length) fill(list, rows, cardHtml);
+    if (rows.length) fill(list, rows, cardHtml, drawn);
+    if (keepPlace) list.scrollTop = top;
   }
 
   function paintQueue() {
@@ -760,6 +755,7 @@
     var w = region('workspace');
     if (w) w.outerHTML = workspaceHtml();
   }
+  function paintHead() { var el = region('head'); if (el) el.outerHTML = headHtml(state.row); }
   function paintScope() { var el = region('scope'); if (el) el.innerHTML = scopeHtml(); }
   function paintNotes() { var el = region('notes'); if (el) el.innerHTML = notesHtml(); }
   function paintComposer() {
@@ -827,8 +823,7 @@
     }
     else if (t.hasAttribute('data-dpc-photo')) {
       var url = photoUrls[+t.getAttribute('data-dpc-photo')];
-      if (url && typeof global.openOpsLightbox === 'function') global.openOpsLightbox(url);
-      else if (url) global.open(url, '_blank', 'noopener');
+      if (url) global.openOpsLightbox(url);
     }
     else if (t.hasAttribute('data-dpc-save')) { saveNote(); }
   }

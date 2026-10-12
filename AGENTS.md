@@ -39,9 +39,10 @@ Captain 2026-10-06: the nav is Jobs (Ops opens on it), Calendar, Financials,
 Dispatch, Sales. Today, Inbox (AI annotations) and Approvals are hidden on the
 front end only, and Materials became Dispatch; their views, loaders and ops-api
 actions stay. `OPS_HIDDEN_VIEWS` / `opsVisibleView` (search `// <ops-tab-set>`)
-send every route into a hidden view to Jobs; Finance Health and Job P&L are
-hidden the same way through `OPS_HIDDEN_SUBTABS`. Bill Reconciliation (the
-`materials_recon_*` queue) moved from Materials to its own Financials sub-tab. Approvals is still the hidden
+send every route into a hidden view to Jobs; Finance Health and Job P&L only
+lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
+moved from Materials to its own Financials sub-tab, and Supplier Price Updates
+(`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
 concept on sample data in `modules/ops-dispatch-concept.js` with no network
 call; do not wire it to live data without a Captain ruling. Guard:

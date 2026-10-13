@@ -759,20 +759,42 @@ trade request never reads as approved. The form never shows or uses a share
 link, and never queues a refused or unsent request offline. Search
 `// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
 
-## Trade hourly rate: office only (`trade.html`)
+## Trade invoice rate: a box, opened on the usual rate (`trade.html`)
 
-Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes
-no `set_trade_rate` call; Profile and assigned job cards show the office rate
-read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
-or extra line keeps a typed rate, because ops-api flags that client-entered rate
-for office verification and never saves it as the trade's rate. A missing rate
-points the trade to the office, never to Profile. A restored session draft
-cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
-clears it on every builder paint, even when hours data is missing or has no
-positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
-on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
-next trade before that user's `my_hours` lands. Guard:
-`tests/e2e/trade-rate-office-only.spec.js`.
+Captain 2026-10-13, reversing the read-only rate of 2026-09-23: "it should look
+like the same boxes as the other inputs, and just have like an auto fill to
+their rate that they normally set so they can change the rate per job and it
+should just have like a brief description of work as well." On an hours card
+the rate (`[data-cardrate]`) and the description of work (`[data-carddesc]`)
+are boxes in the same block as date, start, finish and break. The rate opens on
+the trade's usual rate (`my_hours.rate`) and the app sends whatever is left in
+the box: `rate_source` is `server_resolved` while it equals the usual rate,
+`client_entered` once changed. What a changed rate means is ops-api's call; do
+not add a client rule for it. `_pinAssignedCardRates` keeps an untouched card on
+the usual rate and never overwrites one the trade changed (`rate_user_edited`).
+`trade.html` still makes no `set_trade_rate` call and Profile stays read-only:
+the app never saves a rate as the trade's usual one. `_hoursData` and
+`_tradeRate` clear in `resetInvoiceSession` and on the `onLogin` owner-change
+path so one trade's usual rate cannot open in the next trade's box before that
+user's `my_hours` lands. Guard: `tests/e2e/trade-invoice-rate-box.spec.js`.
+
+## Trade sign in and sign out (`trade.html`)
+
+Captain 2026-10-13: trades sign in to a job and sign out of it with one tap
+each, and those taps carry over to the invoice ("it shouldn't be complicated or
+clunky"). The taps are the existing `clock_event` `clock_on` / `clock_off`,
+on the job stepper, the Today card and the signed-in bar; the pure rules are
+`TradeSiteVisitCore` (`// <trade-site-visit>`). Keep these: one tap and no
+confirm; signing in is optional; the words are Sign in, Sign out and "Signed in
+7:02 am", never clock, timer or shift; a sign in is never refused or held up
+for a location; the app never guesses a finish (a forgotten sign out is typed
+by the trade and marked as typed); no text, push or reminder of any kind is
+sent (not approved). The app must work with an ops-api that has none of the
+visit fields: every new field is read if present and never required. The full
+contract, field names and the both-ways deploy behaviour live in `trade-app.md`
+→ "Sign in and sign out". Guards: `scripts/test-trade-site-visit.js`,
+`tests/e2e/trade-sign-in-out.spec.js`,
+`tests/e2e/trade-invoice-sign-in-fill.spec.js`.
 
 ## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
 
@@ -783,10 +805,15 @@ add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
 (`time_entry_required`). One line is one job on one day: a second day is its
 own Extras row. The date worked cannot be after today (Perth), or more than a year
-before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
-onto a line: no default date or start, no device memory, no prefill from the
-schedule or clock on and off. A card, an Extras row and the job-view row open
-blank; a card shows hours on record only as a reminder. The job-view row
+before it, anywhere a trade gives it, and the app never invents or remembers a date or a time
+on a line: no default date or start, no device memory, no prefill from the
+schedule or from the stamps on the assignment row. One source only may fill a
+line (Captain 2026-10-13: "sign in, sign out, and then that's what carries over
+to the invoice"): the trade's own sign in and sign out on that job, handed over
+as `my_hours` `site_visit_days`, rounded to 15 minutes, tagged "From your sign
+in", still editable, and never over something they typed. Without one, a card, an
+Extras row and the job-view row open blank; a card shows hours on record only
+as a reminder. The job-view row
 records times against the job and never promises the week or the invoice.
 Lines that are not time carry none of the fields. Search
 `// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
@@ -819,7 +846,12 @@ paged own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity
 
 ## Trade clock recovery (`trade.html`)
 
-`checkServerClockRecovery` runs after every `my_jobs` load. The Everyone-feed
+`checkServerClockRecovery` runs after every `my_jobs` load. When the payload
+carries `open_site_visit` (the caller's own, from the server) that is the whole
+answer: it feeds the signed-in bar, and a visit from an earlier day or marked
+`no_sign_out` asks the trade for the time they left (`close_site_visit_late`,
+saved as typed) instead of sending them to the office. The rest of this section
+is the fallback for an ops-api that sends no `open_site_visit`. The Everyone-feed
 flag is `canUseEveryoneLens() && _adminViewAll`, the same derivation
 `fetchMyJobsForActiveLens` uses. It may adopt a server clock as this device's
 running timer ONLY when the row is the signed-in trade's own (`user.id`/
@@ -827,7 +859,7 @@ running timer ONLY when the row is the signed-in trade's own (`user.id`/
 carries every crew's rows), on a live job, clocked on today or yesterday
 (Perth). All-tab own-row preference and the failed-mine rematch use that same
 check (`isOwnClockRow`). Merged own rows are stamped with the viewer's id, so
-they still pass that check. An own clock that fails those gets the "ask the
+they still pass that check. An own sign in that fails those gets the "Ask the
 office to close it" notice, never adoption. A clock_event the server refuses
 ('Not your assignment', any non-transient 4xx, `success:false`) is a refusal
 (`isClockEventRefusal`): never queued offline, never "Saved locally", and a

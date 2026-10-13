@@ -1257,7 +1257,7 @@
     .offline-bar {
       display: none;
       position: fixed;
-      top: 56px;
+      top: var(--sw-header-h, 56px);
       left: 0;
       right: 0;
       background: #E74C3C;
@@ -2658,6 +2658,33 @@
     .js-primary { display: block; width: 100%; min-height: 54px; border: none; border-radius: 12px; background: var(--sw-dark); color: #fff; font-family: var(--sw-font); font-size: 17px; font-weight: 800; cursor: pointer; }
     .job-stepper[data-stepper-state="working"] .js-primary { background: var(--sw-green); }
     .js-primary:active { opacity: 0.85; }
+    .js-secondary.js-out { min-height: 48px; border: 2px solid var(--sw-dark); border-radius: 12px; color: var(--sw-dark); font-size: 16px; font-weight: 800; text-decoration: none; }
+    .mat-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 10px 14px; margin-bottom: 12px; font-size: 13px; font-weight: 600; color: var(--sw-dark); }
+    .mat-line button { min-height: 40px; padding: 6px 12px; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: 700 13px var(--sw-font); cursor: pointer; }
+    /* Sign in and sign out [trade-site-visit] */
+    .header { flex-wrap: wrap; }
+    .sv-bar { flex: 0 0 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 6px 6px 6px 12px; border-radius: 10px; background: rgba(255,255,255,0.12); color: #fff; }
+    .sv-bar[hidden] { display: none; }
+    .sv-bar-where { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: 0; padding: 0; color: inherit; font-family: var(--sw-font); text-align: left; cursor: pointer; }
+    span.sv-bar-where { cursor: default; }
+    .sv-bar-where b { font-size: 13px; font-weight: 800; }
+    .sv-bar-where span { font-size: 11px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .sv-bar-btn { min-height: 40px; padding: 6px 14px; border: 0; border-radius: 8px; background: #fff; color: var(--sw-dark); font: 800 13px var(--sw-font); cursor: pointer; }
+    .sv-break { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--sw-text-sec); }
+    .sv-bar .sv-break { margin-bottom: 0; color: #fff; }
+    .sv-break-btn { min-height: 40px; padding: 6px 12px; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: 700 13px var(--sw-font); cursor: pointer; }
+    .jc-actions .act.sv-in { background: var(--sw-dark); color: #fff; }
+    .jc-actions .act.sv-out { background: #fff; color: var(--sw-dark); box-shadow: inset 0 0 0 2px var(--sw-dark); }
+    .jct.jct-rate { grid-template-columns: minmax(92px, 0.45fr) 1fr; }
+    .jct-sv { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: var(--sw-text-sec); }
+    .jct-sv[hidden] { display: none; }
+    .jct-sv-tag { font-weight: 800; color: #0B6B3A; background: rgba(39,174,96,0.12); border-radius: 999px; padding: 2px 8px; }
+    .jct-sv-tag[hidden], .jct-sv-use[hidden] { display: none; }
+    .jct-sv-use { min-height: 32px; padding: 4px 10px; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: 700 12px var(--sw-font); cursor: pointer; }
+    .jct-day { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--sw-border); }
+    .jct-dayhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: var(--sw-dark); }
+    .jct-dayhead button { background: none; border: 0; color: var(--sw-red); font: 600 12px var(--sw-font); cursor: pointer; min-height: 32px; }
+    .jct-total { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
     .js-secondary { display: block; width: 100%; min-height: 40px; margin-top: 8px; border: none; background: transparent; color: var(--sw-text-sec); font-family: var(--sw-font); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
     .sow-install { margin-top: 10px; border: 1px dashed var(--sw-border); border-radius: 10px; padding: 0 12px; }
     .sow-install > summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; list-style: none; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sw-text-sec); }
@@ -3495,6 +3522,8 @@
     <span id="syncDot" onclick="showSyncStatus()" style="width:10px;height:10px;border-radius:50%;background:var(--sw-green);cursor:pointer;flex-shrink:0;display:none;" title="Sync status"></span>
     <div class="header-user" id="headerUser" onclick="toggleUserMenu()"></div>
   </div>
+  <!-- Signed-in bar: shows on every screen while the trade is signed in to a job. -->
+  <div class="sv-bar" id="siteVisitBar" hidden></div>
 </div>
 <div class="offline-bar" id="offlineBar">No internet connection — working offline</div>
 <div class="notif-banner" id="notifBanner" style="display:none">
@@ -3591,11 +3620,6 @@
 <div id="viewJob" class="view">
   <div class="container" id="jobDetailContent">
     <div class="loading-screen"><div class="spinner"></div>Loading job...</div>
-  </div>
-  <div id="stickyTimerBar" style="display:none;position:fixed;top:0;left:0;right:0;height:40px;background:var(--sw-dark);color:#fff;z-index:400;align-items:center;justify-content:space-between;padding:0 12px;font-size:13px;font-weight:600;">
-    <span id="stickyTimerText">⏱ 0m</span>
-    <span id="stickyTimerJob" style="font-size:11px;color:rgba(255,255,255,0.7);"></span>
-    <button id="stickyTimerPause" style="background:none;border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600;"></button>
   </div>
 </div>
 
@@ -4283,7 +4307,7 @@
     var on = new Date(asg.clocked_on_at);
     var date = Number.isNaN(on.getTime()) ? 'an earlier day'
       : on.toLocaleDateString('en-AU', { timeZone: 'Australia/Perth', weekday: 'short', day: 'numeric', month: 'short' });
-    showClockNotice('Open clock', 'You have an open clock on ' + label + ' from ' + date + ' - ask the office to close it.');
+    showClockNotice('Still signed in', 'You are still signed in on ' + label + ' from ' + date + '. Ask the office to close it.');
   }
 
   // A clock_event the server answered with a refusal (not ours, not found,
@@ -4296,16 +4320,18 @@
     return status >= 400 && status < 500 && [401, 408, 425, 429].indexOf(status) === -1;
   }
 
-  // Stale clock prompt — shown when the trade's own fresh clock is 14+ hours old
+  // Shown when the trade's own fresh sign in is 14+ hours old and ops-api
+  // keeps no visit record yet. With a visit record the trade types the time
+  // they left instead (askLateFinish).
   function showStaleClockPrompt(assignment, hours) {
     var hrs = Math.round(hours);
     showConfirm(
-      'Still working?',
-      'You\'ve been clocked on for ' + hrs + ' hours. Did you forget to clock off?',
-      'Still going'
+      'Still on site?',
+      'You signed in ' + hrs + ' hours ago and have not signed out. Are you still there?',
+      'Still on site'
     ).then(function(stillGoing) {
       if (stillGoing) {
-        toast('Timer continues');
+        toast('Still signed in');
         return;
       }
       // "No": end THIS clock properly. Load its job, then the end-of-day flow
@@ -4337,7 +4363,10 @@
 
   // Server clock recovery — check my_jobs data for this trade's own active clock
   function checkServerClockRecovery(data, requestedAll) {
-    if (_clockState === 'on') return; // already clocked on locally
+    // The server's own record of this trade's open sign in wins when it is
+    // sent: it feeds the signed-in bar and asks for a forgotten leave time.
+    if (adoptServerSiteVisit(data)) return;
+    if (_clockState === 'on' || _siteTapWaiting) return; // already signed in on this phone
     try {
       // Each item in these arrays IS an assignment (flat structure from my_jobs)
       var allAssignments = [].concat(
@@ -4362,18 +4391,25 @@
         // Also set current job so job detail can render
         if (asg.jobs) _currentJobId = asg.jobs.id;
         saveTimerState();
+        _siteVisit = TradeSiteVisitCore.openVisit({
+          job_id: (asg.jobs || {}).id, assignment_id: asg.id, job_number: (asg.jobs || {}).job_number,
+          site_suburb: (asg.jobs || {}).site_suburb, signed_in_at: asg.clocked_on_at
+        });
+        renderSiteVisitBar();
         // Check if stale (14+ hours)
         var clockedHours = (Date.now() - new Date(asg.clocked_on_at).getTime()) / 3600000;
         if (clockedHours > 14) {
           showStaleClockPrompt(asg, clockedHours);
         } else if (asg.jobs) {
-          // Auto-navigate to the active job so tradie sees their running timer
-          toast('Resuming active timer...');
+          // Open the job they are signed in to, so Sign out is one tap away.
+          toast('You are signed in here');
           openJob(asg.jobs.id, asg.id);
         }
         return;
       }
-      // An old clock or one on a closed job cannot be ended from here.
+      // No open sign in on any of their rows: nothing to show in the bar.
+      if (_siteVisit && !_siteVisit.visit_id) { _siteVisit = null; renderSiteVisitBar(); }
+      // An old sign in or one on a closed job cannot be ended from here.
       if (staleOwn) showOpenClockOfficeNotice(staleOwn);
     } catch (e) { /* non-blocking */ }
   }
@@ -4530,6 +4566,7 @@
 
     setTimeout(function() {
       _user = null;
+      clearSiteVisitSession();
       _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
@@ -6609,14 +6646,19 @@
     snapshot.forEach(function(item) {
       chain = chain.then(function() {
         if (!_isOfflineInvoiceAction(item.action)) {
-          return api(item.action, null, item.body).then(function() {
+          return api(item.action, null, item.body).then(function(res) {
             if (['update_job_phase', 'update_my_assignment', 'clock_event', 'complete_job'].indexOf(item.action) !== -1) {
               _invalidateAssignmentLifecycleCaches();
+            }
+            if (item.action === 'clock_event') {
+              try { localStorage.removeItem('sw_pending_clock_' + ((item.body && item.body.assignment_id) || '')); } catch (x) {}
+              siteTapLanded(item.body, res, false);
             }
           }).catch(function(e) {
             // A refused clock event never succeeds on retry: drop it.
             if (item.action === 'clock_event' && isClockEventRefusal(e)) {
               try { localStorage.removeItem('sw_pending_clock_' + ((item.body && item.body.assignment_id) || '')); } catch (x) {}
+              siteTapLanded(item.body, null, true);
               return;
             }
             remaining.push(item);
@@ -6917,6 +6959,7 @@
       _tradeRate = null;
     }
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
+    resetSiteVisitSession();
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
     _userTier = _user.trade_tier || determineTier(_user.email);
     // Dispatcher = ops manager / admin. They get the see-all toggle and, for the
@@ -7062,6 +7105,7 @@
     }
     _currentView = view;
     _lastViewChangeTime = Date.now();
+    renderSiteVisitBar();
 
     // Persist navigation state so app can resume after background kill without dropping
     // the trade back to the root job screen.
@@ -8434,13 +8478,31 @@
 
   // My Jobs installer action row (Call / Text / Notes / Navigate), styled as
   // the unified card's quiet .jc-actions — orange stays reserved for allocate.
-  function _myJobActionsHTML(job, a, type) {
+  // Sign in and Sign out on the job's card: one tap from the Today list, the
+  // same two taps as the job screen. Only on the viewer's own accepted job.
+  // The job they are signed in to keeps its Sign out wherever its card shows.
+  function siteCardTapHTML(job, a, secKey) {
+    if (!job || !job.id || !a || !a.id || a._makesafePool) return '';
+    if (!isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll)) return '';
+    var status = String(a.status || '').toLowerCase();
+    if (status !== 'confirmed' && status !== 'in_progress') return '';
+    var args = '(\'' + esc(a.id) + '\', \'' + esc(job.id) + '\')';
+    if (signedInOnRow(job, a)) {
+      return '<button type="button" class="act sv-out" data-card-signout="' + esc(a.id) + '" onclick="event.stopPropagation();siteSignOut' + args + '">Sign out</button>';
+    }
+    var visit = currentSiteVisit();
+    if (secKey !== 'today' || (visit && visit.job_id === job.id)) return '';
+    return '<button type="button" class="act sv-in" data-card-signin="' + esc(a.id) + '" onclick="event.stopPropagation();siteSignIn' + args + '">Sign in</button>';
+  }
+
+  function _myJobActionsHTML(job, a, type, secKey) {
     var cardPhone = getTradeCardPhone(job);
     var CALL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
     var TEXT = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
     var NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     var NAV = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>';
     var h = '<div class="jc-actions">';
+    h += siteCardTapHTML(job, a, secKey);
     if (cardPhone) {
       h += '<a class="act" href="tel:' + esc(cardPhone) + '" onclick="event.stopPropagation()">' + CALL + 'Call</a>';
       if (type === 'makesafe') h += '<a class="act" href="sms:' + esc(cardPhone) + '" onclick="event.stopPropagation()">' + TEXT + 'Text</a>';
@@ -8755,7 +8817,7 @@
         html += UnifiedJobCard.wrap(_model, {
           onclick: openAction + '(\'' + job.id + '\', \'' + assignmentArg + '\')',
           showWeather: true,
-          actionsHTML: _myJobActionsHTML(job, a, type)
+          actionsHTML: _myJobActionsHTML(job, a, type, sec.key)
         });
       });
     });
@@ -10567,15 +10629,20 @@
     var working = status === 'in_progress';
     var done = status === 'complete' || isJobDone(phase);
     var jobDone = phase === 'complete';
-    var startedAt = myAssignmentStartedAt(a);
-    var isMs = getTradeJobType(data.job) === 'makesafe';
+    var job = data.job || {};
+    var isMs = getTradeJobType(job) === 'makesafe';
+    var visit = currentSiteVisit();
+    var mine = visit && visit.job_id === job.id ? visit : null;
+    var signedIn = !done && (working || !!mine) && signedInOnRow(job, a);
+    var breakAsk = _siteBreakAsk && _siteBreakAsk.job_id === job.id;
+    var aid = esc(a.id), jid = esc(job.id || '');
     var stepCls = function(n) {
       var idx = done ? 3 : working ? 2 : 1;
       if (n < idx) return 'done';
       if (n === idx) return 'active';
       return 'future';
     };
-    var h = '<div class="job-stepper" data-job-stepper data-stepper-state="' + (done ? 'done' : working ? 'working' : 'accepted') + '">';
+    var h = '<div class="job-stepper" data-job-stepper data-stepper-state="' + (done ? 'done' : working ? 'working' : 'accepted') + '" data-signed-in="' + (signedIn ? '1' : '0') + '">';
     h += '<div class="js-track">';
     h += '<div class="js-step ' + stepCls(1) + '"><span class="js-dot">' + (stepCls(1) === 'done' ? '&#10003;' : '1') + '</span><span class="js-label">Accepted</span></div>';
     h += '<div class="js-line ' + (working || done ? 'done' : '') + '"></div>';
@@ -10583,22 +10650,34 @@
     h += '<div class="js-line ' + (done ? 'done' : '') + '"></div>';
     h += '<div class="js-step ' + stepCls(3) + '"><span class="js-dot">' + (done ? '&#10003;' : '3') + '</span><span class="js-label">' + (isMs ? 'Report' : 'Done') + '</span></div>';
     h += '</div>';
+    var finishBtn = function(cls) {
+      return isMs
+        ? '<button type="button" class="' + cls + '" data-stepper-finish onclick="switchJobTab(\'ms_report\')">Do the report</button>'
+        : '<button type="button" class="' + cls + '" data-stepper-finish onclick="confirmThenComplete()">Job complete</button>';
+    };
+    var signInBtn = '<button type="button" class="js-primary" data-stepper-start onclick="siteSignIn(\'' + aid + '\', \'' + jid + '\')">Sign in</button>';
     if (done) {
       h += '<div class="js-state js-state-done">' + (jobDone ? 'Job complete' : 'Your day on this job is complete') + '</div>';
+      if (breakAsk) h += siteBreakAskHTML();
+    } else if (signedIn) {
+      // "Signed in 7:02 am" and a running count. One tap signs out.
+      var since = (mine && mine.signed_in_at) || myAssignmentStartedAt(a);
+      var label = mine ? TradeSiteVisitCore.signedInText(mine) : (since ? 'Signed in ' + siteClock(since) : 'Signed in');
+      h += '<div class="js-state" data-signed-in-state>' + esc(label)
+        + (since ? ' · <span id="timerElapsed" data-since="' + esc(since) + '">' + esc(formatElapsed(since)) + '</span>' : '') + '</div>';
+      h += finishBtn('js-primary');
+      h += '<button type="button" class="js-secondary js-out" data-stepper-endday onclick="siteSignOut(\'' + aid + '\', \'' + jid + '\')">Sign out</button>';
     } else if (working) {
-      var since = startedAt ? new Date(startedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) : '';
-      h += '<div class="js-state">Working' + (since ? ' since ' + esc(since) : '') + (startedAt ? ' · <span id="timerElapsed">' + esc(formatElapsed(startedAt)) + '</span>' : '') + '</div>';
-      if (isMs) {
-        h += '<button type="button" class="js-primary" data-stepper-finish onclick="switchJobTab(\'ms_report\')">Do the report</button>';
-        h += '<button type="button" class="js-secondary" data-stepper-endday onclick="timerAction(\'clock_off\', \'' + esc(a.id) + '\')">Leaving site (no report yet)</button>';
-      } else {
-        h += '<button type="button" class="js-primary" data-stepper-finish onclick="confirmThenComplete()">Job complete</button>';
-        h += '<button type="button" class="js-secondary" data-stepper-endday onclick="timerAction(\'clock_off\', \'' + esc(a.id) + '\')">End my day (job continues)</button>';
-      }
+      // On the job but not signed in right now: signed out earlier, or
+      // never signed in. Signing in again is a second visit.
+      h += '<div class="js-state" data-signed-out-state>' + (a.clocked_off_at ? 'Signed out ' + esc(siteClock(a.clocked_off_at)) : 'Not signed in') + '</div>';
+      if (breakAsk) h += siteBreakAskHTML();
+      h += signInBtn;
+      h += finishBtn('js-secondary');
     } else {
       var sched = a.scheduled_date ? formatDate(a.scheduled_date) : '';
       h += '<div class="js-state">Scheduled' + (sched ? ' for ' + esc(sched) : '') + (a.start_time ? ' · ' + esc(String(a.start_time).slice(0, 5)) : '') + '</div>';
-      h += '<button type="button" class="js-primary" data-stepper-start onclick="timerAction(\'clock_on\', \'' + esc(a.id) + '\')">Start work</button>';
+      h += signInBtn;
     }
     h += '</div>';
     return h;
@@ -10711,6 +10790,7 @@
       h += '</div></div>';
     } else if (!isJobDone(phase) && (myAssignment.status === 'confirmed' || myAssignment.status === 'in_progress')) {
       h += renderJobStepper(data, phase, myAssignment);
+      if (myAssignment.status === 'in_progress') h += materialsCheckLineHTML();
     } else if (phase === 'complete') {
       h += '<div style="text-align:center;margin-bottom:12px;padding:12px;background:var(--sw-light);border-radius:10px">';
       h += '<div style="font-size:15px;font-weight:800;color:var(--sw-green)">Completed</div>';
@@ -13057,9 +13137,8 @@
     if (lastTab === 'comms' && viewOnly) lastTab = 'scope';
     switchJobTab(lastTab);
 
-    // ── Timer system (unchanged) ──
     startTimerTick();
-    setTimeout(setupStickyTimer, 100);
+    renderSiteVisitBar();
 
     // ── Comms unread badge (async, non-blocking) ──
     if (job.ghl_contact_id) {
@@ -15449,7 +15528,8 @@
     }
 
     function sendMakesafeReport() {
-      api('submit_makesafe_report', null, payload).then(function() {
+      api('submit_makesafe_report', null, payload).then(function(result) {
+        siteVisitJobFinished(payload.job_id || payload.jobId || _currentJobId, result);
         toast('Report submitted');
         if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(_currentJobId);
         else refreshJobTab('ms_report');
@@ -17272,7 +17352,7 @@
 
     // Clock state entries from localStorage
     if (_clockState === 'on' && _clockedOnAt) {
-      timeline.push({ time: _clockedOnAt, icon: '&#128296;', text: 'Clocked on', type: 'clock' });
+      timeline.push({ time: _clockedOnAt, icon: '&#128296;', text: 'Signed in', type: 'clock' });
     }
     if (_travelStartTime) {
       timeline.push({ time: _travelStartTime, icon: '&#128663;', text: 'Started travel', type: 'clock' });
@@ -20694,6 +20774,9 @@
         var moved = Object.assign({}, c);
         moved.scheduled_date = c.scheduled_date ? (_weeklyDatePlusDays(String(c.scheduled_date).slice(0, 10), shift) || c.scheduled_date) : c.scheduled_date;
         moved.work_date = '';
+        // A sign in belongs to the week it happened in: it does not move.
+        moved.sv = null;
+        moved.more_days = [];
         delete moved._idx;
         return moved;
       });
@@ -20708,6 +20791,7 @@
         _hoursData = data;
         _tradeRate = data.rate;
         buildJobCards();
+        _applySiteVisitDays();
         carried.forEach(function(c) {
           var dup = _jobCards.some(function(x) { return x.job_id && x.job_id === c.job_id && x.scheduled_date === c.scheduled_date; });
           if (!dup) _jobCards.push(_newJobCard(c));
@@ -21792,6 +21876,7 @@
     // submit path; the weekly work-order builder is an extra door only.
     if (!opts.expenseOnly && jobCentricEnabled()) {
       buildJobCards();
+      _applySiteVisitDays();
       _invoiceBuilderOpen = true;
       if (isPerMetreUser()) {
         _pmWoHydrateState = 'pending';
@@ -22861,6 +22946,7 @@
       _syncJobCardsFromDOM();
       _syncRowsFromDOM();
       _syncInvLumpLinesFromDOM();
+      _applySiteVisitDays();
       renderInvoiceBuilder();
     }).catch(function() {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
@@ -23343,9 +23429,9 @@
   // ════════════════════════════════════════════════════════════════════════════
   // JOB-CENTRIC INVOICE (cutover path) — one card per whitelisted assignment.
   // Times worked and description stay editable; hours are worked out from the
-  // times. Assigned-card rates are office-only
-  // (read-only). Only a searched-in (manually_added) card or extra line keeps a
-  // typed rate, which ops-api flags for office verification.
+  // times, and filled from the trade's own sign in and sign out where they
+  // tapped them. The rate is a box that opens on their usual rate and can be
+  // changed per job; ops-api decides what a changed rate means.
   // ════════════════════════════════════════════════════════════════════════════
 
   function _defaultJobCardWoMode() {
@@ -23377,7 +23463,14 @@
     var today = clockPerthDay(new Date());
     return { min: c && c.assignment_id ? start : TradeTimeEntryCore.earliest(today), max: end && end < today ? end : today };
   }
+  function _jobCardDaySyncHours(line) {
+    if (line) line.hours = TradeTimeEntryCore.hoursFor(line.start_time, line.finish_time, line.break_minutes);
+    return line;
+  }
   function _jobCardTimeHint(c) {
+    // A line carrying a sign in says so itself; hours on record would only
+    // repeat it.
+    if (c.sv) return '';
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
       return TradeTimeEntryCore.hoursText(c.logged_hours) + ' on record for this job. Add the times you worked.';
     }
@@ -23425,8 +23518,16 @@
       start_time: '',
       finish_time: '',
       break_minutes: 0,
-      logged_hours: null
+      logged_hours: null,
+      // The signed-in day this line was filled from, and any further
+      // signed-in days of the same job. [trade-site-visit]
+      sv: null,
+      more_days: [],
+      // The rate box opens on the trade's usual rate; a rate they change for
+      // this job stays theirs.
+      rate_user_edited: false
     }, fields || {});
+    card.more_days = (Array.isArray(card.more_days) ? card.more_days : []).filter(Boolean).map(_jobCardDaySyncHours);
     // A figure typed before times were required (an older saved draft) is kept
     // only as a reminder; it bills nothing until the times are entered.
     if (!card.finish_time && card.logged_hours == null && Number(card.hours) > 0) card.logged_hours = Number(card.hours);
@@ -24051,14 +24152,203 @@
     });
   }
 
+  // ── Sign ins carried onto the invoice [trade-site-visit] ────────────────
+  // my_hours hands each card its site_visit_days. A line is filled only
+  // while its boxes are untouched (or still hold the sign in they were
+  // filled from), so nothing the trade typed, a restored draft included, is
+  // ever overwritten. An ops-api that sends no site_visit_days leaves every
+  // card exactly as it was: blank, for the trade to type.
+  function _siteVisitFillLine(line, day) {
+    var was = line.sv || null;
+    var follows = was ? TradeSiteVisitCore.same(line, was) : TradeSiteVisitCore.blank(line);
+    line.sv = day || null;
+    if (day && follows) TradeSiteVisitCore.fill(line, day);
+    return line;
+  }
+  function _applySiteVisitDays() {
+    var data = _hoursData || {};
+    if (!Array.isArray(data.assignments)) return;
+    var served = false, byAssignment = {};
+    data.assignments.forEach(function(a) {
+      if (!a || !a.id || !Array.isArray(a.site_visit_days)) return;
+      served = true;
+      byAssignment[a.id] = TradeSiteVisitCore.days(a.site_visit_days);
+    });
+    if (!served) return;
+    var input = [];
+    _jobCards.forEach(function(c, i) {
+      if (c && c.assignment_id && c.job_id) input.push({ key: i, job_id: c.job_id, scheduled_date: c.scheduled_date, days: byAssignment[c.assignment_id] || [] });
+    });
+    var plan = TradeSiteVisitCore.assign(input);
+    _jobCards.forEach(function(c, i) {
+      if (!c || !c.assignment_id) return;
+      _siteVisitFillLine(c, plan.line[i] || null);
+      _jobCardSyncHours(c);
+      var have = {};
+      (c.more_days || []).forEach(function(l) { if (l && l.sv) have[l.sv.work_date] = l; });
+      c.more_days = (plan.more[i] || []).map(function(day) {
+        var line = have[day.work_date] || { work_date: '', start_time: '', finish_time: '', break_minutes: 0, sv: null, removed: false };
+        return _jobCardDaySyncHours(_siteVisitFillLine(line, day));
+      });
+    });
+  }
+  // Jobs signed in to this week that have no card: offered, never added for them.
+  function _siteVisitOtherJobs() {
+    var onCards = {};
+    _jobCards.forEach(function(c) { if (c && c.job_id) onCards[c.job_id] = true; });
+    return TradeSiteVisitCore.otherJobs((_hoursData || {}).site_visit_days_other).filter(function(g) { return !onCards[g.job_id]; });
+  }
+  function _siteVisitOtherJobsHtml() {
+    var jobs = _siteVisitOtherJobs();
+    if (!jobs.length) return '';
+    var h = '<div data-sv-other style="border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--sw-card)">';
+    h += '<div style="font-size:12px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">You also signed in at</div>';
+    jobs.forEach(function(g, gi) {
+      var when = g.days.map(function(d) { return TradeTimeEntryCore.dayText(d.work_date); }).join(', ');
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0">';
+      h += '<span style="font-size:13px;color:var(--sw-dark);min-width:0">' + esc([g.job_number, g.site_suburb].filter(Boolean).join(' \u00B7 ') || 'A job') + '<span style="display:block;font-size:11px;color:var(--sw-text-sec)">' + esc(when) + '</span></span>';
+      h += '<button type="button" class="btn btn-secondary btn-small" data-sv-other-add="' + gi + '" onclick="addSiteVisitJob(' + gi + ')" style="width:auto;flex-shrink:0">Add this job</button>';
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
+  window.addSiteVisitJob = function(gi) {
+    var g = _siteVisitOtherJobs()[gi];
+    if (!g) return;
+    _syncJobCardsFromDOM();
+    var defRate = Number((_hoursData && _hoursData.rate) || _tradeRate || 0);
+    var first = g.days[0];
+    var card = _newJobCard({
+      assignment_id: null,
+      manually_added: true,
+      job_id: g.job_id,
+      job_number: g.job_number,
+      client_name: g.client_name,
+      site_suburb: g.site_suburb,
+      job_type: g.job_type,
+      is_makesafe: getTradeJobType({ id: g.job_id, type: g.job_type, job_number: g.job_number }) === 'makesafe',
+      scheduled_date: first.work_date,
+      rate: defRate,
+      rate_source: 'client_entered',
+      description: '',
+      included: true
+    });
+    _siteVisitFillLine(card, first);
+    _jobCardSyncHours(card);
+    card.more_days = g.days.slice(1).map(function(day) {
+      return _jobCardDaySyncHours(_siteVisitFillLine({ work_date: '', start_time: '', finish_time: '', break_minutes: 0, sv: null, removed: false }, day));
+    });
+    _jobCards.push(card);
+    renderInvoiceBuilder();
+  };
+  // The tag and note under a line that carries a sign in.
+  function _siteVisitNoteHtml(line, attr) {
+    var n = TradeSiteVisitCore.note(line, line.sv);
+    var show = !!(n.tag || n.text);
+    return '<div class="jct-sv" ' + attr + (show ? '' : ' hidden') + '>'
+      + '<span class="jct-sv-tag" data-sv-tag' + (n.tag ? '' : ' hidden') + '>' + esc(n.tag) + '</span>'
+      + '<span data-sv-text>' + esc(n.text) + '</span>'
+      + '<button type="button" class="jct-sv-use" data-sv-use' + (n.restore ? '' : ' hidden') + '>Use my sign in times</button></div>';
+  }
+  function _refreshSiteVisitNote(line, el) {
+    if (!el || !line) return;
+    var n = TradeSiteVisitCore.note(line, line.sv);
+    el.hidden = !(n.tag || n.text);
+    var tag = el.querySelector('[data-sv-tag]'), text = el.querySelector('[data-sv-text]'), use = el.querySelector('[data-sv-use]');
+    if (tag) { tag.textContent = n.tag; tag.hidden = !n.tag; }
+    if (text) text.textContent = n.text;
+    if (use) use.hidden = !n.restore;
+  }
+  // "Use my sign in times" puts the sign in back on the line.
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-sv-use]') : null;
+    if (!btn) return;
+    var host = btn.closest('[data-cardsv],[data-daysv]');
+    if (!host) return;
+    var key = host.getAttribute('data-cardsv') != null ? host.getAttribute('data-cardsv') : host.getAttribute('data-daysv');
+    var parts = String(key).split('_');
+    var c = _jobCards[Number(parts[0])];
+    var line = !c ? null : (parts.length > 1 ? (c.more_days || [])[Number(parts[1])] : c);
+    if (!line || !line.sv) return;
+    _syncJobCardsFromDOM(true);
+    TradeSiteVisitCore.fill(line, line.sv);
+    if (line === c) { _setJobCardWorkDate(c, line.sv.work_date); _jobCardSyncHours(c); } else _jobCardDaySyncHours(line);
+    renderInvoiceBuilder();
+  });
+
+  // One further signed-in day of the same job, drawn on the same card. It
+  // posts as its own line (one line is one job on one day).
+  function _jobCardDayHtml(c, line, k) {
+    var key = c._idx + '_' + k;
+    var bounds = _jobCardDateBounds(c);
+    var err = _timeLiveError(line);
+    var h = '<div class="jct-day" data-cardday="' + key + '">';
+    h += '<div class="jct-dayhead"><span>Another day on this job</span><button type="button" data-daydrop="' + key + '" onclick="removeJobCardDay(' + c._idx + ',' + k + ')">Remove</button></div>';
+    h += '<div class="jct">';
+    h += '<label class="jct-f jct-date"><span>Date worked</span><input type="date" data-daydate="' + key + '" value="' + esc(line.work_date || '') + '"'
+      + (bounds.min ? ' min="' + esc(bounds.min) + '"' : '') + (bounds.max ? ' max="' + esc(bounds.max) + '"' : '')
+      + ' onchange="setJobCardDayTime(' + c._idx + ',' + k + ',\'work_date\',this.value)"></label>';
+    h += '<label class="jct-f"><span>Start</span><input type="time" data-daystart="' + key + '" value="' + esc(line.start_time || '') + '"'
+      + ' oninput="setJobCardDayTime(' + c._idx + ',' + k + ',\'start_time\',this.value)" onchange="setJobCardDayTime(' + c._idx + ',' + k + ',\'start_time\',this.value)"></label>';
+    h += '<label class="jct-f"><span>Finish</span><input type="time" data-dayfinish="' + key + '" value="' + esc(line.finish_time || '') + '"'
+      + ' oninput="setJobCardDayTime(' + c._idx + ',' + k + ',\'finish_time\',this.value)" onchange="setJobCardDayTime(' + c._idx + ',' + k + ',\'finish_time\',this.value)"></label>';
+    h += '<label class="jct-f jct-break"><span>Break (min)</span><input type="number" min="0" step="5" inputmode="numeric" data-daybreak="' + key + '" placeholder="0" value="' + (Number(line.break_minutes) > 0 ? esc(String(line.break_minutes)) : '') + '"'
+      + ' oninput="setJobCardDayTime(' + c._idx + ',' + k + ',\'break_minutes\',this.value)" onchange="setJobCardDayTime(' + c._idx + ',' + k + ',\'break_minutes\',this.value)"></label>';
+    h += '<div class="jct-f"><span>Hours</span><div class="jct-fixed" data-dayhours="' + key + '">' + (TradeTimeEntryCore.hoursText(line.hours) || '0 hrs') + '</div></div>';
+    h += '</div>';
+    h += _siteVisitNoteHtml(line, 'data-daysv="' + key + '"');
+    h += '<div class="jct-err" data-daytimeerr="' + key + '" role="alert"' + (err ? '' : ' hidden') + '>' + esc(err) + '</div>';
+    return h + '</div>';
+  }
+  function _readJobCardDaysFromDOM(c, idx) {
+    (c.more_days || []).forEach(function(line, k) {
+      if (!line || line.removed) return;
+      var key = idx + '_' + k;
+      var dateEl = document.querySelector('[data-daydate="' + key + '"]');
+      if (!dateEl) return;
+      var startEl = document.querySelector('[data-daystart="' + key + '"]');
+      var finEl = document.querySelector('[data-dayfinish="' + key + '"]');
+      var brkEl = document.querySelector('[data-daybreak="' + key + '"]');
+      line.work_date = TradeTimeEntryCore.isDate(dateEl.value) ? dateEl.value : '';
+      if (startEl) line.start_time = TradeTimeEntryCore.normTime(startEl.value);
+      if (finEl) line.finish_time = TradeTimeEntryCore.normTime(finEl.value);
+      if (brkEl) line.break_minutes = TradeTimeEntryCore.breakInput(brkEl.value);
+      _jobCardDaySyncHours(line);
+    });
+  }
+  window.setJobCardDayTime = function(idx, k, field, value) {
+    var c = _jobCards[idx]; var line = c && (c.more_days || [])[k];
+    if (!line) return;
+    if (field === 'work_date') line.work_date = TradeTimeEntryCore.isDate(value) ? value : '';
+    else if (field === 'break_minutes') line.break_minutes = TradeTimeEntryCore.breakInput(value);
+    else line[field] = TradeTimeEntryCore.normTime(value);
+    _jobCardDaySyncHours(line);
+    var key = idx + '_' + k;
+    var hrsEl = document.querySelector('[data-dayhours="' + key + '"]');
+    if (hrsEl) hrsEl.textContent = TradeTimeEntryCore.hoursText(line.hours) || '0 hrs';
+    var err = _timeLiveError(line);
+    var errEl = document.querySelector('[data-daytimeerr="' + key + '"]');
+    if (errEl) { errEl.textContent = err; errEl.hidden = !err; }
+    _refreshSiteVisitNote(line, document.querySelector('[data-daysv="' + key + '"]'));
+    _refreshJobCardTime(idx);
+    _refreshJobCardLine(idx);
+  };
+  window.removeJobCardDay = function(idx, k) {
+    var c = _jobCards[idx]; var line = c && (c.more_days || [])[k];
+    if (!line) return;
+    _syncJobCardsFromDOM();
+    line.removed = true;
+    renderInvoiceBuilder();
+  };
+
   // The time block on an hours card: date worked, start, finish, break. Native
   // pickers, phone-sized targets. Hours are shown read-only beside the rate.
-  function _jobCardTimeHtml(c) {
+  function _jobCardTimeHtml(c, rowRate) {
     var i = c._idx;
     var bounds = _jobCardDateBounds(c);
     var err = _timeLiveError(c);
     var hint = _jobCardTimeHint(c);
-    var h = '<div class="jct" data-cardtime="' + i + '">';
+    var h = '<div data-cardtime="' + i + '"><div class="jct">';
     h += '<label class="jct-f jct-date"><span>Date worked</span>'
       + '<input type="date" data-carddate="' + i + '" value="' + esc(c.work_date || '') + '"'
       + (bounds.min ? ' min="' + esc(bounds.min) + '"' : '') + (bounds.max ? ' max="' + esc(bounds.max) + '"' : '')
@@ -24072,10 +24362,31 @@
     h += '<label class="jct-f jct-break"><span>Break (min)</span>'
       + '<input type="number" min="0" step="5" inputmode="numeric" data-cardbreak="' + i + '" placeholder="0" value="' + (Number(c.break_minutes) > 0 ? esc(String(c.break_minutes)) : '') + '"'
       + ' oninput="setJobCardTime(' + i + ',\'break_minutes\',this.value)" onchange="setJobCardTime(' + i + ',\'break_minutes\',this.value)"></label>';
+    h += '<div class="jct-f"><span>Hours</span><div class="jct-fixed" data-cardhours="' + i + '">' + (TradeTimeEntryCore.hoursText(c.hours) || '0 hrs') + '</div></div>';
     h += '</div>';
+    h += _siteVisitNoteHtml(c, 'data-cardsv="' + i + '"');
     h += '<div class="jct-err" data-cardtimeerr="' + i + '" role="alert"' + (err ? '' : ' hidden') + '>' + esc(err) + '</div>';
     h += '<div class="jct-hint" data-cardtimehint="' + i + '"' + (hint ? '' : ' hidden') + '>' + esc(hint) + '</div>';
+    // The rate is a box like the others: it opens on the trade's usual rate
+    // and they can change it for this job. The description of work sits with it.
+    h += '<div class="jct jct-rate">';
+    h += '<label class="jct-f"><span>Rate ($/hr)</span>'
+      + '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + i + '" placeholder="0.00" value="' + (Number(rowRate) > 0 ? esc(String(rowRate)) : '') + '"'
+      + ' oninput="setJobCardRate(' + i + ',this.value)" onchange="setJobCardRate(' + i + ',this.value)"></label>';
+    h += '<label class="jct-f"><span>Description of work</span>'
+      + '<input type="text" data-carddesc="' + i + '" value="' + esc(c.description || '') + '" placeholder="Description of work" maxlength="300"'
+      + ' onchange="setJobCardDescription(' + i + ',this.value)"></label>';
+    h += '</div>';
+    h += '<div class="jct-hint" data-cardratenote="' + i + '"' + (_jobCardRateNote(c) ? '' : ' hidden') + '>' + esc(_jobCardRateNote(c)) + '</div>';
+    h += '</div>';
+    (c.more_days || []).forEach(function(line, k) { if (line && !line.removed) h += _jobCardDayHtml(c, line, k); });
     return h;
+  }
+  // Said only when the rate in the box is not the trade's usual rate.
+  function _jobCardRateNote(c) {
+    var usual = Number((_hoursData && _hoursData.rate) || _tradeRate || 0);
+    if (!c || c.manually_added || !c.rate_user_edited || !(usual > 0) || Number(c.rate) === usual) return '';
+    return 'Your usual rate is $' + usual.toFixed(2) + '. The office checks a changed rate.';
   }
   // At submit every ticked hours card says what it still needs.
   function _refreshJobCardTimeAtSubmit(idx) {
@@ -24087,6 +24398,13 @@
     var chk = _timeCheck(c);
     errEl.textContent = chk.ok ? '' : chk.error;
     errEl.hidden = chk.ok;
+    _jobCardMoreDays(c).forEach(function(line) {
+      var dayErr = document.querySelector('[data-daytimeerr="' + idx + '_' + c.more_days.indexOf(line) + '"]');
+      if (!dayErr) return;
+      var dayChk = _timeCheck(line);
+      dayErr.textContent = dayChk.ok ? '' : dayChk.error;
+      dayErr.hidden = dayChk.ok;
+    });
   }
   function _refreshJobCardTime(idx) {
     var c = _jobCards[idx]; if (!c) return;
@@ -24098,6 +24416,9 @@
     var hint = _jobCardTimeHint(c);
     var hintEl = document.querySelector('[data-cardtimehint="' + idx + '"]');
     if (hintEl) { hintEl.textContent = hint; hintEl.hidden = !hint; }
+    _refreshSiteVisitNote(c, document.querySelector('[data-cardsv="' + idx + '"]'));
+    var allEl = document.querySelector('[data-cardallhours="' + idx + '"]');
+    if (allEl) allEl.textContent = TradeTimeEntryCore.hoursText(_jobCardAllHours(c)) || '0 hrs';
   }
   // Reads one card's time fields back from the screen.
   function _readJobCardTimeFromDOM(c, idx) {
@@ -24201,15 +24522,20 @@
     _refreshJobCardTime(idx);
     _refreshJobCardLine(idx);
   };
-  // Returns the job-centric cards HTML (rate display-only, day-grouped).
-  // Assigned cards always carry the office-set rate (a restored draft may hold
-  // an older typed value). Searched-in cards keep their flagged manual rate.
+  // An assigned card's rate box opens on the trade's usual rate (the one the
+  // office holds for them) and follows it until they change it for that job
+  // (Captain 2026-10-13). The app sends the rate left in the box; ops-api
+  // decides what a changed rate means. A searched-in card keeps its own.
   function _pinAssignedCardRates() {
     var data = _hoursData || {};
-    var officeRate = Number(data.rate || _tradeRate || 0);
+    var usualRate = Number(data.rate || _tradeRate || 0);
     _jobCards.forEach(function(c) {
       if (!c || c.manually_added) return;
-      c.rate = officeRate > 0 ? officeRate : 0;
+      if (c.rate_user_edited) {
+        c.rate_source = (usualRate > 0 && Number(c.rate) === usualRate) ? 'server_resolved' : 'client_entered';
+        return;
+      }
+      c.rate = usualRate > 0 ? usualRate : 0;
       c.rate_source = 'server_resolved';
     });
   }
@@ -24237,12 +24563,13 @@
     }
 
     if (!rateResolved) {
-      html += '<div style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No pay rate is set for you yet. Your rate is set by the office: contact them to have it set before you invoice hours on your assigned jobs.</div>';
+      html += '<div data-rate-missing style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No usual rate is on file for you yet. Type your rate on each job. The office checks it before payment.</div>';
     }
+    html += _siteVisitOtherJobsHtml();
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
     } else {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">For each job, give the date you worked and your start and finish time. Hours are worked out for you. Your rate is set by the office and shown for reference.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">For each job, give the date you worked and your start and finish time. Hours are worked out for you. A job you signed in and out of is filled in already: check it, and change it if it is wrong. The rate box opens on your usual rate.</div>';
     }
 
     // Group cards by scheduled_date
@@ -24409,27 +24736,12 @@
           html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
             + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
-          html += _jobCardTimeHtml(c);
-          html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">';
-          html += '<span style="font-size:12px;color:var(--sw-text-sec)">Hours</span>';
-          // Worked out from start, finish and break. Never typed.
-          html += '<strong data-cardhours="' + c._idx + '" style="font-size:15px;font-weight:800;color:var(--sw-dark)">' + (TradeTimeEntryCore.hoursText(c.hours) || '0 hrs') + '</strong>';
-          html += '<label style="font-size:12px;color:var(--sw-text-sec)">Rate</label>';
-          if (c.manually_added) {
-            // A job the trade searched in is a one-off manual line: ops-api
-            // flags its client-entered rate for office verification and never
-            // saves it as the trade's rate.
-            html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + c._idx + '" '
-              + 'value="' + (rowRate || '') + '" '
-              + 'oninput="setJobCardRate(' + c._idx + ',this.value)" '
-              + 'onchange="setJobCardRate(' + c._idx + ',this.value)" '
-              + 'style="width:78px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
-          } else {
-            // Assigned job: the office sets the rate. Read-only here.
-            html += '<span data-cardrate-readonly="' + c._idx + '" title="Set by the office" '
-              + 'style="font-size:14px;font-weight:600;color:var(--sw-dark)">'
-              + (rowRate > 0 ? '$' + rowRate.toFixed(2) + '/hr' : 'Not set') + '</span>'
-              + '<span style="font-size:11px;color:var(--sw-text-sec)">Set by the office</span>';
+          html += _jobCardTimeHtml(c, rowRate);
+          html += '<div class="jct-total">';
+          // Several days on the card: the hours of all of them. Worked out, never typed.
+          if (_jobCardMoreDays(c).length) {
+            html += '<span style="font-size:12px;color:var(--sw-text-sec)">All days</span>';
+            html += '<strong data-cardallhours="' + c._idx + '" style="font-size:15px;font-weight:800;color:var(--sw-dark)">' + (TradeTimeEntryCore.hoursText(_jobCardAllHours(c)) || '0 hrs') + '</strong>';
           }
           html += '<span data-cardamt="' + c._idx + '" style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-left:auto">$' + (_hoursCardNet(c, rowRate)).toFixed(2) + '</span>';
           html += '</div>';
@@ -24439,7 +24751,8 @@
         var commAutoDesc = cardMode === 'commission' ? ('Commission — ' + esc(c.job_number || '') + ' — ' + esc(c.client_name || '')) : '';
         var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional — breakdown auto-added)' : 'Description of work');
         var descVal = cardMode === 'commission' ? commAutoDesc : esc(c.description || '');
-        html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
+        // An hours card's description sits with its other boxes (above).
+        if (cardMode !== 'hours') html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
         if (c.manually_added) {
           html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">Added by you — the office will verify. <a href="#" data-cardremove="' + c._idx + '" onclick="event.preventDefault();removeManualJobCard(' + c._idx + ')" style="color:var(--sw-red);font-weight:600">Remove</a></div>';
         }
@@ -24468,7 +24781,7 @@
       } else if (c.wo_mode) {
         var n = _woNet(c);
         if (n > 0) sub += n;
-      } else if (c.hours != null || _woLumpSum(c) > 0) {
+      } else if (c.hours != null || _jobCardAllHours(c) > 0 || _woLumpSum(c) > 0) {
         sub += _hoursCardNet(c, Number(c.rate || rate || 0));
       }
     });
@@ -24651,17 +24964,19 @@
         }
       } else {
         if (!skipTime) _readJobCardTimeFromDOM(c, idx);
-        var rateEl = c.manually_added ? document.querySelector('[data-cardrate="' + idx + '"]') : null;
+        if (!skipTime) _readJobCardDaysFromDOM(c, idx);
+        var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
         if (rateEl) {
-          var n = parseFloat(rateEl.value);
-          if (!isNaN(n) && n >= 0) {
-            if (document.activeElement === rateEl || n !== Number(c.rate)) {
-              _markJobCardHoursEdited(c);
-              c.rate_source = 'client_entered';
-            }
+          var n = rateEl.value === '' ? 0 : parseFloat(rateEl.value);
+          if (!isNaN(n) && n >= 0 && n !== Number(c.rate || 0)) {
+            _markJobCardHoursEdited(c);
+            c.rate_source = 'client_entered';
+            c.rate_user_edited = true;
             c.rate = n;
           }
         }
+        var descEl = document.querySelector('[data-carddesc="' + idx + '"]');
+        if (descEl) c.description = descEl.value || '';
       }
       if (!c.commission_mode) {
         var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
@@ -24984,11 +25299,15 @@
   }
 
   window.setJobCardRate = function(idx, val) {
-    var c = _jobCards[idx]; if (!c || !c.manually_added) return; // assigned-job rates are office only
+    var c = _jobCards[idx]; if (!c) return;
     var n = parseFloat(val);
     c.rate = (isNaN(n) || n < 0) ? 0 : n;
-    c.rate_source = 'client_entered';
+    c.rate_user_edited = true;
+    var usual = Number((_hoursData && _hoursData.rate) || _tradeRate || 0);
+    c.rate_source = (!c.manually_added && usual > 0 && c.rate === usual) ? 'server_resolved' : 'client_entered';
     _markJobCardHoursEdited(c);
+    var noteEl = document.querySelector('[data-cardratenote="' + idx + '"]');
+    if (noteEl) { noteEl.textContent = _jobCardRateNote(c); noteEl.hidden = !noteEl.textContent; }
     _refreshJobCardLine(idx);
   };
   window.setJobCardDescription = function(idx, val) {
@@ -25226,6 +25545,21 @@
       return dayText(line.work_date) + ', ' + normTime(line.start_time) + ' to ' + normTime(line.finish_time)
         + (b > 0 ? ', ' + b + ' min break' : '');
     }
+    // A tap lands on an odd minute; an invoice line carries it to the nearest
+    // quarter hour. The one place the app rounds a time.
+    function roundQuarter(v) {
+      var n = minutesOf(v);
+      if (n == null) return '';
+      n = Math.min(Math.round(n / 15) * 15, 23 * 60 + 45);
+      return pad(Math.floor(n / 60)) + ':' + pad(n % 60);
+    }
+    // "7:02 am", as the app words a time of day.
+    function clock12(v) {
+      var n = minutesOf(v);
+      if (n == null) return '';
+      var h = Math.floor(n / 60);
+      return (h % 12 === 0 ? 12 : h % 12) + ':' + pad(n % 60) + (h < 12 ? ' am' : ' pm');
+    }
     function refused(x) {
       function hit(v) { return typeof v === 'string' && v.trim().toLowerCase() === REFUSAL_CODE; }
       if (!x || typeof x !== 'object') return false;
@@ -25235,10 +25569,214 @@
     return {
       REFUSAL_CODE: REFUSAL_CODE, REFUSAL_MSG: REFUSAL_MSG,
       isDate: isDate, earliest: earliest, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
-      touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused
+      touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused,
+      roundQuarter: roundQuarter, clock12: clock12
     };
   })();
   // </trade-time-entry>
+
+  // <trade-site-visit>
+  // Sign in and sign out on a job (Captain 2026-10-13): one tap each, and the
+  // taps carry over to that job's invoice line. A visit is one sign in. The
+  // exact taps stay on the job; the invoice line is filled with them rounded
+  // to the quarter hour, says "From your sign in", and stays the trade's to
+  // change. This is the ONLY source the app carries a time from: never the
+  // schedule, the device, memory or another person, and never an invented
+  // finish. Signing in is optional: no taps means the blank line, unchanged.
+  // Pure and DOM-free: scripts/test-trade-site-visit.js runs this block as
+  // shipped. Field names are the contract with ops-api (trade-app.md, "Sign
+  // in and sign out").
+  var TradeSiteVisitCore = (function() {
+    var T = TradeTimeEntryCore;
+    var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    function str(v) { return v == null ? '' : String(v); }
+    // The Perth day and time of day of an instant.
+    function perth(value) {
+      var d = value instanceof Date ? value : new Date(value);
+      if (!value || isNaN(d.getTime())) return null;
+      var parts = {};
+      new Intl.DateTimeFormat('en-AU', {
+        timeZone: 'Australia/Perth', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+      }).formatToParts(d).forEach(function(p) { parts[p.type] = p.value; });
+      return { day: parts.year + '-' + parts.month + '-' + parts.day, time: (parts.hour === '24' ? '00' : parts.hour) + ':' + parts.minute };
+    }
+    // The caller's open sign in, as my_jobs.open_site_visit or a clock_event
+    // answer gives it. Null when there is none.
+    function openVisit(raw) {
+      if (!raw || typeof raw !== 'object') return null;
+      var at = str(raw.signed_in_at || raw.clocked_on_at);
+      var jobId = str(raw.job_id);
+      var status = str(raw.status || 'open');
+      if (!jobId || !perth(at) || status === 'closed' || raw.signed_out_at) return null;
+      return {
+        visit_id: str(raw.visit_id || raw.id), job_id: jobId, assignment_id: str(raw.assignment_id),
+        job_number: str(raw.job_number), site_suburb: str(raw.site_suburb), signed_in_at: at,
+        status: status === 'no_sign_out' ? 'no_sign_out' : 'open', pending: raw.pending === true
+      };
+    }
+    function where(visit) { return str(visit && (visit.site_suburb || visit.job_number)) || 'a job'; }
+    function signedInText(visit) {
+      var p = visit && perth(visit.signed_in_at);
+      return p ? 'Signed in ' + T.clock12(p.time) + (visit.pending ? ' \u00B7 waiting for signal' : '') : '';
+    }
+    // A sign in that still owes its finish: swept by the server after 16
+    // hours, or left open from an earlier day.
+    function owesFinish(visit, now) {
+      if (!visit || visit.pending) return false;
+      if (visit.status === 'no_sign_out') return true;
+      var a = perth(visit.signed_in_at), b = perth(now || new Date());
+      return !!(a && b && a.day < b.day);
+    }
+    function lateQuestion(visit, now) {
+      var a = perth(visit.signed_in_at), b = perth(now || new Date());
+      var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(a.day);
+      var day = a.day === b.day ? 'today' : WEEKDAYS[new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3])).getUTCDay()];
+      return 'You are still signed in at ' + where(visit) + ' since ' + T.clock12(a.time) + ' ' + day + '. What time did you leave?';
+    }
+    // What is wrong with a leave time typed later, in plain words, or ''.
+    function lateCheck(visit, hhmm, now) {
+      var a = perth(visit && visit.signed_in_at), b = perth(now || new Date()), m = T.minutesOf(hhmm);
+      if (!a) return 'That sign in could not be read. Ask the office to check it.';
+      if (m == null) return 'Add the time you left.';
+      if (m <= T.minutesOf(a.time)) return 'The time you left must be after you signed in at ' + T.clock12(a.time) + '. If you worked past midnight, add the next day as its own line.';
+      if (b && a.day === b.day && m > T.minutesOf(b.time)) return 'The time you left cannot be after now.';
+      return '';
+    }
+    // One signed-in day for an invoice line, from my_hours site_visit_days.
+    // The server's rounded times are the source; a day sent with only its
+    // exact taps is rounded here. A day whose rounding leaves the finish not
+    // after the start is not offered.
+    function day(raw) {
+      raw = raw || {};
+      var date = str(raw.work_date).slice(0, 10);
+      if (!T.isDate(date)) return null;
+      var tin = T.normTime(raw.tapped_in), tout = T.normTime(raw.tapped_out);
+      var start = T.normTime(raw.start_time) || T.roundQuarter(tin);
+      if (!start) return null;
+      var finish = T.normTime(raw.finish_time) || T.roundQuarter(tout);
+      if (finish && T.minutesOf(finish) <= T.minutesOf(start)) return null;
+      var brk = T.breakOf(raw.break_minutes) || 0;
+      if (finish && T.minutesOf(finish) - T.minutesOf(start) - brk <= 0) brk = 0;
+      var ids = (Array.isArray(raw.visit_ids) ? raw.visit_ids : (raw.visit_id ? [raw.visit_id] : [])).map(str).filter(Boolean);
+      return {
+        work_date: date, start_time: start, finish_time: finish, break_minutes: brk,
+        tapped_in: tin, tapped_out: tout, out_capture: str(raw.out_capture), visit_ids: ids
+      };
+    }
+    // One entry per Perth day, oldest first.
+    function days(list) {
+      var seen = {}, out = [];
+      (Array.isArray(list) ? list : []).forEach(function(raw) {
+        var d = day(raw);
+        if (!d || seen[d.work_date]) return;
+        seen[d.work_date] = true;
+        out.push(d);
+      });
+      return out.sort(function(a, b) { return a.work_date < b.work_date ? -1 : 1; });
+    }
+    // Which signed-in day rides which card. A day goes to that job's card
+    // for the same day; a day with no card of its own takes a card still
+    // free; any day left over is a further line on the job's first card.
+    // cards: [{ key, job_id, scheduled_date, days }].
+    function assign(cards) {
+      var byJob = {}, order = [];
+      (cards || []).forEach(function(c) {
+        if (!c || !c.job_id) return;
+        var g = byJob[c.job_id];
+        if (!g) { g = byJob[c.job_id] = { cards: [], days: {} }; order.push(c.job_id); }
+        g.cards.push(c);
+        (c.days || []).forEach(function(d) { if (d && !g.days[d.work_date]) g.days[d.work_date] = d; });
+      });
+      var out = { line: {}, more: {} };
+      order.forEach(function(jobId) {
+        var g = byJob[jobId], left = Object.keys(g.days).sort(), free = [];
+        g.cards.forEach(function(c) {
+          var at = left.indexOf(str(c.scheduled_date).slice(0, 10));
+          if (at === -1) { free.push(c); return; }
+          out.line[c.key] = g.days[left[at]];
+          left.splice(at, 1);
+        });
+        free.forEach(function(c) { if (left.length) out.line[c.key] = g.days[left.shift()]; });
+        if (left.length) out.more[g.cards[0].key] = left.map(function(k) { return g.days[k]; });
+      });
+      return out;
+    }
+    function blank(line) {
+      return !line || (!line.work_date && !line.start_time && !line.finish_time && !(Number(line.break_minutes) > 0));
+    }
+    function same(line, sv) {
+      return !!(line && sv) && str(line.work_date) === sv.work_date && T.normTime(line.start_time) === sv.start_time
+        && T.normTime(line.finish_time) === sv.finish_time && (T.breakOf(line.break_minutes) || 0) === sv.break_minutes;
+    }
+    function fill(line, sv) {
+      line.work_date = sv.work_date;
+      line.start_time = sv.start_time;
+      line.finish_time = sv.finish_time;
+      line.break_minutes = sv.break_minutes;
+      return line;
+    }
+    // What a line says about its sign in: the tag while the sign in still
+    // stands on it, what the taps were where the trade changed a time, and
+    // whether "Use my sign in times" has anything to put back.
+    function note(line, sv) {
+      if (!sv) return { tag: '', text: '', restore: false };
+      line = line || {};
+      if (str(line.work_date) !== sv.work_date) {
+        return { tag: '', text: 'You signed in on ' + T.dayText(sv.work_date) + '.', restore: true };
+      }
+      var startChanged = T.normTime(line.start_time) !== sv.start_time;
+      var finish = T.normTime(line.finish_time);
+      var finishChanged = !!sv.finish_time && finish !== sv.finish_time;
+      var parts = [];
+      if (startChanged) parts.push('You signed in at ' + T.clock12(sv.tapped_in || sv.start_time) + '.');
+      if (!sv.finish_time) parts.push(finish ? 'No sign out that day. The finish is the time you typed.' : 'No sign out that day. Add the time you left.');
+      else if (finishChanged) parts.push('You signed out at ' + T.clock12(sv.tapped_out || sv.finish_time) + '.');
+      else if (sv.out_capture === 'typed_later') parts.push('You typed the time you left. It was not a tap.');
+      if (startChanged || finishChanged) parts.push('The office sees both.');
+      return { tag: startChanged ? '' : 'From your sign in', text: parts.join(' '), restore: startChanged || finishChanged };
+    }
+    // The sign ins a line was filled from. Only while the line is still on
+    // that day: a line moved to another day is no longer that sign in.
+    function ids(line, sv) {
+      return (sv && line && str(line.work_date) === sv.work_date) ? sv.visit_ids.slice() : [];
+    }
+    // Jobs signed in to that have no card in the week (my_hours
+    // site_visit_days_other), one entry per job with its days.
+    function otherJobs(raw) {
+      var by = {}, order = [];
+      (Array.isArray(raw) ? raw : []).forEach(function(e) {
+        if (!e || typeof e !== 'object') return;
+        var job = e.job && typeof e.job === 'object' ? e.job : e;
+        var jobId = str(e.job_id || job.id);
+        if (!jobId) return;
+        var g = by[jobId];
+        if (!g) {
+          g = by[jobId] = {
+            job_id: jobId, job_number: str(e.job_number || job.job_number), site_suburb: str(e.site_suburb || job.site_suburb),
+            client_name: str(e.client_name || job.client_name), job_type: str(e.job_type || job.type), raw: []
+          };
+          order.push(jobId);
+        }
+        g.raw = g.raw.concat(Array.isArray(e.site_visit_days) ? e.site_visit_days : (Array.isArray(e.days) ? e.days : [e]));
+      });
+      return order.map(function(id) {
+        var g = by[id];
+        return { job_id: g.job_id, job_number: g.job_number, site_suburb: g.site_suburb, client_name: g.client_name, job_type: g.job_type, days: days(g.raw) };
+      }).filter(function(g) { return g.days.length > 0; });
+    }
+    // A sign in to another job the server would not double up on.
+    function alreadySignedIn(err) {
+      var body = err && err.body && typeof err.body === 'object' ? err.body : {};
+      if (!err || (str(err.code) !== 'already_signed_in' && str(body.code) !== 'already_signed_in')) return null;
+      return openVisit(body.visit || body.open_site_visit || body) || { visit_id: '', job_id: '', assignment_id: '', job_number: str(body.job_number), site_suburb: str(body.site_suburb), signed_in_at: '', status: 'open', pending: false };
+    }
+    return {
+      perth: perth, openVisit: openVisit, where: where, signedInText: signedInText, owesFinish: owesFinish,
+      lateQuestion: lateQuestion, lateCheck: lateCheck, day: day, days: days, assign: assign, blank: blank,
+      same: same, fill: fill, note: note, ids: ids, otherJobs: otherJobs, alreadySignedIn: alreadySignedIn
+    };
+  })();
+  // </trade-site-visit>
 
   // _woCleanLabourLines: canonical view of a card's labour lines. Names are
   // trimmed + inner whitespace collapsed (production had "Tendo  " ≠ "Tendo"),
@@ -25339,10 +25877,22 @@
     }
     return Math.round(sum * 100) / 100;
   }
+  // The further signed-in days still on an hours card. [trade-site-visit]
+  function _jobCardMoreDays(c) {
+    return (c && !c.wo_mode && !c.commission_mode && Array.isArray(c.more_days) ? c.more_days : []).filter(function(l) { return l && !l.removed; });
+  }
+  // Every hour a card bills: its own line and its further days.
+  function _jobCardAllHours(c) {
+    var total = Number(c && c.hours) > 0 ? Number(c.hours) : 0;
+    _jobCardMoreDays(c).forEach(function(l) { if (Number(l.hours) > 0) total += Number(l.hours); });
+    return Math.round(total * 100) / 100;
+  }
   function _hoursCardNet(c, rate) {
-    var hoursAmt = (c && c.hours != null && Number(c.hours) > 0)
-      ? Math.round(Number(c.hours) * Number(c.rate != null ? c.rate : rate || 0) * 100) / 100
-      : 0;
+    var r = Number(c && c.rate != null ? c.rate : rate || 0);
+    var hoursAmt = (c && c.hours != null && Number(c.hours) > 0) ? Math.round(Number(c.hours) * r * 100) / 100 : 0;
+    _jobCardMoreDays(c).forEach(function(l) {
+      if (Number(l.hours) > 0) hoursAmt += Math.round(Number(l.hours) * r * 100) / 100;
+    });
     return Math.round((hoursAmt - _woLumpSum(c)) * 100) / 100;
   }
   function _woNet(c) {
@@ -25508,6 +26058,25 @@
         }
         if (!timeSeen[key]) timeSeen[key] = c;
       }
+      // Further signed-in days of the same job: each is its own line, in
+      // this invoice week, and no day twice.
+      _jobCardMoreDays(c).forEach(function(line) {
+        var dayChk = TradeTimeEntryCore.check(line, opts.today);
+        var dayLbl = lbl + (line.work_date ? ' (' + TradeTimeEntryCore.dayText(line.work_date) + ')' : ' (another day)');
+        if (!dayChk.ok) { timeBad.push({ idx: c._idx, msg: dayLbl + ': ' + dayChk.error }); return; }
+        var d = String(line.work_date);
+        if ((opts.weekStart && d < opts.weekStart) || (opts.weekEnd && d > opts.weekEnd)) {
+          timeBad.push({ idx: c._idx, msg: dayLbl + ': the date worked is outside this invoice week. Pick a day in the week, or remove that day.' });
+          return;
+        }
+        var dayKey = String(c.job_id || c.job_number || '') + '|' + d;
+        if (dayKey.charAt(0) === '|') return;
+        if (timeSeen[dayKey]) {
+          timeBad.push({ idx: c._idx, msg: lbl + ': there are two lines for ' + d + '. One line is one job on one day, so put that day\u2019s time on one line.' });
+          return;
+        }
+        timeSeen[dayKey] = c;
+      });
     });
     if (timeBad.length > 0) {
       var _timeShown = timeBad.slice(0, 3).map(function(b) { return b.msg; });
@@ -25523,7 +26092,9 @@
       if (!_isTimeCard(c)) return false;
       var hasHours = _cardHours(c) > 0 && Number(c.rate) > 0;
       if (hasHours) {
-        if (c.manually_added && !c.description) return true;
+        // A further day posts as its own line with no assignment behind it,
+        // so the office needs the card's description to know what was done.
+        if ((c.manually_added || _jobCardMoreDays(c).length > 0) && !c.description) return true;
         return false;
       }
       if (_completeLumps(c).length > 0) return false;
@@ -25533,8 +26104,7 @@
       var _msgs = missing.map(function(c) {
         var _lbl = _timeCardLabel(c);
         var _noRate = !(Number(c.rate) > 0);
-        var _noDesc = c.manually_added && !c.description;
-        if (!c.manually_added && _noRate) return RATE_NOT_SET_MSG;
+        var _noDesc = (c.manually_added || _jobCardMoreDays(c).length > 0) && !c.description;
         if (_noDesc && _noRate) return _lbl + ': add a description and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
         return _lbl + ': enter your rate, or add an amount.';
@@ -25547,6 +26117,45 @@
     var manualAssignments = [];
     var cardExtraItems = [];
     var subtotal = 0;
+    // The sign ins a line was filled from ride with it, so the office sees
+    // the taps beside the submitted times. Sent only when there are any.
+    function _withSiteVisits(row, line) {
+      var ids = TradeSiteVisitCore.ids(line, line.sv);
+      if (ids.length) row.site_visit_ids = ids;
+      return row;
+    }
+    // Each further signed-in day of a job is its own line: no assignment
+    // row exists for that day, so it rides extra_items like a searched-in job.
+    function _pushMoreDays(c) {
+      if (!(Number(c.rate) > 0)) return;
+      _jobCardMoreDays(c).forEach(function(line) {
+        var chk = TradeTimeEntryCore.check(line, opts.today);
+        if (!chk.ok || !(chk.hours > 0)) return;
+        var t = TradeTimeEntryCore.fields(line);
+        subtotal += Math.round(chk.hours * Number(c.rate || 0) * 100) / 100;
+        cardExtraItems.push(_withSiteVisits({
+          type: 'Labour',
+          row_type: 'labour',
+          description: c.description || '',
+          quantity: chk.hours,
+          unit: 'hr',
+          rate: Number(c.rate || 0),
+          date: t.work_date,
+          work_date: t.work_date,
+          start_time: t.start_time,
+          finish_time: t.finish_time,
+          break_minutes: t.break_minutes,
+          job_id: c.job_id || null,
+          job_number: c.job_number || '',
+          division: c.job_type || '',
+          client_name: c.client_name || '',
+          manually_added: true,
+          source: 'manual_job_search',
+          rate_source: 'client_entered',
+          client_rate_entered: true
+        }, line));
+      });
+    }
     included.forEach(function(c) {
       if (c.commission_mode) {
         var commAmt = Number(c.commission_amount) || 0;
@@ -25606,7 +26215,7 @@
         if (searchedHours) {
           var searchedTime = TradeTimeEntryCore.fields(c);
           subtotal += Math.round(searchedQty * Number(c.rate || 0) * 100) / 100;
-          cardExtraItems.push({
+          cardExtraItems.push(_withSiteVisits({
             type: 'Labour',
             row_type: 'labour',
             description: c.description || '',
@@ -25628,7 +26237,8 @@
             client_rate_entered: true,
             // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
             justification: (_isMakesafeCard(c) && searchedQty > 2) ? (c.justification || '') : undefined
-          });
+          }, c));
+          _pushMoreDays(c);
         }
       } else {
         var assignedQty = _cardHours(c);
@@ -25636,7 +26246,7 @@
         if (assignedHours) {
           var assignedTime = TradeTimeEntryCore.fields(c);
           subtotal += Math.round(assignedQty * Number(c.rate || 0) * 100) / 100;
-          manualAssignments.push({
+          manualAssignments.push(_withSiteVisits({
             assignment_id: c.assignment_id,
             hours: assignedQty,
             work_date: assignedTime.work_date,
@@ -25649,7 +26259,8 @@
             manually_added: false,
             // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
             justification: (_isMakesafeCard(c) && assignedQty > 2) ? (c.justification || '') : undefined
-          });
+          }, c));
+          _pushMoreDays(c);
         }
       }
     });
@@ -29021,344 +29632,535 @@
   };
 
   // ══════════════════════════════════════════════════
-  // TIME TRACKING — State Machine + Timer UI
+  // SIGN IN AND SIGN OUT: one tap each [trade-site-visit]
   // ══════════════════════════════════════════════════
+  // _siteVisit is the signed-in trade's open sign in, or null. Whenever
+  // my_jobs sends open_site_visit that is its source; an ops-api that does
+  // not send it yet leaves the trade's own in-progress row to stand in
+  // (checkServerClockRecovery). A tap that could not be sent keeps its tap
+  // time in the offline queue and shows "waiting for signal" until it lands.
+  // No reminder, text or push is ever sent from here.
+  var _siteVisit = null;
+  var _siteVisitFromServer = false;
+  var _siteTapWaiting = null;   // { event, assignment_id, job_id, job_number, site_suburb, at, idempotency_key }
+  var _siteBreakAsk = null;     // { visit_id, job_id, at }: the optional break after a sign out
+  var _siteLateAsked = {};
+  var _siteTapBusy = false;
 
-  // renderTimerCard is now deprecated — timer UI is in renderSmartStatusFlow
-  // Kept as stub for any remaining callers
-  function renderTimerCard(myAssignment, job) { return ''; }
+  function siteTapWaitingKey() { return _user && _user.id ? 'sw_site_tap_waiting_' + _user.id : ''; }
+  function saveSiteTapWaiting() {
+    var key = siteTapWaitingKey();
+    if (!key) return;
+    try {
+      if (_siteTapWaiting) localStorage.setItem(key, JSON.stringify(_siteTapWaiting));
+      else localStorage.removeItem(key);
+    } catch (e) {}
+  }
+  // Called at sign-in to the app: nothing of the last account's stays.
+  function resetSiteVisitSession() {
+    _siteVisit = null;
+    _siteVisitFromServer = false;
+    _siteBreakAsk = null;
+    _siteLateAsked = {};
+    _siteTapWaiting = null;
+    _siteTapBusy = false;
+    dismissLateFinish();
+    try {
+      var raw = siteTapWaitingKey() ? localStorage.getItem(siteTapWaitingKey()) : null;
+      var w = raw ? JSON.parse(raw) : null;
+      if (w && (w.event === 'clock_on' || w.event === 'clock_off') && w.at) _siteTapWaiting = w;
+    } catch (e) {}
+    renderSiteVisitBar();
+  }
+  function clearSiteVisitSession() {
+    _siteVisit = null;
+    _siteVisitFromServer = false;
+    _siteBreakAsk = null;
+    _siteTapWaiting = null;
+    _siteTapBusy = false;
+    dismissLateFinish();
+    renderSiteVisitBar();
+  }
+
+  // The sign in the screens show: a tap still waiting for signal counts.
+  function currentSiteVisit() {
+    var w = _siteTapWaiting;
+    if (w && w.event === 'clock_off') return null;
+    if (w && w.event === 'clock_on') {
+      return TradeSiteVisitCore.openVisit({
+        job_id: w.job_id, assignment_id: w.assignment_id, job_number: w.job_number, site_suburb: w.site_suburb,
+        signed_in_at: w.at, pending: true
+      });
+    }
+    return _siteVisit;
+  }
+  function siteVisitOwesFinish(v) { return !!(v && v.visit_id && TradeSiteVisitCore.owesFinish(v)); }
+  // Is this trade signed in on this row's job? With a visit record the
+  // record decides; without one, the row's own sign in and sign out stamps.
+  function signedInOnRow(job, a) {
+    var v = currentSiteVisit();
+    if (v) return !!(job && job.id && v.job_id === job.id) && !siteVisitOwesFinish(v);
+    if (_siteVisitFromServer || _siteTapWaiting) return false;
+    if (!a || String(a.status || '') !== 'in_progress' || !a.clocked_on_at) return false;
+    return !a.clocked_off_at || new Date(a.clocked_off_at).getTime() < new Date(a.clocked_on_at).getTime();
+  }
+  function siteClock(iso) {
+    var p = TradeSiteVisitCore.perth(iso);
+    return p ? TradeTimeEntryCore.clock12(p.time) : '';
+  }
+
+  // my_jobs open_site_visit, when the server sends it. Returns false for an
+  // ops-api that does not: the caller falls back to the trade's own rows.
+  function adoptServerSiteVisit(data) {
+    if (!data || !Object.prototype.hasOwnProperty.call(data, 'open_site_visit')) return false;
+    _siteVisitFromServer = true;
+    if (!_siteTapWaiting) _siteVisit = TradeSiteVisitCore.openVisit(data.open_site_visit);
+    renderSiteVisitBar();
+    if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
+    maybeAskLateFinish();
+    return true;
+  }
+
+  // A queued tap reached the server (or was refused for good).
+  function siteTapLanded(body, result, refused) {
+    var w = _siteTapWaiting;
+    if (!w || !body || (w.idempotency_key && body.idempotency_key !== w.idempotency_key)) return;
+    _siteTapWaiting = null;
+    saveSiteTapWaiting();
+    if (refused) {
+      toast((w.event === 'clock_on' ? 'Your sign in' : 'Your sign out') + ' at ' + siteClock(w.at) + ' was not saved. Ask the office to check this job.', true);
+    } else if (w.event === 'clock_on') {
+      _siteVisit = siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
+        job_id: w.job_id, assignment_id: w.assignment_id, job_number: w.job_number, site_suburb: w.site_suburb, signed_in_at: w.at
+      });
+    } else {
+      _siteVisit = null;
+    }
+    renderSiteVisitBar();
+    if (_currentView === 'myJobs') loadMyJobs();
+  }
+  function siteVisitFromResult(result) {
+    result = result || {};
+    return TradeSiteVisitCore.openVisit(result.site_visit || result.visit || result.open_site_visit);
+  }
+
+  // The job a tap is for, from whichever list or screen it was tapped on.
+  function siteTapContext(assignmentId, jobId) {
+    var row = null;
+    var lists = _lastJobData ? [].concat(_lastJobData.today || [], _lastJobData.thisWeek || [], _lastJobData.upcoming || [],
+      _lastJobData.recent || [], _lastJobData.recentCompleted || [], _lastJobData.unscheduled || []) : [];
+    lists.concat(_cachedMyJobs || []).some(function(a) {
+      if (a && a.id && a.id === assignmentId && a.jobs) { row = a; return true; }
+      return false;
+    });
+    var job = row ? row.jobs : null;
+    if (!job && _currentJob && _currentJob.job && (!jobId || _currentJob.job.id === jobId)) {
+      var onCrew = !assignmentId || (_currentJob.crew || []).some(function(c) { return c && c.id === assignmentId; });
+      if (onCrew) job = _currentJob.job;
+    }
+    return {
+      assignment_id: assignmentId || '',
+      job_id: (job && job.id) || jobId || '',
+      job_number: (job && job.job_number) || '',
+      site_suburb: (job && job.site_suburb) || ''
+    };
+  }
+
+  // Copies what a tap changed onto every copy of that row this page holds.
+  function patchOwnAssignmentRow(assignmentId, patch) {
+    if (!assignmentId || !patch) return;
+    var keys = ['status', 'started_at', 'completed_at', 'clocked_on_at', 'clocked_off_at', 'job_phase', 'hours_worked', 'break_minutes'];
+    function apply(row) {
+      if (!row || row.id !== assignmentId) return;
+      keys.forEach(function(k) { if (k in patch) row[k] = patch[k]; });
+    }
+    if (_currentJob && Array.isArray(_currentJob.crew)) _currentJob.crew.forEach(apply);
+    (_cachedMyJobs || []).forEach(apply);
+    if (_lastJobData) {
+      ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'].forEach(function(k) {
+        (_lastJobData[k] || []).forEach(apply);
+      });
+    }
+  }
+
+  function afterSiteTap(ctx, patch) {
+    patchOwnAssignmentRow(ctx.assignment_id, patch);
+    renderSiteVisitBar();
+    if (_currentView === 'job' && _currentJob && _currentJob.job && _currentJob.job.id === ctx.job_id) {
+      renderJobDetail(_currentJob);
+      startTimerTick();
+    }
+    if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
+  }
+
+  // The phone's location, sent inside the tap. Waits up to 3 seconds, then
+  // the tap goes without it: a sign in is never held up or refused for it.
+  function siteTapLocation() {
+    return new Promise(function(resolve) {
+      var done = false;
+      function finish(loc) { if (!done) { done = true; resolve(loc); } }
+      if (!navigator.geolocation) { finish(null); return; }
+      setTimeout(function() { finish(null); }, 3000);
+      try {
+        navigator.geolocation.getCurrentPosition(function(pos) {
+          finish({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        }, function() { finish(null); }, { timeout: 3000, maximumAge: 60000 });
+      } catch (e) { finish(null); }
+    });
+  }
 
   function updateTimerDisplay() {
     var el = document.getElementById('timerElapsed');
-    if (!el) return;
-    // Show elapsed from clock-on time
-    if (_clockState === 'on' && _clockedOnAt) {
-      el.textContent = formatElapsed(_clockedOnAt);
-    }
-    updateStickyTimer();
+    if (el && el.getAttribute('data-since')) el.textContent = formatElapsed(el.getAttribute('data-since'));
   }
 
   function startTimerTick() {
     clearInterval(_timerTickInterval);
-    if (_clockState === 'on') {
-      updateTimerDisplay();
-      _timerTickInterval = setInterval(updateTimerDisplay, 10000);
-    }
+    if (!document.getElementById('timerElapsed')) return;
+    updateTimerDisplay();
+    _timerTickInterval = setInterval(updateTimerDisplay, 10000);
   }
 
-  // Sticky timer — appears when main timer scrolls out of view
-  var _stickyTimerObserver = null;
-  function setupStickyTimer() {
-    var timerEl = document.getElementById('timerElapsed');
-    var stickyBar = document.getElementById('stickyTimerBar');
-    if (!timerEl || !stickyBar || _stickyTimerObserver) return;
-
-    _stickyTimerObserver = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (_clockState === 'on') {
-          stickyBar.style.display = entry.isIntersecting ? 'none' : 'flex';
-        } else {
-          stickyBar.style.display = 'none';
-        }
-      });
-    }, { threshold: 0 });
-
-    _stickyTimerObserver.observe(timerEl);
-  }
-
-  function updateStickyTimer() {
-    var stickyText = document.getElementById('stickyTimerText');
-    var stickyJob = document.getElementById('stickyTimerJob');
-    var stickyPause = document.getElementById('stickyTimerPause');
-    if (!stickyText) return;
-
-    var elapsed = _clockedOnAt ? formatElapsed(_clockedOnAt) : '0m';
-    stickyText.textContent = (_isPaused ? '⏸ ' : '⏱ ') + elapsed;
-
-    if (stickyJob && _currentJob) {
-      stickyJob.textContent = _currentJob.job ? (_currentJob.job.job_number || '') : '';
-    }
-    if (stickyPause) {
-      if (_isPaused) {
-        stickyPause.textContent = '▶ Resume';
-        stickyPause.onclick = function() { timerAction('resume', _currentAssignment); };
-      } else {
-        stickyPause.textContent = '⏸ Pause';
-        stickyPause.onclick = function() { timerAction('pause', _currentAssignment); };
-      }
-    }
-  }
-
-  // When app comes back from background, update the timer
+  // When app comes back from background, update the running count
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && _clockState === 'on') {
-      updateTimerDisplay();
-    }
+    if (document.visibilityState === 'visible') updateTimerDisplay();
   });
 
-  // ══════════════════════════════════════════════════
-  // CLOCK EVENT — Server-first clock action with retry queue
-  // ══════════════════════════════════════════════════
+  // ── The signed-in bar: follows the trade across the app ──
+  function siteBreakAskHTML() {
+    var b = 'type="button" class="sv-break-btn"';
+    return '<div class="sv-break" data-site-break><span>Had a break?</span>'
+      + '<button ' + b + ' data-site-break-min="0" onclick="siteSetBreak(0)">None</button>'
+      + '<button ' + b + ' data-site-break-min="30" onclick="siteSetBreak(30)">30 min</button>'
+      + '<button ' + b + ' data-site-break-other onclick="siteBreakOther()">Other</button></div>';
+  }
+  function renderSiteVisitBar() {
+    var bar = document.getElementById('siteVisitBar');
+    if (!bar) return;
+    var v = _user ? currentSiteVisit() : null, w = _siteTapWaiting, ask = _siteBreakAsk, h = '';
+    if (v && siteVisitOwesFinish(v)) {
+      h = '<span class="sv-bar-where"><b>You did not sign out</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></span>'
+        + '<button type="button" class="sv-bar-btn" data-site-bar-late onclick="siteAskLateFinish()">Add the time you left</button>';
+    } else if (v) {
+      h = '<button type="button" class="sv-bar-where" data-site-bar-open onclick="siteVisitOpenJob()"><b>' + esc(TradeSiteVisitCore.signedInText(v)) + '</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></button>'
+        + '<button type="button" class="sv-bar-btn" data-site-bar-signout onclick="siteSignOut()">Sign out</button>';
+    } else if (_user && w && w.event === 'clock_off') {
+      h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(w.at)) + ' · waiting for signal</b><span>' + esc(TradeSiteVisitCore.where(w)) + '</span></span>';
+    } else if (_user && ask && !(_currentView === 'job' && _currentJobId === ask.job_id)) {
+      h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(ask.at)) + '</b></span>' + siteBreakAskHTML();
+    }
+    bar.innerHTML = h;
+    bar.hidden = !h;
+  }
+  window.siteVisitOpenJob = function() {
+    var v = currentSiteVisit();
+    if (v && v.job_id) openJob(v.job_id, v.assignment_id || '');
+  };
 
+  // ── The optional break after a sign out. Skipping it means none. ──
+  window.siteSetBreak = function(mins) {
+    var ask = _siteBreakAsk;
+    _siteBreakAsk = null;
+    renderSiteVisitBar();
+    if (_currentView === 'job' && _currentJob) renderJobDetail(_currentJob);
+    mins = Number(mins);
+    if (!ask || !ask.visit_id || !(mins > 0)) return;
+    api('set_site_visit_break', null, { visit_id: ask.visit_id, break_minutes: Math.round(mins) }).then(function(res) {
+      if (res && res.success === false) throw new Error(res.error || 'Break not saved');
+      toast('Break saved: ' + Math.round(mins) + ' min');
+    }).catch(function() {
+      toast('Break not saved. Add it on your invoice line.', true);
+    });
+  };
+  window.siteBreakOther = function() {
+    showTextPrompt('How long was your break?', 'Minutes, as a whole number.', 'Save').then(function(text) {
+      if (text == null) return;
+      var mins = TradeTimeEntryCore.breakOf(String(text).trim());
+      if (mins == null) { toast('Break must be whole minutes, 0 or more.', true); return; }
+      siteSetBreak(mins);
+    });
+  };
+
+  // ── "You did not sign out": the trade types the time they left ──
+  // Asked at app open and before any sign in, for their own visit only. The
+  // server marks it as typed, not a tap. The app never guesses a finish.
+  var _siteLateDismiss = null;
+  function dismissLateFinish() {
+    var old = document.getElementById('siteLateOverlay');
+    if (old) old.remove();
+    var done = _siteLateDismiss;
+    _siteLateDismiss = null;
+    if (done) done(false);
+  }
+  function askLateFinish(v) {
+    dismissLateFinish();
+    return new Promise(function(resolve) {
+      _siteLateDismiss = resolve;
+      var overlay = document.createElement('div');
+      overlay.id = 'siteLateOverlay';
+      overlay.className = 'confirm-overlay active';
+      overlay.innerHTML = '<div class="confirm-box" style="max-width:380px;text-align:left">'
+        + '<h3 style="margin-bottom:6px">You did not sign out</h3>'
+        + '<p id="siteLateMsg" style="font-size:14px;color:var(--sw-mid);margin-bottom:12px">' + esc(TradeSiteVisitCore.lateQuestion(v)) + '</p>'
+        + '<label class="jct-f"><span>Time you left</span><input type="time" id="siteLateTime"></label>'
+        + '<div class="jct-err" id="siteLateErr" role="alert" hidden></div>'
+        + '<div class="jct-hint">It is saved as typed later, not a tap.</div>'
+        + '<div class="confirm-actions" style="margin-top:14px">'
+        + '<button type="button" class="confirm-cancel" id="siteLateSkip">Not now</button>'
+        + '<button type="button" class="confirm-ok" id="siteLateSave">Save</button></div></div>';
+      document.body.appendChild(overlay);
+      var input = overlay.querySelector('#siteLateTime'), errEl = overlay.querySelector('#siteLateErr'), save = overlay.querySelector('#siteLateSave');
+      function fail(msg) { errEl.textContent = msg; errEl.hidden = !msg; }
+      overlay.querySelector('#siteLateSkip').onclick = dismissLateFinish;
+      save.onclick = function() {
+        var time = TradeTimeEntryCore.normTime(input.value);
+        var bad = TradeSiteVisitCore.lateCheck(v, time);
+        if (bad) { fail(bad); return; }
+        fail('');
+        save.disabled = true;
+        api('close_site_visit_late', null, { visit_id: v.visit_id, finish_time: time }).then(function(res) {
+          if (res && res.success === false) throw new Error(res.error || 'Not saved');
+          if (_siteVisit && _siteVisit.visit_id === v.visit_id) _siteVisit = null;
+          _siteLateDismiss = null;
+          overlay.remove();
+          renderSiteVisitBar();
+          toast('Saved: you left at ' + TradeTimeEntryCore.clock12(time) + '. Marked as typed.');
+          if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
+          resolve(true);
+        }).catch(function(err) {
+          save.disabled = false;
+          fail('Not saved: ' + friendlyError(err));
+        });
+      };
+    });
+  }
+  function maybeAskLateFinish() {
+    var v = _siteVisit;
+    if (!siteVisitOwesFinish(v) || _siteLateAsked[v.visit_id]) return;
+    _siteLateAsked[v.visit_id] = true;
+    askLateFinish(v);
+  }
+  window.siteAskLateFinish = function() {
+    var v = currentSiteVisit();
+    if (siteVisitOwesFinish(v)) askLateFinish(v);
+  };
+
+  // ══════════════════════════════════════════════════
+  // CLOCK EVENT: the one door for a sign in or sign out tap
+  // ══════════════════════════════════════════════════
+  // The tap time is taken at the tap and rides the call (and the offline
+  // queue) as `timestamp`; the location rides the same call when the phone
+  // gives one in time. A tap the server refuses is never queued.
   function clockEvent(event, assignmentId, extra) {
     var payload = {
-      assignment_id: assignmentId,
       event: event,
       timestamp: new Date().toISOString(),
       idempotency_key: crypto.randomUUID ? crypto.randomUUID() : 'ik-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-      break_minutes: _totalBreakMins || 0,
+      break_minutes: 0
     };
+    if (assignmentId) payload.assignment_id = assignmentId;
 
     // Merge extras
-    if (extra) Object.keys(extra).forEach(function(k) { payload[k] = extra[k]; });
+    if (extra) Object.keys(extra).forEach(function(k) { if (extra[k] !== undefined) payload[k] = extra[k]; });
+    var onThisJobScreen = !payload.job_id || payload.job_id === _currentJobId;
 
-    return api('clock_event', {}, payload).then(function(result) {
+    return siteTapLocation().then(function(loc) {
+      if (loc) payload.location = loc;
+      return api('clock_event', {}, payload);
+    }).then(function(result) {
       if (!result.success) {
-        var refused = new Error(result.error || 'Clock event failed');
+        var refused = new Error(result.error || 'Not saved');
         refused.clock_refused = true;
         throw refused;
       }
 
       // Update local state FROM SERVER response
       var ass = result.assignment;
-      if (ass && _currentJob && Array.isArray(_currentJob.crew)) {
-        _currentJob.crew.forEach(function(row) {
-          if (!row || row.id !== ass.id) return;
-          ['status', 'started_at', 'completed_at', 'clocked_on_at', 'clocked_off_at', 'travel_started_at', 'arrived_at', 'job_phase', 'hours_worked', 'break_minutes'].forEach(function(k) {
-            if (k in ass) row[k] = ass[k];
-          });
-        });
+      if (ass && ass.id) patchOwnAssignmentRow(ass.id, ass);
+      if (event === 'clock_on') {
+        _clockState = 'on';
+        _clockedOnAt = (ass && ass.clocked_on_at) || payload.timestamp;
+      } else if (event === 'clock_off') {
+        _clockState = 'off';
+        _clockedOnAt = null;
       }
-      if (ass) {
-        _clockedOnAt = ass.clocked_on_at || _clockedOnAt;
-        _travelStartTime = ass.travel_started_at || _travelStartTime;
-        _arrivedAt = ass.arrived_at || _arrivedAt;
-        _totalBreakMins = ass.break_minutes || _totalBreakMins;
-
-        if (event === 'clock_on' || event === 'start_travel') {
-          _clockState = 'on';
-          _isPaused = false;
-        } else if (event === 'clock_off') {
-          _clockState = 'off';
-          _isPaused = false;
-          _clockedOnAt = null;
-          _travelStartTime = null;
-          _arrivedAt = null;
-          _totalBreakMins = 0;
-        } else if (event === 'pause') {
-          _isPaused = true;
-          _pauseStartTime = new Date().toISOString();
-        } else if (event === 'resume') {
-          _isPaused = false;
-          _pauseStartTime = null;
-        }
-      }
-
-      saveTimerState();
+      if (onThisJobScreen) saveTimerState();
       _invalidateAssignmentLifecycleCaches();
       return result;
     }).catch(function(err) {
       // A view-only block or a server refusal ('Not your assignment', any 4xx)
       // is not a lost connection: never stash, queue or optimistically apply it.
       if (err && err.code === 'view_only') throw err;
+      // Signed in at another job: the caller asks once, then switches.
+      if (event === 'clock_on' && TradeSiteVisitCore.alreadySignedIn(err)) throw err;
       if (isClockEventRefusal(err)) {
         err.clock_refused = true;
-        try { localStorage.removeItem('sw_pending_clock_' + assignmentId); } catch (e) {}
+        if (assignmentId) { try { localStorage.removeItem('sw_pending_clock_' + assignmentId); } catch (e) {} }
         console.warn('[trade] clock_event refused:', event, err);
-        toast('Not saved: ' + friendlyError(err) + '. Ask the office to fix this clock.', true);
+        toast('Not saved: ' + friendlyError(err) + '. Ask the office to check this job.', true);
         throw err;
       }
       console.error('[trade] clock_event failed:', event, err);
 
-      // Save locally + queue for retry — DON'T clear state
-      var pendingKey = 'sw_pending_clock_' + assignmentId;
-      localStorage.setItem(pendingKey, JSON.stringify(payload));
+      // Not sent: keep it, with its tap time, for when the signal is back.
+      if (assignmentId) { try { localStorage.setItem('sw_pending_clock_' + assignmentId, JSON.stringify(payload)); } catch (e) {} }
       queueOfflineAction('clock_event', payload);
-
-      // Still update local state optimistically for UI
-      if (event === 'clock_on' || event === 'start_travel') {
-        _clockState = 'on';
-        _clockedOnAt = _clockedOnAt || new Date().toISOString();
-        if (event === 'start_travel') _travelStartTime = new Date().toISOString();
-        else _arrivedAt = new Date().toISOString();
-      } else if (event === 'arrived') {
-        _arrivedAt = new Date().toISOString();
-      } else if (event === 'clock_off') {
-        _clockState = 'off';
-      } else if (event === 'pause') {
-        _isPaused = true;
-        _pauseStartTime = new Date().toISOString();
-      } else if (event === 'resume') {
-        _isPaused = false;
-        _pauseStartTime = null;
-      }
-      saveTimerState();
-
-      toast('Saved locally \u2014 will sync when online', false);
-      throw err; // Re-throw so callers know it failed
+      if (event === 'clock_on') { _clockState = 'on'; _clockedOnAt = payload.timestamp; }
+      else if (event === 'clock_off') { _clockState = 'off'; }
+      if (onThisJobScreen) saveTimerState();
+      err.site_tap_queued = true;
+      err.site_tap_payload = payload;
+      throw err;
     });
   }
 
-  // ══════════════════════════════════════════════════
-  // CLOCK ACTIONS — Server-first via clock_event endpoint
-  // ══════════════════════════════════════════════════
+  function confirmSiteSwitch(other) {
+    return showConfirm('Signed in at another job', 'Sign out of ' + TradeSiteVisitCore.where(other) + ' and sign in here?', 'Yes, sign in here');
+  }
 
-  window.timerAction = function(action, assignmentId) {
+  function sendSiteSignIn(ctx, tappedAt, opts) {
+    opts = opts || {};
+    var extra = { timestamp: tappedAt, job_id: ctx.job_id || undefined };
+    var before = Promise.resolve();
+    var from = opts.switchFrom;
+    if (from && from.visit_id) {
+      extra['switch'] = true;
+    } else if (from && from.assignment_id) {
+      // An ops-api with no visit record cannot switch in one call: sign out
+      // of the other job first, at the same tap time.
+      before = clockEvent('clock_off', from.assignment_id, { timestamp: tappedAt, job_id: from.job_id || undefined }).then(function(res) {
+        patchOwnAssignmentRow(from.assignment_id, (res && res.assignment) || { clocked_off_at: tappedAt });
+      }, function(err) {
+        if (!(err && err.site_tap_queued)) throw err;
+      });
+    }
+    return before.then(function() {
+      return clockEvent('clock_on', ctx.assignment_id, extra);
+    }).then(function(result) {
+      _siteTapWaiting = null;
+      saveSiteTapWaiting();
+      _siteBreakAsk = null;
+      var ass = result.assignment || {};
+      _siteVisit = siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
+        job_id: ctx.job_id, assignment_id: ctx.assignment_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
+        signed_in_at: ass.clocked_on_at || tappedAt
+      });
+      toast(TradeSiteVisitCore.signedInText(_siteVisit) || 'Signed in');
+      afterSiteTap(ctx, result.assignment || { status: 'in_progress', clocked_on_at: tappedAt, clocked_off_at: null });
+      return true;
+    }, function(err) {
+      var other = !extra['switch'] && TradeSiteVisitCore.alreadySignedIn(err);
+      if (other) {
+        return confirmSiteSwitch(other).then(function(ok) {
+          if (!ok) return false;
+          return sendSiteSignIn(ctx, tappedAt, { switchFrom: Object.assign({}, other, { visit_id: other.visit_id || 'open' }) });
+        });
+      }
+      if (err && err.site_tap_queued) {
+        _siteVisit = null;
+        _siteBreakAsk = null;
+        _siteTapWaiting = {
+          event: 'clock_on', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
+          at: tappedAt, idempotency_key: err.site_tap_payload.idempotency_key
+        };
+        saveSiteTapWaiting();
+        toast(TradeSiteVisitCore.signedInText(currentSiteVisit()));
+        afterSiteTap(ctx, { status: 'in_progress', clocked_on_at: tappedAt, clocked_off_at: null });
+        return true;
+      }
+      afterSiteTap(ctx, null);
+      return false;
+    });
+  }
+
+  // Sign in: one tap, no confirm. Asks once only when the trade is still
+  // signed in somewhere else, or still owes the time they left an earlier job.
+  window.siteSignIn = function(assignmentId, jobId) {
     if (navigator.vibrate) navigator.vibrate(10);
     assignmentId = assignmentId || _currentAssignment;
-    if (!assignmentId) { toast('No assignment selected', true); return; }
-
-    var job = _currentJob ? _currentJob.job : null;
-
-    switch (action) {
-      case 'clock_on':
-        clockEvent('clock_on', assignmentId).then(function() {
-          captureGPS('clock_on');
-          toast('Clocked On \u2713');
-          setTimeout(function() { showMaterialsCheckPrompt(); }, 500);
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
-        }).catch(function() {
-          // Already handled in clockEvent — just re-render
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
+    if (!assignmentId) { toast('No job selected', true); return Promise.resolve(false); }
+    if (_siteTapBusy) return Promise.resolve(false);
+    _siteTapBusy = true;
+    var tappedAt = new Date().toISOString();
+    var ctx = siteTapContext(assignmentId, jobId);
+    var open = currentSiteVisit();
+    var late = siteVisitOwesFinish(open) ? askLateFinish(open) : Promise.resolve(false);
+    return late.then(function() {
+      open = currentSiteVisit();
+      if (open && open.job_id && open.job_id !== ctx.job_id && !siteVisitOwesFinish(open)) {
+        return confirmSiteSwitch(open).then(function(ok) {
+          return ok ? sendSiteSignIn(ctx, tappedAt, { switchFrom: open }) : false;
         });
-        break;
+      }
+      return sendSiteSignIn(ctx, tappedAt, {});
+    }).then(function(ok) { _siteTapBusy = false; return ok; }, function(err) {
+      _siteTapBusy = false;
+      console.warn('[trade] sign in failed:', err);
+      return false;
+    });
+  };
 
-      case 'start_travel':
-        clockEvent('start_travel', assignmentId).then(function() {
-          captureGPS('start_travel');
-          localStorage.setItem('sw_travel_started', Date.now().toString());
-          // Auto-SMS
-          if (canMessage() && _autoNotifyClient && job && job.ghl_contact_id) {
-            var firstName = (job.client_name || '').split(' ')[0] || 'there';
-            ghlApi('send_sms', null, { contactId: job.ghl_contact_id, message: 'On my way \u2014 arriving in about 20 minutes.', jobId: job.id }).then(function() {
-              toast('Auto-notified ' + firstName);
-            }).catch(function() {});
-          } else {
-            toast('\uD83D\uDE97 Travelling');
-          }
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
-        }).catch(function() {
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
-        });
-        break;
+  // Sign out: one tap, no confirm. The optional break is asked afterwards.
+  window.siteSignOut = function(assignmentId, jobId) {
+    if (navigator.vibrate) navigator.vibrate(10);
+    var open = currentSiteVisit();
+    assignmentId = assignmentId || (open && open.assignment_id) || _currentAssignment;
+    if (!jobId && open && (!assignmentId || !open.assignment_id || open.assignment_id === assignmentId)) jobId = open.job_id;
+    if (!assignmentId && !jobId) { toast('No job selected', true); return Promise.resolve(false); }
+    if (_siteTapBusy) return Promise.resolve(false);
+    _siteTapBusy = true;
+    var tappedAt = new Date().toISOString();
+    var ctx = siteTapContext(assignmentId, jobId);
+    var visitId = open && open.job_id === ctx.job_id ? open.visit_id : '';
+    return clockEvent('clock_off', ctx.assignment_id, { timestamp: tappedAt, job_id: ctx.job_id || undefined }).then(function(result) {
+      var closed = (result && (result.site_visit || result.visit)) || {};
+      visitId = String(closed.visit_id || closed.id || visitId || '');
+      _siteVisit = null;
+      _siteTapWaiting = null;
+      saveSiteTapWaiting();
+      _siteBreakAsk = visitId ? { visit_id: visitId, job_id: ctx.job_id, at: tappedAt } : null;
+      if (ctx.job_id === _currentJobId) clearTimerState();
+      toast('Signed out ' + siteClock(tappedAt));
+      afterSiteTap(ctx, result.assignment || { clocked_off_at: tappedAt });
+      return true;
+    }, function(err) {
+      if (err && err.site_tap_queued) {
+        _siteVisit = null;
+        _siteBreakAsk = null;
+        _siteTapWaiting = {
+          event: 'clock_off', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
+          at: tappedAt, idempotency_key: err.site_tap_payload.idempotency_key
+        };
+        saveSiteTapWaiting();
+        toast('Signed out ' + siteClock(tappedAt) + ' · waiting for signal');
+        afterSiteTap(ctx, { clocked_off_at: tappedAt });
+        return true;
+      }
+      afterSiteTap(ctx, null);
+      return false;
+    }).then(function(ok) { _siteTapBusy = false; return ok; });
+  };
 
-      case 'arrived':
-        clockEvent('arrived', assignmentId).then(function() {
-          captureGPS('arrived');
-          // Auto-SMS arrived
-          if (canMessage() && _autoNotifyClient && job && job.ghl_contact_id) {
-            ghlApi('send_sms', null, { contactId: job.ghl_contact_id, message: "We've arrived at your property.", jobId: job.id }).then(function() {
-              toast('\uD83D\uDCCD On site \u2014 client notified');
-            }).catch(function() { toast('\uD83D\uDCCD On site'); });
-          } else {
-            toast('\uD83D\uDCCD On site');
-          }
-          setTimeout(function() { showMaterialsCheckPrompt(); }, 500);
-          if (_currentJob) renderJobDetail(_currentJob);
-        }).catch(function() {
-          if (_currentJob) renderJobDetail(_currentJob);
-        });
-        break;
-
-      case 'pause':
-        clockEvent('pause', assignmentId).then(function() {
-          toast('\u23F8 Timer paused');
-          if (_currentJob) renderJobDetail(_currentJob);
-        }).catch(function() {
-          if (_currentJob) renderJobDetail(_currentJob);
-        });
-        break;
-
-      case 'resume':
-        // Calculate break duration for display
-        if (_pauseStartTime) {
-          var breakMins = Math.round((Date.now() - new Date(_pauseStartTime).getTime()) / 60000);
-          _totalBreakMins = (_totalBreakMins || 0) + breakMins;
-        }
-        clockEvent('resume', assignmentId, { break_minutes: _totalBreakMins }).then(function() {
-          toast('\u25B6 Timer running');
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
-        }).catch(function() {
-          if (_currentJob) renderJobDetail(_currentJob);
-          startTimerTick();
-        });
-        break;
-
-      case 'clock_off':
-        clockEvent('clock_off', assignmentId, {
-          break_minutes: _totalBreakMins,
-          progress_pct: window._quickProgress || undefined
-        }).then(function(result) {
-          captureGPS('clock_off');
-          var hours = result.net_hours ? (Math.round(result.net_hours * 100) / 100) + 'h' : '';
-          toast('Clocked off' + (hours ? ' \u2014 ' + hours + ' logged' : ''));
-          clearTimerState();
-          window._quickProgress = null;
-          // Update cached crew data so renderJobDetail shows "complete" not "clock on"
-          if (_currentJob && _currentJob.crew) {
-            for (var ci = 0; ci < _currentJob.crew.length; ci++) {
-              if (_currentJob.crew[ci].id === assignmentId) {
-                _currentJob.crew[ci].status = 'complete';
-                _currentJob.crew[ci].clocked_off_at = new Date().toISOString();
-                _currentJob.crew[ci].hours_worked = result.net_hours || null;
-                _currentJob.crew[ci].job_phase = 'complete';
-                break;
-              }
-            }
-          }
-          if (_currentJob) renderJobDetail(_currentJob);
-        }).catch(function(err) {
-          // Clock-off failed — DON'T clear timer state. A refusal was already
-          // shown by clockEvent; only a queued offline clock-off is "saved locally".
-          if (!(err && err.clock_refused) && !(err && err.code === 'view_only')) {
-            toast('Clock-off saved locally \u2014 will sync when online', false);
-          }
-          if (_currentJob) renderJobDetail(_currentJob);
-        });
-        break;
-
-      default:
-        console.warn('[trade] Unknown timer action:', action);
+  // Completing the job or sending the make-safe report also signs the trade
+  // out (the server closes the visit): do not leave them signed in on screen.
+  function siteVisitJobFinished(jobId, result) {
+    var v = currentSiteVisit();
+    if (result && Object.prototype.hasOwnProperty.call(result, 'open_site_visit')) {
+      _siteVisit = TradeSiteVisitCore.openVisit(result.open_site_visit);
+    } else if (v && v.job_id === jobId) {
+      _siteVisit = null;
     }
-  };
+    if (_siteTapWaiting && _siteTapWaiting.job_id === jobId) { _siteTapWaiting = null; saveSiteTapWaiting(); }
+    if (_siteBreakAsk && _siteBreakAsk.job_id === jobId) _siteBreakAsk = null;
+    if (jobId === _currentJobId) clearTimerState();
+    renderSiteVisitBar();
+  }
 
-  // ── Resume job next day (multi-day) — re-clocks onto existing assignment ──
-  window.resumeJobNextDay = function() {
-    if (!_currentJob || !_user) { toast('No job loaded', true); return; }
-    var job = _currentJob.job;
-    var myAssignment = getMyAssignment(_currentJob);
-    if (!myAssignment) { toast('No assignment found', true); return; }
-    var jobName = job.job_number || 'this job';
-    showConfirm('Clock On Again?', 'Resume working on ' + jobName + ' and start your timer.', 'Yes, Clock On').then(function(ok) {
-      if (!ok) return;
-      _currentAssignment = myAssignment.id;
-      clockEvent('clock_on', myAssignment.id).then(function() {
-        captureGPS('clock_on');
-        toast('Clocked On ✓');
-        // Update cached assignment status so UI re-renders correctly
-        myAssignment.status = 'in_progress';
-        myAssignment.clocked_on_at = new Date().toISOString();
-        startTimerTick();
-        if (_currentJob) renderJobDetail(_currentJob);
-      }).catch(function(err) {
-        console.error('[trade] resumeJobNextDay failed:', err);
-        toast('Failed to clock on: ' + (err.message || 'Unknown error'), true);
-        if (_currentJob) renderJobDetail(_currentJob);
-      });
-    });
-  };
-
-  // ── Confirmation wrappers ──
-  window.confirmClockOn = function(assignmentId) {
-    var jobName = _currentJob ? (_currentJob.job.job_number || 'this job') : 'this job';
-    showConfirm('Clock On?', 'Starting timer for ' + jobName + '.', 'Yes, Clock On').then(function(ok) {
-      if (ok) timerAction('clock_on', assignmentId);
-    });
+  // Older callers (the end-of-day report) still name the tap by its event.
+  window.timerAction = function(action, assignmentId) {
+    if (action === 'clock_on') return siteSignIn(assignmentId);
+    if (action === 'clock_off') return siteSignOut(assignmentId);
+    console.warn('[trade] Unknown timer action:', action);
   };
 
   window.acceptAssignment = function(assignmentId) {
@@ -29384,69 +30186,6 @@
     });
   };
 
-  window.confirmThenTravel = function(assignmentId) {
-    showConfirm('Leave for Site?', 'This starts travel time for this job.', 'Leave now').then(function(ok) {
-      if (ok) {
-        timerAction('start_travel', assignmentId);
-        if (_currentJob) renderJobDetail(_currentJob);
-      }
-    });
-  };
-
-  window.confirmClockOff = function(assignmentId) {
-    // Check for consecutive quick clock-offs without progress update
-    var quickCount = parseInt(localStorage.getItem('sw_quick_clockoff_streak_' + _currentJobId) || '0', 10);
-    var nudge = quickCount >= 3 ? '\n\nYou haven\'t updated progress since ' + (localStorage.getItem('sw_quick_clockoff_last_date_' + _currentJobId) || 'recently') + ' \u2014 quick update?' : '';
-
-    // Photo count warning
-    var photoWarning = '';
-    if (_currentJob) {
-      var media = _currentJob.media || [];
-      var completionPhotos = media.filter(function(m) { return m.phase === 'completion'; }).length;
-      var inProgressPhotos = media.filter(function(m) { return m.phase === 'in_progress'; }).length;
-      if (completionPhotos === 0 && inProgressPhotos < 3) {
-        photoWarning = '<div style="font-size:12px;color:var(--sw-orange);margin-bottom:8px;padding:6px;background:#FEF3C7;border-radius:6px;">Only ' + inProgressPhotos + ' photo(s) taken today. Consider adding more before finishing.</div>';
-      }
-    }
-
-    // Two options: Quick (just log time) or Full Report
-    var overlay = document.createElement('div');
-    overlay.id = 'clockOffOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;';
-    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:360px;width:100%;padding:24px;text-align:center;">' +
-      '<div style="font-size:18px;font-weight:700;color:var(--sw-dark);margin-bottom:8px;">Clock Off?</div>' +
-      photoWarning +
-      (nudge ? '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:12px;padding:8px;background:#FEF3C7;border-radius:6px;">' + nudge.trim() + '</div>' : '') +
-      '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">How far through?</div>' +
-      '<div id="quickProgressPicker" style="display:flex;gap:6px;margin-bottom:12px;justify-content:center;">' +
-        '<button class="qp-btn" onclick="this.parentElement.querySelectorAll(\'.qp-btn\').forEach(function(b){b.style.background=\'var(--sw-light)\';b.style.color=\'var(--sw-mid)\'});this.style.background=\'var(--sw-orange)\';this.style.color=\'#fff\';window._quickProgress=25" style="padding:8px 12px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-light);color:var(--sw-mid);min-width:44px;">25%</button>' +
-        '<button class="qp-btn" onclick="this.parentElement.querySelectorAll(\'.qp-btn\').forEach(function(b){b.style.background=\'var(--sw-light)\';b.style.color=\'var(--sw-mid)\'});this.style.background=\'var(--sw-orange)\';this.style.color=\'#fff\';window._quickProgress=50" style="padding:8px 12px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-light);color:var(--sw-mid);min-width:44px;">50%</button>' +
-        '<button class="qp-btn" onclick="this.parentElement.querySelectorAll(\'.qp-btn\').forEach(function(b){b.style.background=\'var(--sw-light)\';b.style.color=\'var(--sw-mid)\'});this.style.background=\'var(--sw-orange)\';this.style.color=\'#fff\';window._quickProgress=75" style="padding:8px 12px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-light);color:var(--sw-mid);min-width:44px;">75%</button>' +
-        '<button class="qp-btn" onclick="this.parentElement.querySelectorAll(\'.qp-btn\').forEach(function(b){b.style.background=\'var(--sw-light)\';b.style.color=\'var(--sw-mid)\'});this.style.background=\'var(--sw-green)\';this.style.color=\'#fff\';window._quickProgress=100" style="padding:8px 12px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-light);color:var(--sw-mid);min-width:44px;">Done</button>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:8px;">' +
-        '<button onclick="document.getElementById(\'clockOffOverlay\').remove();_quickClockOff(\'' + assignmentId + '\')" style="padding:14px;background:var(--sw-dark);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;min-height:48px;">Clock Off</button>' +
-        '<button onclick="document.getElementById(\'clockOffOverlay\').remove();openEOD()" style="padding:14px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px;">Full Report \u2192</button>' +
-        '<button onclick="window._quickProgress=null;document.getElementById(\'clockOffOverlay\').remove();" style="padding:10px;background:none;border:none;color:var(--sw-text-sec);font-size:13px;cursor:pointer;">Cancel</button>' +
-      '</div></div>';
-    document.body.appendChild(overlay);
-  };
-
-  window._quickClockOff = function(assignmentId) {
-    // Track quick clock-off streak
-    var streakKey = 'sw_quick_clockoff_streak_' + _currentJobId;
-    var count = parseInt(localStorage.getItem(streakKey) || '0', 10) + 1;
-    localStorage.setItem(streakKey, count.toString());
-    localStorage.setItem('sw_quick_clockoff_last_date_' + _currentJobId, new Date().toLocaleDateString('en-AU'));
-    // Log progress if selected
-    var progress = window._quickProgress;
-    if (progress && _currentJobId) {
-      api('add_note', null, { jobId: _currentJobId, text: 'Progress: ' + progress + '%', eventType: 'quick_progress' }).catch(function() {});
-    }
-    window._quickProgress = null;
-    timerAction('clock_off', assignmentId);
-  };
-
   window.confirmThenComplete = function() {
     // Pre-completion checks (warnings, not blockers)
     var warnings = [];
@@ -29459,7 +30198,7 @@
         }
       }
       if (activeCrew.length > 0) {
-        warnings.push(activeCrew.join(', ') + ' still clocked on.');
+        warnings.push(activeCrew.join(', ') + ' still signed in.');
       }
       var prog = parseInt(localStorage.getItem('sw_progress_' + _currentJobId) || '0', 10);
       if (prog > 0 && prog < 90) {
@@ -29480,78 +30219,30 @@
     });
   };
 
-  // Undo travel — available for 5 minutes after starting travel
-  window.undoTravel = function() {
-    var asgId = _currentAssignment;
-    // Clear local state immediately
-    _clockState = 'off';
-    _clockedOnAt = null;
-    _travelStartTime = null;
-    _arrivedAt = null;
-    saveTimerState();
-    localStorage.removeItem('sw_travel_started');
-    if (_currentJob) renderJobDetail(_currentJob);
-
-    // Sync to server — clear clock state so no desync
-    if (asgId) {
-      clockEvent('undo_travel', asgId).then(function() {
-        toast('Travel undone');
-      }).catch(function() {
-        toast('Travel undone locally — will sync when online');
-      });
-    } else {
-      toast('Travel undone');
-    }
-  };
-
-  // Manual time override — hours + mins picker overlay
-  window.showManualTimeOverride = function() {
-    var currentMins = _clockedOnAt ? Math.round((Date.now() - new Date(_clockedOnAt).getTime()) / 60000) : 0;
-    var currentH = Math.floor(currentMins / 60);
-    var currentM = currentMins % 60;
-
-    var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;';
-    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:320px;width:100%;padding:24px;text-align:center;">' +
-      '<div style="font-size:16px;font-weight:700;color:var(--sw-dark);margin-bottom:12px;">Override Time</div>' +
-      '<div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-bottom:8px;">' +
-        '<input type="number" id="overrideHrs" value="' + currentH + '" min="0" max="16" style="width:60px;padding:10px;text-align:center;font-size:18px;font-weight:700;border:2px solid var(--sw-border);border-radius:8px;">' +
-        '<span style="font-size:14px;color:var(--sw-text-sec);font-weight:600;">hrs</span>' +
-        '<input type="number" id="overrideMins" value="' + currentM + '" min="0" max="59" step="15" style="width:60px;padding:10px;text-align:center;font-size:18px;font-weight:700;border:2px solid var(--sw-border);border-radius:8px;">' +
-        '<span style="font-size:14px;color:var(--sw-text-sec);font-weight:600;">mins</span>' +
-      '</div>' +
-      '<div id="overridePreview" style="font-size:12px;color:var(--sw-text-sec);margin-bottom:16px;">Currently: ' + formatElapsed(_clockedOnAt) + '</div>' +
-      '<div style="display:flex;gap:8px;">' +
-        '<button onclick="this.closest(\'div[style*=fixed]\').remove();" style="flex:1;padding:12px;background:var(--sw-light);border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;color:var(--sw-mid);">Cancel</button>' +
-        '<button onclick="applyTimeOverride();this.closest(\'div[style*=fixed]\').remove();" style="flex:1;padding:12px;background:var(--sw-dark);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Apply</button>' +
-      '</div>' +
-    '</div>';
-    document.body.appendChild(overlay);
-    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
-  };
-
-  window.applyTimeOverride = function() {
-    var hrs = parseInt(document.getElementById('overrideHrs') ? document.getElementById('overrideHrs').value : '0');
-    var mins = parseInt(document.getElementById('overrideMins') ? document.getElementById('overrideMins').value : '0');
-    if (isNaN(hrs) || isNaN(mins)) { toast('Invalid time', true); return; }
-    var totalMins = hrs * 60 + mins;
-    _manualOverride = true;
-    _clockedOnAt = new Date(Date.now() - totalMins * 60000).toISOString();
-    saveTimerState();
-    toast('Time adjusted to ' + hrs + 'h ' + mins + 'm');
-    if (_currentJob) renderJobDetail(_currentJob);
-  };
-
-  // Materials check prompt — shown after clock-on if POs exist
-  window.showMaterialsCheckPrompt = function() {
-    if (!_currentJob) return;
+  // Materials check: a line on the job screen the trade answers when they
+  // like. It never pops up over a sign in and it can always be closed.
+  function materialsCheckDue() {
+    if (!_currentJob) return false;
     var pos = _currentJob.purchaseOrders || [];
     var hasPOs = pos.some(function(po) { return po.status === 'confirmed' || po.status === 'delivered' || po.status === 'authorised'; });
-    if (!hasPOs) return;
-    // Already checked today?
-    var checkKey = 'sw_matcheck_' + _currentJobId + '_' + awstDateStr();
-    if (localStorage.getItem(checkKey)) return;
-    // Show materials check overlay
+    if (!hasPOs) return false;
+    try { return !localStorage.getItem('sw_matcheck_' + _currentJobId + '_' + awstDateStr()); } catch (e) { return true; }
+  }
+  function materialsCheckLineHTML() {
+    if (!materialsCheckDue()) return '';
+    return '<div class="mat-line" data-materials-line><span>Materials on site?</span>'
+      + '<button type="button" onclick="showMaterialsCheckPrompt()">Check materials</button></div>';
+  }
+  function closeMaterialsCheck() {
+    var overlay = document.getElementById('materialsCheckOverlay');
+    if (overlay) overlay.classList.remove('active');
+    if (_currentView === 'job' && _currentJob) renderJobDetail(_currentJob);
+  }
+  window.matCheckLater = closeMaterialsCheck;
+
+  window.showMaterialsCheckPrompt = function() {
+    if (!materialsCheckDue()) return;
+    var pos = _currentJob.purchaseOrders || [];
     var overlay = document.getElementById('materialsCheckOverlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -29562,7 +30253,6 @@
     var h = '<div class="confirm-box" style="max-width:400px;max-height:80vh;overflow-y:auto">';
     h += '<h3 style="margin-bottom:4px">Materials on site?</h3>';
     h += '<p style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px">Tick each item as you check it</p>';
-    var itemIdx = 0;
     pos.forEach(function(po) {
       if (!po.line_items || po.line_items.length === 0) return;
       var supplier = po.supplier_name || po.contact_name || 'Supplier';
@@ -29574,15 +30264,16 @@
         h += '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--sw-light);border-radius:8px;margin-bottom:4px;cursor:pointer;">';
         h += '<input type="checkbox" class="mat-item-cb" data-desc="' + esc(desc) + '" style="width:20px;height:20px;accent-color:var(--sw-green);flex-shrink:0;" onchange="matCheckUpdateBtn()">';
         h += '<div style="flex:1;font-size:13px;color:var(--sw-dark);">' + esc(desc);
-        if (qty) h += ' <span style="color:var(--sw-text-sec);font-size:12px;">(' + qty + ')</span>';
+        if (qty) h += ' <span style="color:var(--sw-text-sec);font-size:12px;">(' + esc(qty) + ')</span>';
         h += '</div></label>';
-        itemIdx++;
       });
     });
     h += '<div class="confirm-actions" style="margin-top:16px;gap:8px;">';
     h += '<button id="matCheckAllBtn" class="confirm-ok" style="flex:1;background:var(--sw-green);border-color:var(--sw-green);opacity:0.4;pointer-events:none;" onclick="matCheckAllGood()">All checked ✓</button>';
     h += '<button class="confirm-ok" style="flex:1;background:var(--sw-yellow);border-color:var(--sw-yellow);color:#fff;" onclick="matCheckReportMissing()">Report Missing</button>';
-    h += '</div></div>';
+    h += '</div>';
+    h += '<button type="button" data-materials-later onclick="matCheckLater()" style="width:100%;margin-top:10px;padding:12px;background:none;border:none;color:var(--sw-text-sec);font-size:14px;font-weight:600;cursor:pointer;min-height:44px">Later</button>';
+    h += '</div>';
     overlay.innerHTML = h;
     overlay.classList.add('active');
   };
@@ -29629,6 +30320,7 @@
     var overlay = document.getElementById('materialsCheckOverlay');
     if (overlay) overlay.classList.remove('active');
     toast('Materials confirmed');
+    if (_currentView === 'job' && _currentJob) renderJobDetail(_currentJob);
   };
 
   window.matCheckIssue = function(category) {
@@ -29674,24 +30366,6 @@
         '<button onclick="document.getElementById(\'matIssueBanner\').remove();" style="flex:1;padding:10px;background:var(--sw-light);color:var(--sw-text);border:1px solid var(--sw-border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px;">Continue Anyway \u2192</button>' +
       '</div>';
     document.body.appendChild(banner);
-  }
-
-  function captureGPS(transitionType) {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(function(pos) {
-        var lat = pos.coords.latitude;
-        var lng = pos.coords.longitude;
-        // Persist GPS to backend via job event
-        if (_currentJobId && _user) {
-          api('add_note', null, {
-            jobId: _currentJobId,
-            text: (transitionType || 'gps') + ': ' + lat.toFixed(6) + ',' + lng.toFixed(6),
-            eventType: 'gps_capture',
-            metadata: { latitude: lat, longitude: lng, transition: transitionType || 'unknown', accuracy: pos.coords.accuracy }
-          }).catch(function(e) { console.warn('[GPS] Storage failed:', e); });
-        }
-      }, function() {}, { timeout: 5000, maximumAge: 60000 });
-    }
   }
 
   // ══════════════════════════════════════════════════
@@ -30969,6 +31643,7 @@
         throw err;
       }).then(function(result) {
         _invalidateAssignmentLifecycleCaches();
+        siteVisitJobFinished(jobId, result);
         _wizCompleteResult = result || null;
         return result;
       });
@@ -32962,6 +33637,7 @@
     cloud.on('auth:logout', function() {
       resetJobListSession();
       _user = null;
+      clearSiteVisitSession();
       _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
@@ -33029,13 +33705,14 @@
       try {
         var payload = JSON.parse(localStorage.getItem(key));
         if (payload) {
-          api('clock_event', {}, payload).then(function() {
+          api('clock_event', {}, payload).then(function(res) {
             _invalidateAssignmentLifecycleCaches();
             localStorage.removeItem(key);
+            siteTapLanded(payload, res, false);
             console.log('[trade] Synced pending clock event:', payload.event);
           }).catch(function(err) {
             // Keep for next retry, unless the server refused it outright.
-            if (isClockEventRefusal(err)) localStorage.removeItem(key);
+            if (isClockEventRefusal(err)) { localStorage.removeItem(key); siteTapLanded(payload, null, true); }
           });
         }
       } catch (e) {}

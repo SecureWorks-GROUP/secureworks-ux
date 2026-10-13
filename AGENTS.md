@@ -179,31 +179,45 @@ events; the Crew swimlane view only dims. Guard:
 ## Ops Dash calendar v3 look (`ops.html`)
 
 The job-based (Schedule) view's signed-off design is behind
-`window.__SW_CAL_V3_ENABLED`, DEFAULT ON. Kill switch: `?calv3=0` or
-`localStorage.sw_cal_v3='0'`. It is a LOOK, not a second calendar: v3 adds
+`window.__SW_CAL_V3_ENABLED`, DEFAULT ON. ONE off switch:
+`localStorage.sw_cal_v3='0'`, or `?calv3=0` for one page load; there is no
+force-on spelling. It is a LOOK, not a second calendar: v3 adds
 classes and markup inside the same `renderScheduleView` bars and cells, so drag,
 resize, the popup and every write path are shared. Flag off must stay
 byte-identical (checked against the default branch when this shipped), so every
 v3 branch sits behind the one `v3` variable and its CSS is scoped to
-`#viewCalendar.cal-v3`; do not style a calendar class outside that scope and do
-not change the bar's `left`/`width` percentages (the overlap and resize guards
-measure that box; v3 insets the line with transparent side borders instead).
-Line format: type square, client, job number, staff circles, lock. TWO states
+`#viewCalendar.cal-v3`; do not style a calendar class outside that scope. A
+bar's `left`/`width` stay plain percentages that match the day columns
+(weighted when v3 narrows weekend columns with nothing booked on them), with no
+`calc()` and no pixel offsets, so the overlap and resize guards keep measuring
+the real box; v3 insets the line with transparent side borders instead.
+Line format: type square, client, job number, staff circles, lock; a job line
+carries no start time (a business line keeps its time). TWO states
 only (Captain ruling 2026-10-13): placeholder, and client locked in
 (`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
 one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
-repair, family-first through `calDivisionOf`); the symbol still tells a make
-safe from a repair. Business lines (job-less label rows and org events) take the
-TOP lanes of the week and jobs start under them; an org event stretches across
-its days instead of the corner badge. The Show / Type focus row
+repair, family-first through `calDivisionOf`; anything else, such as general or
+miscellaneous, sits with patios); the symbol still tells a make safe from a
+repair. The v3 Type filter and deliveries read that same `calV3Unit`, never
+`calDivisionOf`, so a job cannot vanish under the filter it is coloured for;
+the flag-off sidebar Divisions rule is unchanged. Business lines (job-less label
+rows and org events) take the TOP lanes of the week and jobs start under them;
+an org event stretches across its days instead of the corner badge. A job-less
+label row follows the business filter with v3 on (`calJoblessLabelShown`). The Show / Type focus row
 (`_calFocus`, `setCalFocus`, stored at `sw_cal_focus`) drives the same in-memory
 `_calEventFilters` / `_calDivFilters` the hidden sidebar drove, but never writes
 the sidebar's storage keys, and "Insurance" is a VIEW filter only: Repair stays
 its own division (ruling 2026-09-16). Leave, holidays and reminders show under
-Everything and Business. Deliveries are read-only from the feed's `deliveries`
-and Materials with none says "No deliveries booked". Staff circles are first +
-surname initial; `list_users` sends no surname today, so a one-word name falls
-back to its first two letters until the backend adds `full_name`.
+Everything and Business. Deliveries are read-only and come from
+`calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
+order, see `// <calendar-delivery-row>`) passed through the Show and Type
+focus; both views use it, and Materials with none in view says "No deliveries
+booked". A delivery takes its colour, job number and address from the job's
+event in view, else from the order's own `job_type`, `job_number` and
+`delivery_address`. Staff circles are first + surname initial from `full_name`
+when the feed sends it, else from a raw user name of two or more words; a
+one-word name shows ONE letter, never two letters that read as initials
+(`list_users` sends no `full_name` today).
 `sw_cal_v3_intro` lands a first-time browser on Schedule + Month ONCE; a spec
 that picks its own view must set it to `'1'` first or its choice is overwritten.
 Search `// <calendar-v3>`. Guard: `tests/e2e/ops-calendar-v3.spec.js`; the

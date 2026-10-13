@@ -203,6 +203,26 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     expect(move.body.crew_name).toBe('Hugo');
   });
 
+  test('move: drop a job bar on the narrow Saturday column → the write lands on Saturday', async ({ page }) => {
+    const { writes } = await bootCalendar(page);
+    await toSchedule(page);
+    // Calendar v3 narrows the weekend columns while nothing is booked on them.
+    // The narrow column must still be a real drop target for a real pointer.
+    const fri = page.locator('.cal-schedule-cell[data-date="' + D.FRI + '"]');
+    const sat = page.locator('.cal-schedule-cell[data-date="' + D.SAT + '"]');
+    expect((await sat.boundingBox()).width, 'Saturday starts out narrow').toBeLessThan((await fri.boundingBox()).width * 0.4);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-2"]').first();
+    await realDrag(page, bar, sat);
+    await expect
+      .poll(() => writes.filter((w) => w.action === 'update_assignment').length, { message: 'a real bar drag onto the narrow Saturday must produce an update_assignment write' })
+      .toBeGreaterThan(0);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move.body.assignmentId).toBe('a-bob');
+    expect(move.body.scheduled_date).toBe(D.SAT);
+    expect(move.body.scheduled_end).toBe(D.SAT);
+    expect(move.body.crew_name).toBe('Liam');
+  });
+
   test('resize: right edge handle of the Friday bar onto Monday → Fri + Mon', async ({ page }) => {
     const { writes } = await bootCalendar(page);
     await toSchedule(page);

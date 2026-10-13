@@ -1,6 +1,6 @@
 // Ops Dash calendar v3: the signed-off month design for the job-based
-// (Schedule) view. On by default (window.__SW_CAL_V3_ENABLED); kill switch
-// ?calv3=0 or localStorage.sw_cal_v3 = '0'.
+// (Schedule) view. On by default (window.__SW_CAL_V3_ENABLED); the one off
+// switch is localStorage.sw_cal_v3 = '0', or ?calv3=0 for one page load.
 //
 // What this guards:
 //  - the line format: type square, client, job number, staff circles, lock
@@ -9,7 +9,7 @@
 //    always above the jobs, and stretched across the days they cover
 //  - the Show / Type focus row, and that "Insurance" is a view filter over
 //    make safes AND repairs without touching the stored divisions
-//  - deliveries in the day, with an honest empty state
+//  - deliveries in the day from every live order, with an honest empty state
 //  - the kill switch giving the old calendar back, and the first-open landing
 //
 // Static-fixture spec, same pattern as ops-calendar-repair-division.spec.js:
@@ -40,7 +40,7 @@ const EVENTS = [
        scheduled_date: '2026-08-03', scheduled_end: '2026-08-04', user_id: 'u2', crew_name: 'Sam' }),
   // fencing, client confirmed = locked in
   ev({ job_id: 'j2', assignment_id: 'a2', job_number: 'SWF-27002', client_name: 'Bob Baker', job_type: 'fencing',
-       confirmation_status: 'confirmed', scheduled_date: '2026-08-04', scheduled_end: '2026-08-04', user_id: 'u3', crew_name: 'Ivy' }),
+       confirmation_status: 'confirmed', start_time: '07:00:00', scheduled_date: '2026-08-04', scheduled_end: '2026-08-04', user_id: 'u3', crew_name: 'Ivy' }),
   // make safe
   ev({ job_id: 'j3', assignment_id: 'a3', job_number: 'SWMS-27003', client_name: 'Cara Chen', job_type: 'makesafe',
        scheduled_date: '2026-08-05', scheduled_end: '2026-08-05', user_id: 'u1', crew_name: 'Rex Lawson' }),
@@ -76,10 +76,12 @@ async function seedAndRender(page, opts = {}) {
     document.getElementById('viewCalendar').classList.add('active');
     window._calDate = new Date('2026-08-03T00:00:00');
     window._calRangeMode = opts.range || '1w';
-    window._calViewMode = 'schedule';
+    window._calViewMode = opts.view || 'schedule';
     window._calEvents = opts.events || EVENTS;
     window._calOrgEvents = opts.noOrg ? [] : ORG_EVENTS;
     window._calDeliveries = opts.noDeliveries ? [] : DELIVERIES;
+    // list_pos, null until that read lands (the page's own starting state)
+    window._calPOs = opts.pos || null;
     window._crewList = CREW;
     window._calLeaveByDate = { '2026-08-05': ['Ivy'] };
     window._calAvailability = {};
@@ -110,13 +112,10 @@ function snapshot(page) {
       noCrew: !!b.querySelector('.v3-nocrew'),
       lock: !!b.querySelector('.bar-lock'),
       bg: getComputedStyle(b).backgroundColor,
-      draggable: b.getAttribute('draggable'),
-      dragstart: b.getAttribute('ondragstart') || '',
-      inlineWidth: (b.getAttribute('style').match(/width:\s*([^;]*)/) || [])[1] || '',
       r: rect(b),
     }));
     const cells = [...cal.querySelectorAll('.cal-schedule-cell')].map((c) => ({
-      date: c.getAttribute('data-date'), drop: c.getAttribute('ondrop') || '', w: rect(c).w, r: rect(c),
+      date: c.getAttribute('data-date'), w: rect(c).w, r: rect(c),
       leave: (c.querySelector('.cal-schedule-leave-badge') || {}).textContent || '',
       holidayBadge: !!c.querySelector('.cal-schedule-holiday-badge'),
       dels: [...c.querySelectorAll('.cal-v3-del')].map((d) => ({ id: d.getAttribute('data-po-id'), l1: (d.querySelector('.v3-d1') || {}).textContent || '', l2: (d.querySelector('.v3-d2') || {}).textContent || '', truck: !!d.querySelector('.v3-truck svg'), unit: [...d.classList].find((k) => k.indexOf('v3u-') === 0) || '', bottom: rect(d).bottom })),
@@ -129,6 +128,7 @@ function snapshot(page) {
       empty: (document.getElementById('calV3Empty') || {}).textContent || '',
       grid: (cal.querySelector('.cal-schedule-grid') || { className: '' }).className,
       bars, cells,
+      crewDels: [...cal.querySelectorAll('.cal-delivery-block')].map((d) => d.getAttribute('data-po-id')),
       divs: window._calDivFilters, storedDivs: localStorage.getItem('sw_cal_divs'), storedEvt: localStorage.getItem('sw_cal_evt_filters'),
     };
   });
@@ -169,8 +169,10 @@ test('a job line carries type square, client, job number, staff circles and the 
   const bob = bar(s, 'j2');
   expect(bob.classes).toContain('v3s-locked');
   expect(bob.lock).toBe(true);
-  // no surname on record anywhere: first two letters of the first name
-  expect(bob.crew).toEqual(['IV']);
+  // no surname on record anywhere: one letter, never two that read as initials
+  expect(bob.crew).toEqual(['I']);
+  // a job line carries no start time, even when the assignment has one
+  expect(bob.time).toBe('');
 
   const eli = bar(s, 'j5');
   expect(eli.noCrew).toBe(true);
@@ -251,9 +253,52 @@ test('Show focuses on labour, business or materials, and Everything brings it ba
 test('Materials with nothing booked says so instead of showing an empty grid', async ({ page }) => {
   await seedAndRender(page, { noDeliveries: true });
   await page.evaluate(() => window.setCalFocus('show', 'materials'));
-  const s = await snapshot(page);
+  let s = await snapshot(page);
   expect(s.empty).toBe('No deliveries booked');
   expect(s.bars).toHaveLength(0);
+
+  // an order booked for a day outside the window is still nothing to show here
+  await seedAndRender(page, { noDeliveries: true, pos: [
+    { id: 'po-far', po_number: 'PO-9090', supplier_name: 'Example Steel Co', delivery_date: '2026-09-21', job_id: 'j1', status: 'sent' },
+  ] });
+  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  s = await snapshot(page);
+  expect(s.cells.flatMap((c) => c.dels)).toHaveLength(0);
+  expect(s.empty).toBe('No deliveries booked');
+});
+
+test('a typed job-less row is a business line: shown under Business, hidden under Labour', async ({ page }) => {
+  const withLabel = EVENTS.concat([ev({ job_id: null, assignment_id: 'l1', assignment_type: 'install', label: 'Yard clean-up',
+    scheduled_date: '2026-08-07', scheduled_end: '2026-08-07', user_id: 'u3', crew_name: 'Ivy' })]);
+  await seedAndRender(page, { events: withLabel });
+  await page.evaluate(() => window.setCalFocus('show', 'business'));
+  let s = await snapshot(page);
+  expect(bizBars(s).map((b) => b.label)).toContain('Yard clean-up');
+  expect(jobBars(s)).toHaveLength(0);
+
+  await page.evaluate(() => window.setCalFocus('show', 'labour'));
+  s = await snapshot(page);
+  expect(s.bars.map((b) => b.label)).not.toContain('Yard clean-up');
+  expect(jobBars(s)).toHaveLength(5);
+});
+
+test('a job outside the three named types sits with Patios for colour, filter and delivery alike', async ({ page }) => {
+  const withGeneral = EVENTS.concat([ev({ job_id: 'j7', assignment_id: 'a7', job_number: 'SWG-27007', client_name: 'Finn Ford', job_type: 'general',
+    scheduled_date: '2026-08-07', scheduled_end: '2026-08-07', user_id: 'u3', crew_name: 'Ivy' })]);
+  const pos = [{ id: 'po-7', po_number: 'PO-9007', supplier_name: 'Example Timber Yard', delivery_date: '2026-08-07', job_id: 'j7', status: 'sent' }];
+  await seedAndRender(page, { events: withGeneral, pos });
+  let s = await snapshot(page);
+  expect(bar(s, 'j7').classes).toContain('v3u-patio');
+
+  await page.locator('#calFocus [data-focus-type="patio"]').click();
+  s = await snapshot(page);
+  expect(jobBars(s).map((b) => b.job).sort()).toEqual(['j1', 'j5', 'j7']);
+  expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-1', 'po-7']);
+
+  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  s = await snapshot(page);
+  expect(jobBars(s).map((b) => b.job)).toEqual(['j2']);
+  expect(s.cells.flatMap((c) => c.dels).map((d) => d.id)).toEqual(['po-2']);
 });
 
 test('Type filters by colour group, and Insurance is a view over make safes and repairs only', async ({ page }) => {
@@ -297,16 +342,67 @@ test('a delivery shows truck, supplier, job number and address at the foot of it
   expect(mon.dels[0].bottom).toBeGreaterThan(lowestLine);
 });
 
-test('drag wiring is untouched: job lines stay draggable and days stay drop targets', async ({ page }) => {
+// Every live order shows, not only the three statuses the calendar feed sends
+// (Captain ruling 2026-10-12). list_pos is the source; the feed tops it up.
+const ALL_ORDERS = [
+  DELIVERIES[0],
+  { id: 'po-3', po_number: 'PO-9003', supplier_name: 'Example Roofing', delivery_date: '2026-08-05', confirmed_delivery_date: '2026-08-06', job_id: 'j3', status: 'sent' },
+  { id: 'po-4', po_number: 'PO-9004', supplier_name: 'Example Timber Yard', delivery_date: '2026-08-06', confirmed_delivery_date: null, job_id: 'j5', status: 'confirmed' },
+  // its job is not on the calendar in this window: the order's own job fields speak
+  { id: 'po-5', po_number: 'PO-9005', supplier_name: 'Example Posts', delivery_date: '2026-08-07', confirmed_delivery_date: null, job_id: 'j-later', status: 'delivered',
+    job_number: 'SWF-27050', job_type: 'fencing', delivery_address: '9 Sample Rd, Testville' },
+  { id: 'po-6', po_number: 'PO-9006', supplier_name: 'Example Steel Co', delivery_date: '2026-08-04', confirmed_delivery_date: null, job_id: 'j1', status: 'cancelled' },
+];
+
+test('deliveries are every live order, on the same day the Crew row puts them', async ({ page }) => {
+  await seedAndRender(page, { pos: ALL_ORDERS });
   const s = await snapshot(page);
-  const alice = bar(s, 'j1');
-  expect(alice.draggable).toBe('true');
-  expect(alice.dragstart).toContain('handleSchedBarDragStart');
-  // the bar box is plain percentages, as the overlap and resize guards expect
-  expect(alice.inlineWidth).toMatch(/^[\d.]+%$/);
-  // a client-locked line refuses the drag, as before
-  expect(bar(s, 'j2').dragstart).toContain('Confirmed');
-  for (const c of s.cells) expect(c.drop).toContain('handleSchedDrop');
+  const onDay = (id) => (s.cells.find((c) => c.dels.some((d) => d.id === id)) || {}).date;
+  expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-1', 'po-2', 'po-3', 'po-4', 'po-5']);
+  // requested day first, the supplier's confirmed day only when there is no requested one
+  expect(onDay('po-3')).toBe('2026-08-05');
+
+  await seedAndRender(page, { pos: ALL_ORDERS, view: 'crew' });
+  const crew = await snapshot(page);
+  expect(crew.crewDels.sort()).toEqual(['po-1', 'po-2', 'po-3', 'po-4', 'po-5']);
+});
+
+test('a delivery whose job is not in view still has its colour, job number and address', async ({ page }) => {
+  await seedAndRender(page, { pos: ALL_ORDERS });
+  let s = await snapshot(page);
+  const fri = s.cells.find((c) => c.date === '2026-08-07');
+  expect(fri.dels).toHaveLength(1);
+  expect(fri.dels[0].l1).toBe('Example Posts SWF-27050');
+  expect(fri.dels[0].l2).toBe('9 Sample Rd, Testville');
+  expect(fri.dels[0].unit).toBe('v3u-fencing');
+
+  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  s = await snapshot(page);
+  expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-2', 'po-5']);
+});
+
+test('the Crew view honours Show: deliveries only under Everything and Materials', async ({ page }) => {
+  await seedAndRender(page, { view: 'crew' });
+  let s = await snapshot(page);
+  expect(s.crewDels.sort()).toEqual(['po-1', 'po-2']);
+
+  for (const show of ['labour', 'business']) {
+    await page.evaluate((v) => window.setCalFocus('show', v), show);
+    s = await snapshot(page);
+    expect(s.crewDels, 'Show = ' + show).toEqual([]);
+    expect(s.empty).toBe('');
+  }
+
+  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  s = await snapshot(page);
+  expect(s.crewDels.sort()).toEqual(['po-1', 'po-2']);
+  expect(s.empty).toBe('');
+
+  await seedAndRender(page, { view: 'crew', noDeliveries: true });
+  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  s = await snapshot(page);
+  expect(s.crewDels).toEqual([]);
+  expect(s.empty).toBe('No deliveries booked');
 });
 
 test('weekend columns are narrow until something is booked on a weekend', async ({ page }) => {
@@ -347,6 +443,18 @@ test.describe('the switch', () => {
     // company days are back to the corner badge
     expect(s.cells.filter((c) => c.holidayBadge).map((c) => c.date)).toEqual(['2026-08-06', '2026-08-07']);
     expect(s.cells.flatMap((c) => c.dels)).toHaveLength(0);
+  });
+
+  test('?calv3=0 is the same switch for one page load, and nothing in the address forces v3 on', async ({ page }) => {
+    const flag = async (url) => {
+      await page.goto(url);
+      await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
+      return page.evaluate(() => window.__SW_CAL_V3_ENABLED);
+    };
+    expect(await flag('/ops.html?calv3=0')).toBe(false);
+    expect(await flag('/ops.html')).toBe(true);
+    await page.evaluate(() => localStorage.setItem('sw_cal_v3', '0'));
+    expect(await flag('/ops.html?calv3=1')).toBe(false);
   });
 
   test('first open lands on the job-based Month once, then the stored view is the operator\'s own', async ({ page }) => {

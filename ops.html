@@ -6410,7 +6410,7 @@ var _calPOs = null;
 // ── Calendar v3 flag (signed-off month design — ops-calendar-mock-20261012) ──
 // ON BY DEFAULT (Captain go-ahead 2026-10-13: "get everythign live its way better
 // than the previous calendar"). Kill switch: ?calv3=0 in the URL for one page
-// load, or localStorage.sw_cal_v3 === '0' persistently; ?calv3=1 forces it on.
+// load, or localStorage.sw_cal_v3 === '0' persistently.
 // Gates the LOOK of the job-based (Schedule) view and its controls only: the
 // new line format, business lines on top, the Show / Type focus row, deliveries
 // in the day, and the hidden left sidebar. Drag, resize, the popup, the Crew
@@ -6419,7 +6419,6 @@ var _calPOs = null;
 window.__SW_CAL_V3_ENABLED = (function () {
   try {
     var search = window.location.search || '';
-    if (search.match(/[?&]calv3=1\b/)) return true;
     if (search.match(/[?&]calv3=0\b/)) return false;
     var ls = window.localStorage && window.localStorage.getItem('sw_cal_v3');
     if (ls === '0') return false;
@@ -7343,9 +7342,10 @@ async function loadCrewList() {
       if (u.email && u.email.indexOf('fenc') !== -1) div = 'fencing';
       var rawName = u.name || u.email.split('@')[0];
       var displayName = cleanCrewName(rawName);
-      // full_name is not sent by list_users today; when the backend adds it the
-      // v3 calendar's staff circles become true initials with no change here.
-      var fullName = u.full_name || (u.trade_details && u.trade_details.fullName) || '';
+      // full_name is not sent by list_users today, so a raw name of two or more
+      // words stands in for it; when the backend adds full_name it wins here.
+      var rawFull = String(u.name || '').trim();
+      var fullName = u.full_name || (u.trade_details && u.trade_details.fullName) || (rawFull.split(/\s+/).length > 1 ? rawFull : '');
       return { id: u.id, name: displayName, fullName: fullName, email: u.email, role: u.role || '', division: div };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
   } catch (e) {
@@ -8388,6 +8388,12 @@ function setCalFocus(kind, val) {
   renderCalendar();
 }
 applyCalFocus();
+// A job-less row that is neither a meeting nor a reminder (a typed label from
+// New > Job assignment). v3 draws it as a business line, so there it follows
+// the business filter; with v3 off it follows Jobs as it always has.
+function calJoblessLabelShown() {
+  return window.__SW_CAL_V3_ENABLED ? _calEventFilters.meetings : _calEventFilters.jobs;
+}
 
 function toggleCalEventFilter(key, el) {
   if (el && el.type === 'checkbox') _calEventFilters[key] = el.checked;
@@ -9251,7 +9257,7 @@ function renderSwimlaneView(container, range) {
     if (aType === 'meeting' && !_calEventFilters.meetings) return;
     if (aType === 'reminder' && !_calEventFilters.reminders) return;
     if (ev.job_id && !_calEventFilters.jobs) return;
-    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !_calEventFilters.jobs) return;
+    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !calJoblessLabelShown()) return;
     var crew = crewDisplayName(ev);
     if (!crewMap[crew]) crewMap[crew] = { division: guessDivision(ev), events: {} };
     var startDate = ev.scheduled_date;
@@ -9334,7 +9340,7 @@ function renderSwimlaneView(container, range) {
 
   // Build delivery lookup
   var deliveryMap = {};
-  calDeliveryList(_calDeliveries, _calPOs).forEach(function(del) {
+  (window.__SW_CAL_V3_ENABLED ? calV3Deliveries().map(function(x) { return x.po; }) : calDeliveryList(_calDeliveries, _calPOs)).forEach(function(del) {
     var day = calDeliveryDay(del);
     if (!deliveryMap[day]) deliveryMap[day] = [];
     deliveryMap[day].push(del);
@@ -9590,6 +9596,9 @@ function renderSwimlaneView(container, range) {
   }
 
   html += '</div>';
+  if (window.__SW_CAL_V3_ENABLED && _calFocus.show === 'materials' && !hasDeliveries) {
+    html = '<div class="cal-v3-empty" id="calV3Empty">No deliveries booked</div>' + html;
+  }
   container.innerHTML = html;
 }
 
@@ -9739,7 +9748,7 @@ function renderScheduleView(container, range) {
     if (aType === 'meeting' && !_calEventFilters.meetings) return;
     if (aType === 'reminder' && !_calEventFilters.reminders) return;
     if (ev.job_id && !_calEventFilters.jobs) return;
-    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !_calEventFilters.jobs) return;
+    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !calJoblessLabelShown()) return;
 
     if (!ev.job_id) {
       // Collect label (internal) events
@@ -9774,8 +9783,11 @@ function renderScheduleView(container, range) {
       }
       return;
     }
-    // Division filter (multi-select)
-    if (_calDivFilter !== 'all') {
+    // Division filter (multi-select). v3's Type row filters on the same group
+    // that colours the line, so a job never vanishes under its own colour.
+    if (v3) {
+      if (_calFocus.type !== 'all' && calV3Unit(ev) !== _calFocus.type) return;
+    } else if (_calDivFilter !== 'all') {
       var div = calDivisionOf(ev);
       var match = false;
       for (var fi = 0; fi < _calDivFilters.length; fi++) {
@@ -9882,18 +9894,10 @@ function renderScheduleView(container, range) {
     });
   }
   // v3: deliveries sit at the bottom of their day (Show = Everything or
-  // Materials). Read-only: whatever the calendar feed already carries.
+  // Materials). Read-only, and the same orders the Crew view's row shows.
   var v3Del = {};
-  if (v3 && (_calFocus.show === 'everything' || _calFocus.show === 'materials')) {
-    (_calDeliveries || []).forEach(function(dl) {
-      var dDay = String(dl.confirmed_delivery_date || dl.delivery_date || '').slice(0, 10);
-      if (!dDay) return;
-      var dEv = null;
-      for (var di = 0; di < _calEvents.length; di++) { if (dl.job_id && _calEvents[di].job_id === dl.job_id) { dEv = _calEvents[di]; break; } }
-      var dUnit = dEv ? calV3Unit(dEv) : '';
-      if (_calFocus.type !== 'all' && dUnit !== _calFocus.type) return;
-      (v3Del[dDay] = v3Del[dDay] || []).push({ po: dl, ev: dEv, unit: dUnit });
-    });
+  if (v3) {
+    calV3Deliveries().forEach(function(x) { (v3Del[x.day] = v3Del[x.day] || []).push(x); });
   }
   jobs.sort(function(a, b) {
     if (a.start !== b.start) return a.start.localeCompare(b.start);
@@ -10179,7 +10183,6 @@ function renderScheduleView(container, range) {
         if (v3) {
           // Type square, client, job number, staff circles, lock.
           html += '<span class="cal-v3-sq">' + calV3Icon(calV3Symbol(job), 12) + '</span>';
-          if (job.start_time) html += '<span class="v3-time">' + calV3Time(job.start_time) + '</span>';
           html += '<span class="bar-label">' + escapeHtml(job.client_name) + '</span>';
           if (job.job_number) html += '<span class="v3-num">' + escapeHtml(job.job_number) + '</span>';
           html += calV3CrewHtml(job.crewNames, startIdx === endIdx ? 2 : 4, v3Unit, true);
@@ -10217,7 +10220,7 @@ function renderScheduleView(container, range) {
 
   // v3, Show = Materials with nothing to show: say so plainly rather than
   // leaving an empty grid that reads like a fault.
-  if (v3 && _calFocus.show === 'materials' && !Object.keys(v3Del).length) {
+  if (v3 && _calFocus.show === 'materials' && !allDates.some(function(ds) { return v3Del[ds]; })) {
     html = '<div class="cal-v3-empty" id="calV3Empty">No deliveries booked</div>' + html;
   }
 
@@ -10245,8 +10248,9 @@ function calV3Icon(name, size) {
 }
 // Which of the three colours a job gets. Insurance = make safes and repairs
 // together, decided family-first through calDivisionOf like every other
-// calendar surface. This is colour and the Type filter only; the divisions
-// themselves are unchanged.
+// calendar surface, and anything that is not fencing or insurance (decking,
+// general, miscellaneous) sits with patios. Colour, the Type filter and
+// deliveries all read this one rule; the divisions themselves are unchanged.
 function calV3Unit(ev) {
   var d = calDivisionOf(ev);
   return (d === 'repair' || d === 'makesafe') ? 'insurance' : d === 'fencing' ? 'fencing' : 'patio';
@@ -10258,7 +10262,7 @@ function calV3Symbol(ev) {
 // Staff circle letters: first letter of the first name + first letter of the
 // surname. The surname comes from the user's full name when the crew list
 // carries one, else from the display name; with no surname on record it is the
-// first two letters of the first name.
+// first letter alone, never two letters that would read as initials.
 function calV3Initials(name) {
   var disp = String(name || '').trim();
   if (!disp) return '?';
@@ -10268,7 +10272,7 @@ function calV3Initials(name) {
   var src = full.split(/\s+/).length > 1 ? full : disp;
   var parts = src.split(/\s+/);
   if (parts.length > 1) return (first.charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-  return first.slice(0, 2).toUpperCase();
+  return first.charAt(0).toUpperCase();
 }
 function calV3Time(t) {
   var hh = parseInt(String(t).slice(0, 2), 10), mm = String(t).slice(3, 5);
@@ -10288,16 +10292,31 @@ function calV3CrewHtml(names, cap, unit, flagEmpty) {
   if (names.length > shown.length) html += '<span class="v3-more">+' + (names.length - shown.length) + '</span>';
   return html + '</span>';
 }
+// The deliveries the focus row lets through, for both calendar views: every
+// live order with a delivery day (see <calendar-delivery-row>), each with its
+// day and its job's colour group. The job's facts come from its calendar event
+// when one is in view, else from the order's own job fields.
+function calV3Deliveries() {
+  if (_calFocus.show !== 'everything' && _calFocus.show !== 'materials') return [];
+  var out = [];
+  calDeliveryList(_calDeliveries, _calPOs).forEach(function(po) {
+    var ev = null;
+    for (var i = 0; i < _calEvents.length; i++) { if (po.job_id && _calEvents[i].job_id === po.job_id) { ev = _calEvents[i]; break; } }
+    var unit = ev ? calV3Unit(ev) : ((po.job_type || po.job_family) ? calV3Unit(po) : '');
+    if (_calFocus.type !== 'all' && unit !== _calFocus.type) return;
+    out.push({ po: po, ev: ev, unit: unit, day: String(calDeliveryDay(po)).slice(0, 10) });
+  });
+  return out;
+}
 // Deliveries at the foot of a day: truck in the job's colour, supplier and job
-// number (the PO number when the job is not in view), then the site address.
+// number (the PO number when the order names no job), then the address.
 function calV3DeliveriesHtml(list) {
   var html = '<div class="cal-v3-dels">';
   list.forEach(function(x) {
     var po = x.po, ev = x.ev;
-    var ref = (ev && ev.job_number) || po.po_number || '';
-    var addr = (ev && (ev.site_address || ev.site_suburb)) || '';
-    var tip = [po.supplier_name || 'Supplier', po.po_number, ref !== po.po_number ? ref : '', addr, po.confirmed_delivery_date ? 'supplier confirmed' : 'expected'].filter(Boolean).join(' · ');
-    html += '<div class="cal-v3-del' + (x.unit ? ' v3u-' + x.unit : '') + '" data-po-id="' + escapeHtml(String(po.id || '')) + '" title="' + escapeHtml(tip) + '">'
+    var ref = (ev && ev.job_number) || po.job_number || po.po_number || '';
+    var addr = (ev && (ev.site_address || ev.site_suburb)) || po.delivery_address || '';
+    html += '<div class="cal-v3-del' + (x.unit ? ' v3u-' + x.unit : '') + '" data-po-id="' + escapeHtml(String(po.id || '')) + '">'
          + '<span class="v3-truck">' + calV3Icon('truck', 13) + '</span>'
          + '<span class="v3-dtx"><span class="v3-d1">' + escapeHtml(po.supplier_name || 'Supplier') + (ref ? ' ' + escapeHtml(ref) : '') + '</span>'
          + (addr ? '<span class="v3-d2">' + escapeHtml(addr) + '</span>' : '') + '</span></div>';

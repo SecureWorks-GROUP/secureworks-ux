@@ -71,7 +71,11 @@ async function renderSchedule(page, events) {
     window._calEventFilters = { jobs: true, meetings: true, holidays: false, leave: true, reminders: true };
     window._calEvents = evts;
 
-    window.renderScheduleView(container, window.getCalRange());
+    // Through renderCalendar(), not the renderer alone: that is what applies
+    // the v3 scoped styles (the inset side borders on every line), so the boxes
+    // measured below are the ones on the live page.
+    document.getElementById('viewCalendar').classList.add('active');
+    window.renderCalendar();
 
     const bars = [...container.querySelectorAll('.cal-schedule-bar')].map((b) => {
       const r = b.getBoundingClientRect();

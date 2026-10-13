@@ -139,6 +139,30 @@ test('no sign out that day: start filled, finish blank, and the line will not su
   ]);
 });
 
+test('signed in 11:30 pm, signed out 1:15 am: one line dated the day it started, with the hours right', async ({ appPage: page, feedRequests }) => {
+  await serveHours(page, hours([signedInDay(TUE, {
+    start_time: '23:30', finish_time: '01:15', finish_next_day: true, break_minutes: 0, hours: 1.75, tapped_in: '23:30', tapped_out: '01:15'
+  })]));
+  const card = await openBuilder(page);
+  await expect(card.locator('[data-carddate]')).toHaveValue(TUE);
+  await expect(card.locator('[data-cardstart]')).toHaveValue('23:30');
+  await expect(card.locator('[data-cardfinish]')).toHaveValue('01:15');
+  await expect(card.locator('[data-cardhours]')).toHaveText('1.75 hrs');
+  await expect(card.locator('[data-cardamt]')).toHaveText('$87.50');
+  await expect(card.locator('[data-cardsv] [data-sv-tag]')).toHaveText('From your sign in');
+  await expect(card.locator('[data-cardsv] [data-sv-text]')).toHaveText('You left after midnight, so the finish is the next day.');
+  await expect(card.locator('[data-cardtimeerr]')).toBeHidden();
+  // No second line appears for the Wednesday morning.
+  await expect(card.locator('[data-cardday]')).toHaveCount(0);
+
+  await confirmSubmit(page);
+  await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+  expect(invoicePosts(feedRequests)[0].body.manual_assignments).toEqual([{
+    assignment_id: 'e2e-wo-holder-assignment', hours: 1.75, work_date: TUE, start_time: '23:30', finish_time: '01:15', finish_next_day: true, break_minutes: 0,
+    rate: 50, rate_source: 'server_resolved', description: '', manually_added: false, site_visit_ids: ['visit-' + TUE]
+  }]);
+});
+
 test('several signed-in days on one job: one line per day on the same card, each posted as its own line', async ({ appPage: page, feedRequests }) => {
   await serveHours(page, hours([signedInDay(TUE), signedInDay(WED), signedInDay(THU, { start_time: '08:00', tapped_in: '08:04' })]));
   const card = await openBuilder(page);

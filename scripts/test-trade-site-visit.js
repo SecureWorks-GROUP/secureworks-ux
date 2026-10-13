@@ -41,7 +41,7 @@ const served = {
   tapped_in: '07:02', tapped_out: '15:34', out_capture: 'tap', visit_ids: ['v-1', 'v-2']
 }
 assert.deepStrictEqual(plain(SV.day(served)), {
-  work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', break_minutes: 30,
+  work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', finish_next_day: false, break_minutes: 30,
   tapped_in: '07:02', tapped_out: '15:34', out_capture: 'tap', visit_ids: ['v-1', 'v-2']
 })
 // The app rounds nothing itself: a day sent with only its exact taps is not offered.
@@ -55,6 +55,32 @@ assert.strictEqual(SV.day({ work_date: '2026-10-06', start_time: '07:00', finish
 assert.strictEqual(SV.day({ work_date: 'yesterday', start_time: '07:00' }), null)
 assert.strictEqual(SV.day({ work_date: '2026-10-06' }), null, 'no sign in time is no sign in')
 assert.strictEqual(SV.day(null), null)
+// A visit that ran past midnight (a night make-safe callout): signed in
+// 11:30 pm, signed out 1:15 am. One day, dated the day it started, and the
+// finish is the next day's clock time.
+const night = SV.day({ work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', finish_next_day: true, break_minutes: 0, hours: 1.75, tapped_in: '23:30', tapped_out: '01:15', out_capture: 'tap', visit_ids: ['v-night'] })
+assert.deepStrictEqual(plain(night), {
+  work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', finish_next_day: true, break_minutes: 0,
+  tapped_in: '23:30', tapped_out: '01:15', out_capture: 'tap', visit_ids: ['v-night']
+})
+assert.strictEqual(SV.day({ work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15' }), null, 'a finish before the start is a day only where the server says it ran past midnight')
+assert.strictEqual(SV.day({ work_date: '2026-10-05', start_time: '07:00', finish_time: '15:30', finish_next_day: true }), null, 'a visit is never more than a day long')
+const nightLine = { ...SV.fill({}, night), sv: night }
+assert.strictEqual(T.overnight(nightLine), true)
+assert.deepStrictEqual(plain(T.check(nightLine, '2026-10-11')), { ok: true, hours: 1.75, field: '', error: '' })
+assert.deepStrictEqual(plain(T.fields(nightLine)), { work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', break_minutes: 0, finish_next_day: true })
+assert.strictEqual(T.hoursFor('23:30', '01:15', 0, true), 1.75)
+assert.deepStrictEqual(plain(SV.note(nightLine, night)), { tag: 'From your sign in', text: 'You left after midnight, so the finish is the next day.' })
+assert.strictEqual(T.label({ work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', finish_next_day: true }), 'Mon 5 Oct, 23:30 to 01:15 the next day')
+// They changed the finish to before midnight: an ordinary same-day line again.
+assert.strictEqual(T.overnight({ ...nightLine, finish_time: '23:45' }), false)
+assert.deepStrictEqual(plain(T.fields({ ...nightLine, finish_time: '23:45' })), { work_date: '2026-10-05', start_time: '23:30', finish_time: '23:45', break_minutes: 0 })
+assert.strictEqual(T.check({ ...nightLine, finish_time: '23:45' }, '2026-10-11').hours, 0.25)
+// Past midnight is only for a line still on the day of a sign in that did:
+// a typed line, or one moved to another day, keeps finish after start.
+assert.match(T.check({ work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', break_minutes: 0 }, '2026-10-11').error, /Finish time must be after start time/)
+assert.match(T.check({ ...nightLine, work_date: '2026-10-06' }, '2026-10-11').error, /Finish time must be after start time/)
+assert.match(T.check({ ...SV.fill({}, SV.day(served)), sv: SV.day(served), start_time: '16:00' }, '2026-10-11').error, /Finish time must be after start time/)
 // One entry per day, oldest first.
 assert.deepStrictEqual(
   plain(SV.days([{ ...served, work_date: '2026-10-08' }, served, { ...served, start_time: '09:00' }, null]).map((d) => [d.work_date, d.start_time])),
@@ -117,18 +143,34 @@ assert.strictEqual(SV.openVisit({ job_id: 'j1', signed_in_at: '2026-10-05T07:02:
 // One shape only: the visit names itself by visit_id and signed_in_at.
 assert.strictEqual(SV.openVisit({ id: 'v-9', job_id: 'j1', signed_in_at: '2026-10-05T07:02:00+08:00' }).visit_id, '')
 assert.strictEqual(SV.openVisit({ visit_id: 'v-9', job_id: 'j1', clocked_on_at: '2026-10-05T07:02:00+08:00' }), null)
-// Forgot to sign out: an earlier day, or swept by the server. Never today's.
+// Forgot to sign out: the server marked it, or it is from an earlier day
+// and more than 16 hours old. Never today's, and never one that only ran
+// past midnight.
 assert.strictEqual(SV.owesFinish(visit, new Date('2026-10-05T16:00:00+08:00')), false, 'still on site today')
 assert.strictEqual(SV.owesFinish(visit, new Date('2026-10-06T06:30:00+08:00')), true)
 assert.strictEqual(SV.owesFinish({ ...visit, status: 'no_sign_out' }, new Date('2026-10-05T23:30:00+08:00')), true)
+const lateShift = SV.openVisit({ visit_id: 'v-night', job_id: 'j1', site_suburb: 'Northfield', signed_in_at: '2026-10-05T23:30:00+08:00', status: 'open' })
+assert.strictEqual(SV.owesFinish(lateShift, new Date('2026-10-06T01:15:00+08:00')), false, 'signed in 11:30 pm, still on site at 1:15 am')
+assert.strictEqual(SV.owesFinish(lateShift, new Date('2026-10-06T15:30:00+08:00')), false, '16 hours on the dot is still live')
+assert.strictEqual(SV.owesFinish(lateShift, new Date('2026-10-06T15:31:00+08:00')), true)
+assert.strictEqual(SV.owesFinish({ ...lateShift, status: 'no_sign_out' }, new Date('2026-10-06T01:15:00+08:00')), true, 'the server\'s mark decides whatever the hour')
+assert.strictEqual(SV.owesFinish({ ...visit, signed_in_at: '2026-10-05T00:10:00+08:00' }, new Date('2026-10-05T23:50:00+08:00')), false, 'a long day is not an earlier day')
 assert.strictEqual(SV.lateQuestion(visit, new Date('2026-10-06T06:30:00+08:00')),
   'You are still signed in at Northfield since 7:02 am Monday. What time did you leave?')
-// The time they left: after the sign in, same day, not after now.
+// The time they left is a day and a time after the sign in, not after now.
+// A clock time at or before the sign in's can only be the day after.
 const tuesday = new Date('2026-10-06T06:30:00+08:00')
-assert.strictEqual(SV.lateCheck(visit, '15:30', tuesday), '')
-assert.match(SV.lateCheck(visit, '', tuesday), /Add the time you left/)
-assert.match(SV.lateCheck(visit, '06:00', tuesday), /after you signed in at 7:02 am.*past midnight.*own line/)
-assert.match(SV.lateCheck(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')), /cannot be after now/)
+assert.deepStrictEqual(plain(SV.lateLeave(visit, '15:30', tuesday)), { error: '', finish_date: '2026-10-05', finish_time: '15:30', when: '3:30 pm' })
+assert.deepStrictEqual(plain(SV.lateLeave(visit, '06:00', tuesday)),
+  { error: '', finish_date: '2026-10-06', finish_time: '06:00', when: '6:00 am Tuesday, the day after you signed in' })
+assert.deepStrictEqual(plain(SV.lateLeave(lateShift, '01:15', new Date('2026-10-06T09:00:00+08:00'))),
+  { error: '', finish_date: '2026-10-06', finish_time: '01:15', when: '1:15 am Tuesday, the day after you signed in' })
+assert.match(SV.lateLeave(visit, '', tuesday).error, /Add the time you left/)
+assert.match(SV.lateLeave(visit, '07:02', tuesday).error, /must be after you signed in at 7:02 am/)
+assert.match(SV.lateLeave(visit, '06:45', tuesday).error, /cannot be after now/, 'the next day, but later than it is now')
+assert.match(SV.lateLeave(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')).error, /cannot be after now/)
+assert.match(SV.lateLeave(lateShift, '01:15', new Date('2026-10-05T23:50:00+08:00')).error, /cannot be after now/)
+assert.strictEqual(SV.lateLeave(visit, '15:30', tuesday).finish_date < SV.lateLeave(visit, '06:00', tuesday).finish_date, true)
 
 // Signed in at another job: the server says where, and the app asks once.
 const clash = SV.alreadySignedIn({ status: 409, code: 'already_signed_in', body: { code: 'already_signed_in', visit_id: 'v-1', job_id: 'j9', job_number: 'SWP-9', site_suburb: 'Kinross', signed_in_at: '2026-10-05T07:02:00+08:00' } })
@@ -157,8 +199,9 @@ const typedLater = { ...d6, out_capture: 'typed_later' }
 const said = [
   SV.signedInText(visit), SV.signedInText({ ...visit, pending: true }), SV.where(visit), SV.where(null),
   SV.lateQuestion(visit, tuesday), SV.lateQuestion(visit, new Date('2026-10-05T16:00:00+08:00')),
-  SV.lateCheck(null, '15:30', tuesday), SV.lateCheck(visit, '', tuesday), SV.lateCheck(visit, '06:00', tuesday),
-  SV.lateCheck(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')),
+  SV.lateLeave(null, '15:30', tuesday).error, SV.lateLeave(visit, '', tuesday).error, SV.lateLeave(visit, '07:02', tuesday).error,
+  SV.lateLeave(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')).error, SV.lateLeave(visit, '06:00', tuesday).when,
+  SV.note(nightLine, night).text,
   ...[
     SV.note(line, d6), SV.note({ ...line, start_time: '06:30', finish_time: '16:00' }, d6), SV.note({ ...line, work_date: '2026-10-07' }, d6),
     SV.note(SV.fill({}, open), open), SV.note({ ...SV.fill({}, open), finish_time: '15:30' }, open), SV.note(SV.fill({}, typedLater), typedLater)
@@ -218,6 +261,18 @@ assert.strictEqual(built.subtotal, 480)
 // No rate in the box: they are asked for it, never sent to the office for it.
 built = build([card(filled(d6, { rate: 0 }))], WEEK)
 assert.match(built.error, /SWF-1: enter your rate/)
+
+// Signed in 11:30 pm, signed out 1:15 am: one line dated the day it started,
+// 1.75 hours, and it says the finish is the next day.
+built = build([card(filled(night, { scheduled_date: '2026-10-05' }))], WEEK)
+assert.strictEqual(built.error, undefined)
+assert.deepStrictEqual(plain(built.manualAssignments), [{
+  assignment_id: 'a1', hours: 1.75, work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15', finish_next_day: true, break_minutes: 0,
+  rate: 50, rate_source: 'server_resolved', description: '', manually_added: false, site_visit_ids: ['v-night']
+}])
+assert.strictEqual(built.subtotal, 87.5)
+// A line the trade typed themselves cannot run past midnight.
+assert.match(build([card({ work_date: '2026-10-05', start_time: '23:30', finish_time: '01:15' })], WEEK).error, /SWF-1: Finish time must be after start time/)
 
 // No sign out: start filled, finish blank, and the line will not submit.
 built = build([card(filled(open))], WEEK)

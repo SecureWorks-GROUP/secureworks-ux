@@ -7370,6 +7370,8 @@
       ncAdoptOwnWorkDefault();
       // Check for active server-side clock (survives app reinstall / device switch)
       checkServerClockRecovery(data, canUseEveryoneLens() && _adminViewAll, requestTapSeq);
+      // The signal is back: a tap still waiting goes now.
+      if (_siteTapWaiting) syncOfflineQueue();
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);
@@ -17665,8 +17667,12 @@
   // Find current clocked-on job, or most recent today's job
   function _findCurrentJob() {
     var jobs = _cachedMyJobs || [];
-    // If clocked on to a job, use that
-    if (_currentJobId && _clockState === 'on') {
+    // Signed in to a job: use that. With the visit record it is the visit's
+    // own job; without one, the job screen they started work on.
+    if (_siteVisitLive) {
+      var signedIn = signedInVisitJob();
+      if (signedIn) return signedIn;
+    } else if (_currentJobId && _clockState === 'on') {
       for (var i = 0; i < jobs.length; i++) {
         if ((jobs[i].jobs || {}).id === _currentJobId) return jobs[i].jobs;
       }
@@ -23618,7 +23624,7 @@
   }
   // Hours on a card are whatever its start, finish and break work out to.
   function _jobCardSyncHours(c) {
-    if (c) c.hours = TradeTimeEntryCore.hoursFor(c.start_time, c.finish_time, c.break_minutes);
+    if (c) c.hours = TradeTimeEntryCore.hoursFor(c.start_time, c.finish_time, c.break_minutes, TradeTimeEntryCore.overnight(c));
     return c;
   }
   // "Mon 5 Oct to Sun 11 Oct" bounds a date field may offer for this card.
@@ -23633,7 +23639,7 @@
     return { min: c && c.assignment_id ? start : TradeTimeEntryCore.earliest(today), max: end && end < today ? end : today };
   }
   function _jobCardDaySyncHours(line) {
-    if (line) line.hours = TradeTimeEntryCore.hoursFor(line.start_time, line.finish_time, line.break_minutes);
+    if (line) line.hours = TradeTimeEntryCore.hoursFor(line.start_time, line.finish_time, line.break_minutes, TradeTimeEntryCore.overnight(line));
     return line;
   }
   function _jobCardTimeHint(c) {
@@ -25592,8 +25598,11 @@
   // (finish - start) - break; ops-api recomputes and stores them and refuses a
   // time line without the fields (code time_entry_required). One line is one
   // job on one day: a second day is a second line, and a shift that runs past
-  // midnight is entered as two lines. Lines that are not time (work order,
-  // commission, deductions) carry none of this. Pure and DOM-free:
+  // midnight is entered as two lines. The one exception is a line filled from
+  // the trade's own sign in where they signed out after midnight: it stays
+  // one line dated the day it started and says finish_next_day (overnight()).
+  // Lines that are not time (work order, commission, deductions) carry none
+  // of this. Pure and DOM-free:
   // scripts/test-trade-time-entry.js runs this block as shipped.
   var TradeTimeEntryCore = (function() {
     var REFUSAL_CODE = 'time_entry_required';
@@ -25631,10 +25640,23 @@
       var n = Number(v);
       return (!isFinite(n) || n < 0 || Math.floor(n) !== n) ? null : n;
     }
-    function hoursFor(start, finish, brk) {
+    // nextDay: the finish is on the day after the start (overnight()).
+    function hoursFor(start, finish, brk, nextDay) {
       var s = minutesOf(start), f = minutesOf(finish), b = breakOf(brk);
-      if (s == null || f == null || b == null || f <= s || f - s - b <= 0) return null;
+      if (s == null || f == null || b == null) return null;
+      if (nextDay) f += 1440;
+      if (f <= s || f - s - b <= 0) return null;
       return Math.round((f - s - b) / 60 * 100) / 100;
+    }
+    // Does this line finish on the day after it started? Only a line still
+    // on the day of a sign in that ran past midnight (entry.sv, from my_hours
+    // site_visit_days) with its finish at or before its start. Every other
+    // line keeps finish after start.
+    function overnight(entry) {
+      var sv = entry && entry.sv;
+      if (!sv || sv.finish_next_day !== true || String(entry.work_date || '') !== sv.work_date) return false;
+      var s = minutesOf(entry.start_time), f = minutesOf(entry.finish_time);
+      return s != null && f != null && f <= s;
     }
     // Blank means no break; a value that is not whole minutes is kept as typed
     // so check() can name it.
@@ -25659,10 +25681,12 @@
       if (today && String(entry.work_date) < earliest(today)) return bad('work_date', 'The date worked is more than a year ago. Check the year.');
       if (s == null) return bad('start_time', 'Add your start time.');
       if (f == null) return bad('finish_time', 'Add your finish time.');
+      var nextDay = overnight(entry);
+      if (nextDay) f += 1440;
       if (f <= s) return bad('finish_time', 'Finish time must be after start time. If you worked past midnight, add the next day as its own line.');
       if (b == null) return bad('break_minutes', 'Break must be whole minutes, 0 or more.');
       if (f - s - b <= 0) return bad('break_minutes', 'The break is as long as the time worked. Check the break.');
-      return { ok: true, hours: hoursFor(entry.start_time, entry.finish_time, entry.break_minutes), field: '', error: '' };
+      return { ok: true, hours: hoursFor(entry.start_time, entry.finish_time, entry.break_minutes, nextDay), field: '', error: '' };
     }
     // While typing, only what is wrong with what is there. A field not
     // reached yet is named at save or submit, not on every keystroke.
@@ -25674,15 +25698,18 @@
       if (chk.field === 'finish_time' && !entry.finish_time) return '';
       return chk.error;
     }
-    // The four contract fields, exactly as ops-api names them.
+    // The four contract fields, exactly as ops-api names them, plus
+    // finish_next_day on a line that runs past midnight and on no other.
     function fields(entry) {
       entry = entry || {};
-      return {
+      var out = {
         work_date: String(entry.work_date || ''),
         start_time: normTime(entry.start_time),
         finish_time: normTime(entry.finish_time),
         break_minutes: breakOf(entry.break_minutes) || 0
       };
+      if (overnight(entry)) out.finish_next_day = true;
+      return out;
     }
     function hoursText(h) {
       var n = Number(h);
@@ -25702,7 +25729,7 @@
       if (!has(line)) return '';
       var b = breakOf(line.break_minutes);
       return dayText(line.work_date) + ', ' + normTime(line.start_time) + ' to ' + normTime(line.finish_time)
-        + (b > 0 ? ', ' + b + ' min break' : '');
+        + (line.finish_next_day === true ? ' the next day' : '') + (b > 0 ? ', ' + b + ' min break' : '');
     }
     // "7:02 am", as the app words a time of day.
     function clock12(v) {
@@ -25720,7 +25747,7 @@
     return {
       REFUSAL_CODE: REFUSAL_CODE, REFUSAL_MSG: REFUSAL_MSG,
       isDate: isDate, earliest: earliest, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
-      touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused,
+      touched: touched, overnight: overnight, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused,
       clock12: clock12
     };
   })();
@@ -25770,33 +25797,53 @@
       var p = visit && perth(visit.signed_in_at);
       return p ? 'Signed in ' + T.clock12(p.time) + (visit.pending ? ' \u00B7 waiting for signal' : '') : '';
     }
-    // A sign in that still owes its finish: swept by the server after 16
-    // hours, or left open from an earlier day.
+    function nextDay(day) {
+      var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+      return new Date(Date.UTC(+p[1], +p[2] - 1, +p[3] + 1)).toISOString().slice(0, 10);
+    }
+    function weekday(day) {
+      var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+      return WEEKDAYS[new Date(Date.UTC(+p[1], +p[2] - 1, +p[3])).getUTCDay()];
+    }
+    // A sign in that still owes its finish: the server marked it
+    // no_sign_out, or it is from an earlier day and more than 16 hours old.
+    // A sign in that only ran past midnight is still live: night callouts
+    // sign out the next morning like any other visit.
     function owesFinish(visit, now) {
       if (!visit || visit.pending) return false;
       if (visit.status === 'no_sign_out') return true;
-      var a = perth(visit.signed_in_at), b = perth(now || new Date());
-      return !!(a && b && a.day < b.day);
+      var at = new Date(visit.signed_in_at), t = now ? new Date(now) : new Date();
+      var a = perth(at), b = perth(t);
+      return !!(a && b && a.day < b.day && t.getTime() - at.getTime() > 16 * 3600000);
     }
     function lateQuestion(visit, now) {
       var a = perth(visit.signed_in_at), b = perth(now || new Date());
-      var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(a.day);
-      var day = a.day === b.day ? 'today' : WEEKDAYS[new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3])).getUTCDay()];
-      return 'You are still signed in at ' + where(visit) + ' since ' + T.clock12(a.time) + ' ' + day + '. What time did you leave?';
+      return 'You are still signed in at ' + where(visit) + ' since ' + T.clock12(a.time) + ' ' + (a.day === b.day ? 'today' : weekday(a.day)) + '. What time did you leave?';
     }
-    // What is wrong with a leave time typed later, in plain words, or ''.
-    function lateCheck(visit, hhmm, now) {
+    // A leave time typed later. It is a day and a time, not a clock time on
+    // the day of the sign in: the first time that clock time came round after
+    // they signed in, so a time at or before the sign in's is the day after.
+    // Answers { error } in plain words, or { finish_date, finish_time, when }
+    // where `when` names the time, with its day when that is not the day
+    // they signed in.
+    function lateLeave(visit, hhmm, now) {
       var a = perth(visit && visit.signed_in_at), b = perth(now || new Date()), m = T.minutesOf(hhmm);
-      if (!a) return 'That sign in could not be read. Ask the office to check it.';
-      if (m == null) return 'Add the time you left.';
-      if (m <= T.minutesOf(a.time)) return 'The time you left must be after you signed in at ' + T.clock12(a.time) + '. If you worked past midnight, add the next day as its own line.';
-      if (b && a.day === b.day && m > T.minutesOf(b.time)) return 'The time you left cannot be after now.';
-      return '';
+      if (!a) return { error: 'That sign in could not be read. Ask the office to check it.' };
+      if (m == null) return { error: 'Add the time you left.' };
+      var signedIn = T.minutesOf(a.time);
+      if (m === signedIn) return { error: 'The time you left must be after you signed in at ' + T.clock12(a.time) + '.' };
+      var date = m < signedIn ? nextDay(a.day) : a.day;
+      if (b && (date > b.day || (date === b.day && m > T.minutesOf(b.time)))) return { error: 'The time you left cannot be after now.' };
+      return {
+        error: '', finish_date: date, finish_time: T.normTime(hhmm),
+        when: T.clock12(hhmm) + (date === a.day ? '' : ' ' + weekday(date) + ', the day after you signed in')
+      };
     }
     // One signed-in day for an invoice line, from my_hours site_visit_days.
     // Its start and finish arrive rounded to the quarter hour by the server.
-    // A day whose rounding leaves the finish not after the start is not
-    // offered.
+    // A visit that ran past midnight is one day, dated the day it started,
+    // with finish_next_day true and its finish the clock time on the day
+    // after. A day whose finish is not after its start is not offered.
     function day(raw) {
       raw = raw || {};
       var date = str(raw.work_date).slice(0, 10);
@@ -25804,11 +25851,13 @@
       var start = T.normTime(raw.start_time);
       if (!start) return null;
       var finish = T.normTime(raw.finish_time);
-      if (finish && T.minutesOf(finish) <= T.minutesOf(start)) return null;
+      var overnight = !!finish && raw.finish_next_day === true;
+      var span = finish ? T.minutesOf(finish) - T.minutesOf(start) + (overnight ? 1440 : 0) : 0;
+      if (finish && (span <= 0 || span > 1440)) return null;
       var brk = T.breakOf(raw.break_minutes) || 0;
-      if (finish && T.minutesOf(finish) - T.minutesOf(start) - brk <= 0) brk = 0;
+      if (finish && span - brk <= 0) brk = 0;
       return {
-        work_date: date, start_time: start, finish_time: finish, break_minutes: brk,
+        work_date: date, start_time: start, finish_time: finish, finish_next_day: overnight, break_minutes: brk,
         tapped_in: T.normTime(raw.tapped_in), tapped_out: T.normTime(raw.tapped_out), out_capture: str(raw.out_capture),
         visit_ids: (Array.isArray(raw.visit_ids) ? raw.visit_ids : []).map(str).filter(Boolean)
       };
@@ -25882,6 +25931,7 @@
       else if (finishChanged) parts.push('You signed out at ' + T.clock12(sv.tapped_out || sv.finish_time) + '.');
       else if (sv.out_capture === 'typed_later') parts.push('You typed the time you left. It was not a tap.');
       if (startChanged || finishChanged) parts.push('The office sees both.');
+      if (sv.finish_next_day && finish && T.minutesOf(finish) <= T.minutesOf(line.start_time)) parts.push('You left after midnight, so the finish is the next day.');
       return { tag: startChanged ? '' : 'From your sign in', text: parts.join(' ') };
     }
     // The sign ins a line was filled from. Only while the line is still on
@@ -25918,7 +25968,7 @@
     }
     return {
       perth: perth, openVisit: openVisit, where: where, signedInText: signedInText, owesFinish: owesFinish,
-      lateQuestion: lateQuestion, lateCheck: lateCheck, day: day, days: days, assign: assign, blank: blank,
+      lateQuestion: lateQuestion, lateLeave: lateLeave, day: day, days: days, assign: assign, blank: blank,
       same: same, fill: fill, note: note, ids: ids, otherJobs: otherJobs, alreadySignedIn: alreadySignedIn
     };
   })();
@@ -26297,6 +26347,7 @@
           work_date: t.work_date,
           start_time: t.start_time,
           finish_time: t.finish_time,
+          finish_next_day: t.finish_next_day,
           break_minutes: t.break_minutes,
           job_id: c.job_id || null,
           job_number: c.job_number || '',
@@ -26379,6 +26430,7 @@
             work_date: searchedTime.work_date,
             start_time: searchedTime.start_time,
             finish_time: searchedTime.finish_time,
+            finish_next_day: searchedTime.finish_next_day,
             break_minutes: searchedTime.break_minutes,
             job_id: c.job_id || null,
             job_number: c.job_number || '',
@@ -26405,6 +26457,7 @@
             work_date: assignedTime.work_date,
             start_time: assignedTime.start_time,
             finish_time: assignedTime.finish_time,
+            finish_next_day: assignedTime.finish_next_day,
             break_minutes: assignedTime.break_minutes,
             rate: Number(c.rate || 0),
             rate_source: c.rate_source || 'server_resolved',
@@ -29884,6 +29937,18 @@
     return _siteVisit;
   }
   function siteVisitOwesFinish(v) { return !!(v && v.visit_id && TradeSiteVisitCore.owesFinish(v)); }
+  // The job the trade is signed in to, whichever screen they signed in from:
+  // where a quick photo, note, issue or expense files by default. Null when
+  // they are not signed in.
+  function signedInVisitJob() {
+    var v = currentSiteVisit();
+    if (!v || siteVisitOwesFinish(v)) return null;
+    var rows = _cachedMyJobs || [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] && rows[i].jobs && rows[i].jobs.id === v.job_id) return rows[i].jobs;
+    }
+    return { id: v.job_id, job_number: v.job_number, site_suburb: v.site_suburb, client_name: '' };
+  }
   // Is this trade signed in to this job? The visit record decides.
   function signedInOnJob(job) {
     var v = currentSiteVisit();
@@ -30097,6 +30162,7 @@
         + '<h3 style="margin-bottom:6px">You did not sign out</h3>'
         + '<p id="siteLateMsg" style="font-size:14px;color:var(--sw-mid);margin-bottom:12px">' + esc(TradeSiteVisitCore.lateQuestion(v)) + '</p>'
         + '<label class="jct-f"><span>Time you left</span><input type="time" id="siteLateTime"></label>'
+        + '<div class="jct-hint" id="siteLateDay" hidden></div>'
         + '<div class="jct-err" id="siteLateErr" role="alert" hidden></div>'
         + '<div class="jct-hint">It is saved as typed later, not a tap.</div>'
         + '<div class="confirm-actions" style="margin-top:14px">'
@@ -30104,21 +30170,28 @@
         + '<button type="button" class="confirm-ok" id="siteLateSave">Save</button></div></div>';
       document.body.appendChild(overlay);
       var input = overlay.querySelector('#siteLateTime'), errEl = overlay.querySelector('#siteLateErr'), save = overlay.querySelector('#siteLateSave');
+      var dayEl = overlay.querySelector('#siteLateDay');
       function fail(msg) { errEl.textContent = msg; errEl.hidden = !msg; }
+      // A time that falls on the day after the sign in says so as it is typed.
+      input.oninput = input.onchange = function() {
+        var typed = TradeSiteVisitCore.lateLeave(v, input.value);
+        var nextDay = !typed.error && typed.when !== TradeTimeEntryCore.clock12(typed.finish_time);
+        dayEl.textContent = nextDay ? 'That is ' + typed.when + '.' : '';
+        dayEl.hidden = !nextDay;
+      };
       overlay.querySelector('#siteLateSkip').onclick = dismissLateFinish;
       save.onclick = function() {
-        var time = TradeTimeEntryCore.normTime(input.value);
-        var bad = TradeSiteVisitCore.lateCheck(v, time);
-        if (bad) { fail(bad); return; }
+        var leave = TradeSiteVisitCore.lateLeave(v, input.value);
+        if (leave.error) { fail(leave.error); return; }
         fail('');
         save.disabled = true;
-        api('close_site_visit_late', null, { visit_id: v.visit_id, finish_time: time }).then(function(res) {
+        api('close_site_visit_late', null, { visit_id: v.visit_id, finish_date: leave.finish_date, finish_time: leave.finish_time }).then(function(res) {
           if (res && res.success === false) throw new Error(res.error || 'Not saved');
           if (_siteVisit && _siteVisit.visit_id === v.visit_id) setSiteVisit(null);
           _siteLateDismiss = null;
           overlay.remove();
           renderSiteVisitBar();
-          toast('Saved: you left at ' + TradeTimeEntryCore.clock12(time) + '. Marked as typed.');
+          toast('Saved: you left at ' + leave.when + '. Marked as typed.');
           if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
           resolve(true);
         }).catch(function(err) {
@@ -30144,7 +30217,10 @@
   // ══════════════════════════════════════════════════
   // The tap time is taken at the tap and rides the call (and the offline
   // queue) as `timestamp`; the location rides the same call when the phone
-  // gives one in time. A tap the server refuses is never queued.
+  // gives one in time. A tap the server refuses is never queued. Taps reach
+  // the server in the order they were made: the offline queue is the only
+  // replay, a tap still waiting for signal is sent before a new one, and a
+  // new tap that cannot get ahead of it joins the queue behind it.
   function clockEvent(event, assignmentId, extra) {
     var payload = {
       event: event,
@@ -30160,6 +30236,9 @@
 
     return siteTapLocation().then(function(loc) {
       if (loc) payload.location = loc;
+      return _siteTapWaiting ? syncOfflineQueue().catch(function() {}) : null;
+    }).then(function() {
+      if (_siteTapWaiting) throw new Error('An earlier tap is still waiting for signal');
       return api('clock_event', {}, payload);
     }).then(function(result) {
       if (!result.success) {
@@ -30189,7 +30268,6 @@
       if (event === 'clock_on' && TradeSiteVisitCore.alreadySignedIn(err)) throw err;
       if (isClockEventRefusal(err)) {
         err.clock_refused = true;
-        if (assignmentId) { try { localStorage.removeItem('sw_pending_clock_' + assignmentId); } catch (e) {} }
         console.warn('[trade] clock_event refused:', event, err);
         toast('Not saved: ' + friendlyError(err) + '. Ask the office to check this job.', true);
         throw err;
@@ -30197,7 +30275,6 @@
       console.error('[trade] clock_event failed:', event, err);
 
       // Not sent: keep it, with its tap time, for when the signal is back.
-      if (assignmentId) { try { localStorage.setItem('sw_pending_clock_' + assignmentId, JSON.stringify(payload)); } catch (e) {} }
       queueOfflineAction('clock_event', payload);
       if (event === 'clock_on') { _clockState = 'on'; _clockedOnAt = payload.timestamp; }
       else if (event === 'clock_off') { _clockState = 'off'; }
@@ -30230,6 +30307,16 @@
       return true;
     }, function(err) {
       var other = switching ? null : TradeSiteVisitCore.alreadySignedIn(err);
+      // A sign in that owes its finish is closed only by the time the trade
+      // types, never by a switch at this tap's time.
+      if (other && siteVisitOwesFinish(other)) {
+        return askLateFinish(other).then(function(saved) {
+          if (saved) return sendSiteSignIn(ctx, tappedAt, false);
+          toast('Add the time you left ' + TradeSiteVisitCore.where(other) + ' before you sign in here.', true);
+          afterSiteTap(ctx, null);
+          return false;
+        });
+      }
       if (other) {
         return confirmSiteSwitch(other).then(function(ok) {
           return ok ? sendSiteSignIn(ctx, tappedAt, true) : false;
@@ -33880,25 +33967,6 @@
     updateOfflineBar();
     toast('Back online');
     syncPendingNotes();
-
-    // Sync pending clock events
-    var pendingKeys = Object.keys(localStorage).filter(function(k) { return k.startsWith('sw_pending_clock_'); });
-    pendingKeys.forEach(function(key) {
-      try {
-        var payload = JSON.parse(localStorage.getItem(key));
-        if (payload) {
-          api('clock_event', {}, payload).then(function(res) {
-            _invalidateAssignmentLifecycleCaches();
-            localStorage.removeItem(key);
-            siteTapLanded(payload, res, false);
-            console.log('[trade] Synced pending clock event:', payload.event);
-          }).catch(function(err) {
-            // Keep for next retry, unless the server refused it outright.
-            if (isClockEventRefusal(err)) { localStorage.removeItem(key); siteTapLanded(payload, null, true); }
-          });
-        }
-      } catch (e) {}
-    });
   });
 
   window.addEventListener('offline', function() {
@@ -34055,7 +34123,7 @@
 
   window.openExpenseOverlay = function(jobId) {
     _expenseState = 'capture';
-    _expenseJobId = jobId || _currentJobId || null;
+    _expenseJobId = jobId || (_siteVisitLive ? (signedInVisitJob() || {}).id : _currentJobId) || null;
     _expenseIsGeneral = false;
     _expensePhotoUrl = null;
     _expenseExtraction = null;
@@ -34094,7 +34162,8 @@
       var h = '<div style="padding:16px">';
 
       // Auto-link banner if clocked on to a job
-      var clockedJob = (_clockState === 'on' && _currentJobId && _currentJob) ? _currentJob.job : null;
+      var clockedJob = _siteVisitLive ? signedInVisitJob() : ((_clockState === 'on' && _currentJobId && _currentJob) ? _currentJob.job : null);
+      if (clockedJob && _siteVisitLive && clockedJob.id !== _expenseJobId) clockedJob = null;
       if (clockedJob && _expenseJobId && !_expenseIsGeneral) {
         h += '<div style="background:#EBF4FF;border:1px solid var(--sw-blue);border-radius:8px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:8px;">';
         h += '<span style="font-size:13px;color:var(--sw-dark);flex:1;">Linking to <strong>' + esc(clockedJob.job_number || '') + '</strong> \u2014 ' + esc(clockedJob.client_name || '') + '</span>';
@@ -34269,7 +34338,7 @@
   window.expenseSetGeneral = function(isGeneral) {
     _expenseIsGeneral = isGeneral;
     if (isGeneral) _expenseJobId = null;
-    else _expenseJobId = _currentJobId || null;
+    else _expenseJobId = (_siteVisitLive ? (signedInVisitJob() || {}).id : _currentJobId) || null;
     renderExpenseStep();
   };
 

@@ -788,8 +788,15 @@ on the job stepper, the Today card and the signed-in bar; the pure rules are
 confirm; signing in is optional; the words are Sign in, Sign out and "Signed in
 7:02 am", never clock, timer or shift; a sign in is never refused or held up
 for a location; the app never guesses a finish (a forgotten sign out is typed
-by the trade and marked as typed); no text, push or reminder of any kind is
-sent (not approved). ONE FIELD SWITCHES IT ON: the one-tap Sign in and Sign
+by the trade and marked as typed, and is never closed by a switch to another
+job); no text, push or reminder of any kind is sent (not approved). A SIGN IN
+STAYS LIVE PAST MIDNIGHT (night make-safe callouts): it is forgotten only
+when the server marks it `no_sign_out`, or it is from an earlier Perth day
+AND more than 16 hours old (`owesFinish`); a typed leave time is a day and a
+time (`lateLeave`, `finish_date` + `finish_time`), and an overnight visit is
+one invoice line dated the day it started with `finish_next_day: true`. TAPS
+LAND IN ORDER: the offline queue is the only replay and `clockEvent` sends a
+waiting tap before a new one; do not add a second replay path. ONE FIELD SWITCHES IT ON: the one-tap Sign in and Sign
 out (the Today card taps, the bar, the switch question, the leave-time
 question) run only while `my_jobs` carries the `open_site_visit` key, null
 included (`_siteVisitLive`, remembered per trade for a start with no signal).
@@ -812,7 +819,8 @@ and optional `break_minutes`; hours are worked out and NEVER typed, so do not
 add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
 (`time_entry_required`). One line is one job on one day: a second day is its
-own Extras row. The date worked cannot be after today (Perth), or more than a year
+own Extras row, and finish is after start, except a line filled from a sign
+in that ran past midnight (`finish_next_day`, `TradeTimeEntryCore.overnight`). The date worked cannot be after today (Perth), or more than a year
 before it, anywhere a trade gives it, and the app never invents or remembers a date or a time
 on a line: no default date or start, no device memory, no prefill from the
 schedule or from the stamps on the assignment row. One source only may fill a

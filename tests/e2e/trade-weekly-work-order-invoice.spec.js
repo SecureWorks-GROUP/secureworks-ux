@@ -57,6 +57,9 @@ test('builds invoice #31 from source selections and renders only server-calculat
   await expect(totals).toContainText('Grand total$5,163.40');
   await expect(totals).toContainText('Final deductions-$350.00');
   await expect(totals).toContainText('TO BE PAID$4,813.40');
+  // The Work Order Invoice shows no weekly deduction row: these three rows and nothing more.
+  await expect(totals.locator('.wwi-total-row')).toHaveText(['Grand total$5,163.40', 'Final deductions-$350.00', 'TO BE PAID$4,813.40']);
+  await expect(page.locator('[data-invoice-deduction], [data-invoice-deduction-week], [data-invoice-deduction-note]')).toHaveCount(0);
   await expect(page.getByText('Car Loan')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeEnabled();
 
@@ -84,6 +87,7 @@ test('builds invoice #31 from source selections and renders only server-calculat
 
   await page.getByRole('button', { name: 'Submit Invoice' }).click();
   await expect(page.locator('#confirmMsg')).toContainText('$4,813.40');
+  await expect(page.locator('#confirmMsg')).toContainText('A DRAFT bill will be created in Xero.\n\nThis is your ONE invoice', { useInnerText: true });
   // One invoice per week: the submit confirm must be ticked deliberately.
   await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();

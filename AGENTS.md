@@ -804,6 +804,32 @@ Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.
 
+## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
+
+A trade who hires a ute from us has a weekly amount taken off what he is paid
+(Captain 2026-10-13). ops-api owns the rule and the money; both apps show only
+what the reads send: `recurring_deduction` `{label, amount}`,
+`payable_before_deduction`, the reduced `trade_payable`, and
+`recurring_deduction_week` before submit. The paid figure is ALWAYS
+`trade_payable`; never work it out in the browser, and a deduction without it
+reads unavailable. The Work Order Invoice screen is NOT built for it yet,
+although the server applies it to a weekly Work Order Invoice: add it there
+before any per-metre trade is given a rule. `my_hours` works its outcome out
+from clocked hours and a draft save from the typed extras alone, so before
+submit only the label and amount are shown; the not-taken reason is shown
+only from the submit response. My money period cards keep every figure as it
+was; a period holding deduction invoices only gains one line naming the total
+taken off. ops-api names the GST figure `gst`, never `gst_amount`, and
+`_invoicePersistedMoney` reads `gst` ONLY for an invoice carrying a deduction:
+a GST-on invoice with none still reads unavailable as on main (known gap, its
+own task; see `trade-app.md`). With none of the fields every
+screen, the PDF and the Trade Bills table stay exactly as they were, which
+`tests/e2e/trade-invoice-recurring-deduction.spec.js` holds to the pre-change
+markup; a change to the invoice money summary updates those strings on purpose.
+Search `// <trade-recurring-deduction>` (`MyMoneyCore.deductionOf` /
+`deductionWeekOf`) and `// <trade-recurring-deduction-ops>`. Contract, screens
+and wording: `trade-app.md` → "Pay tab: a weekly deduction".
+
 ## Trade own work: Today, History, Calendar default (`trade.html`)
 
 "My work" is ONE list: `ownAssignmentRows` (`// <trade-own-work>`) keeps the

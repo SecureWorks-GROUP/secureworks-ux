@@ -18077,6 +18077,47 @@ function swTradeInvoiceWhenHtml(inv) {
 }
 // </trade-time-entry-ops>
 
+// <trade-recurring-deduction-ops>
+// 2026-10-13 (Captain): a trade who hires a ute from us has a weekly amount
+// taken off what he is paid (secureworks-backend
+// docs/trade-recurring-deductions-2026-10-13.md). The office sees what the read
+// sends and works nothing out: `recurring_deduction` {label, amount} with the
+// reduced `trade_payable`, and `recurring_deduction_note` when one was due and
+// NOT taken (invoice below the deduction, no invoice week, overlapping rules).
+// An invoice with neither reads exactly as it always did.
+function swTradeInvoiceDeduction(inv) {
+  var d = inv && inv.recurring_deduction;
+  if (!d || typeof d !== 'object') return null;
+  var label = String(d.label == null ? '' : d.label).replace(/\s+/g, ' ').trim();
+  var amount = Number(d.amount);
+  if (!label || d.amount == null || d.amount === '' || !isFinite(amount) || !(amount > 0)) return null;
+  var paid = inv.trade_payable == null || inv.trade_payable === '' || !isFinite(Number(inv.trade_payable)) ? null : Number(inv.trade_payable);
+  return { label: label, amount: amount, paid: paid };
+}
+// The Total cell of a Trade Bills row: the amount payable, with what came off.
+function swTradeInvoiceTotalHtml(inv, total) {
+  var d = swTradeInvoiceDeduction(inv);
+  if (!d) return '$' + total.toFixed(2);
+  var sub = 'font-size:10px;color:var(--sw-text-sec);font-weight:400;margin-top:2px';
+  var line = escapeHtml(d.label) + ' \u2212$' + d.amount.toFixed(2);
+  if (d.paid == null) {
+    return '$' + total.toFixed(2) + '<div data-invoice-deduction style="' + sub + '">' + line + ' comes off this. Amount payable not sent.</div>';
+  }
+  return '<span data-invoice-payable>$' + d.paid.toFixed(2) + '</span>'
+    + '<div data-invoice-deduction style="' + sub + '">Payable after ' + line + '</div>'
+    + '<div data-invoice-total style="' + sub + '">Invoice total $' + total.toFixed(2) + '</div>';
+}
+// The reason a deduction was due and not taken. The read also folds it into
+// query_note, which this table shows only while an invoice is pending review,
+// so it is shown here at every status and never twice.
+function swTradeInvoiceDeductionNoteHtml(inv, queryNoteShown) {
+  var note = String((inv && inv.recurring_deduction_note) || '').trim();
+  if (!note) return '';
+  if (queryNoteShown && String(inv.query_note || '').indexOf(note) !== -1) return '';
+  return '<div data-deduction-note style="font-size:10px;color:var(--sw-orange);font-weight:600;text-transform:none;margin-top:2px">' + escapeHtml(note) + '</div>';
+}
+// </trade-recurring-deduction-ops>
+
 async function loadTradeBills() {
   try {
     var data = await opsFetch('list_trade_invoices');
@@ -18120,9 +18161,10 @@ function renderTradeBillTable(invoices) {
     html += '<td>' + tradeName + swTradeInvoiceWhenHtml(inv) + '</td>';
     html += '<td>' + we + badge + '</td>';
     html += '<td>' + hours.toFixed(1) + '</td>';
-    html += '<td>$' + total.toFixed(2) + '</td>';
+    html += '<td>' + swTradeInvoiceTotalHtml(inv, total) + '</td>';
     html += '<td>' + billLink + '</td>';
     html += '<td style="' + statusClass + ';font-weight:600;text-transform:capitalize">' + statusLabel;
+    html += swTradeInvoiceDeductionNoteHtml(inv, isReview && !!inv.query_note);
     if (isReview) {
       if (inv.query_note) html += '<div style="font-size:10px;color:var(--sw-text-sec);font-weight:400;text-transform:none;margin-top:2px">' + inv.query_note + '</div>';
       html += '<div style="display:flex;gap:6px;margin-top:6px">';

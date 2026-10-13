@@ -410,6 +410,37 @@ test('the Crew view honours Type: other jobs are dropped, no crew row is dimmed,
   expect(s.crewBlocks).toHaveLength(7);
 });
 
+test('each meeting or reminder on one job and day keeps its own line, time and popup', async ({ page }) => {
+  const onJob = (o) => ev(Object.assign({ job_id: 'j1', job_number: 'SWP-27001', client_name: 'Alice Adams', job_type: 'patio',
+    scheduled_date: '2026-08-05', scheduled_end: '2026-08-05' }, o));
+  await seedAndRender(page, { events: EVENTS.concat([
+    onJob({ assignment_id: 'm3', assignment_type: 'meeting', start_time: '09:00:00', user_id: 'u3', crew_name: 'Ivy' }),
+    // the same 9am meeting with a second person on it: one line, two circles
+    onJob({ assignment_id: 'm4', assignment_type: 'meeting', start_time: '09:00:00', user_id: 'u2', crew_name: 'Sam' }),
+    onJob({ assignment_id: 'r3', assignment_type: 'reminder', start_time: '14:00:00', user_id: 'u1', crew_name: 'Rex Lawson' }),
+    onJob({ assignment_id: 'm5', assignment_type: 'meeting', start_time: '15:00:00', user_id: 'u1', crew_name: 'Rex Lawson' }),
+  ]) });
+  const s = await snapshot(page);
+  const lines = bizBars(s).filter((b) => b.label.indexOf('Alice Adams') !== -1)
+    .map((b) => ({ label: b.label, time: b.time, crew: b.crew.slice().sort() }))
+    .sort((a, b) => a.label.localeCompare(b.label) || a.time.localeCompare(b.time));
+  expect(lines).toEqual([
+    { label: 'Meeting \u00b7 Alice Adams', time: '3pm', crew: ['RL'] },
+    { label: 'Meeting \u00b7 Alice Adams', time: '9am', crew: ['I', 'SR'] },
+    { label: 'Reminder \u00b7 Alice Adams', time: '2pm', crew: ['RL'] },
+  ]);
+
+  // a click on each line opens that event, not its neighbour on the same job
+  const opened = async (text) => {
+    await page.evaluate(() => window.closeCalJobPopup());
+    await page.locator('.cal-schedule-bar.v3-biz', { hasText: 'Alice Adams' }).filter({ hasText: text }).click();
+    return page.evaluate(() => window._calPopupAssignment && window._calPopupAssignment.assignment_id);
+  };
+  expect(await opened('2pm')).toBe('r3');
+  expect(await opened('3pm')).toBe('m5');
+  expect(await opened('9am')).toBe('m3');
+});
+
 test('a meeting linked to a job is a business line of its own, never part of the job line', async ({ page }) => {
   const withJobMeeting = EVENTS.concat([ev({ job_id: 'j1', assignment_id: 'm3', assignment_type: 'meeting', start_time: '09:00:00',
     job_number: 'SWP-27001', client_name: 'Alice Adams', job_type: 'patio',

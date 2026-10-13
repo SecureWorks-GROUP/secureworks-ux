@@ -6411,11 +6411,13 @@ var _calPOs = null;
 // ON BY DEFAULT (Captain go-ahead 2026-10-13: "get everythign live its way better
 // than the previous calendar"). Kill switch: ?calv3=0 in the URL for one page
 // load, or localStorage.sw_cal_v3 === '0' persistently.
-// Gates the LOOK of the job-based (Schedule) view and its controls only: the
-// new line format, business lines on top, the Show / Type focus row, deliveries
-// in the day, and the hidden left sidebar. Drag, resize, the popup, the Crew
-// view and every write path are the same code either way. OFF = the calendar
-// exactly as it was before this change.
+// Gates the LOOK of the job-based (Schedule) view and the calendar's controls:
+// the new line format, business lines on top, the Show / Type focus row,
+// deliveries in the day, and the hidden left sidebar. The Crew view keeps its
+// own look but follows the focus row too: Type drops other jobs (no crew-row
+// dim) and its Deliveries row follows Show / Type. Drag, resize, the popup and
+// every write path are the same code either way. OFF = the calendar exactly as
+// it was before this change.
 window.__SW_CAL_V3_ENABLED = (function () {
   try {
     var search = window.location.search || '';
@@ -9752,8 +9754,11 @@ function renderScheduleView(container, range) {
     // of the job's line.
     if (v3 ? calV3IsBusiness(ev) : !ev.job_id) {
       // Collect label (internal) events
-      // Group job-less entries by label+date so multiple crew appear on one bar
-      var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date + (ev.job_id ? '_' + ev.job_id : '');
+      // Group job-less entries by label+date so multiple crew appear on one bar.
+      // A row on a job has no label, so its kind and start time tell one
+      // meeting or reminder from the next on the same job and day.
+      var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date
+        + (ev.job_id ? '_' + ev.job_id + '_' + (ev.assignment_type || '') + '_' + (ev.start_time || '') : '');
       if (!labelMap[aid]) {
         var crewName = crewDisplayName(ev);
         var crew = {};

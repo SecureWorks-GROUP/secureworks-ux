@@ -179,7 +179,7 @@ read exactly these keys and no other spelling:
 | Kind | `kind` (`labour` / `material`) |
 | Note | `notes` |
 | Hours | `hours`; a line whose `unit` is `h`/`hr`/`hrs`/`hour`/`hours` is its own hours |
-| Rate, allocation (Ops only) | `rate` with `rate_unit` (`m`, `each`, `hr`, `pct`, ...) and `total`, as the backend quote line builder sends them; `rate_ex`, `allocation_ex` are read first where a line carries them |
+| Rate, allocation (Ops only) | `rate` with `rate_unit` (`m`, `each`, `hr`, `pct`, ...) and `total`, as the backend quote line builder sends them; no other spelling is read |
 | In the agreed labour (Ops only) | `counted`; `false` lines are named and left out of the allocation total |
 | Variation line | `is_variation`, `variation_number` (or, with no number, `variation_label`) marks the line; title `variation_label` (else "Variation n"); date `variation_approved_at` |
 | Variation addendum | the work order's `addenda[]`: `variation_number`, `label`, `approved_at`, `description`, and its lines in `lines[]` (staff) or `scope_items[]` (trade); `trade_allocation_ex`, `customer_price_ex` (Ops only, `addendaOf(list, {money: true})`) |

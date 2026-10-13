@@ -28,11 +28,11 @@ const SHAUN = 'shaun@secureworkswa.com.au';
 // no hours (the captain's example), and a variation addendum.
 function scopeItems() {
   return [
-    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate_ex: 35, allocation_ex: 1316 },
-    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate_ex: 10, allocation_ex: 210 },
-    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate_ex: 80, allocation_ex: 160 },
-    { description: 'Root removal', qty: 1, unit: 'job', kind: 'labour', allocation_ex: 250 },
-    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', allocation_ex: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
+    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate: 35, rate_unit: 'm', total: 1316 },
+    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate: 10, rate_unit: 'each', total: 210 },
+    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate: 80, rate_unit: 'hr', total: 160 },
+    { description: 'Root removal', qty: 1, unit: 'job', kind: 'labour', total: 250 },
+    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', total: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
   ];
 }
 
@@ -203,7 +203,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       .toMatchObject({ task: 'Post set', hours: 1.5, qty: 4, notes: 'Corner first' });
     expect(C.needsHours(C.lineOf({ description: 'Material', qty: 1, unit: 'job', kind: 'material' }))).toBe(false);
     // Only the backend contract's keys are read: no other spelling stands in for a field.
-    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, cost_per_hour: 9, note: 'x', variation: true }))
+    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, allocation_ex: 500, rate_ex: 9, cost_per_hour: 9, note: 'x', variation: true }))
       .toMatchObject({ task: '', qty: null, unit: '', hours: null, allocationEx: null, rateEx: null, notes: '', addendumKey: '' });
   });
 
@@ -435,7 +435,7 @@ test.describe('Customer variations on the job work order (core)', () => {
       ['Extend the fence along the side', 3, '6 m', true],
     ]);
     // Without opts.money no money field is read, even if one is sent.
-    const trade = C.addendaOf([Object.assign(staffAddendum(), { scope_items: [{ description: 'x', hours: 1, allocation_ex: 99 }], lines: [] })]);
+    const trade = C.addendaOf([Object.assign(staffAddendum(), { scope_items: [{ description: 'x', hours: 1, total: 99, rate: 9, rate_unit: 'hr' }], lines: [] })]);
     expect(trade[0].tradeAllocationEx).toBeUndefined();
     expect(trade[0].customerPriceEx).toBeUndefined();
     expect(trade[0].lines[0].allocationEx).toBe(null);
@@ -464,6 +464,12 @@ test.describe('Customer variations on the job work order (core)', () => {
     expect(html).toContain('$2,576.00');
     expect(html).toContain('$176.00');
     expect(html).toContain('data-job-wo-rule="has_customer_variations"');
+
+    // Variations without an agreed total read Not set, never the agreed labour.
+    const noTotal = approvedWithVariation();
+    delete noTotal.figures.agreed_total_ex;
+    const unset = C.renderOpsPanel(noTotal, readWith(noTotal, customerVariations()), 'ready', { viewerEmail: SHAUN });
+    expect(unset).toMatch(/data-job-wo-agreed-total><div class="jwo-fig-k">Agreed total<\/div><div class="jwo-fig-v">Not set</);
 
     // No variations: no agreed total cell, the figures stay as before.
     const plain = C.renderOpsPanel(approvedBlock(), null, 'ready', { viewerEmail: SHAUN });
@@ -632,7 +638,7 @@ test.describe('Customer variations on the job work order (core)', () => {
         // Money smuggled onto an addendum is never read by the trade view.
         trade_allocation_ex: 320, customer_price_ex: 921.6,
         scope_items: [
-          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, allocation_ex: 320 },
+          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, total: 320, rate: 80, rate_unit: 'hr' },
           { description: 'Extend the fence along the side', qty: 6, unit: 'm', hours: 3, is_variation: true, variation_number: 1 },
         ],
       }],

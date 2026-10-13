@@ -13,10 +13,10 @@ const DRAFT_UPDATED_AT = '2026-10-13T03:04:05.123456+00:00';
 
 function scopeItems() {
   return [
-    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate_ex: 35, allocation_ex: 1316 },
-    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate_ex: 10, allocation_ex: 210 },
-    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate_ex: 80, allocation_ex: 160 },
-    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', allocation_ex: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
+    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate: 35, rate_unit: 'm', total: 1316 },
+    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate: 10, rate_unit: 'each', total: 210 },
+    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate: 80, rate_unit: 'hr', total: 160 },
+    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', total: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
   ];
 }
 
@@ -236,7 +236,7 @@ test.describe('Job work order on the Ops job page (preview)', () => {
 
   test('a patio job with a stored work order prints it too', async ({ page }) => {
     await page.goto('/ops.html?wo=preview');
-    const data = detailPayload(workOrder({ scope_items: [{ description: 'Labour: 2 trades x 1.5 days', hours: 24, allocation_ex: 1080 }] }));
+    const data = detailPayload(workOrder({ scope_items: [{ description: 'Labour: 2 trades x 1.5 days', hours: 24, total: 1080 }] }));
     data.job.type = 'patio';
     data.job.scope_json = { config: { length: 6, projection: 4 } };
     const printed = await page.evaluate((data) => {
@@ -675,6 +675,23 @@ test.describe('Customer variations on the job work order (preview)', () => {
     await expect(page.locator('[data-job-wo-cv-invoice]')).toContainText('Reference SWF-26904 Variation 1');
     await expect(page.locator('[data-job-wo-cv-invoice-note]')).toContainText('Preview only: nothing is sent to Xero from here.');
     await expect(page.locator('[data-job-wo-panel] button', { hasText: /xero/i })).toHaveCount(0);
+    expect(await posts(page)).toEqual([{ action: 'prepare_customer_variation_invoice_line', body: { variation_id: 'cv-1' } }]);
+  });
+
+  test('a refused invoice line preview reads in the variations message, never in an open form', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const { data, read } = withVariations([approvedVariation()]);
+    await openBuild(page, data, {
+      job_work_order: read,
+      prepare_customer_variation_invoice_line: { reject: { code: 'invoice_line_unavailable', status: 422, message: 'The invoice line could not be built.' } },
+    }, SHAUN);
+    await page.locator('[data-job-wo-cv-add]').click();
+    const form = page.locator('[data-job-wo-cv-form="create"]');
+    await form.locator('[data-cv-f="description"]').fill('Second gate');
+    await page.locator('[data-job-wo-cv-invoice-line][data-cv-id="cv-1"]').click();
+    await expect(page.locator('[data-job-wo-cv-message]')).toHaveText('The invoice line could not be built.');
+    await expect(form.locator('[data-cv-f="description"]')).toHaveValue('Second gate');
+    await expect(form.locator('[data-job-wo-cv-errors]')).toHaveCount(0);
     expect(await posts(page)).toEqual([{ action: 'prepare_customer_variation_invoice_line', body: { variation_id: 'cv-1' } }]);
   });
 

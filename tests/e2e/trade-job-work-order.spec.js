@@ -114,7 +114,7 @@ test.describe('Job work order on the Trade App job (preview)', () => {
         description: 'Remove the tree roots the quote left',
         trade_allocation_ex: 320, customer_price_ex: 921.6,
         scope_items: [
-          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, allocation_ex: 320 },
+          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, total: 320, rate: 80, rate_unit: 'hr' },
           { description: 'Extend the fence along the side', qty: 6, unit: 'm', hours: 3, is_variation: true, variation_number: 1 },
         ],
       }],

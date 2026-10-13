@@ -4889,7 +4889,8 @@
   // The job work order's trade read carries no money by design; strip any
   // money key it or a scope line might still carry before anything caches it.
   var TRADE_JOB_WO_MONEY_KEYS = ['allocation_ex', 'labour_ex', 'rate_ex', 'cost_rate_ex', 'unit_cost_ex',
-    'total_ex', 'agreed_labour_ex', 'figures', 'trade_allocation_ex', 'customer_price_ex'];
+    'total_ex', 'agreed_labour_ex', 'figures', 'trade_allocation_ex', 'customer_price_ex',
+    'total', 'rate', 'rate_unit'];
   function tradeStripJobWorkOrderMoney(res) {
     delete res.figures;
     var wo = res.work_order;
@@ -4900,6 +4901,7 @@
     (Array.isArray(wo.addenda) ? wo.addenda : []).forEach(function(a) {
       nodes.push(a);
       if (a && Array.isArray(a.scope_items)) nodes = nodes.concat(a.scope_items);
+      if (a && Array.isArray(a.lines)) nodes = nodes.concat(a.lines);
     });
     nodes.forEach(function(node) {
       if (node && typeof node === 'object') TRADE_JOB_WO_MONEY_KEYS.forEach(function(k) { delete node[k]; });

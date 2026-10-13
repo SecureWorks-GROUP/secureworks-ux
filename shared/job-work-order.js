@@ -128,7 +128,8 @@ var JobWorkOrderCore = (function () {
   //   hours                                 a line priced in hours (unit h /
   //                                         hr / hrs / hour / hours) is its
   //                                         own hours
-  //   rate_ex, allocation_ex                Ops only
+  //   rate, rate_unit, total                Ops only (total is the
+  //                                         line's allocation)
   //   variation_number, variation_label,    a variation addendum
   //   variation_approved_at, is_variation
   function lineOf(item) {
@@ -149,10 +150,9 @@ var JobWorkOrderCore = (function () {
       kind: lower(it.kind),
       notes: firstText(it.notes),
       // The quote line builder (backend docs/quote-work-order-lines-v1.md)
-      // sends total, rate and rate_unit ('m', 'each', 'hr', 'pct', ...);
-      // allocation_ex / rate_ex are read first where a line carries them.
-      allocationEx: firstNum(it.allocation_ex, it.total),
-      rateEx: firstNum(it.rate_ex, it.rate),
+      // sends total, rate and rate_unit ('m', 'each', 'hr', 'pct', ...).
+      allocationEx: firstNum(it.total),
+      rateEx: firstNum(it.rate),
       rateUnit: firstText(it.rate_unit),
       // false: the quote's labour figure is not made of this line, so the
       // agreed labour does not include it (removal, an uncertain extra).
@@ -672,7 +672,7 @@ var JobWorkOrderCore = (function () {
       if (cvCount > 0) {
         h += figureCell('Approved variations', moneyWords(f.customer_variations_ex) + DOT + cvCount);
         h += '<div class="jwo-fig" data-job-wo-agreed-total><div class="jwo-fig-k">Agreed total</div><div class="jwo-fig-v">' +
-          esc(moneyWords(f.agreed_total_ex) || moneyWords(f.agreed_ex) || 'Not set') + '</div></div>';
+          esc(moneyWords(f.agreed_total_ex) || 'Not set') + '</div></div>';
       }
       h += figureCell('Billed to date', moneyWords(f.billed_to_date_ex) || '$0.00');
       h += figureCell('Remaining', f.remaining_ex == null ? '' : moneyWords(f.remaining_ex), f.over_agreed ? 'jwo-fig-over' : '');

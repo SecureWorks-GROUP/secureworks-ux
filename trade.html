@@ -21571,8 +21571,21 @@
     html += '<div class="wwi-totals" data-weekly-invoice-totals>';
     html += '<div class="wwi-total-row"><span>Grand total</span><span>' + _weeklyInvoiceMoney(invoice.grand_total) + '</span></div>';
     html += '<div class="wwi-total-row"><span>Final deductions</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(invoice.final_deductions_total))) + '</span></div>';
-    html += '<div class="wwi-total-row paid"><span>TO BE PAID</span><span>' + _weeklyInvoiceMoney(invoice.to_be_paid) + '</span></div>';
+    // [trade-recurring-deduction] A weekly deduction comes off after the
+    // invoice's own figures: its own row, then the server's trade_payable.
+    var deduction = MyMoneyCore.deductionOf(invoice);
+    var weekDeduction = MyMoneyCore.deductionWeekOf(invoice);
+    if (deduction) {
+      html += '<div class="wwi-total-row" data-invoice-before-deduction><span>Payable before ' + esc(deduction.label) + '</span><span>' + _weeklyInvoiceMoney(deduction.before != null ? deduction.before : invoice.to_be_paid) + '</span></div>';
+      html += '<div class="wwi-total-row" data-invoice-deduction><span>' + esc(deduction.label) + '</span><span>-' + _weeklyInvoiceMoney(deduction.amount) + '</span></div>';
+      html += '<div class="wwi-total-row paid" data-invoice-paid><span>TO BE PAID</span><span>' + (deduction.paid != null ? _weeklyInvoiceMoney(deduction.paid) : 'Figures unavailable') + '</span></div>';
+    } else {
+      html += '<div class="wwi-total-row paid"><span>TO BE PAID</span><span>' + _weeklyInvoiceMoney(invoice.to_be_paid) + '</span></div>';
+    }
     html += '</div>';
+    if (!deduction && weekDeduction && weekDeduction.note) {
+      html += '<div class="wwi-warning" data-invoice-deduction-note>' + esc(weekDeduction.note) + '</div>';
+    }
     return html;
   }
 
@@ -21585,6 +21598,10 @@
     html += '<div class="wwi-toolbar"><h2>Weekly Invoice</h2><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div>';
     html += '<div class="hours-week-nav"><button aria-label="Previous invoice week" onclick="shiftWeeklyWorkOrderWeek(-1)">&larr;</button><div class="hours-week-label">' + formatWeekRange(_hoursWeekEnd) + '</div><button aria-label="Next invoice week" onclick="shiftWeeklyWorkOrderWeek(1)">&rarr;</button></div>';
     html += '<div class="wwi-intro"><strong>SecureWorks calculates this invoice.</strong> Select the completed work orders and deductions that belong to the week. Prices, deduction rates, job subtotals and TO BE PAID are confirmed by the server when you save.</div>';
+    // Before the first save the server's preview is not on screen yet, so say
+    // what my_hours named for this week. [trade-recurring-deduction]
+    var wwiDeduction = MyMoneyCore.deductionOf(state.preview) || MyMoneyCore.deductionWeekOf(state.preview) ? null : _hoursDeductionWeek();
+    if (wwiDeduction) html += '<div class="wwi-count" data-invoice-deduction-week>' + esc(_invoiceDeductionSentence(wwiDeduction)) + '</div>';
 
     if (state.workOrders.length === 0) {
       html += '<div class="hours-no-data">No completed work orders available for this week</div>';
@@ -21750,9 +21767,13 @@
     if (_guardFinancialWrite('generate_trade_invoice', payload)) return;
     var revision = state.revision;
     var preview = state.preview;
-    var payable = _weeklyInvoiceMoney(preview.to_be_paid);
+    var previewDeduction = MyMoneyCore.deductionOf(preview);
+    var payable = _weeklyInvoiceMoney(previewDeduction && previewDeduction.paid != null ? previewDeduction.paid : preview.to_be_paid);
     var ctx = _invoiceApiContext();
-    _confirmOneInvoiceForWeek(state.weekEnd, 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '. A DRAFT bill will be created in Xero.').then(function(ok) {
+    var deductionLead = previewDeduction && previewDeduction.paid != null
+      ? ' That is after ' + MyMoneyCore.deductionLabel(previewDeduction) + '.'
+      : _invoiceDeductionConfirmLine(MyMoneyCore.deductionWeekOf(preview));
+    _confirmOneInvoiceForWeek(state.weekEnd, 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '. A DRAFT bill will be created in Xero.' + deductionLead).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       if (!_weeklyStateCurrent(state, revision)) {
@@ -22315,6 +22336,47 @@
       return { label: 'Waiting on office', cls: 'sent' };
     }
     function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
+    // <trade-recurring-deduction>
+    // 2026-10-13 (Captain): a trade who hires a ute from us has a weekly amount
+    // taken off what he is paid. ops-api owns the rule and the money; the
+    // contract is secureworks-backend docs/trade-recurring-deductions-2026-10-13.md.
+    // The app only shows what it is sent. deductionOf reads the line an invoice
+    // carries (`recurring_deduction`), with the server's own before and after
+    // figures; `paid` is `trade_payable` and is NEVER worked out here.
+    // deductionWeekOf reads what comes off a week before it is submitted
+    // (`recurring_deduction_week`). Both answer null for every other trade and
+    // for a server that does not send the fields, and every screen then reads
+    // exactly as it did before deductions existed.
+    function deductionLine(d) {
+      if (!d || typeof d !== 'object') return null;
+      var label = String(d.label == null ? '' : d.label).replace(/\s+/g, ' ').trim();
+      var amount = hasMoney(d.amount) ? round2(d.amount) : null;
+      if (!label || amount == null || !(amount > 0)) return null;
+      return { label: label, amount: amount };
+    }
+    function deductionOf(source) {
+      var line = deductionLine(source && source.recurring_deduction);
+      if (!line) return null;
+      line.before = hasMoney(source.payable_before_deduction) ? round2(source.payable_before_deduction) : null;
+      line.paid = hasMoney(source.trade_payable) ? round2(source.trade_payable) : null;
+      return line;
+    }
+    function deductionWeekOf(source) {
+      var w = source && source.recurring_deduction_week;
+      var line = deductionLine(w);
+      if (!line) return null;
+      line.week_start = String(w.week_start || '').slice(0, 10);
+      line.applied = w.applied === true;
+      line.outcome = String(w.outcome || '');
+      // The reason it was due and not taken. An applied deduction has none.
+      line.note = line.applied ? '' : String(w.note == null ? '' : w.note).trim();
+      return line;
+    }
+    // "Ute hire -$100.00" with a real minus sign, for a row beside an amount.
+    function deductionLabel(line) {
+      return line ? line.label + ' \u2212' + money(line.amount) : '';
+    }
+    // </trade-recurring-deduction>
     // What the amount column says for one invoice. Paid: what Xero actually
     // paid (amount_paid), with the invoiced figure beside it when the two
     // differ. Part paid: what is still owed. Otherwise the payable figure, or
@@ -22393,7 +22455,9 @@
       var onclick = String(row.status || '') === 'draft' ? "openInvoiceDraft('" + esc(row.id) + "')" : "viewInvoiceDetail('" + esc(row.id) + "')";
       var h = '<div class="mm-inv" data-mm-invoice="' + esc(row.id) + '" data-mm-status="' + esc(st.cls) + '" onclick="' + onclick + '">';
       h += '<div class="mm-inv-l"><div class="mm-inv-when">' + esc(when) + '</div><div class="mm-inv-num">' + esc(row.invoice_number || '') + (row.counts === false ? ' (not counted)' : '') + '</div></div>';
-      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amt.main) + '</div>' + (amt.sub ? '<div class="mm-inv-sub" data-mm-amount-sub>' + esc(amt.sub) + '</div>' : '') + '<span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+      // my_money rows already carry the reduced payable; name what came off it.
+      var ded = deductionOf(row);
+      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amt.main) + '</div>' + (amt.sub ? '<div class="mm-inv-sub" data-mm-amount-sub>' + esc(amt.sub) + '</div>' : '') + (ded ? '<div class="mm-inv-sub" data-mm-deduction>' + esc(deductionLabel(ded)) + '</div>' : '') + '<span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
       h += '</div>';
       return h;
     }
@@ -22417,7 +22481,7 @@
       h += '</div>';
       return h;
     }
-    return { money: money, dateShort: dateShort, statusOf: statusOf, amountOf: amountOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit };
+    return { money: money, dateShort: dateShort, statusOf: statusOf, amountOf: amountOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit, deductionOf: deductionOf, deductionWeekOf: deductionWeekOf, deductionLabel: deductionLabel };
   })();
   // </trade-my-money>
 
@@ -22565,12 +22629,44 @@
     if (_invoiceHasPersistedNumber(result.total_hours)) facts.push(Number(result.total_hours) + 'h');
     var money = _invoicePersistedMoney(result);
     facts.push(money.complete ? _invoiceMoney(money.total_inc) : 'confirmed figures unavailable');
+    if (money.complete && money.deduction) facts.push(MyMoneyCore.deductionLabel(money.deduction), 'you get paid ' + _invoiceMoney(money.deduction.paid));
     return _invoiceSubmitStatusMessage(result, 'Invoice generated') + ' — ' + facts.join(', ');
   }
 
   // Builder-only estimate. The browser never sends these calculated figures;
   // generate/submit requests send line inputs + gst_on and the backend persists
   // the authoritative gross/super/net amounts used by summaries and PDFs.
+  // What comes off the week this invoice is for, as my_hours (or the last
+  // draft save) named it. Null when the server names nothing, names another
+  // week, or the builder is on an expense invoice, which has no week and so
+  // carries no deduction. [trade-recurring-deduction]
+  function _hoursDeductionWeek() {
+    var wk = MyMoneyCore.deductionWeekOf(_hoursData);
+    if (!wk) return null;
+    var week = wk.week_start || String((_hoursData && _hoursData.week_start) || '').slice(0, 10);
+    if (week && _hoursWeekStart && week !== _hoursWeekStart) return null;
+    return wk;
+  }
+  function _invoiceDeductionWeek() {
+    return _invoiceBuilderMode === 'expense' ? null : _hoursDeductionWeek();
+  }
+
+  // One plain sentence: the server's reason when the deduction is not being
+  // taken, else what comes off. The submit confirm leads with a blank line.
+  function _invoiceDeductionSentence(wk) {
+    return wk ? (wk.note || (MyMoneyCore.deductionLabel(wk) + ' comes off what you are paid for this week.')) : '';
+  }
+  function _invoiceDeductionConfirmLine(wk) {
+    return wk ? '\n\n' + _invoiceDeductionSentence(wk) : '';
+  }
+
+  // Keep the newest answer about the week: a draft save names it too.
+  function _noteInvoiceDeductionWeek(res) {
+    if (!res || !MyMoneyCore.deductionWeekOf(res) || !_hoursData) return;
+    _hoursData.recurring_deduction_week = res.recurring_deduction_week;
+    _updateInvoiceMoneySummary();
+  }
+
   function _invoicePreviewMoney(gross) {
     gross = Math.round((Number(gross) || 0) * 100) / 100;
     var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);
@@ -22580,7 +22676,7 @@
     if (rate == null && isPerMetreUser()) rate = 0.12;
     if (rate == null) return null;
     var split = MyMoneyCore.resolveSuperSplit({ gross_earned: gross, super_rate: rate });
-    return {
+    var preview = {
       complete: true,
       estimated: true,
       gross_earned: gross,
@@ -22591,6 +22687,9 @@
       amount_payable: split.amount_payable,
       gst_on: _invGst
     };
+    var weekDeduction = _invoiceDeductionWeek();
+    if (weekDeduction) preview.deduction_week = weekDeduction;
+    return preview;
   }
 
   function _invoicePersistedMoney(source) {
@@ -22624,8 +22723,13 @@
       && gstOn != null;
     var hasGstMoney = gstOn !== true
       || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(source.total_inc));
-    return {
-      complete: hasCoreMoney && hasGstMoney,
+    // An invoice that carries a deduction is paid the server's trade_payable.
+    // Without that figure there is no honest amount to show, so the money
+    // reads unavailable rather than the figure before the deduction.
+    var deduction = MyMoneyCore.deductionOf(source);
+    var weekDeduction = MyMoneyCore.deductionWeekOf(source);
+    var persisted = {
+      complete: hasCoreMoney && hasGstMoney && (!deduction || deduction.paid != null),
       estimated: false,
       gross_earned: gross == null ? null : Number(gross),
       super_rate: superRate == null ? null : _invoiceSuperRate(superRate),
@@ -22638,6 +22742,9 @@
       gst_amount: gstAmount == null ? null : Number(gstAmount),
       total_inc: total == null ? null : Number(total)
     };
+    if (deduction) persisted.deduction = deduction;
+    if (weekDeduction) persisted.deduction_week = weekDeduction;
+    return persisted;
   }
 
   // One `my_trade_invoices` row -> the row shape MyMoneyCore.statusOf /
@@ -22654,7 +22761,12 @@
     inv = inv || {};
     var payable = null;
     var hasSplit = ['gross_earned', 'super_amount', 'net_pay'].some(function(k) { return inv[k] != null && inv[k] !== ''; });
-    if (String(inv.invoice_source || '') === 'weekly_work_order' && _invoiceHasPersistedNumber(inv.to_be_paid)) {
+    // An invoice carrying a deduction is paid the server's figure, on every
+    // kind of invoice; nothing here works it out. [trade-recurring-deduction]
+    var deduction = MyMoneyCore.deductionOf(inv);
+    if (deduction) {
+      payable = deduction.paid;
+    } else if (String(inv.invoice_source || '') === 'weekly_work_order' && _invoiceHasPersistedNumber(inv.to_be_paid)) {
       payable = Number(inv.to_be_paid);
     } else if (hasSplit) {
       var money = _invoicePersistedMoney(Object.assign({}, inv, { gst_amount: inv.gst_amount != null ? inv.gst_amount : inv.gst }));
@@ -22664,7 +22776,7 @@
     } else if (!inv.figures_error && _invoiceHasPersistedNumber(inv.total_inc)) {
       payable = Number(inv.total_inc);
     }
-    return {
+    var row = {
       id: inv.id,
       invoice_number: inv.invoice_number || inv.xero_bill_number || null,
       week_end: inv.week_end || inv.week_ending || null,
@@ -22677,6 +22789,15 @@
       payable: payable,
       figures_ok: payable != null
     };
+    if (deduction) row.deduction = deduction;
+    return row;
+  }
+
+  // "Ute hire -$100.00" under the amount of a row that carries a deduction.
+  function _invoiceRowDeductionHtml(row) {
+    return row && row.deduction
+      ? '<div class="mm-inv-sub" data-inv-deduction>' + esc(MyMoneyCore.deductionLabel(row.deduction)) + '</div>'
+      : '';
   }
 
   function _invoiceDetailStatusHtml(inv) {
@@ -22691,6 +22812,7 @@
     var amt = MyMoneyCore.amountOf(row);
     var h = '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(amt.main) + '</div>';
     if (amt.sub) h += '<div class="mm-inv-sub" data-inv-amount-sub>' + esc(amt.sub) + '</div>';
+    h += _invoiceRowDeductionHtml(row);
     h += '<span class="mm-status ' + esc(st.cls) + '" data-inv-status="' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
     return h;
   }
@@ -22702,7 +22824,8 @@
       'gross_earned', 'super_rate', 'super_amount', 'net_pay',
       'amount_payable', 'worker_withhold', 'company_contribution',
       'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
-      'total_inc', 'total', 'items', 'invoice_items'
+      'total_inc', 'total', 'items', 'invoice_items',
+      'recurring_deduction', 'payable_before_deduction', 'trade_payable', 'recurring_deduction_week'
     ].forEach(function(field) {
       if (!Object.prototype.hasOwnProperty.call(response, field)) delete submitted[field];
     });
@@ -22742,6 +22865,15 @@
     var company = split.company_contribution;
     var cash = split.amount_payable;
     var workerRate = money.super_rate != null ? Number(money.super_rate) / 2 : null;
+    // [trade-recurring-deduction] `deduction` is the line a saved invoice
+    // carries; `weekDeduction` is what the server says comes off this week
+    // before it is submitted. With neither, nothing below changes.
+    var deduction = money.deduction || null;
+    var weekDeduction = money.deduction_week || null;
+    // Before submit the row shows what comes off this invoice. A deduction
+    // another invoice already took this week comes off nothing here, so only
+    // the server's reason is shown.
+    var comesOff = !!(opts.gstSwitch && weekDeduction && weekDeduction.outcome !== 'already_taken');
     var attrs = ' class="inv-money-summary" data-invoice-money-summary';
     if (opts.id) attrs += ' id="' + opts.id + '"';
     var html = '<div' + attrs + '>';
@@ -22752,7 +22884,16 @@
     html += '<div class="inv-money-row"><span>Super (' + _invoiceRateLabel(money.super_rate) + ') paid into your super fund</span><span>' + _invoiceMoney(money.super_amount) + '</span></div>';
     html += '<div class="inv-money-row"><span>Your share of super (' + _invoiceRateLabel(workerRate) + ')</span><span>−' + _invoiceMoney(worker) + '</span></div>';
     html += '<div class="inv-money-row"><span>Company covers the other ' + _invoiceRateLabel(workerRate) + '</span><span>' + _invoiceMoney(company) + '</span></div>';
-    html += '<div class="inv-money-row net"><span>You get paid</span><span>' + _invoiceMoney(cash) + '</span></div>';
+    // "You get paid" is only ever the last figure. On an invoice with a
+    // deduction that is the server's trade_payable, further down.
+    if (deduction || comesOff) {
+      html += '<div class="inv-money-row' + (deduction ? '' : ' net') + '" data-invoice-after-super><span>After super</span><span>' + _invoiceMoney(cash) + '</span></div>';
+    } else {
+      html += '<div class="inv-money-row net"><span>You get paid</span><span>' + _invoiceMoney(cash) + '</span></div>';
+    }
+    if (comesOff) {
+      html += '<div class="inv-money-row" data-invoice-deduction-week><span>' + esc(weekDeduction.label) + ' (comes off this week)</span><span>−' + _invoiceMoney(weekDeduction.amount) + '</span></div>';
+    }
     if (opts.gstSwitch) {
       html += '<div class="inv-gst-control">';
       html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
@@ -22762,6 +22903,18 @@
     } else {
       html += '<div class="inv-money-row"><span>GST</span><span>' + (money.gst_on ? _invoiceMoney(money.gst_amount) : 'Off') + '</span></div>';
       if (money.total_inc != null) html += '<div class="inv-money-row total"><span>Invoice total</span><span>' + _invoiceMoney(money.total_inc) + '</span></div>';
+      if (deduction) {
+        if (deduction.before != null) html += '<div class="inv-money-row" data-invoice-before-deduction><span>Payable before ' + esc(deduction.label) + '</span><span>' + _invoiceMoney(deduction.before) + '</span></div>';
+        html += '<div class="inv-money-row" data-invoice-deduction><span>' + esc(deduction.label) + '</span><span>−' + _invoiceMoney(deduction.amount) + '</span></div>';
+        html += '<div class="inv-money-row net" data-invoice-paid><span>You get paid</span><span>' + _invoiceMoney(deduction.paid) + '</span></div>';
+      }
+    }
+    if (deduction) {
+      html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(MyMoneyCore.deductionLabel(deduction)) + ' came off this invoice after super and GST.</div>';
+    } else if (weekDeduction && weekDeduction.note) {
+      html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(weekDeduction.note) + '</div>';
+    } else if (comesOff) {
+      html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(MyMoneyCore.deductionLabel(weekDeduction)) + ' comes off what you are paid for this week, after super and GST. SecureWorks confirms the amount you are paid when you submit.</div>';
     }
     html += '<div class="inv-money-note">Your job amounts are not changed. Only half the super comes out of what you earned; the company covers the other half. The full ' + _invoiceRateLabel(money.super_rate) + ' still goes into your super fund each week.</div>';
     if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
@@ -26106,7 +26259,7 @@
       return;
     }
 
-    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.').then(function(ok) {
+    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.' + _invoiceDeductionConfirmLine(_invoiceDeductionWeek())).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();
@@ -26619,6 +26772,7 @@
         throw _ambiguousInvoiceResponseError('Draft save did not return a draft id', { draft_id: capturedId });
       }
       _draftSaveUnresolved = false;
+      _noteInvoiceDeductionWeek(res);
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;
@@ -26665,7 +26819,7 @@
       return;
     }
 
-    var builderLead = 'Submit invoice for $' + t.total.toFixed(2) + '?\n\n' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '');
+    var builderLead = 'Submit invoice for $' + t.total.toFixed(2) + '?\n\n' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + _invoiceDeductionConfirmLine(_invoiceDeductionWeek());
     var builderWeekEnd = !isExpense && _hoursWeekStart ? _weeklyDatePlusDays(_hoursWeekStart, 6) : '';
     (builderWeekEnd
       ? _confirmOneInvoiceForWeek(builderWeekEnd, builderLead)
@@ -27000,6 +27154,10 @@
     doc.setTextColor(80, 90, 100);
     var persistedMoney = Object.assign({}, data.money, MyMoneyCore.resolveSuperSplit(data.money || {}));
     var workerRate = persistedMoney.super_rate != null ? Number(persistedMoney.super_rate) / 2 : null;
+    // [trade-recurring-deduction] The deduction is its own line on the Xero
+    // bill, so the bill total is the server's trade_payable. This PDF is
+    // attached to that bill: it carries the same row and the same total.
+    var pdfDeduction = persistedMoney.deduction && persistedMoney.deduction.paid != null ? persistedMoney.deduction : null;
     doc.text('Earned', margin + 105, y);
     doc.setTextColor(41, 60, 70);
     doc.text('$' + Number(persistedMoney.gross_earned).toFixed(2), colAmt, y, { align: 'right' });
@@ -27021,7 +27179,7 @@
       doc.text('$' + Number(persistedMoney.company_contribution).toFixed(2), colAmt, y, { align: 'right' });
       y += 5;
       doc.setTextColor(80, 90, 100);
-      doc.text('You get paid', margin + 105, y);
+      doc.text(pdfDeduction ? 'After super' : 'You get paid', margin + 105, y);
       doc.setTextColor(41, 60, 70);
       doc.text('$' + Number(persistedMoney.amount_payable).toFixed(2), colAmt, y, { align: 'right' });
       y += 5;
@@ -27030,6 +27188,21 @@
       doc.setTextColor(41, 60, 70);
       doc.text(persistedMoney.gst_on ? '$' + Number(persistedMoney.gst_amount || 0).toFixed(2) : 'Off', colAmt, y, { align: 'right' });
       y += 5;
+      if (pdfDeduction) {
+        var pdfDeductionLabel = pdfDeduction.label.slice(0, 30);
+        if (pdfDeduction.before != null) {
+          doc.setTextColor(80, 90, 100);
+          doc.text('Payable before ' + pdfDeductionLabel, margin + 105, y);
+          doc.setTextColor(41, 60, 70);
+          doc.text('$' + pdfDeduction.before.toFixed(2), colAmt, y, { align: 'right' });
+          y += 5;
+        }
+        doc.setTextColor(80, 90, 100);
+        doc.text(pdfDeductionLabel, margin + 105, y);
+        doc.setTextColor(41, 60, 70);
+        doc.text('-$' + pdfDeduction.amount.toFixed(2), colAmt, y, { align: 'right' });
+        y += 5;
+      }
     }
     // Total with orange accent
     doc.setFillColor(41, 60, 70);
@@ -27038,7 +27211,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.text('TOTAL', margin + 108, y + 4.5);
-    doc.text('$' + Number(persistedMoney.total_inc).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
+    doc.text('$' + Number(pdfDeduction ? pdfDeduction.paid : persistedMoney.total_inc).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
     y += 14;
 
     // ── Notes ──
@@ -28869,7 +29042,7 @@
         html += '    <div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + esc(label) + '</div>';
         html += '    <div style="font-size:11px;color:var(--sw-text-sec)">' + esc(MyMoneyCore.statusOf(row).label) + '</div>';
         html += '  </div>';
-        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(amt.main) + '</div>';
+        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)' + (row.deduction ? ';text-align:right' : '') + '">' + esc(amt.main) + _invoiceRowDeductionHtml(row) + '</div>';
         html += '</div>';
       });
       container.innerHTML = html;

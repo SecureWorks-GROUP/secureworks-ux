@@ -10,6 +10,7 @@
 //  - With the preview off nothing changes and my_job_work_order is never read.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
@@ -126,7 +127,7 @@ test.describe('Job work order on the Trade App job (preview)', () => {
 });
 
 test.describe('Job work order on the trade invoice (preview)', () => {
-  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer' });
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6 });
 
   async function openInvoice(page) {
     await page.locator('[data-view="hours"]').click();
@@ -152,6 +153,8 @@ test.describe('Job work order on the trade invoice (preview)', () => {
     await expect(card.locator('[data-cardwoalloc]')).toHaveCount(0);
     expect(reads).toContain('e2e-wo-holder-job');
 
+    // An hours card says when it was worked before it can be sent.
+    await fillCardTime(card, 8);
     await page.locator('#invSubmitBtn').click();
     await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();

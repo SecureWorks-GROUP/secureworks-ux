@@ -416,6 +416,37 @@ test('Hours typed while hydrate is pending stay Hours after the WO arrives', asy
   await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
 });
 
+test.describe('the rate box while hydrate is pending', () => {
+  test.use({ tradeRateEditable: true });
+
+  test('a card the trade is sitting in the rate box of stays Hours after the WO arrives', async ({ appPage: page }) => {
+    let releaseHydrate;
+    const holdHydrate = new Promise((resolve) => { releaseHydrate = resolve; });
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_work_orders') {
+        await holdHydrate;
+      }
+      await route.fallback();
+    });
+
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toBeVisible();
+    // Tapped into the rate box, nothing typed yet, when the work-order read lands.
+    await card.locator('[data-cardrate]').focus();
+    releaseHydrate();
+
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+    await expect(card.locator('[data-cardrate]')).toHaveValue('55');
+    await expect(card.locator('[data-cardwoalloc]')).toHaveCount(0);
+  });
+});
+
 test.describe('same job on two days', () => {
   test.use({ feedScenario: 'henry-same-job-two-days' });
 

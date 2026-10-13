@@ -24267,7 +24267,7 @@
         + '<span>Set by the office</span></div>';
     }
     h += '<label class="jct-f"><span>Description of work</span>'
-      + '<input type="text" data-carddesc="' + i + '" value="' + esc(c.description || '') + '" placeholder="Description of work" maxlength="300"'
+      + '<input type="text" data-carddesc="' + i + '" value="' + esc(c.description || '') + '" placeholder="Description of work"'
       + ' onchange="setJobCardDescription(' + i + ',this.value)"></label>';
     h += '</div>';
     h += '<div class="jct-hint" data-cardratenote="' + i + '"' + (_jobCardRateNote(c) ? '' : ' hidden') + '>' + esc(_jobCardRateNote(c)) + '</div>';
@@ -24861,6 +24861,7 @@
         if (!skipTime) _readJobCardTimeFromDOM(c, idx);
         var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
         if (rateEl) {
+          if (document.activeElement === rateEl) _markJobCardHoursEdited(c);
           var n = rateEl.value === '' ? 0 : parseFloat(rateEl.value);
           if (!isNaN(n) && n >= 0 && n !== Number(c.rate || 0)) _setJobCardRate(c, n);
         }

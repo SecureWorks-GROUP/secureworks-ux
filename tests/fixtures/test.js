@@ -198,7 +198,6 @@ const test = base.extend({
         worker_withhold: 24,
         company_contribution: 24,
         gst_on: gstOn,
-        gst_amount: gst,
         gst,
         total_inc: 400 + gst,
         ...(deductionTaken
@@ -235,6 +234,25 @@ const test = base.extend({
       week_end: addIsoDays(weekStart, -1),
       week_ending: addIsoDays(weekStart, -1),
       ...deductionInvoiceMoney(false)
+    };
+    // Last week's invoice of a GST-registered trade with no deduction, as
+    // ops-api stores and returns it: the GST figure is named `gst`.
+    const gstPriorInvoice = {
+      id: 'invoice-gst-last-week',
+      invoice_number: 'SW-INV-GST-PREV',
+      status: 'pushed_to_xero',
+      xero_bill_id: 'xero-gst-prev',
+      week_start: addIsoDays(weekStart, -7),
+      week_end: addIsoDays(weekStart, -1),
+      week_ending: addIsoDays(weekStart, -1),
+      gross_earned: 400,
+      super_rate: 0.12,
+      super_amount: 48,
+      net_pay: 376,
+      gst_on: true,
+      gst: 40,
+      total_inc: 440,
+      trade_payable: 416
     };
     const perMetreInvoiceHours = {
       week_start: weekStart,
@@ -1247,6 +1265,8 @@ const test = base.extend({
           ? { invoices: [weeklyInvoiceResponse()] }
           : DEDUCTION_SCENARIOS.includes(feedScenario)
           ? { invoices: deductionTaken ? [deductionPriorInvoice] : [] }
+          : feedScenario === 'trade-invoice-super-gst-payable'
+          ? { invoices: [gstPriorInvoice] }
           : feedScenario === 'trade-invoice-history-money-truth'
           ? {
             invoices: [
@@ -1290,6 +1310,9 @@ const test = base.extend({
           }
           if (deductionTaken) {
             return { invoice: { ...deductionPriorInvoice, lines: deductionInvoiceLines } };
+          }
+          if (feedScenario === 'trade-invoice-super-gst-payable') {
+            return { invoice: { ...gstPriorInvoice, lines: deductionInvoiceLines } };
           }
           if (feedScenario !== 'trade-invoice-history-money-truth') {
             return { status: 409, body: { error: 'Invoice detail fixture is not enabled' } };
@@ -1706,11 +1729,11 @@ const test = base.extend({
               super_amount: 32.64,
               net_pay: 239.36,
               gst_on: true,
-              gst_amount: 23.94,
               total_inc: 263.30,
-              // Today's server always answers trade_payable; a trade with no
-              // deduction gets no recurring_deduction key at all.
-              ...(feedScenario === 'trade-invoice-super-gst-payable' ? { trade_payable: 263.30 } : {}),
+              // Today's server names the GST figure `gst` and always answers
+              // trade_payable; a trade with no deduction gets no
+              // recurring_deduction key at all.
+              ...(feedScenario === 'trade-invoice-super-gst-payable' ? { gst: 23.94, trade_payable: 263.30 } : { gst_amount: 23.94 }),
               lines: [{
                 id: 'persisted-line-e2e',
                 line_date: addIsoDays(weekStart, 1),

@@ -217,8 +217,10 @@ test.describe('a week where the deduction was due and not taken', () => {
 // change (captured from main, 13 Oct 2026), not a description of them: any
 // new row, wording or figure for these trades fails here. Two server shapes
 // are held to them: an older response with none of the new fields, and
-// today's server, which always answers `trade_payable` and sends no
-// `recurring_deduction` key for a trade without one.
+// today's server, which names the GST figure `gst`, always answers
+// `trade_payable` and sends no `recurring_deduction` key for a trade without
+// one. That second shape is a GST-registered trade with no deduction: his
+// submit confirmation shows its totals and his PDF is built from them.
 const BASELINE_BUILDER = '<div class="inv-money-summary" data-invoice-money-summary="" id="invMoneySummary">'
   + '<div class="inv-money-row"><span>Earned</span><span>$400.00</span></div>'
   + '<div class="inv-money-row"><span>Super (12%) paid into your super fund</span><span>$48.00</span></div>'
@@ -252,7 +254,7 @@ const BASELINE_CONFIRM = /^Submit 1 job for .+ \(\$400\.00 before super\)\.\n\nM
 
 [
   ['an older server response without the new fields', 'trade-invoice-super-gst'],
-  ['today\'s server, which sends trade_payable and no deduction', 'trade-invoice-super-gst-payable']
+  ['today\'s server, which sends gst, trade_payable and no deduction', 'trade-invoice-super-gst-payable']
 ].forEach(([name, scenario]) => {
   test.describe('a trade with no deduction: ' + name, () => {
     test.use({ persona: 'installer', feedScenario: scenario, appWeekDay: 6, ...MOBILE });
@@ -272,6 +274,32 @@ const BASELINE_CONFIRM = /^Submit 1 job for .+ \(\$400\.00 before super\)\.\n\nM
       expect(await pdfTotals(page)).toEqual(BASELINE_PDF_TOTALS);
       await expect(page.locator('[data-invoice-deduction], [data-invoice-deduction-week], [data-invoice-deduction-note], [data-invoice-paid], [data-invoice-after-super]')).toHaveCount(0);
     });
+  });
+});
+
+test.describe('a GST-registered trade with no deduction: a stored invoice as the server returns it', () => {
+  test.use({ persona: 'installer', feedScenario: 'trade-invoice-super-gst-payable', ...MOBILE });
+
+  test('Recent activity pays net pay plus GST, and the invoice detail shows its GST and totals', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    const recent = page.locator('.inv-history-item').filter({ hasText: 'SW-INV-GST-PREV' });
+    await expect(recent).toContainText('$416.00');
+    await expect(recent.locator('[data-inv-deduction]')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'View All' }).click();
+    await page.locator('.inv-history-item').filter({ hasText: 'SW-INV-GST-PREV' }).click();
+    await expect(page.getByText('Invoice Detail')).toBeVisible();
+    await expect(page.locator('[data-invoice-money-summary] .inv-money-row')).toHaveText([
+      'Earned$400.00',
+      'Super (12%) paid into your super fund$48.00',
+      'Your share of super (6%)−$24.00',
+      'Company covers the other 6%$24.00',
+      'You get paid$376.00',
+      'GST$40.00',
+      'Invoice total$440.00'
+    ]);
+    await expect(page.locator('#hoursContent')).not.toContainText('unavailable');
   });
 });
 

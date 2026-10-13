@@ -203,7 +203,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       .toMatchObject({ task: 'Post set', hours: 1.5, qty: 4, notes: 'Corner first' });
     expect(C.needsHours(C.lineOf({ description: 'Material', qty: 1, unit: 'job', kind: 'material' }))).toBe(false);
     // Only the backend contract's keys are read: no other spelling stands in for a field.
-    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, rate: 9, note: 'x', variation: true }))
+    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, cost_per_hour: 9, note: 'x', variation: true }))
       .toMatchObject({ task: '', qty: null, unit: '', hours: null, allocationEx: null, rateEx: null, notes: '', addendumKey: '' });
   });
 
@@ -678,5 +678,60 @@ test.describe('Customer variations on the job work order (core)', () => {
       expect(out).not.toMatch(/[–—]/);
       expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
     }
+  });
+});
+
+// The quote line builder's real line shape (secureworks-backend
+// docs/quote-work-order-lines-v1.md, quote_work_order_lines.ts): rate,
+// rate_unit and total, with counted saying whether the quote's labour figure
+// is made of the line. Shaped from SWF-26904 and SWF-261527.
+function backendQuoteLines() {
+  return [
+    { line_key: 'install:0', source: 'quote', basis: 'fence_install', description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', hours: null, rate: 35, rate_unit: 'm', total: 1316, counted: true, flags: [], needs_review: false },
+    { line_key: 'plinths', source: 'quote', basis: 'fence_plinths', description: 'Plinth install', qty: 21, unit: 'each', hours: null, rate: 10, rate_unit: 'each', total: 210, counted: true, flags: [], needs_review: false },
+    { line_key: 'access', source: 'quote', basis: 'fence_access', description: 'Moderate site access, extra time on the install', qty: 1, unit: 'lot', hours: null, rate: 10, rate_unit: 'pct', total: null, counted: false, flags: ['labour_split_unverified'], needs_review: true },
+    { line_key: 'removal:3', source: 'quote', basis: 'removal', description: 'Remove old timber fence', qty: 15, unit: 'm', hours: null, rate: 10, rate_unit: 'm', total: 150, counted: false, flags: ['quote_counted_as_materials'], needs_review: false },
+    { line_key: 'extra:5', source: 'quote', basis: 'quote_extra', description: 'Root removal / hard digging', qty: 2, unit: 'hrs', hours: 2, rate: 80, rate_unit: 'hr', total: 160, counted: false, flags: ['saved_as_material', 'outside_quote_labour'], needs_review: true },
+  ];
+}
+
+test.describe('Quote lines as the backend sends them (core)', () => {
+  test('the office allocation and rate come from total, rate and rate_unit; lines outside the agreed labour are named and left out of the total', () => {
+    const l = C.lineOf(backendQuoteLines()[0]);
+    expect(l).toMatchObject({ allocationEx: 1316, rateEx: 35, rateUnit: 'm', counted: true });
+    expect(C.rateWords(l)).toBe('$35.00/m');
+    expect(C.rateWords(C.lineOf(backendQuoteLines()[4]))).toBe('$80.00/h');
+    expect(C.rateWords(C.lineOf(backendQuoteLines()[2]))).toBe('10%');
+    const lines = backendQuoteLines().map(C.lineOf);
+    // The counted lines are the quote's own labour figure (37.6 m x $35 + 21 x $10).
+    expect(C.allocationTotal(lines)).toBe(1526);
+
+    const block = draftBlock({ scope_items: backendQuoteLines(), agreed_labour_ex: 1526 });
+    const html = C.renderOpsPanel(block, null, 'ready', { viewerEmail: SHAUN });
+    expect(html).toContain('<th class="r">Allocation</th>');
+    expect(html).toContain('$1,316.00');
+    expect(html).toContain('$35.00/m');
+    expect(html).toContain('$210.00');
+    expect(html).toContain('$10.00/each');
+    expect(html).toContain('$80.00/h');
+    expect(html).toContain('10%');
+    expect((html.match(/data-job-wo-not-counted/g) || [])).toHaveLength(2);
+    expect(html).toContain('$1,526.00');
+
+    const pdf = C.pdfSections(block);
+    expect(pdf.costHtml).toContain('$1,316.00');
+    expect(pdf.costHtml).toContain('Not in the agreed labour');
+    expect(pdf.scopeHtml).not.toContain('$');
+  });
+
+  test('office only: the trade view of the same lines shows no rate, no allocation and no dollar figure', () => {
+    const wo = Object.assign({}, approvedBlock().work_order, { scope_items: backendQuoteLines() });
+    const html = C.renderTrade({ work_order: wo }, 'ready');
+    expect(html).toContain('Install Colorbond fencing');
+    expect(html).toContain('37.6 m');
+    expect(html).toContain('2 h');
+    expect(html).not.toContain('$');
+    expect(html).not.toContain('%');
+    for (const money of ['1316', '1,316', '210.00', '160', '150', '35.00', '80.00', '10%']) expect(html).not.toContain(money);
   });
 });

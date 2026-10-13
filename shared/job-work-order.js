@@ -148,8 +148,15 @@ var JobWorkOrderCore = (function () {
       hours: hours,
       kind: lower(it.kind),
       notes: firstText(it.notes),
-      allocationEx: firstNum(it.allocation_ex),
-      rateEx: firstNum(it.rate_ex),
+      // The quote line builder (backend docs/quote-work-order-lines-v1.md)
+      // sends total, rate and rate_unit ('m', 'each', 'hr', 'pct', ...);
+      // allocation_ex / rate_ex are read first where a line carries them.
+      allocationEx: firstNum(it.allocation_ex, it.total),
+      rateEx: firstNum(it.rate_ex, it.rate),
+      rateUnit: firstText(it.rate_unit),
+      // false: the quote's labour figure is not made of this line, so the
+      // agreed labour does not include it (removal, an uncertain extra).
+      counted: it.counted === false ? false : (it.counted === true ? true : null),
       addendumKey: number != null ? 'n:' + number : (label ? 'label:' + lower(label) : ''),
       addendumLabel: label,
       addendumNumber: number,
@@ -238,7 +245,7 @@ var JobWorkOrderCore = (function () {
         var line = lineOf(item);
         if (!line.task && line.qty == null && line.hours == null) return;
         line.isVariation = true;
-        if (!money) { line.allocationEx = null; line.rateEx = null; }
+        if (!money) { line.allocationEx = null; line.rateEx = null; line.rateUnit = ''; }
         lines.push(line);
       });
       var g = {
@@ -273,8 +280,18 @@ var JobWorkOrderCore = (function () {
   function allocationTotal(lines) {
     var total = 0;
     var any = false;
-    arr(lines).forEach(function (l) { if (l.allocationEx != null) { total += l.allocationEx; any = true; } });
+    arr(lines).forEach(function (l) { if (l.allocationEx != null && l.counted !== false) { total += l.allocationEx; any = true; } });
     return any ? Math.round(total * 100) / 100 : null;
+  }
+
+  // A line's rate in words (office only): "$35.00/m", "$80.00/h", "10%".
+  function rateWords(l) {
+    if (!l || l.rateEx == null) return '';
+    var u = lower(l.rateUnit);
+    if (u === 'pct' || u === '%') return numWords(l.rateEx) + '%';
+    if (HOUR_UNITS.indexOf(u) >= 0) return moneyWords(l.rateEx) + '/h';
+    if (u) return moneyWords(l.rateEx) + '/' + l.rateUnit;
+    return moneyWords(l.rateEx) + (l.unitIsHours || l.hours != null ? '/h' : (l.unit ? '/' + l.unit : ''));
   }
 
   // ── The job's work order as job_detail.job_work_order carries it ──
@@ -626,8 +643,9 @@ var JobWorkOrderCore = (function () {
       h += '<td class="r">' + (l.hours != null ? esc(hoursWords(l.hours)) : (flag ? '<span class="jwo-warn" title="A lump-sum line with no hours on it">No hours</span>' : '')) + '</td>';
       if (showMoney) {
         var alloc = l.allocationEx != null ? moneyWords(l.allocationEx) : '';
-        var rate = l.rateEx != null ? moneyWords(l.rateEx) + (l.unitIsHours || l.hours != null ? '/h' : (l.unit ? '/' + l.unit : '')) : '';
-        h += '<td class="r">' + esc(alloc) + (rate ? '<div class="jwo-line-note">' + esc(rate) + '</div>' : '') + '</td>';
+        var rate = rateWords(l);
+        h += '<td class="r">' + esc(alloc) + (rate ? '<div class="jwo-line-note">' + esc(rate) + '</div>' : '') +
+          (l.counted === false && l.allocationEx != null ? '<div class="jwo-line-note" data-job-wo-not-counted>Not in the agreed labour</div>' : '') + '</td>';
       }
       h += '</tr>';
     });
@@ -937,7 +955,8 @@ var JobWorkOrderCore = (function () {
     lines.forEach(function (l) {
       h += '<tr><td>' + esc(l.task || 'Untitled task') + (l.notes ? '<br><small>' + esc(l.notes) + '</small>' : '') + '</td><td>' + esc(qtyWords(l)) +
         '</td><td class="text-right">' + esc(l.hours != null ? hoursWords(l.hours) : '') + '</td>' +
-        (money ? '<td class="text-right">' + esc(l.allocationEx != null ? moneyWords(l.allocationEx) : '') + '</td>' : '') + '</tr>';
+        (money ? '<td class="text-right">' + esc(l.allocationEx != null ? moneyWords(l.allocationEx) : '') +
+          (l.counted === false && l.allocationEx != null ? '<br><small>Not in the agreed labour</small>' : '') + '</td>' : '') + '</tr>';
     });
     var t = hoursTotal(lines);
     h += '<tr class="total-row"><td>Total</td><td></td><td class="text-right">' + esc(t.hours != null ? hoursWords(t.hours) : '') + '</td>' +
@@ -1034,6 +1053,7 @@ var JobWorkOrderCore = (function () {
     groupLines: groupLines,
     hoursTotal: hoursTotal,
     allocationTotal: allocationTotal,
+    rateWords: rateWords,
     needsHours: needsHours,
     qtyWords: qtyWords,
     hoursWords: hoursWords,

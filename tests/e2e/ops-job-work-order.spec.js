@@ -132,6 +132,28 @@ test.describe('Job work order on the Ops job page (preview)', () => {
     expect(posts[0].body).toEqual({ work_order_id: 'wo-1', expected_updated_at: DRAFT_UPDATED_AT });
   });
 
+  test('real jobs: the allocation comes from the quote lines the backend sends (rate, rate_unit, total)', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    // The quote line builder's shape (backend docs/quote-work-order-lines-v1.md).
+    const lines = [
+      { line_key: 'install:0', source: 'quote', basis: 'fence_install', description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', hours: null, rate: 35, rate_unit: 'm', total: 1316, counted: true, flags: [], needs_review: false },
+      { line_key: 'plinths', source: 'quote', basis: 'fence_plinths', description: 'Plinth install', qty: 21, unit: 'each', hours: null, rate: 10, rate_unit: 'each', total: 210, counted: true, flags: [], needs_review: false },
+      { line_key: 'extra:5', source: 'quote', basis: 'quote_extra', description: 'Root removal / hard digging', qty: 2, unit: 'hrs', hours: 2, rate: 80, rate_unit: 'hr', total: 160, counted: false, flags: ['saved_as_material', 'outside_quote_labour'], needs_review: true },
+    ];
+    const draft = workOrder({ scope_items: lines, agreed_labour_ex: 1526 });
+    await openBuild(page, detailPayload(draft), { job_work_order: { work_order: draft, figures: {}, variations: [] } }, SHAUN);
+    const table = page.locator('[data-job-wo-panel] [data-job-wo-lines]').first();
+    await expect(table.locator('thead')).toContainText('Allocation');
+    const install = table.locator('tbody tr').filter({ hasText: 'Install Colorbond fencing' });
+    await expect(install).toContainText('$1,316.00');
+    await expect(install).toContainText('$35.00/m');
+    const roots = table.locator('tbody tr').filter({ hasText: 'Root removal / hard digging' });
+    await expect(roots).toContainText('$160.00');
+    await expect(roots).toContainText('$80.00/h');
+    await expect(roots.locator('[data-job-wo-not-counted]')).toHaveText('Not in the agreed labour');
+    await expect(table.locator('tfoot')).toContainText('$1,526.00');
+  });
+
   test('a stale review is refused in words and the draft is read again before anyone approves', async ({ page }) => {
     await page.goto('/ops.html?wo=preview');
     const draft = workOrder();

@@ -47,8 +47,11 @@ What it shows:
   quote to fill it from", "no labour lines"). A refusal reads in words; `work_order_sealed`
   re-reads the job.
 - **Task lines**: task, quantity as quoted (`37.6 m`, `21 each`), hours, and the allocation
-  with its rate. A lump line with no hours ("Root removal, 1 job") is marked **No hours**, so
-  it is fixed before approval. Total hours and total allocation underneath. An empty draft
+  with its rate (`$35.00/m`, `$80.00/h`, `10%`). A lump line with no hours ("Root removal, 1
+  job") is marked **No hours**, so it is fixed before approval. A line the quote's labour figure
+  is not made of (`counted: false`: removal, an extra outside the quote's labour) shows its
+  allocation marked **Not in the agreed labour** and is left out of the total. Total hours and
+  total allocation underneath. An empty draft
   says the lines come from the accepted quote and it has none yet.
 - **Variation addenda**: each approved customer variation (`addenda[]` on the job_detail block
   and the `job_work_order` read) as its own marked block under the approved lines, never mixed
@@ -176,7 +179,8 @@ read exactly these keys and no other spelling:
 | Kind | `kind` (`labour` / `material`) |
 | Note | `notes` |
 | Hours | `hours`; a line whose `unit` is `h`/`hr`/`hrs`/`hour`/`hours` is its own hours |
-| Rate, allocation (Ops only) | `rate_ex`, `allocation_ex` |
+| Rate, allocation (Ops only) | `rate` with `rate_unit` (`m`, `each`, `hr`, `pct`, ...) and `total`, as the backend quote line builder sends them; `rate_ex`, `allocation_ex` are read first where a line carries them |
+| In the agreed labour (Ops only) | `counted`; `false` lines are named and left out of the allocation total |
 | Variation line | `is_variation`, `variation_number` (or, with no number, `variation_label`) marks the line; title `variation_label` (else "Variation n"); date `variation_approved_at` |
 | Variation addendum | the work order's `addenda[]`: `variation_number`, `label`, `approved_at`, `description`, and its lines in `lines[]` (staff) or `scope_items[]` (trade); `trade_allocation_ex`, `customer_price_ex` (Ops only, `addendaOf(list, {money: true})`) |
 

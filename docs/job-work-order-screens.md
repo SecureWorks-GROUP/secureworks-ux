@@ -187,8 +187,9 @@ read exactly these keys and no other spelling:
 The trade read (`my_job_work_order`) keeps `hours`, `is_variation` and `variation_number` on
 every line since backend #1031, so trades see each line's hours and which lines are
 variations. The trade renderer reads no money field of an addendum, and the Trade App's
-office money door also strips `trade_allocation_ex` and `customer_price_ex` off every addendum
-before render.
+office money door (`TRADE_JOB_WO_MONEY_KEYS`) also strips `trade_allocation_ex` and
+`customer_price_ex` off every addendum, and `total`, `rate` and `rate_unit` off every line
+(the addenda's lines included), before render.
 
 ## Tests
 

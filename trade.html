@@ -22620,11 +22620,12 @@
   // Builder-only estimate. The browser never sends these calculated figures;
   // generate/submit requests send line inputs + gst_on and the backend persists
   // the authoritative gross/super/net amounts used by summaries and PDFs.
-  // What comes off the week this invoice is for, as my_hours named it. Null
-  // when the server names nothing or names another week. my_hours works its
-  // outcome out from clocked hours, not from the hours on this invoice, so
-  // only the label and amount are read from it: never a reason it would not
-  // be taken. [trade-recurring-deduction]
+  // What comes off the week this invoice is for, as my_hours (or the last
+  // draft save) named it. Null when the server names nothing or names another
+  // week. my_hours works its outcome out from clocked hours and a draft save
+  // from the typed extras alone, neither from the whole invoice, so only the
+  // label and amount are read here: never a reason it would not be taken.
+  // That reason comes from the submit response. [trade-recurring-deduction]
   function _hoursDeductionWeek() {
     var wk = MyMoneyCore.deductionWeekOf(_hoursData);
     if (!wk) return null;
@@ -22634,35 +22635,14 @@
     return wk;
   }
 
-  // What the last draft save said about the week. The server worked that out
-  // from the saved draft itself, so its reason stands only while the builder
-  // still shows that draft: same week, same earned figure, same GST choice.
-  var _draftDeductionWeek = null;
-  function _invoiceRoundedGross(gross) {
-    return Math.round((Number(gross) || 0) * 100) / 100;
-  }
-  function _noteInvoiceDeductionWeek(res, shown) {
-    var wk = MyMoneyCore.deductionWeekOf(res);
-    _draftDeductionWeek = wk
-      ? { week: wk, week_start: shown.week_start, gross: _invoiceRoundedGross(shown.gross), gst_on: shown.gst_on }
-      : null;
-    _updateInvoiceMoneySummary();
-  }
-
   // An expense invoice has no week and so carries no deduction.
-  function _invoiceDeductionWeek(gross) {
-    if (_invoiceBuilderMode === 'expense') return null;
-    var saved = _draftDeductionWeek;
-    if (saved && saved.week_start === _hoursWeekStart && saved.gst_on === _invGst
-      && saved.gross === _invoiceRoundedGross(gross == null ? _currentInvoiceGross() : gross)) return saved.week;
-    return _hoursDeductionWeek();
+  function _invoiceDeductionWeek() {
+    return _invoiceBuilderMode === 'expense' ? null : _hoursDeductionWeek();
   }
 
-  // One plain sentence: the server's reason when it was not taken, else what
-  // comes off at submit. The submit confirm leads with a blank line.
+  // One plain sentence: what comes off at submit. The submit confirm leads
+  // with a blank line.
   function _invoiceDeductionSentence(wk) {
-    if (!wk) return '';
-    if (wk.note) return wk.note;
     return MyMoneyCore.deductionComesOff(wk)
       ? MyMoneyCore.deductionLabel(wk) + ' comes off what you are paid for this week. It is applied when you submit.'
       : '';
@@ -22670,6 +22650,13 @@
   function _invoiceDeductionConfirmLine(wk) {
     var sentence = _invoiceDeductionSentence(wk);
     return sentence ? '\n\n' + sentence : '';
+  }
+
+  // Keep the newest answer about the week: a draft save names it too.
+  function _noteInvoiceDeductionWeek(res) {
+    if (!res || !MyMoneyCore.deductionWeekOf(res) || !_hoursData) return;
+    _hoursData.recurring_deduction_week = res.recurring_deduction_week;
+    _updateInvoiceMoneySummary();
   }
 
   function _invoicePreviewMoney(gross) {
@@ -22692,7 +22679,7 @@
       amount_payable: split.amount_payable,
       gst_on: _invGst
     };
-    var weekDeduction = _invoiceDeductionWeek(gross);
+    var weekDeduction = _invoiceDeductionWeek();
     if (weekDeduction) preview.deduction_week = weekDeduction;
     return preview;
   }
@@ -22767,8 +22754,8 @@
     var payable = null;
     var hasSplit = ['gross_earned', 'super_amount', 'net_pay'].some(function(k) { return inv[k] != null && inv[k] !== ''; });
     // A weekly invoice carrying a deduction is paid the server's figure;
-    // nothing here works it out. A Work Order Invoice carries none and reads
-    // its own to_be_paid. [trade-recurring-deduction]
+    // nothing here works it out. The Work Order Invoice is not built for a
+    // deduction yet and reads its own to_be_paid. [trade-recurring-deduction]
     var isWorkOrderInvoice = String(inv.invoice_source || '') === 'weekly_work_order';
     var deduction = isWorkOrderInvoice ? null : MyMoneyCore.deductionOf(inv);
     if (deduction) {
@@ -22877,9 +22864,9 @@
     // before it is submitted. With neither, nothing below changes.
     var deduction = money.deduction || null;
     var weekDeduction = money.deduction_week || null;
-    // Before submit the row shows what comes off this invoice. A deduction
-    // the server says was not taken comes off nothing here, so only its
-    // reason is shown: never the row and the reason together.
+    // Before submit the row shows what comes off this invoice. On a submitted
+    // invoice the server says was not taken, only its reason is shown: never
+    // the row and the reason together.
     var comesOff = !!(opts.gstSwitch && MyMoneyCore.deductionComesOff(weekDeduction));
     var attrs = ' class="inv-money-summary" data-invoice-money-summary';
     if (opts.id) attrs += ' id="' + opts.id + '"';
@@ -23261,7 +23248,6 @@
     _invLumpLines = [];
     _invRows = [];
     _draftSaveUnresolved = false;
-    _draftDeductionWeek = null;
     try {
       var key = _invDraftStorageKey();
       if (key) sessionStorage.removeItem(key);
@@ -26768,7 +26754,6 @@
       toast('Draft save is already in progress.');
       return;
     }
-    var draftShown = { week_start: draftBody.week_start, gross: _currentInvoiceGross(), gst_on: _invGst };
 
     _financialInvoiceApi('save_trade_invoice_draft', null, draftBody, ctx).then(function(res) {
       if (!_invoiceApiCurrent(ctx)) return;
@@ -26781,7 +26766,7 @@
         throw _ambiguousInvoiceResponseError('Draft save did not return a draft id', { draft_id: capturedId });
       }
       _draftSaveUnresolved = false;
-      _noteInvoiceDeductionWeek(res, draftShown);
+      _noteInvoiceDeductionWeek(res);
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;

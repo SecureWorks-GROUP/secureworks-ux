@@ -178,7 +178,7 @@ test.describe('a week that carries the deduction', () => {
 
 // my_hours works its outcome out from clocked hours, not from the hours he
 // types on the invoice, so its "not taken" reason never reaches the screen
-// before submit. Only the submit response, worked out from the invoice itself,
+// before submit. Only the submit response, worked out from the whole invoice,
 // may say the deduction was not taken.
 test.describe('a week where the deduction was due and not taken', () => {
   test.use({ persona: 'installer', feedScenario: 'trade-invoice-recurring-deduction-not-taken', appWeekDay: 6, ...MOBILE });

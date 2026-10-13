@@ -6667,6 +6667,7 @@
     if (queue.length === 0) return Promise.resolve();
     var snapshot = queue.slice();
     var remaining = [];
+    var tapRefused = false;
     var chain = Promise.resolve();
 
     snapshot.forEach(function(item) {
@@ -6678,12 +6679,15 @@
             }
             if (item.action === 'clock_event') {
               try { localStorage.removeItem('sw_pending_clock_' + ((item.body && item.body.assignment_id) || '')); } catch (x) {}
-              siteTapLanded(item.body, res, false);
+              var refused = !!(res && res.success === false);
+              if (refused) tapRefused = true;
+              siteTapLanded(item.body, res, refused);
             }
           }).catch(function(e) {
             // A refused clock event never succeeds on retry: drop it.
             if (item.action === 'clock_event' && isClockEventRefusal(e)) {
               try { localStorage.removeItem('sw_pending_clock_' + ((item.body && item.body.assignment_id) || '')); } catch (x) {}
+              tapRefused = true;
               siteTapLanded(item.body, null, true);
               return;
             }
@@ -6721,7 +6725,8 @@
           return latest;
         }, { money: true });
       }
-      if (committed && persist.length === 0 && snapshot.length > 0 && _readOfflineQueue().length === 0) {
+      // A tap the server would not take has its own words: "Synced" would hide them.
+      if (!tapRefused && committed && persist.length === 0 && snapshot.length > 0 && _readOfflineQueue().length === 0) {
         toast('Synced ' + snapshot.length + ' queued action' + (snapshot.length > 1 ? 's' : ''));
       }
     });
@@ -8510,7 +8515,8 @@
   // Sign in and Sign out on the job's card: one tap from the Today list, the
   // same two taps as the job screen. Only on the viewer's own accepted job,
   // and only where ops-api keeps the visit record (_siteVisitLive).
-  // The job they are signed in to keeps its Sign out wherever its card shows.
+  // The job they are signed in to keeps its Sign out wherever its card shows,
+  // and a job whose sign in still owes the time they left asks for it there.
   function siteCardTapHTML(job, a, secKey) {
     if (!_siteVisitLive || !job || !job.id || !a || !a.id || a._makesafePool) return '';
     if (!isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll)) return '';
@@ -8520,8 +8526,10 @@
     if (signedInOnJob(job)) {
       return '<button type="button" class="act sv-out" data-card-signout="' + esc(a.id) + '" onclick="event.stopPropagation();siteSignOut' + args + '">Sign out</button>';
     }
-    var visit = currentSiteVisit();
-    if (secKey !== 'today' || (visit && visit.job_id === job.id)) return '';
+    if (owingSiteVisit(job.id)) {
+      return '<button type="button" class="act sv-out" data-card-late="' + esc(a.id) + '" onclick="event.stopPropagation();siteAskLateFinish(\'' + esc(job.id) + '\')">Add the time you left</button>';
+    }
+    if (secKey !== 'today') return '';
     return '<button type="button" class="act sv-in" data-card-signin="' + esc(a.id) + '" onclick="event.stopPropagation();siteSignIn' + args + '">Sign in</button>';
   }
 
@@ -10706,7 +10714,7 @@
     } else if (working) {
       // On the job but not signed in right now: signed out earlier, or
       // never signed in. Signing in again is a second visit.
-      h += '<div class="js-state" data-signed-out-state>' + (a.clocked_off_at ? 'Signed out ' + esc(siteClock(a.clocked_off_at)) : 'Not signed in') + '</div>';
+      h += '<div class="js-state" data-signed-out-state>' + esc(siteSignedOutText(job, a)) + '</div>';
       if (breakAsk) h += siteBreakAskHTML();
       h += signInBtn;
       h += finishBtn('js-secondary');
@@ -25789,13 +25797,13 @@
       return {
         visit_id: str(raw.visit_id), job_id: jobId, assignment_id: str(raw.assignment_id),
         job_number: str(raw.job_number), site_suburb: str(raw.site_suburb), signed_in_at: at,
-        status: status === 'no_sign_out' ? 'no_sign_out' : 'open', pending: raw.pending === true
+        status: status === 'no_sign_out' ? 'no_sign_out' : 'open', pending: raw.pending === true, sending: raw.sending === true
       };
     }
     function where(visit) { return str(visit && (visit.site_suburb || visit.job_number)) || 'a job'; }
     function signedInText(visit) {
       var p = visit && perth(visit.signed_in_at);
-      return p ? 'Signed in ' + T.clock12(p.time) + (visit.pending ? ' \u00B7 waiting for signal' : '') : '';
+      return p ? 'Signed in ' + T.clock12(p.time) + (visit.pending ? (visit.sending ? ' \u00B7 sending' : ' \u00B7 waiting for signal') : '') : '';
     }
     function nextDay(day) {
       var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
@@ -29867,6 +29875,13 @@
   var _siteVisitLive = false;
   var _siteTapSeq = 0;
   var _siteTapWaiting = null;   // { event, assignment_id, job_id, job_number, site_suburb, at, idempotency_key }
+  // A tap on its way to the server. The screens show its result from the
+  // moment of the tap, marked "sending"; a refusal puts them back.
+  var _siteTapSending = null;   // { event, assignment_id, job_id, job_number, site_suburb, at }
+  // A sign in that still owes the time they left, set aside while the trade
+  // is signed in at another job. open_site_visit names the live sign in then,
+  // so this is what keeps the question on that job's card.
+  var _siteOwing = null;
   var _siteBreakAsk = null;     // { visit_id, job_id, at }: the optional break after a sign out
   var _siteLateAsked = {};
   var _siteTapBusy = false;
@@ -29898,6 +29913,8 @@
   // Called at sign-in to the app: nothing of the last account's stays.
   function resetSiteVisitSession() {
     _siteVisit = null;
+    _siteOwing = null;
+    _siteTapSending = null;
     _siteVisitLive = false;
     _siteBreakAsk = null;
     _siteLateAsked = {};
@@ -29914,6 +29931,8 @@
   }
   function clearSiteVisitSession() {
     _siteVisit = null;
+    _siteOwing = null;
+    _siteTapSending = null;
     _siteVisitLive = false;
     _siteBreakAsk = null;
     _siteTapWaiting = null;
@@ -29922,21 +29941,37 @@
     renderSiteVisitBar();
   }
 
-  // The sign in the screens show: a tap still waiting for signal counts.
-  // None while ops-api keeps no visit record.
+  // The sign in the screens show: a tap being sent, or still waiting for
+  // signal, counts. None while ops-api keeps no visit record.
   function currentSiteVisit() {
     if (!_siteVisitLive) return null;
-    var w = _siteTapWaiting;
+    var w = _siteTapSending || _siteTapWaiting;
     if (w && w.event === 'clock_off') return null;
     if (w && w.event === 'clock_on') {
       return TradeSiteVisitCore.openVisit({
         job_id: w.job_id, assignment_id: w.assignment_id, job_number: w.job_number, site_suburb: w.site_suburb,
-        signed_in_at: w.at, pending: true
+        signed_in_at: w.at, pending: true, sending: w === _siteTapSending
       });
     }
     return _siteVisit;
   }
   function siteVisitOwesFinish(v) { return !!(v && v.visit_id && TradeSiteVisitCore.owesFinish(v)); }
+  // The sign in that still owes the time they left: the open one when nobody
+  // is signed in, or the one set aside while they are signed in elsewhere.
+  // With a job, only that job's.
+  function owingSiteVisit(jobId) {
+    var v = currentSiteVisit();
+    var owing = siteVisitOwesFinish(v) ? v : _siteOwing;
+    return owing && (!jobId || owing.job_id === jobId) ? owing : null;
+  }
+  // "Signed out 3:34 pm" for a job the trade is on but not signed in to.
+  function siteSignedOutText(job, a) {
+    var w = _siteTapSending || _siteTapWaiting;
+    if (w && w.event === 'clock_off' && w.job_id === job.id) {
+      return 'Signed out ' + siteClock(w.at) + ' \u00B7 ' + (w === _siteTapSending ? 'sending' : 'waiting for signal');
+    }
+    return a.clocked_off_at ? 'Signed out ' + siteClock(a.clocked_off_at) : 'Not signed in';
+  }
   // The job the trade is signed in to, whichever screen they signed in from:
   // where a quick photo, note, issue or expense files by default. Null when
   // they are not signed in.
@@ -29961,12 +29996,18 @@
 
   // my_jobs open_site_visit, when the server sends it. Returns false for an
   // ops-api that does not: the caller falls back to the trade's own rows.
+  // It names the live sign in whenever the trade is signed in somewhere, and
+  // a forgotten one only when nobody is.
   // tapSeq is _siteTapSeq as it stood when that my_jobs was asked for: an
   // answer older than a tap made since does not replace what the tap set.
   function adoptServerSiteVisit(data, tapSeq) {
     var live = !!data && Object.prototype.hasOwnProperty.call(data, 'open_site_visit');
     var turned = setSiteVisitLive(live);
-    if (live && !_siteTapWaiting && tapSeq === _siteTapSeq) _siteVisit = TradeSiteVisitCore.openVisit(data.open_site_visit);
+    if (live && !_siteTapWaiting && tapSeq === _siteTapSeq) {
+      _siteVisit = TradeSiteVisitCore.openVisit(data.open_site_visit);
+      // Nobody is signed in: the server names a forgotten sign in itself.
+      if (!_siteVisit || siteVisitOwesFinish(_siteVisit)) _siteOwing = null;
+    }
     if (live || turned) {
       renderSiteVisitBar();
       if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
@@ -30096,7 +30137,7 @@
     var bar = document.getElementById('siteVisitBar');
     if (!bar) return;
     var on = !!_user && _siteVisitLive;
-    var v = on ? currentSiteVisit() : null, w = _siteTapWaiting, ask = _siteBreakAsk, h = '';
+    var v = on ? currentSiteVisit() : null, w = _siteTapSending || _siteTapWaiting, ask = _siteBreakAsk, h = '';
     if (v && siteVisitOwesFinish(v)) {
       h = '<span class="sv-bar-where"><b>You did not sign out</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></span>'
         + '<button type="button" class="sv-bar-btn" data-site-bar-late onclick="siteAskLateFinish()">Add the time you left</button>';
@@ -30104,7 +30145,7 @@
       h = '<button type="button" class="sv-bar-where" data-site-bar-open onclick="siteVisitOpenJob()"><b>' + esc(TradeSiteVisitCore.signedInText(v)) + '</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></button>'
         + '<button type="button" class="sv-bar-btn" data-site-bar-signout onclick="siteSignOut()">Sign out</button>';
     } else if (on && w && w.event === 'clock_off') {
-      h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(w.at)) + ' · waiting for signal</b><span>' + esc(TradeSiteVisitCore.where(w)) + '</span></span>';
+      h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(w.at)) + ' · ' + (w === _siteTapSending ? 'sending' : 'waiting for signal') + '</b><span>' + esc(TradeSiteVisitCore.where(w)) + '</span></span>';
     } else if (on && ask && !(_currentView === 'job' && _currentJobId === ask.job_id)) {
       h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(ask.at)) + '</b></span>' + siteBreakAskHTML();
     }
@@ -30188,6 +30229,7 @@
         api('close_site_visit_late', null, { visit_id: v.visit_id, finish_date: leave.finish_date, finish_time: leave.finish_time }).then(function(res) {
           if (res && res.success === false) throw new Error(res.error || 'Not saved');
           if (_siteVisit && _siteVisit.visit_id === v.visit_id) setSiteVisit(null);
+          if (_siteOwing && _siteOwing.visit_id === v.visit_id) _siteOwing = null;
           _siteLateDismiss = null;
           overlay.remove();
           renderSiteVisitBar();
@@ -30207,9 +30249,9 @@
     _siteLateAsked[v.visit_id] = true;
     askLateFinish(v);
   }
-  window.siteAskLateFinish = function() {
-    var v = currentSiteVisit();
-    if (siteVisitOwesFinish(v)) askLateFinish(v);
+  window.siteAskLateFinish = function(jobId) {
+    var v = owingSiteVisit(jobId);
+    if (v) askLateFinish(v);
   };
 
   // ══════════════════════════════════════════════════
@@ -30293,11 +30335,15 @@
   // the one call signs out there and in here at the same tap time.
   function sendSiteSignIn(ctx, tappedAt, switching) {
     var extra = { timestamp: tappedAt, job_id: ctx.job_id || undefined, 'switch': switching ? true : undefined };
+    _siteTapSending = { event: 'clock_on', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb, at: tappedAt };
+    afterSiteTap(ctx, null);
     return clockEvent('clock_on', ctx.assignment_id, extra).then(function(result) {
+      _siteTapSending = null;
       _siteTapWaiting = null;
       saveSiteTapWaiting();
       _siteBreakAsk = null;
       var ass = result.assignment || {};
+      if (siteVisitOwesFinish(_siteVisit)) _siteOwing = _siteVisit;
       setSiteVisit(siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
         job_id: ctx.job_id, assignment_id: ctx.assignment_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
         signed_in_at: ass.clocked_on_at || tappedAt
@@ -30306,7 +30352,9 @@
       afterSiteTap(ctx, result.assignment || { status: 'in_progress', clocked_on_at: tappedAt, clocked_off_at: null });
       return true;
     }, function(err) {
+      _siteTapSending = null;
       var other = switching ? null : TradeSiteVisitCore.alreadySignedIn(err);
+      if (other) afterSiteTap(ctx, null);
       // A sign in that owes its finish is closed only by the time the trade
       // types, never by a switch at this tap's time.
       if (other && siteVisitOwesFinish(other)) {
@@ -30323,6 +30371,7 @@
         });
       }
       if (err && err.site_tap_queued) {
+        if (siteVisitOwesFinish(_siteVisit)) _siteOwing = _siteVisit;
         setSiteVisit(null);
         _siteBreakAsk = null;
         _siteTapWaiting = {
@@ -30341,6 +30390,7 @@
 
   // Sign in: one tap, no confirm. Asks once only when the trade is still
   // signed in somewhere else, or still owes the time they left an earlier job.
+  // The screens show the sign in from the tap, while it is being sent.
   window.siteSignIn = function(assignmentId, jobId) {
     if (navigator.vibrate) navigator.vibrate(10);
     assignmentId = assignmentId || _currentAssignment;
@@ -30350,6 +30400,12 @@
     var tappedAt = new Date().toISOString();
     var ctx = siteTapContext(assignmentId, jobId);
     var open = currentSiteVisit();
+    // Already signed in to this job: a second tap sends nothing.
+    if (open && open.job_id === ctx.job_id && !siteVisitOwesFinish(open)) {
+      _siteTapBusy = false;
+      afterSiteTap(ctx, null);
+      return Promise.resolve(false);
+    }
     var late = siteVisitOwesFinish(open) ? askLateFinish(open) : Promise.resolve(false);
     return late.then(function() {
       open = currentSiteVisit();
@@ -30382,7 +30438,10 @@
     var tappedAt = new Date().toISOString();
     var ctx = siteTapContext(assignmentId, jobId);
     var visitId = open && open.job_id === ctx.job_id ? open.visit_id : '';
+    _siteTapSending = { event: 'clock_off', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number || (open && open.job_number) || '', site_suburb: ctx.site_suburb || (open && open.site_suburb) || '', at: tappedAt };
+    afterSiteTap(ctx, null);
     return clockEvent('clock_off', ctx.assignment_id, { timestamp: tappedAt, job_id: ctx.job_id || undefined }).then(function(result) {
+      _siteTapSending = null;
       visitId = String(((result && result.site_visit) || {}).visit_id || visitId || '');
       setSiteVisit(null);
       _siteTapWaiting = null;
@@ -30393,6 +30452,7 @@
       afterSiteTap(ctx, result.assignment || { clocked_off_at: tappedAt });
       return true;
     }, function(err) {
+      _siteTapSending = null;
       if (err && err.site_tap_queued) {
         setSiteVisit(null);
         _siteBreakAsk = null;
@@ -34121,9 +34181,17 @@
   var _expenseType = 'company_expense'; // 'company_expense' or 'reimbursement'
   var _expenseId = null;
 
+  // The job a "Specific Job" expense links to: the job the form was opened
+  // for; opened for none, the job the trade is signed in to.
+  var _expenseOpenedJobId = null;
+  function expenseHomeJobId() {
+    return _expenseOpenedJobId || (_siteVisitLive ? (signedInVisitJob() || {}).id : _currentJobId) || null;
+  }
+
   window.openExpenseOverlay = function(jobId) {
     _expenseState = 'capture';
-    _expenseJobId = jobId || (_siteVisitLive ? (signedInVisitJob() || {}).id : _currentJobId) || null;
+    _expenseOpenedJobId = jobId || null;
+    _expenseJobId = expenseHomeJobId();
     _expenseIsGeneral = false;
     _expensePhotoUrl = null;
     _expenseExtraction = null;
@@ -34135,6 +34203,7 @@
 
   window.openGeneralExpense = function() {
     _expenseState = 'capture';
+    _expenseOpenedJobId = null;
     _expenseJobId = null;
     _expenseIsGeneral = true;
     _expensePhotoUrl = null;
@@ -34338,7 +34407,7 @@
   window.expenseSetGeneral = function(isGeneral) {
     _expenseIsGeneral = isGeneral;
     if (isGeneral) _expenseJobId = null;
-    else _expenseJobId = (_siteVisitLive ? (signedInVisitJob() || {}).id : _currentJobId) || null;
+    else _expenseJobId = expenseHomeJobId();
     renderExpenseStep();
   };
 

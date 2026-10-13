@@ -239,27 +239,37 @@ test('the bar signs out of the job they are signed in to, never the job screen o
   expect(state.open).toBe(null);
 });
 
-test('signed in from the card: an expense links to the job they are signed in to, not the job screen opened last', async ({ page }) => {
+test('an expense added from a job screen stays on that job through General Stock and back to Specific Job', async ({ page }) => {
   const state = { open: null, n: 0 };
   const north = NORTHFIELD();
   const kinross = KINROSS();
-  await boot(page, 'alyx', {
+  const { requestLog } = await boot(page, 'alyx', {
     my_jobs: () => ({ ...EMPTY, today: [north, kinross], open_site_visit: state.open }),
     trade_job_detail: () => detail(kinross),
-    clock_event: visitApi(state)
-  });
-  // They read the other job's screen, go back, and sign in at Northfield.
-  await card(page, 'SWF-270011').click();
-  await expect(page.locator('[data-job-stepper] [data-stepper-start]')).toHaveText('Sign in');
-  await page.locator('[data-view="myJobs"]').click();
+    clock_event: visitApi(state),
+    // The receipt goes no further than asking where to upload: that ask names the job.
+    get_upload_url: { status: 500, body: { error: 'e2e stops the upload here' } }
+  }, { allowedWriteActions: ['clock_event', 'get_upload_url'] });
+  // Signed in at Northfield, they open Kinross's screen and add a receipt for Kinross.
   await card(page, 'SWF-270010').locator('[data-card-signin]').click();
   await expect(page.locator('#siteVisitBar')).toContainText('Northfield');
-
-  await page.evaluate(() => window.openExpenseOverlay());
+  await card(page, 'SWF-270011').click();
+  await expect(page.locator('[data-job-stepper]')).toBeVisible();
+  // What the job screen's "Add Expense Receipt" button does.
+  await page.evaluate(() => window.openExpenseOverlay('e2e-job-kinross'));
   const expense = page.locator('#expenseBody');
-  await expect(expense).toContainText('Linking to');
-  await expect(expense).toContainText('SWF-270010');
-  await expect(expense).not.toContainText('SWF-270011');
+  await expect(expense).toContainText('Link to:');
+  // It never says it is linking to the job they are signed in to.
+  await expect(expense).not.toContainText('SWF-270010');
+
+  await expense.getByRole('button', { name: 'General Stock' }).click();
+  await expect(expense).toContainText('Not linked to a job');
+  await expense.getByRole('button', { name: 'Specific Job' }).click();
+  await expect(expense).not.toContainText('Not linked to a job');
+
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  await expense.locator('input[type="file"]').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: png });
+  await expect.poll(() => requestLog.filter((r) => r.action === 'get_upload_url').map((r) => r.body.jobId)).toEqual(['e2e-job-kinross']);
 });
 
 test('a my_jobs answer asked for before a sign in does not undo it', async ({ page }) => {
@@ -396,16 +406,19 @@ test('signed in 11:30 pm, still on site after midnight: the sign in stays live a
   expect(state.open).toBe(null);
 });
 
-test('forgot to sign out, answered "Not now": the bar keeps the question and a new sign in is not blocked', async ({ page }) => {
+test('forgot to sign out, answered "Not now": a new sign in is not blocked, keeps the bar, and the forgotten one asks on its own card', async ({ page }) => {
   const yesterday = addIsoDays(TODAY, -1);
   const late = { visit_id: 'e2e-visit-late', job_id: 'e2e-job-north', job_number: 'SWF-270010', site_suburb: 'Northfield', signed_in_at: `${yesterday}T07:02:00+08:00`, status: 'no_sign_out' };
   // The server holds the forgotten sign in too. As the contract asks, it does
-  // not refuse a new sign in over it and does not close it.
+  // not refuse a new sign in over it, does not close it, and names the live
+  // sign in in open_site_visit whenever there is one.
   const state = { open: null, owing: { ...late }, n: 0 };
+  const north = { ...NORTHFIELD(), status: 'in_progress', started_at: late.signed_in_at, clocked_on_at: late.signed_in_at };
   const { requestLog } = await boot(page, 'alyx', {
-    my_jobs: () => ({ ...EMPTY, today: [KINROSS()], open_site_visit: state.owing }),
-    clock_event: visitApi(state)
-  }, { openJobs: false });
+    my_jobs: () => ({ ...EMPTY, today: [north, KINROSS()], open_site_visit: state.open || state.owing }),
+    clock_event: visitApi(state),
+    close_site_visit_late: () => { state.owing = null; return { success: true }; }
+  }, { allowedWriteActions: ['clock_event', 'close_site_visit_late'], openJobs: false });
   await page.locator('#siteLateSkip').click();
   await expect(page.locator('#siteLateOverlay')).toHaveCount(0);
   await page.locator('[data-view="myJobs"]').click();
@@ -415,7 +428,9 @@ test('forgot to sign out, answered "Not now": the bar keeps the question and a n
   await expect(bar.locator('[data-site-bar-signout]')).toHaveCount(0);
 
   // Signing in elsewhere asks for the leave time once more, then goes ahead.
-  await card(page, 'SWF-270011').locator('[data-card-signin]').click();
+  const kinross = card(page, 'SWF-270011');
+  const northCard = card(page, 'SWF-270010');
+  await kinross.locator('[data-card-signin]').click();
   await expect(page.locator('#siteLateOverlay')).toBeVisible();
   await page.locator('#siteLateSkip').click();
   await expect.poll(() => taps(requestLog).length).toBe(1);
@@ -424,6 +439,39 @@ test('forgot to sign out, answered "Not now": the bar keeps the question and a n
   await expect(page.locator('#toast')).toContainText('Signed in');
   // The forgotten sign in was given no finish: it still waits for the trade.
   expect(state.owing).toEqual(late);
+
+  // The list refreshes. The job they are on keeps its Sign out and the bar;
+  // the forgotten one asks on its own card and never takes the bar.
+  const reads = requestLog.filter((r) => r.action === 'my_jobs').length;
+  await page.locator('[data-view="hours"]').click();
+  const refreshed = page.waitForResponse((r) => new URL(r.url()).searchParams.get('action') === 'my_jobs');
+  await page.locator('[data-view="myJobs"]').click();
+  await refreshed;
+  expect(requestLog.filter((r) => r.action === 'my_jobs').length).toBeGreaterThan(reads);
+  await expect(kinross.locator('[data-card-signout]')).toHaveText('Sign out');
+  await expect(bar).toContainText('Kinross');
+  await expect(bar.locator('[data-site-bar-signout]')).toHaveText('Sign out');
+  await expect(bar).not.toContainText('You did not sign out');
+  await expect(northCard.locator('[data-card-late]')).toHaveText('Add the time you left');
+  await expect(northCard.locator('[data-card-signout]')).toHaveCount(0);
+
+  // A second tap on Sign in for the job they are already signed in to sends nothing.
+  expect(await page.evaluate(() => window.siteSignIn('e2e-asg-kinross', 'e2e-job-kinross'))).toBe(false);
+  await page.waitForTimeout(300);
+  expect(taps(requestLog).length).toBe(1);
+
+  // They give the forgotten time from that job's card. Kinross is untouched.
+  await northCard.locator('[data-card-late]').click();
+  const overlay = page.locator('#siteLateOverlay');
+  await expect(overlay.locator('#siteLateMsg')).toContainText('You are still signed in at Northfield since 7:02 am');
+  await overlay.locator('#siteLateTime').fill('15:30');
+  await overlay.locator('#siteLateSave').click();
+  await expect.poll(() => requestLog.filter((r) => r.action === 'close_site_visit_late').map((r) => r.body))
+    .toEqual([{ visit_id: 'e2e-visit-late', finish_date: yesterday, finish_time: '15:30' }]);
+  await expect(northCard.locator('[data-card-late]')).toHaveCount(0);
+  await expect(kinross.locator('[data-card-signout]')).toHaveText('Sign out');
+  await expect(bar).toContainText('Kinross');
+  expect(taps(requestLog).length).toBe(1);
 });
 
 test('a server that refuses a sign in over a forgotten one: the trade types the time they left, and it is never closed by a switch', async ({ page }) => {
@@ -540,6 +588,89 @@ test('weak signal: a sign in still waiting is sent before the sign out that gets
   // The server closed the visit the sign in opened, so the break can go on it.
   await expect(page.locator('#siteVisitBar [data-site-break]')).toContainText('Had a break?');
   expect(state.open).toBe(null);
+});
+
+test('a tap shows at once: signed in with the tap time and "sending" while the server answers', async ({ page }) => {
+  const state = { open: null, n: 0 };
+  let answer;
+  const held = new Promise((resolve) => { answer = resolve; });
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [NORTHFIELD()], open_site_visit: state.open }),
+    clock_event: async (ctx) => { await held; return visitApi(state)(ctx); }
+  });
+  const north = card(page, 'SWF-270010');
+  const bar = page.locator('#siteVisitBar');
+  await north.locator('[data-card-signin]').click();
+  // The server has the tap and has not answered. The screen already says so.
+  await expect.poll(() => taps(requestLog).length).toBe(1);
+  await expect(bar).toContainText(/Signed in \d{1,2}:\d{2} (am|pm) · sending/);
+  await expect(bar).toContainText('Northfield');
+  await expect(north.locator('[data-card-signout]')).toHaveText('Sign out');
+  await expect(north.locator('[data-card-signin]')).toHaveCount(0);
+  const shown = (await bar.textContent()).match(/Signed in (\d{1,2}:\d{2} (?:am|pm))/)[1];
+  // A tap while it is sending is ignored, not sent as a second tap.
+  await north.locator('[data-card-signout]').click();
+  await page.waitForTimeout(300);
+  expect(taps(requestLog).length).toBe(1);
+
+  answer();
+  await expect(bar).not.toContainText('sending');
+  // The time stays the moment of the tap, not the moment the server answered.
+  await expect(bar).toContainText('Signed in ' + shown);
+  await expect(north.locator('[data-card-signout]')).toHaveText('Sign out');
+});
+
+test('a tap the server refuses: the screen goes back and says why in plain words', async ({ page }) => {
+  let answer;
+  const held = new Promise((resolve) => { answer = resolve; });
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [NORTHFIELD()], open_site_visit: null }),
+    clock_event: async () => { await held; return { status: 422, body: { error: 'This job was taken off your list' } }; }
+  });
+  const north = card(page, 'SWF-270010');
+  const bar = page.locator('#siteVisitBar');
+  await north.locator('[data-card-signin]').click();
+  await expect(bar).toContainText(/Signed in \d{1,2}:\d{2} (am|pm) · sending/);
+  answer();
+  await expect(page.locator('#toast')).toContainText('Not saved');
+  await expect(page.locator('#toast')).toContainText('Ask the office to check this job.');
+  await expect(page.locator('#toast')).not.toContainText(PLAIN);
+  await expect(bar).toBeHidden();
+  await expect(north.locator('[data-card-signin]')).toHaveText('Sign in');
+  await expect(north.locator('[data-card-signout]')).toHaveCount(0);
+  expect(taps(requestLog).length).toBe(1);
+  const queued = await page.evaluate(() => JSON.parse(localStorage.getItem('sw_action_queue') || '[]').filter((i) => i && i.action === 'clock_event'));
+  expect(queued).toEqual([]);
+});
+
+test('a sign in that waited for signal and is then turned down is not shown as saved', async ({ page }) => {
+  let signal = false;
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [NORTHFIELD()], open_site_visit: null }),
+    // The office took the job off them while they had no signal.
+    clock_event: { success: false, error: 'Not your assignment' }
+  });
+  await page.route(`${OPS_API}**`, async (route) => {
+    if (!signal && new URL(route.request().url()).searchParams.get('action') === 'clock_event') return route.abort('internetdisconnected');
+    return route.fallback();
+  });
+  const north = card(page, 'SWF-270010');
+  const bar = page.locator('#siteVisitBar');
+  await north.locator('[data-card-signin]').click();
+  await expect(bar).toContainText('waiting for signal');
+
+  signal = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect.poll(() => taps(requestLog).length, { timeout: 12000 }).toBe(1);
+  await expect(page.locator('#toast')).toContainText(/Your sign in at \d{1,2}:\d{2} (am|pm) was not saved\. Ask the office to check this job\./);
+  await expect(bar).toBeHidden();
+  await expect(north.locator('[data-card-signin]')).toHaveText('Sign in');
+  await expect(north.locator('[data-card-signout]')).toHaveCount(0);
+  // The words stay: nothing follows them to say it synced.
+  await page.waitForTimeout(600);
+  await expect(page.locator('#toast')).not.toContainText('Synced');
+  const queued = await page.evaluate(() => JSON.parse(localStorage.getItem('sw_action_queue') || '[]').filter((i) => i && i.action === 'clock_event'));
+  expect(queued).toEqual([]);
 });
 
 test('another crew\'s job in the Everyone list carries no Sign in', async ({ page }) => {

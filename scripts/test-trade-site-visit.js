@@ -136,6 +136,7 @@ const visit = SV.openVisit({ visit_id: 'v-9', job_id: 'j1', job_number: 'SWF-1',
 assert.strictEqual(visit.visit_id, 'v-9')
 assert.strictEqual(SV.signedInText(visit), 'Signed in 7:02 am')
 assert.strictEqual(SV.signedInText({ ...visit, pending: true }), 'Signed in 7:02 am · waiting for signal')
+assert.strictEqual(SV.signedInText({ ...visit, pending: true, sending: true }), 'Signed in 7:02 am · sending', 'a tap on its way to the server')
 assert.strictEqual(SV.where(visit), 'Northfield')
 assert.strictEqual(SV.openVisit(null), null)
 assert.strictEqual(SV.openVisit({ job_id: 'j1', signed_in_at: 'not a time' }), null)
@@ -197,7 +198,7 @@ assert.deepStrictEqual(plain(SV.otherJobs(undefined)), [])
 // shift, and no long dash.
 const typedLater = { ...d6, out_capture: 'typed_later' }
 const said = [
-  SV.signedInText(visit), SV.signedInText({ ...visit, pending: true }), SV.where(visit), SV.where(null),
+  SV.signedInText(visit), SV.signedInText({ ...visit, pending: true }), SV.signedInText({ ...visit, pending: true, sending: true }), SV.where(visit), SV.where(null),
   SV.lateQuestion(visit, tuesday), SV.lateQuestion(visit, new Date('2026-10-05T16:00:00+08:00')),
   SV.lateLeave(null, '15:30', tuesday).error, SV.lateLeave(visit, '', tuesday).error, SV.lateLeave(visit, '07:02', tuesday).error,
   SV.lateLeave(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')).error, SV.lateLeave(visit, '06:00', tuesday).when,

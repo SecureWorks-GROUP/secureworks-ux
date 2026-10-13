@@ -796,7 +796,11 @@ AND more than 16 hours old (`owesFinish`); a typed leave time is a day and a
 time (`lateLeave`, `finish_date` + `finish_time`), and an overnight visit is
 one invoice line dated the day it started with `finish_next_day: true`. TAPS
 LAND IN ORDER: the offline queue is the only replay and `clockEvent` sends a
-waiting tap before a new one; do not add a second replay path. ONE FIELD SWITCHES IT ON: the one-tap Sign in and Sign
+waiting tap before a new one; do not add a second replay path. A TAP SHOWS AT
+ONCE ("Signed in 7:02 am · sending", `_siteTapSending`) and a refusal puts the
+screens back. `open_site_visit` NAMES THE LIVE SIGN IN whenever there is one;
+a forgotten one is named only when nobody is signed in, and while they are
+signed in elsewhere it asks on its own job's card (`_siteOwing`), never the bar. ONE FIELD SWITCHES IT ON: the one-tap Sign in and Sign
 out (the Today card taps, the bar, the switch question, the leave-time
 question) run only while `my_jobs` carries the `open_site_visit` key, null
 included (`_siteVisitLive`, remembered per trade for a start with no signal).

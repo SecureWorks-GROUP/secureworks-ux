@@ -57,7 +57,7 @@ test('builds invoice #31 from source selections and renders only server-calculat
   await expect(totals).toContainText('Grand total$5,163.40');
   await expect(totals).toContainText('Final deductions-$350.00');
   await expect(totals).toContainText('TO BE PAID$4,813.40');
-  // A trade with no weekly deduction: these three rows and nothing more.
+  // A Work Order Invoice carries no weekly deduction: these three rows and nothing more.
   await expect(totals.locator('.wwi-total-row')).toHaveText(['Grand total$5,163.40', 'Final deductions-$350.00', 'TO BE PAID$4,813.40']);
   await expect(page.locator('[data-invoice-deduction], [data-invoice-deduction-week], [data-invoice-deduction-note]')).toHaveCount(0);
   await expect(page.getByText('Car Loan')).toBeVisible();
@@ -345,36 +345,5 @@ test.describe('mobile weekly invoice', () => {
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeVisible();
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(horizontalOverflow).toBe(false);
-  });
-});
-
-// A weekly deduction (Captain, 2026-10-13) comes off a work-order invoice too:
-// its own row, then the server's trade_payable as TO BE PAID. Search
-// `// <trade-recurring-deduction>` in trade.html.
-test.describe('a week that carries a weekly deduction', () => {
-  test.use({ feedScenario: 'trade-weekly-work-order-invoice-deduction' });
-
-  test('the calculated invoice shows the deduction row and pays the server figure', async ({ appPage: page }) => {
-    await openWeeklyInvoice(page);
-    await enterInvoice31Deductions(page);
-    await page.getByRole('button', { name: 'Save & calculate' }).click();
-
-    const totals = page.locator('[data-weekly-invoice-totals]');
-    await expect(totals.locator('.wwi-total-row')).toHaveText([
-      'Grand total$5,163.40',
-      'Final deductions-$350.00',
-      'Payable before Ute hire$4,813.40',
-      'Ute hire-$100.00',
-      'TO BE PAID$4,713.40'
-    ]);
-
-    await page.getByRole('button', { name: 'Submit Invoice' }).click();
-    await expect(page.locator('#confirmMsg')).toContainText('Submit $4,713.40 for');
-    await expect(page.locator('#confirmMsg')).toContainText('That is after Ute hire −$100.00.');
-    await page.locator('#confirmAck').check();
-    await page.locator('#confirmOk').click();
-    await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
-    await expect(page.locator('[data-weekly-invoice-totals] [data-invoice-deduction]')).toHaveText('Ute hire-$100.00');
-    await expect(page.locator('[data-weekly-invoice-totals] [data-invoice-paid]')).toHaveText('TO BE PAID$4,713.40');
   });
 });

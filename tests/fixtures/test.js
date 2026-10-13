@@ -326,8 +326,7 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-incomplete-generate',
       'trade-weekly-work-order-invoice-stale-submit',
       'trade-weekly-work-order-invoice-crew-load-race',
-      'trade-weekly-work-order-invoice-invoice-id-only',
-      'trade-weekly-work-order-invoice-deduction'
+      'trade-weekly-work-order-invoice-invoice-id-only'
     ];
     const weeklyInvoiceSubtotals = [164.60, 244.20, 48.60, 2510, 274, 35, 842, 640, 405];
     const weeklyInvoicePositiveAmounts = [651, 730.60, 535, 3550, 760.40, 521.40, 1328.40, 1126.40, 891.40];
@@ -492,16 +491,6 @@ const test = base.extend({
       gst: 0,
       gst_on: false,
       total_inc: 4813.40,
-      // A weekly deduction on a work-order invoice: the server answers the
-      // line, the figure before it and the reduced trade_payable.
-      ...(feedScenario === 'trade-weekly-work-order-invoice-deduction'
-        ? {
-          trade_payable: 4713.40,
-          payable_before_deduction: 4813.40,
-          recurring_deduction: { id: 'e2e-ute-hire-rule', label: 'Ute hire', amount: 100 },
-          recurring_deduction_week: { label: 'Ute hire', amount: 100, week_start: weekStart, applied: true, outcome: 'applied', note: null }
-        }
-        : {}),
       notes: 'Invoice 31 weekly fixture'
     });
     const cloneWeeklyInvoiceResponse = () => JSON.parse(JSON.stringify(weeklyInvoiceResponse()));
@@ -843,7 +832,6 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-incomplete-generate': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-stale-submit': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-invoice-id-only': ['save_trade_invoice_draft', 'generate_trade_invoice'],
-      'trade-weekly-work-order-invoice-deduction': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead'],
       'henry-job-centric-submit': ['generate_trade_invoice'],

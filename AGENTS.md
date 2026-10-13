@@ -808,7 +808,10 @@ what the reads send: `recurring_deduction` `{label, amount}`,
 `payable_before_deduction`, the reduced `trade_payable`, and
 `recurring_deduction_week` before submit. The paid figure is ALWAYS
 `trade_payable`; never work it out in the browser, and a deduction without it
-reads unavailable. With none of the fields every screen, the PDF and the Trade
+reads unavailable. Weekly invoices only: the Work Order Invoice shows none.
+`my_hours` works its outcome out from clocked hours, so before submit only its
+label and amount are shown, never its not-taken reason; that reason comes only
+from a draft-save or submit response. With none of the fields every screen, the PDF and the Trade
 Bills table stay exactly as they were, which
 `tests/e2e/trade-invoice-recurring-deduction.spec.js` holds to the pre-change
 markup; a change to the invoice money summary updates those strings on purpose.

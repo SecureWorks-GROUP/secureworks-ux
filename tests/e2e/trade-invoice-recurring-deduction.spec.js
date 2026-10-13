@@ -10,6 +10,8 @@ const { signIn } = require('../helpers/auth');
 const { fillCardTime } = require('../helpers/invoice-time');
 
 const MOBILE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
+const COMES_OFF_NOTE = (amount) => 'Ute hire −' + amount + ' comes off what you are paid for this week, after super and GST. It is applied when you submit. SecureWorks confirms the amount you are paid then.';
+const COMES_OFF_CONFIRM = (amount) => 'Ute hire −' + amount + ' comes off what you are paid for this week. It is applied when you submit.';
 const SUPER_NOTE = 'Your job amounts are not changed. Only half the super comes out of what you earned; the company covers the other half. The full 12% still goes into your super fund each week.';
 
 async function installPdfRecorder(page) {
@@ -71,7 +73,7 @@ test.describe('a week that carries the deduction', () => {
     await expect(preview).toContainText('Earned$400.00');
     await expect(preview.locator('[data-invoice-after-super]')).toHaveText('After super$376.00');
     await expect(preview.locator('[data-invoice-deduction-week]')).toHaveText('Ute hire (comes off this week)−$100.00');
-    await expect(preview.locator('[data-invoice-deduction-note]')).toHaveText('Ute hire −$100.00 comes off what you are paid for this week, after super and GST. SecureWorks confirms the amount you are paid when you submit.');
+    await expect(preview.locator('[data-invoice-deduction-note]')).toHaveText(COMES_OFF_NOTE('$100.00'));
     await expect(preview).not.toContainText('You get paid');
     await expect(preview).not.toContainText('$276.00');
     const builderShot = testInfo.outputPath('trade-invoice-deduction-builder.png');
@@ -79,7 +81,7 @@ test.describe('a week that carries the deduction', () => {
     await testInfo.attach('Weekly invoice before submit', { path: builderShot, contentType: 'image/png' });
 
     const confirm = await submitAndReadConfirm(page);
-    expect(confirm).toContain('Ute hire −$100.00 comes off what you are paid for this week.');
+    expect(confirm).toContain(COMES_OFF_CONFIRM('$100.00'));
 
     // After submit: its own row with a minus amount, and the server's figure.
     const saved = page.locator('[data-invoice-money-summary]');
@@ -174,18 +176,25 @@ test.describe('a week that carries the deduction', () => {
   });
 });
 
+// my_hours works its outcome out from clocked hours, not from the hours he
+// types on the invoice, so its "not taken" reason never reaches the screen
+// before submit. Only the submit response, worked out from the invoice itself,
+// may say the deduction was not taken.
 test.describe('a week where the deduction was due and not taken', () => {
   test.use({ persona: 'installer', feedScenario: 'trade-invoice-recurring-deduction-not-taken', appWeekDay: 6, ...MOBILE });
 
-  test('the server reason is shown, nothing comes off, and the invoice is paid in full', async ({ appPage: page }) => {
+  test('before submit only what comes off is shown; the server reason shows once the invoice is submitted and paid in full', async ({ appPage: page }) => {
     const reason = 'Ute hire $500.00 was not taken: this invoice pays $376.00, which is less than the deduction. The office has been told.';
     await openBuilderWithDay(page);
     const preview = page.locator('[data-invoice-money-summary]');
     await expect(preview.locator('[data-invoice-deduction-week]')).toHaveText('Ute hire (comes off this week)−$500.00');
-    await expect(preview.locator('[data-invoice-deduction-note]')).toHaveText(reason);
+    await expect(preview.locator('[data-invoice-deduction-note]')).toHaveText(COMES_OFF_NOTE('$500.00'));
+    await expect(preview).not.toContainText('not taken');
+    await expect(page.locator('#hoursContent')).not.toContainText(reason);
 
     const confirm = await submitAndReadConfirm(page);
-    expect(confirm).toContain(reason);
+    expect(confirm).toContain(COMES_OFF_CONFIRM('$500.00'));
+    expect(confirm).not.toContain('not taken');
 
     const saved = page.locator('[data-invoice-money-summary]');
     await expect(saved.locator('.inv-money-row')).toHaveText([

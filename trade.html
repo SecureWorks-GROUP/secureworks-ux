@@ -26,6 +26,8 @@
   <!-- Trade keeps its own login screen. Do NOT load ops auth-gate.js here:
        it hides the trade login UI and confuses crew sign-in after the ops JWT cutover. -->
   <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
+  <!-- Job work order (docs/job-work-order-screens.md): read only while the ?wo=preview switch is on. -->
+  <script src="shared/job-work-order.js?v=1"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -2665,6 +2667,23 @@
     .sow-install-sub { font-weight: 500; text-transform: none; letter-spacing: 0; }
     .sow-install .sow-items { border-top: none; margin-bottom: 8px; }
 
+    /* Job work order (shared/job-work-order.js renderTrade): tasks and hours, no money. Preview only. */
+    .two-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+    .two-num { font-family: var(--sw-mono); font-size: 16px; font-weight: 700; color: var(--sw-dark); letter-spacing: 0.02em; }
+    .two-chip { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: var(--sw-r-chip); background: var(--sw-green); color: #fff; }
+    .two-empty { font-size: 14px; line-height: 1.5; color: var(--sw-text-sec); }
+    .two-lines { border-top: 1px solid var(--sw-border); }
+    .two-line { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--sw-border); }
+    .two-task { flex: 1; font-size: 15px; line-height: 1.45; color: var(--sw-text); font-weight: 500; }
+    .two-qty { display: block; font-family: var(--sw-mono); font-size: 12px; color: var(--sw-mid); font-weight: 400; }
+    .two-hours { white-space: nowrap; font-family: var(--sw-mono); font-size: 15px; font-weight: 700; color: var(--sw-dark); }
+    .two-total .two-task { font-weight: 700; }
+    .two-addendum { margin-top: 12px; border-left: 3px solid var(--sw-orange); padding-left: 10px; }
+    .two-add-k { font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; margin-bottom: 4px; }
+    .two-add-k span { letter-spacing: 0; text-transform: none; color: var(--sw-text-sec); font-weight: 400; }
+    .two-instr { margin-top: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+    .two-k { display: block; font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-text-sec); margin-bottom: 4px; }
+
     /* ── Job detail: scope of works / instructions / documents (2026-09-08) ── */
     .jd-instr { background: var(--sw-orange-tint); border: 1px solid var(--sw-orange-line); }
     .jd-instr-k { font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; margin-bottom: 8px; }
@@ -4864,12 +4883,27 @@
     });
   }
 
+  // The job work order's trade read carries no money by design; strip any
+  // money key it or a scope line might still carry before anything caches it.
+  var TRADE_JOB_WO_MONEY_KEYS = ['allocation_ex', 'labour_ex', 'rate_ex', 'cost_rate_ex', 'unit_cost_ex',
+    'total_ex', 'agreed_labour_ex', 'figures'];
+  function tradeStripJobWorkOrderMoney(res) {
+    delete res.figures;
+    var wo = res.work_order;
+    if (!wo || typeof wo !== 'object') return;
+    tradeStripMoneyKeys(wo);
+    [wo].concat(Array.isArray(wo.scope_items) ? wo.scope_items : []).forEach(function(node) {
+      if (node && typeof node === 'object') TRADE_JOB_WO_MONEY_KEYS.forEach(function(k) { delete node[k]; });
+    });
+  }
+
   var TRADE_MONEY_DOOR = {
     my_jobs: tradeStripJobListMoney,
     search_all_jobs: tradeStripJobListMoney,
     trade_job_detail: tradeStripJobDetailMoney,
     my_work_orders: tradeStripWorkOrderListMoney,
-    crew_charges_on_my_jobs: tradeStripCrewChargeMoney
+    crew_charges_on_my_jobs: tradeStripCrewChargeMoney,
+    my_job_work_order: tradeStripJobWorkOrderMoney
   };
 
   function tradeOfficeMoneyDoor(action, body) {
@@ -13201,6 +13235,7 @@
     var viewOnly = isForeignCrewJob(data);
     var h = '';
 
+    h += renderTradeJobWorkOrder(data);
     h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
@@ -13692,6 +13727,139 @@
     }
   }
 
+  // <trade-job-work-order>
+  // The job's work order (one per fencing or patio job, approved by the office)
+  // as the trade reads it: each task with its hours, per-metre lines as quoted,
+  // variations as marked addenda, and NO dollar figure for anyone, the lead
+  // trade included (captain, 12 Oct 2026). Rules and HTML:
+  // shared/job-work-order.js. Preview only: ?wo=preview or localStorage
+  // sw_wo_preview = '1' (?wo=live turns it off); with it off nothing here runs.
+  // Screen doc: docs/job-work-order-screens.md.
+  var TRADE_JOB_WO_STORE_KEY = 'sw_wo_preview';
+  var TRADE_JOB_WO_TTL_MS = 2 * 60 * 1000;
+  var _tradeJobWoPreview = null;
+  var _tradeJobWo = {}; // job id -> { state: 'loading'|'ready'|'failed', read, at }
+
+  function tradeJobWoPreviewOn() {
+    if (_tradeJobWoPreview !== null) return _tradeJobWoPreview;
+    var C = window.JobWorkOrderCore;
+    if (!C) { _tradeJobWoPreview = false; return false; }
+    var stored = null;
+    try { stored = localStorage.getItem(TRADE_JOB_WO_STORE_KEY); } catch (e) { stored = null; }
+    var st = C.previewState(window.location.search, stored);
+    if (st.persist) {
+      try {
+        if (st.persist === '1') localStorage.setItem(TRADE_JOB_WO_STORE_KEY, '1');
+        else localStorage.removeItem(TRADE_JOB_WO_STORE_KEY);
+      } catch (e) { /* the URL still decides this load */ }
+    }
+    _tradeJobWoPreview = st.on;
+    return _tradeJobWoPreview;
+  }
+
+  function tradeJobWoEligibleType(type) {
+    return !!(window.JobWorkOrderCore && JobWorkOrderCore.eligibleType(type));
+  }
+
+  // The cached my_job_work_order answer for a job (kept while a refresh is
+  // in flight and when a refresh fails), or null when none has landed. A
+  // failed read is never cached as "no work order".
+  function tradeJobWoRead(jobId) {
+    var e = _tradeJobWo[jobId];
+    return e ? e.read : null;
+  }
+
+  // The approved work order on a job, from the cache only.
+  function tradeJobWoApproved(jobId) {
+    var read = tradeJobWoRead(jobId);
+    return read && read.work_order ? read.work_order : null;
+  }
+
+  // Read the job's work order once (again, or after a failure, once TTL_MS has
+  // passed, so a repaint never fires a read per keystroke); onDone(changed) runs
+  // when the answer lands.
+  function tradeJobWoLoad(jobId, onDone) {
+    if (!jobId || !tradeJobWoPreviewOn()) return;
+    var e = _tradeJobWo[jobId];
+    if (e && (e.state === 'loading' || Date.now() - e.at < TRADE_JOB_WO_TTL_MS)) return;
+    var before = e && e.state === 'ready' ? JSON.stringify(e.read) : null;
+    _tradeJobWo[jobId] = { state: 'loading', read: e ? e.read : null, at: 0 };
+    api('my_job_work_order', { job_id: jobId }, null, { preserveSessionOnAuthFailure: true }).then(function(res) {
+      _tradeJobWo[jobId] = { state: 'ready', read: res || { work_order: null }, at: Date.now() };
+      if (onDone) onDone(JSON.stringify(_tradeJobWo[jobId].read) !== before);
+    }).catch(function() {
+      var kept = e ? e.read : null;
+      _tradeJobWo[jobId] = { state: kept ? 'ready' : 'failed', read: kept, at: Date.now() };
+      if (onDone) onDone(false);
+    });
+  }
+
+  function tradeJobWoSlotHtml(jobId) {
+    var read = tradeJobWoRead(jobId);
+    var e = _tradeJobWo[jobId];
+    return JobWorkOrderCore.renderTrade(read, read ? 'ready' : (e && e.state === 'failed' ? 'failed' : 'loading'));
+  }
+
+  // The Work Order and Scope tabs: the job's work order scope, on an
+  // allocated fencing or patio job. '' while the preview is off.
+  function renderTradeJobWorkOrder(data) {
+    if (!tradeJobWoPreviewOn() || !data || !data.job || isForeignCrewJob(data)) return '';
+    if (!tradeJobWoEligibleType(getTradeJobType(data.job)) && !tradeJobWoEligibleType(data.job.type)) return '';
+    var jobId = data.job.id;
+    if (_tradeJobWo[jobId] && _tradeJobWo[jobId].state === 'failed') delete _tradeJobWo[jobId];
+    tradeJobWoLoad(jobId, function() {
+      var slots = document.querySelectorAll('[data-trade-job-wo-slot]');
+      for (var i = 0; i < slots.length; i++) {
+        if (slots[i].getAttribute('data-trade-job-wo-slot') === String(jobId)) slots[i].innerHTML = tradeJobWoSlotHtml(jobId);
+      }
+    });
+    return '<div data-trade-job-wo-slot="' + esc(jobId) + '">' + tradeJobWoSlotHtml(jobId) + '</div>';
+  }
+
+  // Invoice: on a job with an approved work order the blank typed
+  // "WO allocated $" box is retired and the card bills the hours worked. A
+  // card carrying a server-issued crew work order (work_order_id) and a
+  // per-metre trade's cards keep their Work Order mode.
+  function tradeJobWoRetiresTypedBox(c) {
+    return !!(c && c.job_id && !c.work_order_id && tradeJobWoPreviewOn() && !isPerMetreUser()
+      && tradeJobWoApproved(c.job_id));
+  }
+
+  // Takes each such card out of Work Order mode. Returns true when a card changed.
+  function retireTypedWorkOrderOnJobWorkOrders(cards) {
+    var changed = false;
+    (cards || []).forEach(function(c) {
+      if (!tradeJobWoRetiresTypedBox(c)) return;
+      if (c.wo_mode) {
+        c.wo_mode = false;
+        c.hours_mode_locked = true;
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  // Start reading the work order of every fencing or patio job on the
+  // invoice whose typed box it could retire; when one turns out to have an
+  // approved work order, repaint.
+  function loadInvoiceJobWorkOrders(onChange) {
+    if (!tradeJobWoPreviewOn() || isPerMetreUser()) return;
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.job_id || c.work_order_id || c.is_makesafe) return;
+      var t = String(c.job_type || '').toLowerCase();
+      if (t && !tradeJobWoEligibleType(t)) return;
+      tradeJobWoLoad(c.job_id, function(changed) { if (changed && onChange) onChange(); });
+    });
+  }
+
+  function invoiceJobWorkOrderNoteHtml(c) {
+    if (!tradeJobWoRetiresTypedBox(c)) return '';
+    var read = tradeJobWoRead(c.job_id);
+    return '<div data-job-wo-invoice-note="' + c._idx + '" style="margin-top:8px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;background:var(--sw-light);font-size:12px;color:var(--sw-text-sec)">'
+      + esc(JobWorkOrderCore.invoiceNote(read)) + '</div>';
+  }
+  // </trade-job-work-order>
+
   // Office instructions for the crew: work order special instructions (+ est.
   // hours), else the scoping tool's installer note. Rendered at the top of the
   // Scope tab so a tier-1 installer sees them without the Work tab.
@@ -13721,6 +13889,7 @@
     // → what was sold (quote writing, price-free) → build spec → work order
     // lines → videos → materials. Quote-pack / compact WO rates stay office-only.
     h += renderTradeInstructions(data);
+    h += renderTradeJobWorkOrder(data);
     h += renderQuotePacks(data);
 
     // 1. Build spec (dimensions, colours, attachment)
@@ -24318,12 +24487,14 @@
         html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
           + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
           + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
-        var woLocked = !c.work_order_id && !!c.requires_work_order_id;
-        html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="No work order on this job yet" ' : '')
+        var jobWoOn = tradeJobWoRetiresTypedBox(c);
+        var woLocked = jobWoOn || (!c.work_order_id && !!c.requires_work_order_id);
+        html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="' + (jobWoOn ? 'This job has a work order: bill the hours you worked' : 'No work order on this job yet') + '" ' : '')
           + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
           + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
         html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'commission' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'commission\')">Commission</button>';
         html += '</div>';
+        html += invoiceJobWorkOrderNoteHtml(c);
         if (_jobCardWorkOrderBlocked(c)) {
           html += '<div data-wo-block="' + c._idx + '" style="margin-top:8px;padding:8px 10px;border:1px solid var(--sw-orange);border-radius:8px;background:rgba(241,90,41,0.08)">';
           html += '<div style="font-size:12px;font-weight:700;color:var(--sw-mid)">' + esc(c.wo_block_reason || 'This work order is not available to invoice this week.') + '</div>';
@@ -24824,6 +24995,10 @@
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
   window.setJobCardMode = function(idx, mode) {
     var c = _jobCards[idx]; if (!c) return;
+    if (mode === 'work_order' && tradeJobWoRetiresTypedBox(c)) {
+      toast('This job has a work order. Bill the hours you worked; the office checks them against it.', true);
+      return;
+    }
     if (mode === 'work_order' && !c.work_order_id && c.requires_work_order_id) {
       toast('This job has no work order yet. Invoice hours, or wait for the work order to load.', true);
       return;
@@ -25851,6 +26026,8 @@
     var postWeekStart = _hoursWeekStart || getWeekStartMonday(0);
     var postWeekEnd = _hoursWeekEnd || _weeklyDatePlusDays(postWeekStart, 6) || getWeekEndSunday(0);
     var timeBounds = { weekStart: postWeekStart, weekEnd: postWeekEnd, today: clockPerthDay(new Date()) };
+    // <trade-job-work-order> a job with an approved work order never submits a typed WO total
+    retireTypedWorkOrderOnJobWorkOrders(_jobCards);
     var built = _buildJobCentricPayload(_jobCards, timeBounds);
     if (built.error) {
       toast(built.error, true);
@@ -26114,6 +26291,15 @@
 
   function renderInvoiceBuilder() {
     if (!_invoiceBuilderOpen) return;
+    // <trade-job-work-order> invoice: a job with an approved work order bills hours
+    if (_invoiceBuilderMode !== 'expense') {
+      retireTypedWorkOrderOnJobWorkOrders(_jobCards);
+      loadInvoiceJobWorkOrders(function() {
+        if (!_invoiceBuilderOpen) return;
+        _syncJobCardsFromDOM();
+        renderInvoiceBuilder();
+      });
+    }
     var renderSeq = ++_invoiceRenderSeq;
     var container = document.getElementById('hoursContent');
     var details = loadTradeDetails();

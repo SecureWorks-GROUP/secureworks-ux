@@ -6244,6 +6244,13 @@ __swOpsStampAssets([
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 </script>
+<!-- Job work order (docs/job-work-order-screens.md): off unless ?wo=preview or localStorage sw_wo_preview = '1'. -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'shared/job-work-order.js?v=1'},
+  {t:'js', u:'modules/ops-job-work-order.js?v=1'}
+]);
+</script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -22188,6 +22195,10 @@ function renderBuildView(data) {
     return;
   }
 
+  // <job-work-order-panel> modules/ops-job-work-order.js; '' unless the preview is on and the job has one (fencing, patio)
+  if (window.JobWorkOrderOps) html += JobWorkOrderOps.buildTabHtml(data);
+  // </job-work-order-panel>
+
   // Embedded scope tool preview (3D/2D render)
   if (j.type !== 'miscellaneous' && j.type !== 'general') {
     var scopeToolUrl = j.type === 'fencing'
@@ -22521,9 +22532,15 @@ function generateRichWorkOrder(data) {
   var j = data.job;
   var scope = j.scope_json || {};
   var sj = scope.job || {};
-  if (!sj.runs || sj.runs.length === 0) { alert('No fencing scope data on this job.'); return; }
+  // <job-work-order-pdf> The stored job work order (modules/ops-job-work-order.js,
+  // preview only) replaces the labour this printout used to recompute from its own
+  // rate copy. With none, the printout below is unchanged, fencing only.
+  var stored = window.JobWorkOrderOps ? JobWorkOrderOps.pdfSections(data) : null;
+  // </job-work-order-pdf>
+  var hasRuns = !!(sj.runs && sj.runs.length > 0);
+  if (!hasRuns && !stored) { alert('No fencing scope data on this job.'); return; }
 
-  var d = _woCollectData(sj);
+  var d = hasRuns ? _woCollectData(sj) : null;
   var pricing = sj._pricing_json || j.pricing_json || {};
   var media = data.media || [];
   var sitePhotos = media.filter(function(m) { return m.phase !== 'receipt'; });
@@ -22562,6 +22579,8 @@ function generateRichWorkOrder(data) {
   css += '.footer { border-top: 1px solid #c8c8c8; padding-top: 12px; margin-top: 30px; text-align: center; font-size: 10px; color: #4C6A7C; line-height: 1.6; }';
   css += '.print-btn { position: fixed; top: 12px; right: 12px; padding: 10px 20px; background: #F15A29; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 100; }';
   css += '.print-btn:hover { background: #d94e22; }';
+  css += '.wo-draft { border: 2px solid #F15A29; color: #F15A29; font-weight: 700; padding: 6px 10px; margin: 0 0 10px; }';
+  css += '.wo-addendum { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: #F15A29; border-left: 3px solid #F15A29; padding-left: 8px; margin: 14px 0 6px; }';
   css += '@media print { body { padding: 0; } .page { padding: 0 20px 20px; } .header-inner { padding: 12px 20px; } .no-print { display: none !important; } .header-band, .header-accent, th, .section h2 { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }';
 
   // Site plan
@@ -22571,7 +22590,8 @@ function generateRichWorkOrder(data) {
   }
 
   // Runs HTML
-  var runsHtml = '';
+  var runsHtml = '', gatesHtml = '', scopeChecklist = '', costHtml = '';
+  if (d) {
   d.runDetails.forEach(function(r) {
     runsHtml += '<div class="section"><h2>' + e(r.name) + ' (' + r.panelCount + ' panels, ' + r.length + 'm)';
     if (r.patioTubes > 0) runsHtml += ' <span class="patio-flag">[' + r.patioTubes + ' patio tubes]</span>';
@@ -22594,12 +22614,12 @@ function generateRichWorkOrder(data) {
   });
 
   // Gates HTML
-  var gatesHtml = d.gateLineItems.length > 0
+  gatesHtml = d.gateLineItems.length > 0
     ? d.gateLineItems.map(function(g) { return '<p style="padding-left:12px;">' + e(g.desc) + ' \u2014 90\u00D790mm SHS gate posts</p>'; }).join('')
     : '<p style="padding-left:12px;">None</p>';
 
   // Scope checklist
-  var scopeChecklist = '<ul class="checklist">';
+  scopeChecklist = '<ul class="checklist">';
   scopeChecklist += '<li>Install COLORBOND\u00AE fencing per specification</li>';
   scopeChecklist += '<li>Set all posts in concrete (2 bags/post)</li>';
   if (d.totalPlinths > 0) scopeChecklist += '<li>Install ' + d.totalPlinths + ' retaining plinths</li>';
@@ -22612,7 +22632,7 @@ function generateRichWorkOrder(data) {
   var totalCostBase = d.internalCost + d.internalLabour + d.deliveryFee;
   var quoteTotalExGST = pricing.totalExGST || (pricing.totalIncGST ? pricing.totalIncGST / 1.1 : 0);
   var margin = quoteTotalExGST - totalCostBase;
-  var costHtml = '<table><thead><tr><th>Item</th><th class="text-right">Cost</th></tr></thead><tbody>';
+  costHtml = '<table><thead><tr><th>Item</th><th class="text-right">Cost</th></tr></thead><tbody>';
   costHtml += '<tr><td>Materials (panels, posts, plinths, concrete, fixings)</td><td class="text-right">$' + _woFmt(d.internalCost) + '</td></tr>';
   costHtml += '<tr><td>Labour base (' + d.totalMetres.toFixed(1) + 'm @ $' + _woConst.COST_PRICES.labourPerMetre + '/m' + (d.accessRate > 0 ? ' + ' + (d.accessRate * 100) + '% access' : '') + ')</td><td class="text-right">$' + _woFmt(d.internalLabour) + '</td></tr>';
   costHtml += '<tr><td>Delivery</td><td class="text-right">$' + _woFmt(d.deliveryFee) + '</td></tr>';
@@ -22620,6 +22640,7 @@ function generateRichWorkOrder(data) {
   costHtml += '<tr><td>Quote total (excl. GST)</td><td class="text-right">$' + _woFmt(quoteTotalExGST) + '</td></tr>';
   costHtml += '<tr style="font-weight:700"><td>Margin</td><td class="text-right">$' + _woFmt(margin) + '</td></tr>';
   costHtml += '</tbody></table>';
+  }
 
   // Site photos
   var photosHtml = '';
@@ -22644,7 +22665,7 @@ function generateRichWorkOrder(data) {
   html += '</div></div>';
 
   html += '<div class="page">';
-  html += '<div class="doc-title"><h1>Work Order \u2014 ' + e(j.job_number || sj.ref) + '</h1></div>';
+  html += '<div class="doc-title"><h1>' + (stored ? stored.title : 'Work Order') + ' \u2014 ' + e(j.job_number || sj.ref) + '</h1></div>';
 
   // Client info
   html += '<div class="section"><div class="info-grid">';
@@ -22655,13 +22676,14 @@ function generateRichWorkOrder(data) {
   html += '<div><span class="label">Phone</span><br><span class="value">' + e(j.client_phone || sj.phone) + '</span></div>';
   html += '<div><span class="label">Email</span><br><span class="value">' + e(j.client_email || sj.email) + '</span></div>';
   html += '<div><span class="label">Scoper</span><br><span class="value">' + e(sj.scoper) + '</span></div>';
-  html += '<div><span class="label">Access</span><br><span class="value">' + e(d.access) + '</span></div>';
+  html += '<div><span class="label">Access</span><br><span class="value">' + e(d ? d.access : sj.access) + '</span></div>';
   html += '</div></div>';
 
   // Site plan
   if (sitePlanHtml) html += '<div class="section"><h2>Site Plan</h2>' + sitePlanHtml + '</div>';
 
-  // Fence spec
+  // Fence spec, runs, gates and summary: fencing scope only
+  if (d) {
   html += '<div class="section"><h2>Fence Specification</h2><div class="info-grid">';
   html += '<div><span class="label">Supplier</span><br><span class="value">' + e(d.supplier) + '</span></div>';
   html += '<div><span class="label">Profile</span><br><span class="value">' + e(d.profile) + '</span></div>';
@@ -22686,16 +22708,17 @@ function generateRichWorkOrder(data) {
   html += '<div><span class="label">Concrete</span><br><span class="value">' + d.concreteBags + ' bags</span></div>';
   html += '<div><span class="label">Tek Screws</span><br><span class="value">' + d.tekBoxes + ' boxes</span></div>';
   html += '</div></div>';
+  }
 
   // Scope of work
-  html += '<div class="section"><h2>Scope of Work</h2>' + scopeChecklist + '</div>';
+  html += '<div class="section"><h2>Scope of Work</h2>' + (stored ? stored.scopeHtml : scopeChecklist) + '</div>';
 
   // Safety
   html += '<div class="section"><h2>Safety &amp; Compliance</h2><ul class="checklist">';
   html += '<li>Dial Before You Dig check completed: <strong>___</strong></li>';
   html += '<li>PPE: steel-cap boots, gloves, safety glasses, ear protection</li>';
   html += '<li>First aid kit on site</li>';
-  if (d.removal.existingFenceType === 'asbestos') html += '<li style="color:#dc2626;font-weight:700;">ASBESTOS: Licensed removal required. Do NOT break sheets.</li>';
+  if (d && d.removal.existingFenceType === 'asbestos') html += '<li style="color:#dc2626;font-weight:700;">ASBESTOS: Licensed removal required. Do NOT break sheets.</li>';
   html += '<li>No overhead power lines within 3m of work area confirmed: <strong>___</strong></li>';
   html += '</ul></div>';
 
@@ -22717,7 +22740,7 @@ function generateRichWorkOrder(data) {
   html += '<div class="section" style="margin-top:30px; page-break-before:auto;">';
   html += '<span class="confidential">Confidential \u2014 Internal Use Only</span>';
   html += '<h2 style="border-left:none;background:none;padding-left:0;">Cost Breakdown</h2>';
-  html += costHtml + '</div>';
+  html += (stored ? stored.costHtml : costHtml) + '</div>';
 
   // Footer
   html += '<div class="footer">SecureWorks WA Pty Ltd | ABN 64 689 223 416<br>fencing@secureworkswa.com.au | 0489 267 772<br>Fully Licensed | Quality Guaranteed</div>';

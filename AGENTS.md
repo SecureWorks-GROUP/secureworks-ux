@@ -759,24 +759,33 @@ trade request never reads as approved. The form never shows or uses a share
 link, and never queues a refused or unsent request offline. Search
 `// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
 
-## Trade invoice rate: a box, opened on the usual rate (`trade.html`)
+## Trade invoice rate: a box once ops-api honours it (`trade.html`)
 
-Captain 2026-10-13, reversing the read-only rate of 2026-09-23: "it should look
-like the same boxes as the other inputs, and just have like an auto fill to
-their rate that they normally set so they can change the rate per job and it
-should just have like a brief description of work as well." On an hours card
-the rate (`[data-cardrate]`) and the description of work (`[data-carddesc]`)
-are boxes in the same block as date, start, finish and break. The rate opens on
-the trade's usual rate (`my_hours.rate`) and the app sends whatever is left in
-the box: `rate_source` is `server_resolved` while it equals the usual rate,
-`client_entered` once changed. What a changed rate means is ops-api's call; do
-not add a client rule for it. `_pinAssignedCardRates` keeps an untouched card on
-the usual rate and never overwrites one the trade changed (`rate_user_edited`).
-`trade.html` still makes no `set_trade_rate` call and Profile stays read-only:
-the app never saves a rate as the trade's usual one. `_hoursData` and
+Captain 2026-10-13: "it should look like the same boxes as the other inputs, and
+just have like an auto fill to their rate that they normally set so they can
+change the rate per job and it should just have like a brief description of work
+as well." The app never shows a rate the server will not pay, and today's
+ops-api bills its own rate on an assigned job whatever the browser posts. So
+the box is DORMANT until `my_hours` answers `trade_rate_editable: true`
+(`_assignedRateEditable`; the paired back end change is the contract in
+`trade-app.md` → "Rate and description"). Field absent or false: the read-only
+rate of 2026-09-23 stands ("Set by the office", the office rate billed as
+`server_resolved`, no changed-rate wording). Field true and a usual rate on
+file: the rate is a box (`[data-cardrate]`) opened on the usual rate
+(`my_hours.rate`), the total follows it, a changed rate posts `client_entered`,
+and the on-card line about the office checking it shows only while it differs.
+No usual rate on file is the contact-the-office wording and block in both
+states; typing a rate with none on file is not built. The description of work
+(`[data-carddesc]`) sits in the block with the other boxes in both states. A
+rate the trade types lives in `typed_rate` on the card, and `c.rate` /
+`rate_source` come only from `_pinAssignedCardRates`, so a typed rate in a
+draft bills nothing until the capability is on. `trade.html` makes no
+`set_trade_rate` call and Profile stays read-only. `_hoursData` and
 `_tradeRate` clear in `resetInvoiceSession` and on the `onLogin` owner-change
-path so one trade's usual rate cannot open in the next trade's box before that
-user's `my_hours` lands. Guard: `tests/e2e/trade-invoice-rate-box.spec.js`.
+path so one trade's rate cannot show on the next trade's card before that
+user's `my_hours` lands. Guard: `tests/e2e/trade-invoice-rate-box.spec.js`
+(fixture option `tradeRateEditable`; off, its invoice stub refuses a typed
+assigned rate).
 
 ## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
 

@@ -62,12 +62,16 @@ const test = base.extend({
   // is the real clock. A date worked cannot be after today, so a spec that
   // enters times on the week's jobs runs the app at the end of that week (6).
   appWeekDay: [null, { option: true }],
+  // True once ops-api honours a rate a trade types on an assigned job and says
+  // so on my_hours (trade_rate_editable). Off, the stub stands in for today's
+  // ops-api, which bills its own rate whatever the browser posts.
+  tradeRateEditable: [false, { option: true }],
   feedRequests: async ({}, use) => {
     const requests = [];
     await use(requests);
   },
 
-  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay }, use) => {
+  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay, tradeRateEditable }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
     if (appWeekDay != null) {
@@ -137,6 +141,7 @@ const test = base.extend({
       { id: 'e2e-admin-job-complete-fence', job_number: 'SWF-26168', type: 'fencing', status: 'complete', client_name: 'Complete Fence Client', site_suburb: 'South Perth' },
       { id: 'e2e-admin-job-claim-makesafe', job_number: 'SWMS-261290', type: 'makesafe', status: 'complete', client_name: 'Claim Ref Client', site_suburb: 'Morley', external_ref: 'MLB-40398' }
     ];
+    const withTradeRateCapability = (hours) => (tradeRateEditable ? { ...hours, trade_rate_editable: true } : hours);
     const labourExplainerHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -1023,7 +1028,7 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
+        my_hours: withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
           'trade-invoice-per-metre-gst',
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
@@ -1142,7 +1147,7 @@ const test = base.extend({
               assignments: [],
               total_hours: 0,
               already_submitted: false
-            },
+            }),
         my_trade_invoices: feedScenario === 'trade-invoice-multi-week'
           ? () => ({
             invoices: Object.entries(multiWeekLive).map(([monday, inv]) => ({
@@ -1399,6 +1404,15 @@ const test = base.extend({
           return weeklyInvoiceResponse();
         },
         generate_trade_invoice: async ({ request }) => {
+          // A rate typed on an assigned job is paid only by an ops-api that
+          // advertises trade_rate_editable. Any other would save the invoice at
+          // its own rate, so the stub refuses rather than pass a figure the
+          // trade would never be paid.
+          const typedAssignedRate = ((request.postDataJSON() || {}).manual_assignments || [])
+            .some((row) => row && row.manually_added === false && row.rate_source === 'client_entered');
+          if (typedAssignedRate && !tradeRateEditable) {
+            return { status: 422, body: { error: 'E2E: this ops-api does not honour a trade-entered rate on an assigned job' } };
+          }
           if (feedScenario === 'trade-invoice-multi-week') {
             const body = request.postDataJSON();
             const weekEnd = addIsoDays(body.week_start, 6);

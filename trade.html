@@ -23513,8 +23513,10 @@
   // ════════════════════════════════════════════════════════════════════════════
   // JOB-CENTRIC INVOICE (cutover path) — one card per whitelisted assignment.
   // Times worked and description stay editable; hours are worked out from the
-  // times. The rate is a box that opens on the trade's usual rate and can be
-  // changed per job; ops-api decides what a changed rate means.
+  // times. An assigned card's rate is the trade's usual rate: read-only until
+  // ops-api says it honours a rate typed on an assigned job
+  // (my_hours.trade_rate_editable), then a box that opens on it and can be
+  // changed per job.
   // ════════════════════════════════════════════════════════════════════════════
 
   function _defaultJobCardWoMode() {
@@ -23595,9 +23597,9 @@
       finish_time: '',
       break_minutes: 0,
       logged_hours: null,
-      // The rate box opens on the trade's usual rate; a rate they change for
-      // this job stays theirs.
-      rate_user_edited: false
+      // The rate the trade typed for this job, null while the box is untouched.
+      // It bills only while ops-api honours it (_assignedRateEditable).
+      typed_rate: null
     }, fields || {});
     // A figure typed before times were required (an older saved draft) is kept
     // only as a reminder; it bills nothing until the times are entered.
@@ -24250,12 +24252,20 @@
     h += '</div>';
     h += '<div class="jct-err" data-cardtimeerr="' + i + '" role="alert"' + (err ? '' : ' hidden') + '>' + esc(err) + '</div>';
     h += '<div class="jct-hint" data-cardtimehint="' + i + '"' + (hint ? '' : ' hidden') + '>' + esc(hint) + '</div>';
-    // The rate is a box like the others: it opens on the trade's usual rate
-    // and they can change it for this job. The description of work sits with it.
+    // The rate sits with the description of work. A searched-in job, and an
+    // assigned job once ops-api honours a typed rate, get a box like the others,
+    // opened on the trade's usual rate. Otherwise the office's rate is read-only.
     h += '<div class="jct jct-rate">';
-    h += '<label class="jct-f"><span>Rate ($/hr)</span>'
-      + '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + i + '" placeholder="0.00" value="' + (Number(rowRate) > 0 ? esc(String(rowRate)) : '') + '"'
-      + ' oninput="setJobCardRate(' + i + ',this.value)" onchange="setJobCardRate(' + i + ',this.value)"></label>';
+    if (c.manually_added || _assignedRateEditable()) {
+      var boxRate = c.manually_added ? Number(rowRate) : Number(c.rate || 0);
+      h += '<label class="jct-f"><span>Rate ($/hr)</span>'
+        + '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + i + '" placeholder="0.00" value="' + (boxRate > 0 ? esc(String(boxRate)) : '') + '"'
+        + ' oninput="setJobCardRate(' + i + ',this.value)" onchange="setJobCardRate(' + i + ',this.value)"></label>';
+    } else {
+      h += '<div class="jct-f"><span>Rate</span>'
+        + '<div class="jct-fixed" data-cardrate-readonly="' + i + '" title="Set by the office">' + (Number(rowRate) > 0 ? '$' + Number(rowRate).toFixed(2) + '/hr' : 'Not set') + '</div>'
+        + '<span>Set by the office</span></div>';
+    }
     h += '<label class="jct-f"><span>Description of work</span>'
       + '<input type="text" data-carddesc="' + i + '" value="' + esc(c.description || '') + '" placeholder="Description of work" maxlength="300"'
       + ' onchange="setJobCardDescription(' + i + ',this.value)"></label>';
@@ -24266,9 +24276,8 @@
   }
   // Said only when the rate in the box is not the trade's usual rate.
   function _jobCardRateNote(c) {
-    var usual = Number((_hoursData && _hoursData.rate) || _tradeRate || 0);
-    if (!c || c.manually_added || !c.rate_user_edited || !(usual > 0) || Number(c.rate) === usual) return '';
-    return 'Your usual rate is $' + usual.toFixed(2) + '. The office checks a changed rate.';
+    if (!c || c.manually_added || !_assignedRateEditable() || !(Number(c.rate) > 0) || c.rate_source !== 'client_entered') return '';
+    return 'Your usual rate is $' + Number(_hoursData.rate).toFixed(2) + '. The office checks a changed rate.';
   }
   // At submit every ticked hours card says what it still needs.
   function _refreshJobCardTimeAtSubmit(idx) {
@@ -24394,22 +24403,40 @@
     _refreshJobCardTime(idx);
     _refreshJobCardLine(idx);
   };
-  // An assigned card's rate box opens on the trade's usual rate (the one the
-  // office holds for them) and follows it until they change it for that job
-  // (Captain 2026-10-13). The app sends the rate left in the box; ops-api
-  // decides what a changed rate means. A searched-in card keeps its own.
+  // ops-api says on my_hours (trade_rate_editable) whether it honours a rate a
+  // trade types on an assigned job. Without that, and with no usual rate on
+  // file, the rate is the office's: read-only, and the only rate billed.
+  function _assignedRateEditable() {
+    var data = _hoursData || {};
+    return data.trade_rate_editable === true && data.rate_resolved !== false && Number(data.rate || 0) > 0;
+  }
+  // An assigned card bills the trade's usual rate (the one the office holds
+  // for them). Only while ops-api honours it does a rate the trade typed for
+  // that job (Captain 2026-10-13) bill instead. A searched-in card keeps its own.
   function _pinAssignedCardRates() {
     var data = _hoursData || {};
     var usualRate = Number(data.rate || _tradeRate || 0);
+    var editable = _assignedRateEditable();
     _jobCards.forEach(function(c) {
       if (!c || c.manually_added) return;
-      if (c.rate_user_edited) {
-        c.rate_source = (usualRate > 0 && Number(c.rate) === usualRate) ? 'server_resolved' : 'client_entered';
-        return;
-      }
-      c.rate = usualRate > 0 ? usualRate : 0;
-      c.rate_source = 'server_resolved';
+      var typed = editable && c.typed_rate != null;
+      c.rate = typed ? (Number(c.typed_rate) || 0) : (usualRate > 0 ? usualRate : 0);
+      c.rate_source = (typed && c.rate !== usualRate) ? 'client_entered' : 'server_resolved';
     });
+  }
+  // False when the card's rate is not the trade's to type.
+  function _setJobCardRate(c, n) {
+    if (c.manually_added) {
+      c.rate = n;
+      c.rate_source = 'client_entered';
+    } else if (_assignedRateEditable()) {
+      c.typed_rate = n;
+      _pinAssignedCardRates();
+    } else {
+      return false;
+    }
+    _markJobCardHoursEdited(c);
+    return true;
   }
 
   function renderJobCardsHtml() {
@@ -24435,12 +24462,12 @@
     }
 
     if (!rateResolved) {
-      html += '<div data-rate-missing style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No usual rate is on file for you yet. Type your rate on each job. The office checks it before payment.</div>';
+      html += '<div data-rate-missing style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No pay rate is set for you yet. Your rate is set by the office: contact them to have it set before you invoice hours on your assigned jobs.</div>';
     }
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
     } else {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">For each job, give the date you worked and your start and finish time. Hours are worked out for you. The rate box opens on your usual rate, and you can change it for a job.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">For each job, give the date you worked and your start and finish time. Hours are worked out for you. ' + (_assignedRateEditable() ? 'The rate box opens on your usual rate, and you can change it for a job.' : 'Your rate is set by the office and shown for reference.') + '</div>';
     }
 
     // Group cards by scheduled_date
@@ -24835,15 +24862,8 @@
         var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
         if (rateEl) {
           var n = rateEl.value === '' ? 0 : parseFloat(rateEl.value);
-          if (!isNaN(n) && n >= 0 && n !== Number(c.rate || 0)) {
-            _markJobCardHoursEdited(c);
-            c.rate_source = 'client_entered';
-            c.rate_user_edited = true;
-            c.rate = n;
-          }
+          if (!isNaN(n) && n >= 0 && n !== Number(c.rate || 0)) _setJobCardRate(c, n);
         }
-        var descEl = document.querySelector('[data-carddesc="' + idx + '"]');
-        if (descEl) c.description = descEl.value || '';
       }
       if (!c.commission_mode) {
         var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
@@ -25172,11 +25192,7 @@
   window.setJobCardRate = function(idx, val) {
     var c = _jobCards[idx]; if (!c) return;
     var n = parseFloat(val);
-    c.rate = (isNaN(n) || n < 0) ? 0 : n;
-    c.rate_user_edited = true;
-    var usual = Number((_hoursData && _hoursData.rate) || _tradeRate || 0);
-    c.rate_source = (!c.manually_added && usual > 0 && c.rate === usual) ? 'server_resolved' : 'client_entered';
-    _markJobCardHoursEdited(c);
+    if (!_setJobCardRate(c, (isNaN(n) || n < 0) ? 0 : n)) return; // assigned-job rates are office only until ops-api honours a typed one
     var noteEl = document.querySelector('[data-cardratenote="' + idx + '"]');
     if (noteEl) { noteEl.textContent = _jobCardRateNote(c); noteEl.hidden = !noteEl.textContent; }
     _refreshJobCardLine(idx);
@@ -25724,6 +25740,7 @@
         var _lbl = _timeCardLabel(c);
         var _noRate = !(Number(c.rate) > 0);
         var _noDesc = c.manually_added && !c.description;
+        if (!c.manually_added && _noRate && !_assignedRateEditable()) return RATE_NOT_SET_MSG;
         if (_noDesc && _noRate) return _lbl + ': add a description and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
         return _lbl + ': enter your rate, or add an amount.';

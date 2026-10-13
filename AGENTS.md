@@ -155,7 +155,9 @@ as "(cancelled|completed visit still holds that date)". Guard:
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 `data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`
-persisted at `localStorage.sw_cal_divs`) is a flat list of independently
+persisted at `localStorage.sw_cal_divs`) is on screen and applied only with
+calendar v3 OFF (v3 is default on, hides the sidebar and filters through its
+own Show / Type row; see the next section). It is a flat list of independently
 toggleable job-type buckets, not a hierarchy — Repair (Captain ruling
 2026-09-16) is its own division alongside Patios/Fencing/Make Safes, never
 folded under Make Safes. Which bucket an event belongs to is decided in ONE
@@ -175,6 +177,61 @@ which `renderScheduleView`'s division filter compares against with
 `f === calDivisionOf(ev)` — the only place that actually drops non-matching
 events; the Crew swimlane view only dims. Guard:
 `tests/e2e/ops-calendar-repair-division.spec.js`.
+
+## Ops Dash calendar v3 look (`ops.html`)
+
+The job-based (Schedule) view's signed-off design is behind
+`window.__SW_CAL_V3_ENABLED`, DEFAULT ON. ONE off switch:
+`localStorage.sw_cal_v3='0'`, or `?calv3=0` for one page load; there is no
+force-on spelling. It is a LOOK, not a second calendar: v3 adds
+classes and markup inside the same `renderScheduleView` bars and cells, so drag,
+resize, the popup and every write path are shared. Flag off must stay
+byte-identical (checked against the default branch when this shipped), so every
+v3 branch sits behind the one `v3` variable and its CSS is scoped to
+`#viewCalendar.cal-v3`; do not style a calendar class outside that scope. A
+bar's `left`/`width` stay plain percentages that match the day columns
+(weighted when v3 narrows weekend columns with nothing booked on them), with no
+`calc()` and no pixel offsets, so the overlap and resize guards keep measuring
+the real box; v3 insets the line with transparent side borders instead.
+Line format: type square, client, job number, staff circles, lock; a job line
+carries no start time (a business line keeps its time) and no readiness dot
+(readiness stays in the tooltip and popup). TWO states
+only (Captain ruling 2026-10-13): placeholder, and client locked in
+(`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
+one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
+repair, family-first through `calDivisionOf`; anything else, such as general or
+miscellaneous, sits with patios); the symbol still tells a make safe from a
+repair. The v3 Type filter and deliveries read that same `calV3Unit`, never
+`calDivisionOf`, so a job cannot vanish under the filter it is coloured for;
+the flag-off sidebar Divisions rule is unchanged. A business line is decided in
+ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
+job-less label row, plus org events. Business lines take the TOP lanes of the
+week and jobs start under them; an org event stretches across its days instead
+of the corner badge, and a meeting on a job is its own purple line, never merged
+into the job's line. The Show / Type focus row (`_calFocus`, `setCalFocus`,
+stored at `sw_cal_focus`) works in BOTH views. Show sets the in-memory
+`_calEventFilters`; a calendar row is let through only by `calEventShown`
+(business lines follow the business filters, only jobs follow Jobs). Type is
+read off `_calFocus` by
+`calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
+with v3 on) and never filters a business line. Neither writes the sidebar's
+storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
+stays its own division (ruling 2026-09-16). Leave, holidays and reminders show under
+Everything and Business. Deliveries are read-only and come from
+`calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
+order, see `// <calendar-delivery-row>`) passed through the Show and Type
+focus; both views use it, and Materials with none in view says "No deliveries
+booked". A delivery takes its colour, job number and address from the job's
+event in view, else from the order's own `job_type`, `job_number` and
+`delivery_address`. Staff circles are first + surname initial from `full_name`
+when the feed sends it, else from a raw user name of two or more words; a
+one-word name shows ONE letter, never two letters that read as initials
+(`list_users` sends no `full_name` today).
+`sw_cal_v3_intro` lands a first-time browser on Schedule + Month ONCE; a spec
+that picks its own view must set it to `'1'` first or its choice is overwritten.
+Search `// <calendar-v3>`. Guard: `tests/e2e/ops-calendar-v3.spec.js`; the
+sidebar Divisions guard (`ops-calendar-repair-division.spec.js`) runs with v3
+off because the sidebar only exists there.
 
 ## Ops Insurance Repairs board (`ops.html`)
 

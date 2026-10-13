@@ -54,6 +54,9 @@ async function stub(page, { detail, workOrderRead }) {
     if (action === 'my_job_work_order') {
       reads.push(url.searchParams.get('job_id'));
       const body = typeof workOrderRead === 'function' ? workOrderRead(url.searchParams.get('job_id')) : workOrderRead;
+      if (body && body.__failStatus) {
+        return route.fulfill({ status: body.__failStatus, contentType: 'application/json', body: JSON.stringify({ error: 'down' }) });
+      }
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     }
     return route.fallback();
@@ -158,6 +161,33 @@ test.describe('Job work order on the trade invoice (preview)', () => {
     const rows = (submit.body.extra_items || []).concat(submit.body.items || []);
     expect(rows.some((r) => r && r.row_type === 'work_order')).toBe(false);
     expect(JSON.stringify(submit.body)).not.toContain('wo_allocated":5');
+  });
+
+  test('a failed refresh keeps the approved work order, so the typed box stays retired', async ({ appPage: page }) => {
+    let failing = false;
+    const reads = await stub(page, {
+      workOrderRead: (jobId) => (failing
+        ? { __failStatus: 500 }
+        : { schema: 'trade-job-work-order.v1', job_id: jobId, work_order: approvedWorkOrder(jobId, { job_number: 'SWF-26767' }), reason: null, can_report_variation: true, my_variations: [] }),
+    });
+    await signIn(page, PERSONAS.installer);
+    await setPreview(page, true);
+    const card = await openInvoice(page);
+    await expect(card.locator('[data-job-wo-invoice-note]')).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Work Order' })).toBeDisabled();
+    const firstReads = reads.length;
+
+    failing = true;
+    // Move the page's clock past the two-minute cache, then repaint the builder.
+    await page.evaluate(() => { const real = Date.now; Date.now = () => real() + 3 * 60 * 1000; });
+    const failed = page.waitForResponse((r) => r.url().includes('action=my_job_work_order') && r.status() === 500);
+    await card.getByRole('button', { name: 'Hours' }).click();
+    await failed;
+    await page.waitForTimeout(300);
+    expect(reads.length).toBeGreaterThan(firstReads);
+    await expect(card.locator('[data-job-wo-invoice-note]')).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Work Order' })).toBeDisabled();
+    await expect(card.locator('[data-cardwoalloc]')).toHaveCount(0);
   });
 
   test('a job with no approved work order keeps the typed Work Order mode', async ({ appPage: page }) => {

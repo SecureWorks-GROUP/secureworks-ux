@@ -13762,11 +13762,11 @@
   }
 
   // The cached my_job_work_order answer for a job (kept while a refresh is
-  // in flight), or null when none has landed. A failed read is never cached
-  // as "no work order".
+  // in flight and when a refresh fails), or null when none has landed. A
+  // failed read is never cached as "no work order".
   function tradeJobWoRead(jobId) {
     var e = _tradeJobWo[jobId];
-    return e && e.state !== 'failed' ? e.read : null;
+    return e ? e.read : null;
   }
 
   // The approved work order on a job, from the cache only.
@@ -13788,8 +13788,9 @@
       _tradeJobWo[jobId] = { state: 'ready', read: res || { work_order: null }, at: Date.now() };
       if (onDone) onDone(JSON.stringify(_tradeJobWo[jobId].read) !== before);
     }).catch(function() {
-      _tradeJobWo[jobId] = { state: 'failed', read: null, at: Date.now() };
-      if (onDone) onDone(before !== null);
+      var kept = e ? e.read : null;
+      _tradeJobWo[jobId] = { state: kept ? 'ready' : 'failed', read: kept, at: Date.now() };
+      if (onDone) onDone(false);
     });
   }
 

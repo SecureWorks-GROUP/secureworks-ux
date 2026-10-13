@@ -7520,6 +7520,7 @@
   function resetInvoiceSession() {
     _invoiceAuthGen++;
     _hoursData = null;
+    _invoiceDeductionWeekAnswer = null;
     _tradeRate = null;
     _invWeekCollision = null;
     _invoicedWeeks = {};
@@ -22030,6 +22031,7 @@
       }
       _invoiceBuilderOpen = true;
       renderInvoiceBuilder();
+      if (inv.week_start) _readDraftWeekDeduction();
     }).catch(function(err) {
       if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       toast('Failed to load draft: ' + friendlyError(err), true);
@@ -22419,8 +22421,10 @@
       // owed count them. Say exactly that rather than let Paid look bigger
       // than Earned for no reason.
       if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and still owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
-      // No figure above takes a weekly deduction off, so a period whose
-      // invoices carry one names what came off them. [trade-recurring-deduction]
+      // The server's Paid to you and Still owed are already reduced by a
+      // weekly deduction; only "You get", worked out here from the super
+      // split, is not. So a period whose invoices carry one names what came
+      // off them. [trade-recurring-deduction]
       if (opts.deductions && opts.deductions.length) h += '<div class="mm-note" data-mm-period-deduction>' + esc(opts.deductions.map(deductionLabel).join(', ')) + ' taken off what you were paid.</div>';
       h += '</div>';
       return h;
@@ -22637,19 +22641,27 @@
     return _invoiceSubmitStatusMessage(result, 'Invoice generated') + ' — ' + facts.join(', ');
   }
 
+  // The newest answer about a week from outside the hours on hand: the
+  // my_hours read for a saved draft's own week, or a draft save. Stamped
+  // with the week it was asked about.
+  var _invoiceDeductionWeekAnswer = null;
+
   // What comes off the week this invoice is for, as my_hours (or the last
   // draft save) named it. Null when the server names nothing or names another
   // week. my_hours works its outcome out from clocked hours and a draft save
   // from the typed extras alone, neither from the whole invoice, so only the
   // label and amount are read here: never a reason it would not be taken.
   // That reason comes from the submit response. [trade-recurring-deduction]
-  function _hoursDeductionWeek() {
-    var wk = MyMoneyCore.deductionWeekOf(_hoursData);
+  function _deductionWeekForBuilder(source) {
+    var wk = MyMoneyCore.deductionWeekOf(source);
     if (!wk) return null;
-    var week = wk.week_start || String((_hoursData && _hoursData.week_start) || '').slice(0, 10);
+    var week = wk.week_start || String((source && source.week_start) || '').slice(0, 10);
     if (week && _hoursWeekStart && week !== _hoursWeekStart) return null;
     wk.note = '';
     return wk;
+  }
+  function _hoursDeductionWeek() {
+    return _deductionWeekForBuilder(_invoiceDeductionWeekAnswer) || _deductionWeekForBuilder(_hoursData);
   }
 
   // An expense invoice has no week and so carries no deduction.
@@ -22670,10 +22682,21 @@
   }
 
   // Keep the newest answer about the week: a draft save names it too.
-  function _noteInvoiceDeductionWeek(res) {
-    if (!res || !MyMoneyCore.deductionWeekOf(res) || !_hoursData) return;
-    _hoursData.recurring_deduction_week = res.recurring_deduction_week;
+  function _noteInvoiceDeductionWeek(res, weekStart) {
+    if (!MyMoneyCore.deductionWeekOf(res)) return;
+    _invoiceDeductionWeekAnswer = { week_start: String(weekStart || '').slice(0, 10), recurring_deduction_week: res.recurring_deduction_week };
     _updateInvoiceMoneySummary();
+  }
+
+  // A saved draft is for its own week, which the hours on hand may not
+  // cover: ask my_hours what comes off that week.
+  function _readDraftWeekDeduction() {
+    var weekStart = _hoursWeekStart;
+    var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
+    api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
+      _noteInvoiceDeductionWeek(data, weekStart);
+    }).catch(function() {});
   }
 
   // Builder-only estimate. The browser never sends these calculated figures;
@@ -26822,7 +26845,7 @@
         throw _ambiguousInvoiceResponseError('Draft save did not return a draft id', { draft_id: capturedId });
       }
       _draftSaveUnresolved = false;
-      _noteInvoiceDeductionWeek(res);
+      _noteInvoiceDeductionWeek(res, draftBody.week_start);
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;

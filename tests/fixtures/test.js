@@ -235,6 +235,53 @@ const test = base.extend({
       week_ending: addIsoDays(weekStart, -1),
       ...deductionInvoiceMoney(false)
     };
+    // A draft saved for LAST week and opened this week. The rule took $100
+    // that week and takes $200 from this one, so my_hours answers by week.
+    const deductionDraftScenario = feedScenario === 'trade-invoice-recurring-deduction-saved-draft';
+    const deductionDraftWeek = addIsoDays(weekStart, -7);
+    const deductionDraftHours = (weekEnding) => {
+      const monday = addIsoDays(weekEnding, -6);
+      return {
+        week_start: monday,
+        week_ending: weekEnding,
+        assignments: [],
+        rate: 50,
+        rate_resolved: true,
+        total_hours: 0,
+        already_submitted: false,
+        super_rate: 0.12,
+        gst_on: false,
+        recurring_deduction_week: {
+          label: 'Ute hire',
+          amount: monday === deductionDraftWeek ? 100 : 200,
+          week_start: monday,
+          applied: true,
+          outcome: 'applied',
+          note: null
+        }
+      };
+    };
+    const deductionSavedDraft = {
+      id: 'invoice-ute-draft',
+      invoice_number: 'SW-INV-UTE-DRAFT',
+      status: 'draft',
+      week_start: deductionDraftWeek,
+      week_end: addIsoDays(weekStart, -1),
+      week_ending: addIsoDays(weekStart, -1),
+      gst_on: false
+    };
+    const deductionSavedDraftLines = [{
+      id: 'draft-line-ute',
+      work_date: addIsoDays(deductionDraftWeek, 1),
+      start_time: '07:00',
+      finish_time: '15:00',
+      break_minutes: 0,
+      description: 'Yard clean up',
+      line_type: 'extra',
+      quantity: 8,
+      unit_rate: 50,
+      line_total_ex: 400
+    }];
     const perMetreInvoiceHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -1096,7 +1143,9 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
+        my_hours: deductionDraftScenario
+          ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
+          : withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
           'trade-invoice-per-metre-gst',
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
@@ -1244,6 +1293,8 @@ const test = base.extend({
           })
           : weeklyInvoiceScenarios.includes(feedScenario) && weeklyInvoiceDraftSaved
           ? { invoices: [weeklyInvoiceResponse()] }
+          : deductionDraftScenario
+          ? { invoices: [deductionSavedDraft] }
           : DEDUCTION_SCENARIOS.includes(feedScenario)
           ? { invoices: deductionTaken ? [deductionPriorInvoice] : [] }
           : feedScenario === 'trade-invoice-history-money-truth'
@@ -1286,6 +1337,9 @@ const test = base.extend({
               return { invoice };
             }
             return { invoice: weeklyInvoiceResponse() };
+          }
+          if (deductionDraftScenario) {
+            return { invoice: { ...deductionSavedDraft, lines: deductionSavedDraftLines } };
           }
           if (deductionTaken) {
             return { invoice: { ...deductionPriorInvoice, lines: deductionInvoiceLines } };

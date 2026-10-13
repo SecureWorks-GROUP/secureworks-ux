@@ -307,7 +307,9 @@ context._hoursData = { week_start: '2026-10-12', recurring_deduction_week: below
 context._hoursWeekStart = '2026-10-12';
 context._invoiceBuilderMode = 'weekly';
 context._updateInvoiceMoneySummary = function () {};
+context._invoiceDeductionWeekAnswer = null;
 vm.runInContext([
+  extractFunction('_deductionWeekForBuilder'),
   extractFunction('_hoursDeductionWeek'),
   extractFunction('_invoiceDeductionWeek'),
   extractFunction('_invoiceDeductionSentence'),
@@ -338,6 +340,22 @@ check('a draft save that names no deduction leaves what my_hours named', saysCom
 context._invoiceBuilderMode = 'expense';
 check('an expense invoice has no week and shows no deduction', context._invoiceDeductionWeek() === null);
 context._invoiceBuilderMode = 'weekly';
+
+// A saved draft of 12 Oct opened in the week of 19 Oct: the hours on hand are
+// for the later week ($200), or are not loaded at all. What my_hours names for
+// the draft's own week is kept and shown; the later week's amount never is.
+context._invoiceDeductionWeekAnswer = null;
+context._hoursData = { week_start: '2026-10-19', recurring_deduction_week: { label: 'Ute hire', amount: 200, week_start: '2026-10-19', applied: true, outcome: 'applied', note: null } };
+check('hours on hand for a later week show nothing on the draft week', context._invoiceDeductionWeek() === null);
+context._noteInvoiceDeductionWeek({ week_start: '2026-10-12', recurring_deduction_week: belowDeduction }, '2026-10-12');
+check('the answer for the draft week shows what comes off it, never a not-taken reason', saysComesOffOnly(builderEstimate(400)) && builderEstimate(400).indexOf('$200.00') === -1);
+context._hoursData = null;
+check('a kept answer still shows with no hours loaded', context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === COMES_OFF_CONFIRM);
+context._noteInvoiceDeductionWeek({ ok: true, draft_id: 'd2', recurring_deduction_week: { label: 'Ute hire', amount: 100, applied: true, outcome: 'applied', note: null } }, '2026-10-12');
+check('a draft save with no hours loaded is kept for the week it was saved under', saysComesOffOnly(builderEstimate(400)));
+context._hoursWeekStart = '2026-10-19';
+check('an answer kept for one week shows nothing on another', context._invoiceDeductionWeek() === null);
+context._hoursWeekStart = '2026-10-12';
 
 const labelHtml = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: { label: 'Ute <hire> & trailer', amount: 100 } })));
 check('a deduction label is escaped on the invoice', labelHtml.indexOf('Ute &lt;hire&gt; &amp; trailer') !== -1 && labelHtml.indexOf('<hire>') === -1);

@@ -176,6 +176,32 @@ test.describe('a week that carries the deduction', () => {
   });
 });
 
+// A saved draft is for its own week. The Pay hub loaded this week's hours
+// ($200 comes off this week); the draft is last week's, when $100 came off.
+test.describe('a saved draft of another week', () => {
+  test.use({ persona: 'installer', feedScenario: 'trade-invoice-recurring-deduction-saved-draft', appWeekDay: 6, ...MOBILE });
+
+  test('opening it shows what comes off the draft\'s own week, in the estimate and the submit confirm', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    await page.locator('.inv-history-item').filter({ hasText: 'SW-INV-UTE-DRAFT' }).click();
+
+    const preview = page.locator('[data-invoice-money-summary]');
+    await expect(preview.locator('[data-invoice-deduction-week]')).toHaveText('Ute hire (comes off this week)−$100.00');
+    await expect(preview.locator('[data-invoice-deduction-note]')).toHaveText(COMES_OFF_NOTE('$100.00'));
+    await expect(preview).not.toContainText('$200.00');
+    await expect(preview).not.toContainText('not taken');
+    await expect(preview).not.toContainText('You get paid');
+
+    await page.locator('#invSubmitBtn').click();
+    const confirm = await page.locator('#confirmMsg').innerText();
+    expect(confirm).toContain(COMES_OFF_CONFIRM('$100.00'));
+    expect(confirm).not.toContain('$200.00');
+    await page.locator('#confirmCancel').click();
+    expect(feedRequests.filter((entry) => entry.method !== 'GET')).toEqual([]);
+  });
+});
+
 // my_hours works its outcome out from clocked hours, not from the hours he
 // types on the invoice, so its "not taken" reason never reaches the screen
 // before submit. Only the submit response, worked out from the whole invoice,

@@ -22637,9 +22637,6 @@
     return _invoiceSubmitStatusMessage(result, 'Invoice generated') + ' — ' + facts.join(', ');
   }
 
-  // Builder-only estimate. The browser never sends these calculated figures;
-  // generate/submit requests send line inputs + gst_on and the backend persists
-  // the authoritative gross/super/net amounts used by summaries and PDFs.
   // What comes off the week this invoice is for, as my_hours (or the last
   // draft save) named it. Null when the server names nothing or names another
   // week. my_hours works its outcome out from clocked hours and a draft save
@@ -22679,6 +22676,9 @@
     _updateInvoiceMoneySummary();
   }
 
+  // Builder-only estimate. The browser never sends these calculated figures;
+  // generate/submit requests send line inputs + gst_on and the backend persists
+  // the authoritative gross/super/net amounts used by summaries and PDFs.
   function _invoicePreviewMoney(gross) {
     gross = Math.round((Number(gross) || 0) * 100) / 100;
     var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);

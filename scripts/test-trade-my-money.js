@@ -220,38 +220,53 @@ check('my money row with no deduction is unchanged',
 const uteRowHtml = M.invoiceRowHTML(uteMoneyRow);
 check('my money row names the deduction beside the reduced payable', uteRowHtml.indexOf('<div class="mm-inv-amt">$316.00</div><div class="mm-inv-sub" data-mm-deduction>Ute hire −$100.00</div>') !== -1);
 
-// My money period cards. The server's period `payable` is the cash figure,
-// already less any deduction. Only a period holding an invoice that carries a
-// deduction reads it; every other period is worked out as it always was.
-const uteWeek = { id: 'inv-ute-week', invoice_number: 'SW-INV-2', week_end: '2026-10-18', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1780, trade_payable: 1780, recurring_deduction: { label: 'Ute hire', amount: 100 } };
-const septWeek = { id: 'inv-sept', invoice_number: 'SW-INV-0', week_end: '2026-09-20', bucket: '2026-09', counts: true, status: 'paid', paid: true, payable: 1880, trade_payable: 1880 };
-const octTotals = { invoices: 1, gross_earned: 2000, super_amount: 240, gst: 0, payable: 1780, paid_total: 0, outstanding: 1780, figures_incomplete: 0 };
-const septTotals = { invoices: 1, gross_earned: 2000, super_amount: 240, gst: 0, payable: 1880, paid_total: 1880, outstanding: 0, figures_incomplete: 0 };
-const bothTotals = { invoices: 2, gross_earned: 4000, super_amount: 480, gst: 0, payable: 3660, paid_total: 1880, outstanding: 1780, figures_incomplete: 0 };
-const cardOf = (html, key) => { const from = html.indexOf('data-mm-period="' + key + '"'); return html.slice(from, html.indexOf('</div></div>', html.indexOf('mm-sub', from))); };
-const uteView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: Object.assign({ month: '2026-10', label: 'Oct 2026' }, octTotals), fytd: bothTotals, all_time: bothTotals, months: [], invoices: [uteWeek, septWeek] });
-check('a month holding a deduction invoice pays the server period figure', cardOf(uteView, 'month').indexOf('You get $1,780.00') !== -1 && cardOf(uteView, 'month').indexOf('$1,880.00') === -1);
-check('the year to date and all time cards holding it pay the server period figure', cardOf(uteView, 'fytd').indexOf('You get $3,660.00') !== -1 && cardOf(uteView, 'all').indexOf('You get $3,660.00') !== -1);
-const novView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: Object.assign({ month: '2026-09', label: 'Sep 2026' }, septTotals), fytd: bothTotals, all_time: bothTotals, months: [], invoices: [uteWeek, septWeek] });
-check('a month with no deduction invoice is worked out as before, beside a year that holds one', cardOf(novView, 'month').indexOf('You get $1,880.00') !== -1 && cardOf(novView, 'fytd').indexOf('You get $3,660.00') !== -1);
-const lastFyView = M.viewHTML({ fy_label: 'FY 2027/28', fy_start: '2027-07-01', month: Object.assign({ month: '2027-07', label: 'Jul 2027' }, septTotals), fytd: septTotals, all_time: bothTotals, months: [], invoices: [uteWeek, septWeek] });
-check('a financial year that starts after the deduction invoice is worked out as before', cardOf(lastFyView, 'fytd').indexOf('You get $1,880.00') !== -1 && cardOf(lastFyView, 'all').indexOf('You get $3,660.00') !== -1);
-const voidedView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: Object.assign({ month: '2026-10', label: 'Oct 2026' }, septTotals, { payable: 1999 }), fytd: septTotals, all_time: septTotals, months: [], invoices: [Object.assign({}, uteWeek, { counts: false }), septWeek] });
-check('a voided deduction invoice does not change its period card', cardOf(voidedView, 'month').indexOf('You get $1,880.00') !== -1);
-// A GST-registered trade with no deduction: the card is the string it was on
-// main, GST named beside a "You get" that leaves it out.
-const gstTotals = { invoices: 1, gross_earned: 1000, super_amount: 120, gst: 94, payable: 1034, paid_total: 0, outstanding: 1034, figures_incomplete: 0 };
-const plainView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: Object.assign({ month: '2026-10', label: 'Oct 2026' }, gstTotals), fytd: gstTotals, all_time: gstTotals, months: [], invoices: [{ id: 'inv-gst', week_end: '2026-10-18', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1034, trade_payable: 1034 }] });
-check('a period with no deduction keeps the card exactly as it was',
-  plainView.indexOf(M.periodHTML('Oct 2026', Object.assign({ month: '2026-10', label: 'Oct 2026' }, gstTotals), { key: 'month' })) !== -1
-  && cardOf(plainView, 'month').indexOf('<div class="mm-sub">Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00 &middot; GST $94.00 &middot; You get $940.00') !== -1
-  && cardOf(plainView, 'fytd').indexOf('You get $940.00') !== -1 && cardOf(plainView, 'all').indexOf('You get $940.00') !== -1);
+// My money period cards. Every figure on a card is worked out as it was before
+// deductions existed, for every trade and every period. A period whose counted
+// invoices carry a weekly deduction gains one line under them: the label and
+// the total of the amounts the server sent on those rows.
+const cardOf = (html, key) => { const at = html.indexOf('data-mm-period="' + key + '"'); return html.slice(html.lastIndexOf('<div class="mm-card"', at), html.indexOf('<div class="mm-card"', at)); };
+const uteWeek = { id: 'inv-ute-1', invoice_number: 'SW-INV-9', week_end: '2026-10-18', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1780, trade_payable: 1780, recurring_deduction: { label: 'Ute hire', amount: 100 } };
+const uteWeek2 = { id: 'inv-ute-2', invoice_number: 'SW-INV-10', week_end: '2026-10-25', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1680, trade_payable: 1680, recurring_deduction: { label: 'Ute hire', amount: 200 } };
+const splitWeek = { id: 'inv-split', invoice_number: 'SW-INV-8', week_end: '2026-09-20', bucket: '2026-09', counts: true, status: 'paid', paid: true, payable: 1880, trade_payable: 1880 };
+const preSplit = (n) => ({ id: 'inv-old-' + n, invoice_number: 'SW-INV-' + n, week_end: '2026-08-0' + n, bucket: '2026-08', counts: true, status: 'paid', paid: true, payable: 2000, figures_ok: false });
+// Year to date: two older invoices with no super split, one split week, then
+// one $2,000 week with $100 Ute hire.
+const ytdTotals = { invoices: 4, gross_earned: 4000, super_amount: 480, gst: 0, payable: 7660, paid_total: 5880, outstanding: 1780, figures_incomplete: 2 };
+const octTotals = { month: '2026-10', label: 'Oct 2026', invoices: 1, gross_earned: 2000, super_amount: 240, gst: 0, payable: 1780, paid_total: 0, outstanding: 1780, figures_incomplete: 0 };
+const ytdRows = [uteWeek, splitWeek, preSplit(1), preSplit(2)];
+const ytdRes = { fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: octTotals, fytd: ytdTotals, all_time: ytdTotals, months: [], invoices: ytdRows };
+const ytdView = M.viewHTML(ytdRes);
+const NOTE = (text) => '<div class="mm-note" data-mm-period-deduction>' + text + ' taken off what you were paid.</div>';
+const withoutNote = (card) => card.replace(/<div class="mm-note" data-mm-period-deduction>[^<]*<\/div>/, '');
+const ytdCard = cardOf(ytdView, 'fytd');
+check('a year holding older invoices and one deduction week keeps Earned and You get as they were',
+  ytdCard.indexOf('<div class="mm-stat-v">$4,000.00</div><div class="mm-stat-l">Earned</div>') !== -1 && ytdCard.indexOf('You get $3,760.00') !== -1 && ytdCard.indexOf('$7,660.00') === -1);
+check('that year names the one amount taken off, under the card figures', ytdCard.indexOf(NOTE('Ute hire −$100.00')) !== -1 && ytdCard.indexOf('data-mm-incomplete') < ytdCard.indexOf('data-mm-period-deduction'));
+check('the line is the only thing a deduction adds to a card',
+  withoutNote(ytdCard) === cardOf(M.viewHTML(Object.assign({}, ytdRes, { invoices: [Object.assign({}, uteWeek, { recurring_deduction: undefined }), splitWeek, preSplit(1), preSplit(2)] })), 'fytd'));
+check('the month and all time cards holding the week name it too', cardOf(ytdView, 'month').indexOf(NOTE('Ute hire −$100.00')) !== -1 && cardOf(ytdView, 'month').indexOf('You get $1,880.00') !== -1 && cardOf(ytdView, 'all').indexOf(NOTE('Ute hire −$100.00')) !== -1);
+const twoWeeks = M.viewHTML(Object.assign({}, ytdRes, { invoices: [uteWeek, uteWeek2, splitWeek] }));
+check('two deduction weeks in a period show one total', cardOf(twoWeeks, 'month').indexOf(NOTE('Ute hire −$300.00')) !== -1);
+const septView = M.viewHTML(Object.assign({}, ytdRes, { month: Object.assign({}, octTotals, { month: '2026-09', label: 'Sep 2026' }) }));
+check('a month with no deduction invoice has no line, beside a year that has one', cardOf(septView, 'month').indexOf('data-mm-period-deduction') === -1 && cardOf(septView, 'fytd').indexOf(NOTE('Ute hire −$100.00')) !== -1);
+const nextFy = M.viewHTML(Object.assign({}, ytdRes, { fy_label: 'FY 2027/28', fy_start: '2027-07-01', month: Object.assign({}, octTotals, { month: '2027-07', label: 'Jul 2027' }) }));
+check('a financial year that starts after the deduction week has no line; all time still has', cardOf(nextFy, 'fytd').indexOf('data-mm-period-deduction') === -1 && cardOf(nextFy, 'month').indexOf('data-mm-period-deduction') === -1 && cardOf(nextFy, 'all').indexOf(NOTE('Ute hire −$100.00')) !== -1);
+const voidedView = M.viewHTML(Object.assign({}, ytdRes, { invoices: [Object.assign({}, uteWeek, { counts: false }), splitWeek] }));
+check('a voided deduction invoice adds no line', voidedView.indexOf('data-mm-period-deduction') === -1);
+// A trade with no deduction: every card is the string it was on main.
+const gstTotals = { month: '2026-10', label: 'Oct 2026', invoices: 1, gross_earned: 1000, super_amount: 120, gst: 94, payable: 1034, paid_total: 0, outstanding: 1034, figures_incomplete: 0 };
+const plainView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: gstTotals, fytd: gstTotals, all_time: gstTotals, months: [], invoices: [{ id: 'inv-gst', week_end: '2026-10-18', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1034, trade_payable: 1034 }] });
+check('a trade with no deduction keeps every period card exactly as it was',
+  plainView.indexOf('data-mm-period-deduction') === -1
+  && cardOf(plainView, 'month') === '<div class="mm-card" data-mm-period="month"><div class="mm-card-t">Oct 2026<span class="mm-card-n">1 invoice</span></div><div class="mm-stats"><div class="mm-stat earned"><div class="mm-stat-v">$1,000.00</div><div class="mm-stat-l">Earned</div></div><div class="mm-stat paid"><div class="mm-stat-v">$0.00</div><div class="mm-stat-l">Paid to you</div></div><div class="mm-stat owed"><div class="mm-stat-v">$1,034.00</div><div class="mm-stat-l">Still owed</div></div></div><div class="mm-sub">Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00 &middot; GST $94.00 &middot; You get $940.00</div></div>');
 
 // Persisted invoice money and the Invoice history row.
 const uteMoney = context._invoicePersistedMoney(uteInvoice);
 check('persisted money carries the deduction and stays complete', uteMoney.complete === true && uteMoney.deduction.paid === 316 && uteMoney.amount_payable === 376 && uteMoney.total_inc === 440);
 check('persisted money reads the GST figure under the name ops-api sends', uteMoney.gst_on === true && uteMoney.gst_amount === 40);
-const plainMoney = context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: undefined, payable_before_deduction: undefined, trade_payable: 416 }));
+const gstNoDeduction = context._invoicePersistedMoney({ gross_earned: 400, super_rate: 0.12, super_amount: 48, net_pay: 376, gst_on: true, gst: 40, total_inc: 440, trade_payable: 416 });
+check('a GST-on invoice with no deduction is read as it was: `gst` alone leaves it incomplete', gstNoDeduction.complete === false && gstNoDeduction.gst_amount === null && !('deduction' in gstNoDeduction));
+const plainMoney = context._invoicePersistedMoney(Object.assign({}, uteInvoice, { gst: undefined, gst_amount: 40, recurring_deduction: undefined, payable_before_deduction: undefined, trade_payable: 416 }));
 check('persisted money without a deduction has no deduction keys', plainMoney.complete === true && !('deduction' in plainMoney) && !('deduction_week' in plainMoney));
 const noPaid = context._invoicePersistedMoney(Object.assign({}, uteInvoice, { trade_payable: undefined }));
 check('a deduction without the server paid figure is not shown as complete money', noPaid.complete === false);

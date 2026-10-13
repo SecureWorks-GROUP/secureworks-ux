@@ -235,25 +235,6 @@ const test = base.extend({
       week_ending: addIsoDays(weekStart, -1),
       ...deductionInvoiceMoney(false)
     };
-    // Last week's invoice of a GST-registered trade with no deduction, as
-    // ops-api stores and returns it: the GST figure is named `gst`.
-    const gstPriorInvoice = {
-      id: 'invoice-gst-last-week',
-      invoice_number: 'SW-INV-GST-PREV',
-      status: 'pushed_to_xero',
-      xero_bill_id: 'xero-gst-prev',
-      week_start: addIsoDays(weekStart, -7),
-      week_end: addIsoDays(weekStart, -1),
-      week_ending: addIsoDays(weekStart, -1),
-      gross_earned: 400,
-      super_rate: 0.12,
-      super_amount: 48,
-      net_pay: 376,
-      gst_on: true,
-      gst: 40,
-      total_inc: 440,
-      trade_payable: 416
-    };
     const perMetreInvoiceHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -1265,8 +1246,6 @@ const test = base.extend({
           ? { invoices: [weeklyInvoiceResponse()] }
           : DEDUCTION_SCENARIOS.includes(feedScenario)
           ? { invoices: deductionTaken ? [deductionPriorInvoice] : [] }
-          : feedScenario === 'trade-invoice-super-gst-payable'
-          ? { invoices: [gstPriorInvoice] }
           : feedScenario === 'trade-invoice-history-money-truth'
           ? {
             invoices: [
@@ -1310,9 +1289,6 @@ const test = base.extend({
           }
           if (deductionTaken) {
             return { invoice: { ...deductionPriorInvoice, lines: deductionInvoiceLines } };
-          }
-          if (feedScenario === 'trade-invoice-super-gst-payable') {
-            return { invoice: { ...gstPriorInvoice, lines: deductionInvoiceLines } };
           }
           if (feedScenario !== 'trade-invoice-history-money-truth') {
             return { status: 409, body: { error: 'Invoice detail fixture is not enabled' } };
@@ -1713,7 +1689,32 @@ const test = base.extend({
               pending_ops_review: true
             };
           }
-          if (feedScenario === 'trade-invoice-super-gst' || feedScenario === 'trade-invoice-super-gst-payable') {
+          if (feedScenario === 'trade-invoice-super-gst-payable') {
+            // Today's server for a trade with no deduction, 8 hours at $50, in
+            // the figures ops-api computes: GST is 10% of gross and is named
+            // `gst`, total_inc is gross plus GST, trade_payable is net pay
+            // plus GST, and there is no recurring_deduction key at all.
+            const gst = body.gst_on === true ? 40 : 0;
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-SUPER-GST',
+              xero_bill_id: 'xero-e2e-super-gst',
+              gross_earned: 400,
+              super_rate: 0.12,
+              super_amount: 48,
+              net_pay: 376,
+              amount_payable: 376,
+              worker_withhold: 24,
+              company_contribution: 24,
+              gst_on: body.gst_on === true,
+              gst,
+              total_inc: 400 + gst,
+              trade_payable: 376 + gst,
+              lines: deductionInvoiceLines,
+              pending_ops_review: true
+            };
+          }
+          if (feedScenario === 'trade-invoice-super-gst') {
             if (body.gst_on !== true) {
               return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
             }
@@ -1729,11 +1730,8 @@ const test = base.extend({
               super_amount: 32.64,
               net_pay: 239.36,
               gst_on: true,
+              gst_amount: 23.94,
               total_inc: 263.30,
-              // Today's server names the GST figure `gst` and always answers
-              // trade_payable; a trade with no deduction gets no
-              // recurring_deduction key at all.
-              ...(feedScenario === 'trade-invoice-super-gst-payable' ? { gst: 23.94, trade_payable: 263.30 } : { gst_amount: 23.94 }),
               lines: [{
                 id: 'persisted-line-e2e',
                 line_date: addIsoDays(weekStart, 1),

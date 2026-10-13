@@ -254,59 +254,47 @@ const takenEstimate = context._invoiceMoneySummaryHtml(Object.assign({}, estimat
 check('a deduction another invoice already took shows the reason and no "comes off" row', takenEstimate.indexOf('data-invoice-deduction-week') === -1 && takenEstimate.indexOf('Ute hire $100.00 was already taken on SW-INV-1 this week.') !== -1 && takenEstimate.indexOf('<span>You get paid</span><span>$376.00</span>') !== -1);
 
 // What the Weekly Invoice says before submit. my_hours works its outcome out
-// from clocked hours, not from the hours on the invoice, so its "not taken"
-// reason never reaches the screen; a draft save's reason does, for as long as
-// the builder still shows that draft.
+// from clocked hours and a draft save from the typed extras alone, neither from
+// the whole invoice, so only the label and amount are read from them: a "not
+// taken" reason reaches the screen from the submit response and nowhere else.
 const NOT_TAKEN = 'Ute hire $100.00 NOT taken: the amount payable on this invoice ($47.00) is less than the deduction. Nothing was taken off.';
-const clockedPreview = { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: false, outcome: 'payable_below_deduction', note: NOT_TAKEN };
-context._hoursData = { week_start: '2026-10-12', recurring_deduction_week: clockedPreview };
+const belowDeduction = { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: false, outcome: 'payable_below_deduction', note: NOT_TAKEN };
+const COMES_OFF_CONFIRM = '\n\nUte hire −$100.00 comes off what you are paid for this week. It is applied when you submit.';
+context._hoursData = { week_start: '2026-10-12', recurring_deduction_week: belowDeduction };
 context._hoursWeekStart = '2026-10-12';
 context._invoiceBuilderMode = 'weekly';
-context._shownGross = 1900;
-context._currentInvoiceGross = function () { return context._shownGross; };
 context._updateInvoiceMoneySummary = function () {};
 vm.runInContext([
   extractFunction('_hoursDeductionWeek'),
-  extractFunction('_invoiceRoundedGross'),
-  extractFunction('_noteInvoiceDeductionWeek'),
-  extractFunction('_invoiceDeductionWeek(gross)'),
+  extractFunction('_invoiceDeductionWeek'),
   extractFunction('_invoiceDeductionSentence'),
-  extractFunction('_invoiceDeductionConfirmLine')
+  extractFunction('_invoiceDeductionConfirmLine'),
+  extractFunction('_noteInvoiceDeductionWeek')
 ].join('\n'), context);
-const builderEstimate = (gross) => context._invoiceMoneySummaryHtml(Object.assign({}, estimate, { gross_earned: gross, deduction_week: context._invoiceDeductionWeek(gross) }), { gstSwitch: true });
-const typed38 = builderEstimate(1900);
-check('1 hour clocked, 38 typed: the estimate says the deduction comes off and never that it is not taken',
-  typed38.indexOf('<span>Ute hire (comes off this week)</span><span>−$100.00</span>') !== -1 && typed38.indexOf('It is applied when you submit.') !== -1 && typed38.indexOf('NOT taken') === -1 && typed38.indexOf('Nothing was taken off') === -1);
-check('1 hour clocked, 38 typed: the submit confirm says it comes off at submit',
-  context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === '\n\nUte hire −$100.00 comes off what you are paid for this week. It is applied when you submit.');
+const builderEstimate = (gross) => context._invoiceMoneySummaryHtml(Object.assign({}, estimate, { gross_earned: gross, deduction_week: context._invoiceDeductionWeek() }), { gstSwitch: true });
+const saysComesOffOnly = (html) => html.indexOf('<span>Ute hire (comes off this week)</span><span>−$100.00</span>') !== -1 && html.indexOf('It is applied when you submit.') !== -1 && html.indexOf('NOT taken') === -1 && html.indexOf('Nothing was taken off') === -1;
+check('1 hour clocked, 38 typed: the estimate says the deduction comes off and never that it is not taken', saysComesOffOnly(builderEstimate(1900)));
+check('1 hour clocked, 38 typed: the submit confirm says it comes off at submit', context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === COMES_OFF_CONFIRM);
 context._hoursData.recurring_deduction_week = { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: false, outcome: 'already_taken', note: 'Ute hire $100.00 was already taken on SW-INV-1 this week.' };
 const previewTaken = builderEstimate(1900);
 check('a preview that says another invoice took it claims nothing either way',
   previewTaken.indexOf('deduction') === -1 && previewTaken.indexOf('Ute hire') === -1 && previewTaken.indexOf('<span>You get paid</span>') !== -1 && context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === '');
-context._hoursData.recurring_deduction_week = clockedPreview;
+context._hoursData.recurring_deduction_week = belowDeduction;
 context._hoursWeekStart = '2026-10-19';
-check('a preview for another week shows nothing', context._invoiceDeductionWeek(1900) === null);
+check('a preview for another week shows nothing', context._invoiceDeductionWeek() === null);
 context._hoursWeekStart = '2026-10-12';
 
-context._shownGross = 50;
-context._noteInvoiceDeductionWeek({ recurring_deduction_week: clockedPreview }, { week_start: '2026-10-12', gross: 50, gst_on: false });
-const savedDraft = builderEstimate(50);
-check('a draft save reason is shown, alone, for the draft that was saved',
-  savedDraft.indexOf(NOT_TAKEN) !== -1 && savedDraft.indexOf('data-invoice-deduction-week') === -1 && savedDraft.indexOf('<span>You get paid</span>') !== -1);
-check('the submit confirm for that saved draft carries the server reason', context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === '\n\n' + NOT_TAKEN);
-context._shownGross = 1900;
-const editedAfterSave = builderEstimate(1900);
-check('hours typed after the draft save drop its reason', editedAfterSave.indexOf('NOT taken') === -1 && editedAfterSave.indexOf('data-invoice-deduction-week') !== -1 && context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()).indexOf('NOT taken') === -1);
-context._shownGross = 50;
-context._invGst = true;
-check('a GST change after the draft save drops its reason', context._invoiceDeductionWeek(50).note === '');
-context._invGst = false;
-check('the draft save reason stands again when the builder is back on that draft', context._invoiceDeductionWeek(50).note === NOT_TAKEN);
+// 38 clocked hours and one $50 extra: a draft save sees only the extra and
+// answers "not taken", while submit takes the deduction off the whole invoice.
+context._hoursData.recurring_deduction_week = { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: true, outcome: 'applied', note: null };
+context._noteInvoiceDeductionWeek({ ok: true, draft_id: 'd1', recurring_deduction_week: belowDeduction });
+check('a draft save that answers "not taken" still reads as what comes off at submit', saysComesOffOnly(builderEstimate(1950)));
+check('the submit confirm after that draft save never says "not taken"', context._invoiceDeductionConfirmLine(context._invoiceDeductionWeek()) === COMES_OFF_CONFIRM);
+context._noteInvoiceDeductionWeek({ ok: true, draft_id: 'd1' });
+check('a draft save that names no deduction leaves what my_hours named', saysComesOffOnly(builderEstimate(1950)));
 context._invoiceBuilderMode = 'expense';
-check('an expense invoice has no week and shows no deduction', context._invoiceDeductionWeek(50) === null);
+check('an expense invoice has no week and shows no deduction', context._invoiceDeductionWeek() === null);
 context._invoiceBuilderMode = 'weekly';
-context._noteInvoiceDeductionWeek({ ok: true, draft_id: 'd1' }, { week_start: '2026-10-12', gross: 50, gst_on: false });
-check('a draft save that names no deduction clears the earlier reason', context._invoiceDeductionWeek(50).note === '');
 
 const labelHtml = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: { label: 'Ute <hire> & trailer', amount: 100 } })));
 check('a deduction label is escaped on the invoice', labelHtml.indexOf('Ute &lt;hire&gt; &amp; trailer') !== -1 && labelHtml.indexOf('<hire>') === -1);

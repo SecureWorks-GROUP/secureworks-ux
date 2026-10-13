@@ -804,6 +804,22 @@ Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.
 
+## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
+
+A trade who hires a ute from us has a weekly amount taken off what he is paid
+(Captain 2026-10-13). ops-api owns the rule and the money; both apps show only
+what the reads send: `recurring_deduction` `{label, amount}`,
+`payable_before_deduction`, the reduced `trade_payable`, and
+`recurring_deduction_week` before submit. The paid figure is ALWAYS
+`trade_payable`; never work it out in the browser, and a deduction without it
+reads unavailable. With none of the fields every screen, the PDF and the Trade
+Bills table stay exactly as they were, which
+`tests/e2e/trade-invoice-recurring-deduction.spec.js` holds to the pre-change
+markup; a change to the invoice money summary updates those strings on purpose.
+Search `// <trade-recurring-deduction>` (`MyMoneyCore.deductionOf` /
+`deductionWeekOf`) and `// <trade-recurring-deduction-ops>`. Contract, screens
+and wording: `trade-app.md` → "Pay tab: a weekly deduction".
+
 ## Trade own work: Today, History, Calendar default (`trade.html`)
 
 "My work" is ONE list: `ownAssignmentRows` (`// <trade-own-work>`) keeps the

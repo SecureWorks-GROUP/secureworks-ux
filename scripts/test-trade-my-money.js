@@ -182,4 +182,76 @@ check('detail pill: authorised part-paid bill is Part paid', detailPartPaid.inde
 const detailWeeklyDeleted = context._invoiceDetailStatusHtml({ invoice_source: 'weekly_work_order', status: 'pushed_to_xero', xero_bill_status: 'DELETED', to_be_paid: 1916.4 });
 check('detail pill: weekly deleted bill is Voided', detailWeeklyDeleted.indexOf('Voided') !== -1 && !/pushed to xero/i.test(detailWeeklyDeleted));
 
+// 2026-10-13 (Captain): a weekly deduction (a trade hiring a ute from us).
+// Contract: secureworks-backend docs/trade-recurring-deductions-2026-10-13.md.
+// The app reads the server's fields and works out no figure of its own.
+const uteInvoice = {
+  gross_earned: 400, super_rate: 0.12, super_amount: 48, net_pay: 376, amount_payable: 376,
+  gst_on: true, gst_amount: 40, total_inc: 440,
+  trade_payable: 316, payable_before_deduction: 416,
+  recurring_deduction: { id: 'rule-1', label: 'Ute hire', amount: 100 }
+};
+const ute = M.deductionOf(uteInvoice);
+check('deductionOf reads label, amount and the server before/after figures', ute && ute.label === 'Ute hire' && ute.amount === 100 && ute.before === 416 && ute.paid === 316);
+check('deductionLabel is the label and a minus amount', M.deductionLabel(ute) === 'Ute hire −$100.00');
+check('deductionOf never works out the paid figure', M.deductionOf({ recurring_deduction: { label: 'Ute hire', amount: 100 }, net_pay: 376, gst_amount: 40 }).paid === null);
+[
+  ['no fields at all (older server)', { gross_earned: 400, net_pay: 376 }],
+  ['trade_payable alone (a trade with no deduction)', { trade_payable: 416, net_pay: 376 }],
+  ['null deduction', { recurring_deduction: null, trade_payable: 416 }],
+  ['a deduction with no label', { recurring_deduction: { label: ' ', amount: 100 }, trade_payable: 316 }],
+  ['a deduction of zero', { recurring_deduction: { label: 'Ute hire', amount: 0 }, trade_payable: 416 }],
+  ['a deduction with no amount', { recurring_deduction: { label: 'Ute hire' }, trade_payable: 416 }]
+].forEach(([name, source]) => check('deductionOf is null for ' + name, M.deductionOf(source) === null));
+check('deductionOf is null for nothing', M.deductionOf(null) === null && M.deductionOf(undefined) === null);
+
+const applied = M.deductionWeekOf({ recurring_deduction_week: { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: true, outcome: 'applied', note: null } });
+check('deductionWeekOf reads what comes off the week', applied && applied.label === 'Ute hire' && applied.amount === 100 && applied.week_start === '2026-10-12' && applied.applied === true && applied.note === '');
+const notTaken = M.deductionWeekOf({ recurring_deduction_week: { label: 'Ute hire', amount: 200, week_start: '2026-10-19', applied: false, outcome: 'payable_below_deduction', note: ' Not taken: invoice below the deduction. ' } });
+check('deductionWeekOf carries the reason when it was not taken', notTaken.applied === false && notTaken.outcome === 'payable_below_deduction' && notTaken.note === 'Not taken: invoice below the deduction.');
+check('deductionWeekOf is null when my_hours names none', M.deductionWeekOf({ week_start: '2026-10-12' }) === null && M.deductionWeekOf(null) === null);
+
+// My money rows already carry the server's reduced payable; the row names
+// what came off it, and a row with no deduction is the string it always was.
+const plainMoneyRow = { id: 'inv-plain', invoice_number: 'SW-INV-1', week_end: '2026-10-18', status: 'pushed_to_xero', payable: 416, trade_payable: 416 };
+const uteMoneyRow = Object.assign({}, plainMoneyRow, { id: 'inv-ute', payable: 316, trade_payable: 316, recurring_deduction: { label: 'Ute hire', amount: 100 } });
+check('my money row with no deduction is unchanged',
+  M.invoiceRowHTML(plainMoneyRow) === '<div class="mm-inv" data-mm-invoice="inv-plain" data-mm-status="sent" onclick="viewInvoiceDetail(\'inv-plain\')"><div class="mm-inv-l"><div class="mm-inv-when">Week ending 18 Oct 2026</div><div class="mm-inv-num">SW-INV-1</div></div><div class="mm-inv-r"><div class="mm-inv-amt">$416.00</div><span class="mm-status sent">Waiting on office</span></div></div>');
+const uteRowHtml = M.invoiceRowHTML(uteMoneyRow);
+check('my money row names the deduction beside the reduced payable', uteRowHtml.indexOf('<div class="mm-inv-amt">$316.00</div><div class="mm-inv-sub" data-mm-deduction>Ute hire −$100.00</div>') !== -1);
+
+// Persisted invoice money and the Invoice history row.
+const uteMoney = context._invoicePersistedMoney(uteInvoice);
+check('persisted money carries the deduction and stays complete', uteMoney.complete === true && uteMoney.deduction.paid === 316 && uteMoney.amount_payable === 376 && uteMoney.total_inc === 440);
+const plainMoney = context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: undefined, payable_before_deduction: undefined, trade_payable: 416 }));
+check('persisted money without a deduction has no deduction keys', plainMoney.complete === true && !('deduction' in plainMoney) && !('deduction_week' in plainMoney));
+const noPaid = context._invoicePersistedMoney(Object.assign({}, uteInvoice, { trade_payable: undefined }));
+check('a deduction without the server paid figure is not shown as complete money', noPaid.complete === false);
+const uteHistory = context._invoiceHistoryMoneyRow(Object.assign({ id: 'h1', status: 'pushed_to_xero', gst: 40 }, uteInvoice));
+check('history row pays the server figure and names the deduction', uteHistory.payable === 316 && uteHistory.deduction.label === 'Ute hire' && M.amountOf(uteHistory).main === '$316.00');
+const plainHistory = context._invoiceHistoryMoneyRow({ id: 'h2', status: 'pushed_to_xero', gross_earned: 400, super_rate: 0.12, super_amount: 48, net_pay: 376, gst_on: true, gst: 40, total_inc: 440, trade_payable: 416 });
+check('history row without a deduction keeps the app figure and gains no key', plainHistory.payable === 416 && !('deduction' in plainHistory));
+const weeklyUte = context._invoiceHistoryMoneyRow({ id: 'h3', invoice_source: 'weekly_work_order', status: 'pushed_to_xero', to_be_paid: 4813.4, trade_payable: 4713.4, recurring_deduction: { label: 'Ute hire', amount: 100 } });
+check('work-order invoice with a deduction pays trade_payable, not to_be_paid', weeklyUte.payable === 4713.4);
+const unpaidUte = context._invoiceHistoryMoneyRow(Object.assign({ id: 'h4', status: 'pushed_to_xero', gst: 40 }, uteInvoice, { trade_payable: undefined }));
+check('a deduction without the server paid figure reads Figures unavailable', M.amountOf(unpaidUte).main === 'Figures unavailable');
+
+// The money summary itself, run from the shipped function.
+context._invGst = false;
+vm.runInContext([
+  extractFunction('_invoiceMoney(value)'),
+  extractFunction('_invoiceRateLabel'),
+  extractFunction('_invoiceMoneySummaryHtml')
+].join('\n'), context);
+const estimate = { complete: true, estimated: true, gross_earned: 400, super_rate: 0.12, super_amount: 48, worker_withhold: 24, company_contribution: 24, amount_payable: 376, gst_on: false };
+const plainEstimate = context._invoiceMoneySummaryHtml(estimate, { gstSwitch: true });
+check('estimate with no deduction keeps "You get paid" and gains no row', plainEstimate.indexOf('<div class="inv-money-row net"><span>You get paid</span><span>$376.00</span></div>') !== -1 && plainEstimate.indexOf('deduction') === -1 && plainEstimate.indexOf('After super') === -1);
+const weekEstimate = context._invoiceMoneySummaryHtml(Object.assign({}, estimate, { deduction_week: applied }), { gstSwitch: true });
+check('estimate for a deduction week shows the row and no paid figure', weekEstimate.indexOf('<span>Ute hire (comes off this week)</span><span>−$100.00</span>') !== -1 && weekEstimate.indexOf('You get paid') === -1 && weekEstimate.indexOf('$276.00') === -1);
+const takenAlready = M.deductionWeekOf({ recurring_deduction_week: { label: 'Ute hire', amount: 100, week_start: '2026-10-12', applied: false, outcome: 'already_taken', note: 'Ute hire $100.00 was already taken on SW-INV-1 this week.' } });
+const takenEstimate = context._invoiceMoneySummaryHtml(Object.assign({}, estimate, { deduction_week: takenAlready }), { gstSwitch: true });
+check('a deduction another invoice already took shows the reason and no "comes off" row', takenEstimate.indexOf('data-invoice-deduction-week') === -1 && takenEstimate.indexOf('Ute hire $100.00 was already taken on SW-INV-1 this week.') !== -1 && takenEstimate.indexOf('<span>You get paid</span><span>$376.00</span>') !== -1);
+const labelHtml = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: { label: 'Ute <hire> & trailer', amount: 100 } })));
+check('a deduction label is escaped on the invoice', labelHtml.indexOf('Ute &lt;hire&gt; &amp; trailer') !== -1 && labelHtml.indexOf('<hire>') === -1);
+
 console.log('trade-my-money: ' + passed + ' checks passed');

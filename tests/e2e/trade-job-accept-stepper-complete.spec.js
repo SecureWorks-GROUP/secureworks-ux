@@ -100,21 +100,23 @@ test.describe('Accept gate and job stepper', () => {
     await expect(page.locator('#jobDetailContent')).toContainText('Trappers');
     await expect(page.locator('.jd-action-bar a.act-call')).toBeVisible();
     await expect(page.locator('[data-job-stepper]')).toHaveAttribute('data-stepper-state', 'accepted');
-    await expect(page.locator('[data-stepper-start]')).toHaveText('Start work');
+    await expect(page.locator('[data-stepper-start]')).toHaveText('Sign in');
   });
 
-  test('Start work clocks on; working state offers Job complete and End my day', async ({ appPage: page }) => {
+  test('Sign in is one tap; the signed-in state offers Job complete and Sign out', async ({ appPage: page }) => {
     const log = [];
     await stub(page, () => fenceDetail('confirmed'), log);
     await openJob(page);
     await page.locator('[data-stepper-start]').click();
-    await expect(page.locator('#toast')).toContainText('Clocked On');
+    await expect(page.locator('#toast')).toContainText('Signed in');
     expect(log).toContainEqual(['clock_event', 'clock_on']);
     const stepper = page.locator('[data-job-stepper]');
     await expect(stepper).toHaveAttribute('data-stepper-state', 'working');
     await expect(stepper.locator('#timerElapsed')).toBeVisible();
     await expect(stepper.locator('[data-stepper-finish]')).toHaveText('Job complete');
-    await expect(stepper.locator('[data-stepper-endday]')).toContainText('End my day');
+    await expect(stepper).toContainText('Signed in');
+    await expect(stepper).not.toContainText('Working since');
+    await expect(stepper.locator('[data-stepper-endday]')).toHaveText('Sign out');
     await expect(stepper.locator('[data-stepper-start]')).toHaveCount(0);
   });
 

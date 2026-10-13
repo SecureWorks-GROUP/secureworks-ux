@@ -1,7 +1,7 @@
 // Server clock recovery at login (trade.html `// <trade-clock-recovery>`).
 // Regression for the 2026-09-23 trade-app audit, findings 1 and 2: every
-// manager's app adopted another trade's 13-day-old open clock at login ("Still
-// working? You've been clocked on for 322 hours"), Cancel opened an end-of-day
+// manager's app adopted another trade's 13-day-old open clock at login (then
+// worded "Still working? You've been clocked on for 322 hours"), Cancel opened an end-of-day
 // report for that trade's job, and the refused clock-off was queued as offline
 // forever behind "Saved locally". Rows are shaped from the real read-only rows
 // in the audit; no request leaves the machine and no real user signs in.
@@ -60,7 +60,7 @@ test('a manager never adopts another trade\'s open clock from the Everyone feed'
   });
   await expect.poll(() => requestLog.some((r) => r.action === 'my_jobs' && new URL(r.url).searchParams.get('mode') === 'all')).toBe(true);
   await page.waitForTimeout(1500);
-  await expect(page.getByText('Still working?')).toHaveCount(0);
+  await expect(page.getByText('Still on site?')).toHaveCount(0);
   await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
   expect(await storedClocks(page)).toEqual([]);
   await expect(page.locator('#eodOverlay')).toBeHidden();
@@ -74,10 +74,10 @@ test('a trade\'s own old clock on a closed job is not adopted; they are told to 
   });
   const overlay = page.locator('#confirmOverlay');
   await expect(overlay).toHaveClass(/active/, { timeout: 10000 });
-  await expect(page.locator('#confirmMsg')).toContainText('You have an open clock on SWF-261138 from');
-  await expect(page.locator('#confirmMsg')).toContainText('ask the office to close it');
+  await expect(page.locator('#confirmMsg')).toContainText('You are still signed in on SWF-261138 from');
+  await expect(page.locator('#confirmMsg')).toContainText('Ask the office to close it');
   await expect(page.locator('#confirmCancel')).toBeHidden();
-  await expect(page.getByText('Still working?')).toHaveCount(0);
+  await expect(page.getByText('Still on site?')).toHaveCount(0);
   expect(await storedClocks(page)).toEqual([]);
   await page.locator('#confirmOk').click();
   await expect(overlay).not.toHaveClass(/active/);
@@ -106,7 +106,8 @@ test('own fresh 14h+ clock: "No" loads that job and opens its end-of-day report;
     clock_event: { status: 500, body: { error: 'Not your assignment' } }
   }, { allowedWriteActions: ['clock_event'] });
 
-  await expect(page.getByText('Still working?')).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('#confirmTitle')).toHaveText('Still on site?', { timeout: 10000 });
+  await expect(page.locator('#confirmOverlay')).toHaveClass(/active/);
   await page.locator('#confirmCancel').click();
   await expect.poll(() => requestLog.some((r) => r.action === 'trade_job_detail' && new URL(r.url).searchParams.get('jobId') === 'e2e-job-own-fresh')).toBe(true);
   await expect(page.locator('#eodOverlay')).toBeVisible();

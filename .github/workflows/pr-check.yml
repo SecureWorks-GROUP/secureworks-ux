@@ -76,6 +76,9 @@ jobs:
       - name: Test trade invoice start and finish time rules and payload
         run: node scripts/test-trade-time-entry.js
 
+      - name: Test trade sign in and sign out rules and invoice payload
+        run: node scripts/test-trade-site-visit.js
+
       - name: Test trade scope videos and SOW price redaction
         run: node scripts/test-trade-scope-media.js
 

@@ -711,8 +711,8 @@ test.describe('Henry Hours submit after hydrate fail', () => {
     const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
     await expect(card.locator('[data-cardhours]')).toBeVisible();
     await fillCardTime(card, 3);
-    // Assigned job: the office rate is shown read-only, never typed.
-    await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$55.00/hr');
+    // Assigned job: the rate box opens on the trade's usual rate.
+    await expect(card.locator('[data-cardrate]')).toHaveValue('55');
     await expect(page.locator('#invSubmitBtn')).toBeEnabled();
 
     await page.locator('#invSubmitBtn').click();

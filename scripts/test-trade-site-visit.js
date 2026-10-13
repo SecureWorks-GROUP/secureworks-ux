@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+// Sign in and sign out on a job carry over to the invoice (Captain, 2026-10-13).
+//
+// A trade taps Sign in when they arrive and Sign out when they leave. Those taps
+// fill date worked, start, finish and break on that job's invoice line, one
+// line per signed-in day, rounded to 15 minutes. This harness runs the shipped
+// code, not a copy: it extracts the `<trade-time-entry>` and `<trade-site-visit>`
+// rules and the [JC-PAYLOAD-BUILD-START..END] payload builder verbatim from
+// trade.html and pins the rules and the exact fields ops-api is built against.
+const fs = require('fs')
+const assert = require('assert')
+const vm = require('vm')
+
+const html = fs.readFileSync('trade.html', 'utf8')
+
+function slice(startMark, endMark) {
+  const start = html.indexOf(startMark)
+  const end = html.indexOf(endMark)
+  assert(start !== -1 && end > start, startMark + ' block markers exist')
+  return html.slice(start, end)
+}
+const plain = (v) => JSON.parse(JSON.stringify(v))
+
+// ── 1. The rules, on their own ─────────────────────────────────────────────
+const rulesCtx = { console, Intl }
+vm.createContext(rulesCtx)
+vm.runInContext(
+  slice('// <trade-time-entry>', '// </trade-time-entry>') +
+  slice('// <trade-site-visit>', '// </trade-site-visit>') +
+  '\nthis.T = TradeTimeEntryCore; this.SV = TradeSiteVisitCore;', rulesCtx)
+const { T, SV } = rulesCtx
+
+// Rounding is to the nearest 15 minutes, in one place.
+assert.strictEqual(T.roundQuarter('07:02'), '07:00')
+assert.strictEqual(T.roundQuarter('15:34'), '15:30')
+assert.strictEqual(T.roundQuarter('07:08'), '07:15')
+assert.strictEqual(T.roundQuarter('07:07'), '07:00')
+assert.strictEqual(T.roundQuarter('23:55'), '23:45', 'a late tap never rounds into the next day')
+assert.strictEqual(T.roundQuarter(''), '')
+assert.strictEqual(T.clock12('07:02'), '7:02 am')
+assert.strictEqual(T.clock12('15:34'), '3:34 pm')
+assert.strictEqual(T.clock12('00:05'), '12:05 am')
+assert.strictEqual(T.clock12('12:00'), '12:00 pm')
+
+// A signed-in day from my_hours: the server's rounded times are the source.
+const served = {
+  work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', break_minutes: 30, hours: 8,
+  tapped_in: '07:02', tapped_out: '15:34', out_capture: 'tap', visit_ids: ['v-1', 'v-2']
+}
+assert.deepStrictEqual(plain(SV.day(served)), {
+  work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', break_minutes: 30,
+  tapped_in: '07:02', tapped_out: '15:34', out_capture: 'tap', visit_ids: ['v-1', 'v-2']
+})
+// Sent with only the exact taps, the app rounds them itself.
+assert.deepStrictEqual(
+  [SV.day({ work_date: '2026-10-06', tapped_in: '07:02', tapped_out: '15:34' }).start_time,
+    SV.day({ work_date: '2026-10-06', tapped_in: '07:02', tapped_out: '15:34' }).finish_time],
+  ['07:00', '15:30'])
+// No sign out: the start is carried and the finish is left blank. Never invented.
+const open = SV.day({ work_date: '2026-10-06', start_time: '07:00', finish_time: null, hours: null, tapped_in: '07:02', tapped_out: null, visit_ids: ['v-3'] })
+assert.strictEqual(open.start_time, '07:00')
+assert.strictEqual(open.finish_time, '')
+// A day that makes no line is not offered.
+assert.strictEqual(SV.day({ work_date: '2026-10-06', start_time: '07:00', finish_time: '07:00' }), null, 'rounding left the finish not after the start')
+assert.strictEqual(SV.day({ work_date: 'yesterday', start_time: '07:00' }), null)
+assert.strictEqual(SV.day({ work_date: '2026-10-06' }), null, 'no sign in time is no sign in')
+assert.strictEqual(SV.day(null), null)
+// One entry per day, oldest first.
+assert.deepStrictEqual(
+  plain(SV.days([{ ...served, work_date: '2026-10-08' }, served, { ...served, start_time: '09:00' }, null]).map((d) => [d.work_date, d.start_time])),
+  [['2026-10-06', '07:00'], ['2026-10-08', '07:00']])
+assert.deepStrictEqual(plain(SV.days(undefined)), [], 'an ops-api that sends no sign ins gives none')
+
+// Which day rides which card: its own day's card first, then a free card,
+// then a further line on the job's first card.
+const d6 = SV.day(served)
+const d7 = SV.day({ ...served, work_date: '2026-10-07', visit_ids: ['v-7'] })
+const d8 = SV.day({ ...served, work_date: '2026-10-08', visit_ids: ['v-8'] })
+let plan = SV.assign([
+  { key: 0, job_id: 'j1', scheduled_date: '2026-10-06', days: [d6, d7, d8] },
+  { key: 1, job_id: 'j1', scheduled_date: '2026-10-07', days: [d6, d7, d8] },
+  { key: 2, job_id: 'j2', scheduled_date: '2026-10-06', days: [] }
+])
+assert.deepStrictEqual(plain(plan.line), { 0: plain(d6), 1: plain(d7) })
+assert.deepStrictEqual(plain(plan.more), { 0: [plain(d8)] }, 'the day with no card of its own is a further line on the first card')
+plan = SV.assign([{ key: 4, job_id: 'j1', scheduled_date: '2026-10-05', days: [d7] }])
+assert.deepStrictEqual(plain(plan.line), { 4: plain(d7) }, 'signed in on a different day to the booking: the card carries the day they signed in')
+assert.deepStrictEqual(plain(SV.assign([{ key: 0, job_id: 'j1', scheduled_date: '2026-10-06', days: [] }])), { line: {}, more: {} })
+
+// Filling: only an untouched line, and it says where the times came from.
+const line = { work_date: '', start_time: '', finish_time: '', break_minutes: 0 }
+assert.strictEqual(SV.blank(line), true)
+assert.strictEqual(SV.blank({ ...line, start_time: '06:00' }), false, 'a line the trade typed on is theirs')
+SV.fill(line, d6)
+assert.deepStrictEqual(plain(line), { work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', break_minutes: 30 })
+assert.strictEqual(SV.same(line, d6), true)
+assert.deepStrictEqual(plain(SV.note(line, d6)), { tag: 'From your sign in', text: '', restore: false })
+assert.deepStrictEqual(plain(SV.ids(line, d6)), ['v-1', 'v-2'])
+// A time they change: the line says what the tap was, and that the office sees both.
+assert.deepStrictEqual(plain(SV.note({ ...line, finish_time: '16:00' }, d6)),
+  { tag: 'From your sign in', text: 'You signed out at 3:34 pm. The office sees both.', restore: true })
+assert.deepStrictEqual(plain(SV.note({ ...line, start_time: '06:30' }, d6)),
+  { tag: '', text: 'You signed in at 7:02 am. The office sees both.', restore: true })
+assert.deepStrictEqual(plain(SV.ids({ ...line, finish_time: '16:00' }, d6)), ['v-1', 'v-2'], 'a changed time still points at its sign in')
+// A break they add is not a changed tap.
+assert.deepStrictEqual(plain(SV.note({ ...line, break_minutes: 45 }, d6)), { tag: 'From your sign in', text: '', restore: false })
+// Moved to another day, the line is no longer that sign in.
+assert.deepStrictEqual(plain(SV.ids({ ...line, work_date: '2026-10-07' }, d6)), [])
+assert.strictEqual(SV.note({ ...line, work_date: '2026-10-07' }, d6).restore, true)
+// No sign out: the finish is the trade's to give.
+assert.deepStrictEqual(plain(SV.note(SV.fill({}, open), open)),
+  { tag: 'From your sign in', text: 'No sign out that day. Add the time you left.', restore: false })
+assert.match(SV.note({ ...SV.fill({}, open), finish_time: '15:30' }, open).text, /No sign out that day\. The finish is the time you typed\./)
+// A leave time typed later is marked as typed.
+assert.match(SV.note(SV.fill({}, { ...d6, out_capture: 'typed_later' }), { ...d6, out_capture: 'typed_later' }).text, /You typed the time you left\. It was not a tap\./)
+assert.deepStrictEqual(plain(SV.note(line, null)), { tag: '', text: '', restore: false }, 'no sign in, nothing said')
+
+// The open sign in, as my_jobs.open_site_visit gives it.
+const visit = SV.openVisit({ visit_id: 'v-9', job_id: 'j1', job_number: 'SWF-1', site_suburb: 'Northfield', signed_in_at: '2026-10-05T07:02:00+08:00', status: 'open' })
+assert.strictEqual(visit.visit_id, 'v-9')
+assert.strictEqual(SV.signedInText(visit), 'Signed in 7:02 am')
+assert.strictEqual(SV.signedInText({ ...visit, pending: true }), 'Signed in 7:02 am · waiting for signal')
+assert.strictEqual(SV.where(visit), 'Northfield')
+assert.strictEqual(SV.openVisit(null), null)
+assert.strictEqual(SV.openVisit({ job_id: 'j1', signed_in_at: 'not a time' }), null)
+assert.strictEqual(SV.openVisit({ job_id: 'j1', signed_in_at: '2026-10-05T07:02:00+08:00', status: 'closed' }), null)
+// Forgot to sign out: an earlier day, or swept by the server. Never today's.
+assert.strictEqual(SV.owesFinish(visit, new Date('2026-10-05T16:00:00+08:00')), false, 'still on site today')
+assert.strictEqual(SV.owesFinish(visit, new Date('2026-10-06T06:30:00+08:00')), true)
+assert.strictEqual(SV.owesFinish({ ...visit, status: 'no_sign_out' }, new Date('2026-10-05T23:30:00+08:00')), true)
+assert.strictEqual(SV.lateQuestion(visit, new Date('2026-10-06T06:30:00+08:00')),
+  'You are still signed in at Northfield since 7:02 am Monday. What time did you leave?')
+// The time they left: after the sign in, same day, not after now.
+const tuesday = new Date('2026-10-06T06:30:00+08:00')
+assert.strictEqual(SV.lateCheck(visit, '15:30', tuesday), '')
+assert.match(SV.lateCheck(visit, '', tuesday), /Add the time you left/)
+assert.match(SV.lateCheck(visit, '06:00', tuesday), /after you signed in at 7:02 am.*past midnight.*own line/)
+assert.match(SV.lateCheck(visit, '18:00', new Date('2026-10-05T16:00:00+08:00')), /cannot be after now/)
+
+// Signed in at another job: the server says where, and the app asks once.
+const clash = SV.alreadySignedIn({ status: 409, code: 'already_signed_in', body: { code: 'already_signed_in', visit_id: 'v-1', job_id: 'j9', job_number: 'SWP-9', site_suburb: 'Kinross', signed_in_at: '2026-10-05T07:02:00+08:00' } })
+assert.strictEqual(SV.where(clash), 'Kinross')
+assert.strictEqual(SV.alreadySignedIn({ status: 409, code: 'WEEK_ALREADY_INVOICED' }), null)
+assert.strictEqual(SV.alreadySignedIn({ status: 500, message: 'Not your assignment' }), null)
+
+// Jobs signed in to with no card in the week.
+assert.deepStrictEqual(
+  plain(SV.otherJobs([
+    { job_id: 'j5', job_number: 'SWP-5', site_suburb: 'Duncraig', ...served },
+    { job_id: 'j5', job_number: 'SWP-5', site_suburb: 'Duncraig', ...served, work_date: '2026-10-07' },
+    { job_id: 'j6', job_number: 'SWF-6', site_suburb: 'Morley', site_visit_days: [served] },
+    { job_id: 'j7', job_number: 'SWF-7', site_visit_days: [] }
+  ]).map((g) => [g.job_id, g.job_number, g.site_suburb, g.days.map((d) => d.work_date)])),
+  [['j5', 'SWP-5', 'Duncraig', ['2026-10-06', '2026-10-07']], ['j6', 'SWF-6', 'Morley', ['2026-10-06']]])
+assert.deepStrictEqual(plain(SV.otherJobs(undefined)), [])
+
+// Plain words on every screen: no clock, timer or shift, and no long dash.
+const siteVisitSource = slice('// <trade-site-visit>', '// </trade-site-visit>')
+const words = siteVisitSource.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n').match(/'[^'\n]*'/g) || []
+words.forEach((w) => {
+  assert(!/\b(clock(ed)?|timer|shift)\b/i.test(w.replace(/clock12|clocked_on_at/g, '')), 'plain words only: ' + w)
+  assert(!/—/.test(w), 'no long dash in words a trade reads: ' + w)
+})
+
+// ── 2. The payload the trade app posts ─────────────────────────────────────
+const ctx = {
+  _isMakesafeCard: function (c) { return !!c.is_makesafe },
+  RATE_NOT_SET_MSG: 'No pay rate is set for you yet.',
+  console, Intl
+}
+vm.createContext(ctx)
+vm.runInContext(slice('// [JC-PAYLOAD-BUILD-START]', '// [JC-PAYLOAD-BUILD-END]'), ctx)
+const build = ctx._buildJobCentricPayload
+const WEEK = { weekStart: '2026-10-05', weekEnd: '2026-10-11', today: '2026-10-11' }
+function card(extra) {
+  return Object.assign({
+    _idx: 0, included: true, assignment_id: 'a1', job_id: 'j1', job_number: 'SWF-1', client_name: 'Client', site_suburb: 'Northfield',
+    job_type: 'fencing', scheduled_date: '2026-10-06', rate: 50, rate_source: 'server_resolved', description: '',
+    work_date: '', start_time: '', finish_time: '', break_minutes: 0, hours: null, wo_lump_lines: [], wo_labour_lines: [], more_days: [], sv: null
+  }, extra || {})
+}
+function filled(day, extra) { return Object.assign({ work_date: day.work_date, start_time: day.start_time, finish_time: day.finish_time, break_minutes: day.break_minutes, sv: day }, extra || {}) }
+
+// A line filled from a sign in posts the same four fields, plus its sign ins.
+let built = build([card(filled(d6))], WEEK)
+assert.strictEqual(built.error, undefined)
+assert.deepStrictEqual(plain(built.manualAssignments), [{
+  assignment_id: 'a1', hours: 8, work_date: '2026-10-06', start_time: '07:00', finish_time: '15:30', break_minutes: 30,
+  rate: 50, rate_source: 'server_resolved', description: '', manually_added: false, site_visit_ids: ['v-1', 'v-2']
+}])
+assert.strictEqual(built.subtotal, 400)
+
+// No sign in: the PR 375 payload, byte for byte. No site_visit_ids key at all.
+built = build([card({ work_date: '2026-10-06', start_time: '07:00', finish_time: '15:00' })], WEEK)
+assert.deepStrictEqual(plain(built.manualAssignments), [{
+  assignment_id: 'a1', hours: 8, work_date: '2026-10-06', start_time: '07:00', finish_time: '15:00', break_minutes: 0,
+  rate: 50, rate_source: 'server_resolved', description: '', manually_added: false
+}])
+assert.strictEqual('site_visit_ids' in built.manualAssignments[0], false)
+
+// The trade changed a time: what they submit is billed, and it still points at the sign in.
+built = build([card(filled(d6, { finish_time: '16:00' }))], WEEK)
+assert.strictEqual(built.manualAssignments[0].hours, 8.5)
+assert.deepStrictEqual(plain(built.manualAssignments[0].site_visit_ids), ['v-1', 'v-2'])
+
+// A rate they changed for this job is the rate sent, marked as theirs.
+built = build([card(filled(d6, { rate: 60, rate_source: 'client_entered' }))], WEEK)
+assert.deepStrictEqual([built.manualAssignments[0].rate, built.manualAssignments[0].rate_source], [60, 'client_entered'])
+assert.strictEqual(built.subtotal, 480)
+// No rate in the box: they are asked for it, never sent to the office for it.
+built = build([card(filled(d6, { rate: 0 }))], WEEK)
+assert.match(built.error, /SWF-1: enter your rate/)
+
+// No sign out: start filled, finish blank, and the line will not submit.
+built = build([card(filled(open))], WEEK)
+assert.match(built.error, /SWF-1: Add your finish time\./)
+
+// Several signed-in days on one card: the first rides the assignment row,
+// each further day is its own extra_items line for the same job.
+const multi = card(filled(d6, {
+  description: 'Fence install',
+  more_days: [
+    { work_date: d7.work_date, start_time: d7.start_time, finish_time: d7.finish_time, break_minutes: d7.break_minutes, sv: d7 },
+    { work_date: d8.work_date, start_time: d8.start_time, finish_time: d8.finish_time, break_minutes: d8.break_minutes, sv: d8, removed: true }
+  ]
+}))
+built = build([multi], WEEK)
+assert.strictEqual(built.error, undefined)
+assert.strictEqual(built.manualAssignments.length, 1)
+assert.deepStrictEqual(plain(built.cardExtraItems), [{
+  type: 'Labour', row_type: 'labour', description: 'Fence install', quantity: 8, unit: 'hr', rate: 50,
+  date: '2026-10-07', work_date: '2026-10-07', start_time: '07:00', finish_time: '15:30', break_minutes: 30,
+  job_id: 'j1', job_number: 'SWF-1', division: 'fencing', client_name: 'Client',
+  manually_added: true, source: 'manual_job_search', rate_source: 'client_entered', client_rate_entered: true,
+  site_visit_ids: ['v-7']
+}], 'a removed day is not sent')
+assert.strictEqual(built.subtotal, 800)
+// A further day needs the card's description, an in-week date and its own day.
+assert.match(build([Object.assign({}, multi, { description: '' })], WEEK).error, /SWF-1: add a description of works done\./)
+assert.match(build([Object.assign({}, multi, { more_days: [{ work_date: '2026-10-07', start_time: '07:00', finish_time: '', break_minutes: 0 }] })], WEEK).error,
+  /SWF-1 \(Wed 7 Oct\): Add your finish time\./)
+assert.match(build([Object.assign({}, multi, { more_days: [Object.assign({}, multi.more_days[0], { work_date: '2026-10-06' })] })], WEEK).error,
+  /two lines for 2026-10-06/)
+assert.match(build([Object.assign({}, multi, { more_days: [Object.assign({}, multi.more_days[0], { work_date: '2026-10-01' })] })], WEEK).error,
+  /outside this invoice week/)
+
+console.log('trade site visit: sign in rules and invoice payload OK')

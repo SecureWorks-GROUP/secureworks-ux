@@ -8719,6 +8719,7 @@ function toggleCalUnsched() {
 
 async function loadCalendar() {
   var range = getCalRange();
+  syncCalV3Chrome();
 
   // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
   var bodyEl = document.getElementById('calendarBody');
@@ -9755,10 +9756,10 @@ function renderScheduleView(container, range) {
     if (v3 ? calV3IsBusiness(ev) : !ev.job_id) {
       // Collect label (internal) events
       // Group job-less entries by label+date so multiple crew appear on one bar.
-      // A row on a job has no label, so its kind and start time tell one
-      // meeting or reminder from the next on the same job and day.
+      // v3: the job, kind and start time are part of the key too, so two
+      // separate events that share a title and a day each keep their own line.
       var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date
-        + (ev.job_id ? '_' + ev.job_id + '_' + (ev.assignment_type || '') + '_' + (ev.start_time || '') : '');
+        + (v3 ? '_' + (ev.job_id || '') + '_' + (ev.assignment_type || '') + '_' + (ev.start_time || '') : '');
       if (!labelMap[aid]) {
         var crewName = crewDisplayName(ev);
         var crew = {};
@@ -10392,9 +10393,12 @@ function toggleCalV3NewMenu(force) {
 // Schedule tooltip
 function showScheduleTooltip(event, jobId) {
   var job = null;
+  // v3 draws a meeting or reminder on a job as its own business line, so it is
+  // not one of the rows behind the job's line.
+  var onLine = function(ev) { return ev.job_id === jobId && !(window.__SW_CAL_V3_ENABLED && calV3IsBusiness(ev)); };
   // Find job data from _calEvents
   for (var i = 0; i < _calEvents.length; i++) {
-    if (_calEvents[i].job_id === jobId) { job = _calEvents[i]; break; }
+    if (onLine(_calEvents[i])) { job = _calEvents[i]; break; }
   }
   if (!job) return;
 
@@ -10404,7 +10408,7 @@ function showScheduleTooltip(event, jobId) {
   // Collect all crew for this job
   var crewSet = {};
   _calEvents.forEach(function(ev) {
-    if (ev.job_id !== jobId) return;
+    if (!onLine(ev)) return;
     var cn = crewDisplayName(ev);
     if (cn !== 'Unassigned') crewSet[cn] = true;
   });

@@ -138,6 +138,13 @@ function snapshot(page) {
   });
 }
 const jobBars = (s) => s.bars.filter((b) => !b.biz);
+// A real click on the one business line carrying both texts; answers which
+// assignment's popup that opened.
+async function openedLine(page, label, time) {
+  await page.evaluate(() => window.closeCalJobPopup());
+  await page.locator('.cal-schedule-bar.v3-biz', { hasText: label }).filter({ hasText: time }).click();
+  return page.evaluate(() => window._calPopupAssignment && window._calPopupAssignment.assignment_id);
+}
 const bizBars = (s) => s.bars.filter((b) => b.biz);
 const bar = (s, job) => s.bars.find((b) => b.job === job);
 
@@ -431,14 +438,84 @@ test('each meeting or reminder on one job and day keeps its own line, time and p
   ]);
 
   // a click on each line opens that event, not its neighbour on the same job
-  const opened = async (text) => {
-    await page.evaluate(() => window.closeCalJobPopup());
-    await page.locator('.cal-schedule-bar.v3-biz', { hasText: 'Alice Adams' }).filter({ hasText: text }).click();
-    return page.evaluate(() => window._calPopupAssignment && window._calPopupAssignment.assignment_id);
+  expect(await openedLine(page, 'Alice Adams', '2pm')).toBe('r3');
+  expect(await openedLine(page, 'Alice Adams', '3pm')).toBe('m5');
+  expect(await openedLine(page, 'Alice Adams', '9am')).toBe('m3');
+});
+
+test('job-less events that share a title and a day each keep their own line, time and popup', async ({ page }) => {
+  const titled = (o) => ev(Object.assign({ job_id: null, label: 'Call supplier', scheduled_date: '2026-08-07', scheduled_end: '2026-08-07' }, o));
+  await seedAndRender(page, { events: EVENTS.concat([
+    titled({ assignment_id: 'r5', assignment_type: 'reminder', start_time: '09:00:00', user_id: 'u3', crew_name: 'Ivy' }),
+    titled({ assignment_id: 'r6', assignment_type: 'reminder', start_time: '15:00:00', user_id: 'u1', crew_name: 'Rex Lawson' }),
+    // a meeting with the reminder's title and time is still a different event
+    titled({ assignment_id: 'm6', assignment_type: 'meeting', start_time: '09:00:00', user_id: 'u2', crew_name: 'Sam' }),
+    // and a second person on that meeting shares its line
+    titled({ assignment_id: 'm7', assignment_type: 'meeting', start_time: '09:00:00', user_id: 'u1', crew_name: 'Rex Lawson' }),
+  ]) });
+  const s = await snapshot(page);
+  const lines = bizBars(s).filter((b) => b.label === 'Call supplier')
+    .map((b) => ({ time: b.time, crew: b.crew.slice().sort() }))
+    .sort((a, b) => (a.time + a.crew.join()).localeCompare(b.time + b.crew.join()));
+  expect(lines).toEqual([
+    { time: '3pm', crew: ['RL'] },
+    { time: '9am', crew: ['I'] },
+    { time: '9am', crew: ['RL', 'SR'] },
+  ]);
+  expect(await openedLine(page, 'Call supplier', '3pm')).toBe('r6');
+});
+
+test('hovering a job line names the job\'s own time and crew, not a meeting held on that job', async ({ page }) => {
+  // the feed lists the meeting first, ahead of the job's own rows
+  const meetingFirst = [ev({ job_id: 'j1', assignment_id: 'm3', assignment_type: 'meeting', start_time: '09:00:00',
+    job_number: 'SWP-27001', client_name: 'Alice Adams', job_type: 'patio',
+    scheduled_date: '2026-08-05', scheduled_end: '2026-08-05', user_id: 'u3', crew_name: 'Ivy' })].concat(EVENTS);
+  await seedAndRender(page, { events: meetingFirst });
+  await page.locator('.cal-schedule-bar[data-job-id="j1"]').first().hover();
+  const tip = page.locator('#calScheduleTooltip');
+  await expect(tip.locator('.tt-name')).toHaveText('Alice Adams');
+  await expect(tip.locator('.tt-crew')).toHaveText('Crew: Rex Lawson, Sam');
+  await expect(tip.locator('.tt-time')).toHaveCount(0);
+});
+
+test('the new chrome is in place before the calendar feed answers, and stays when it fails', async ({ page, baseURL }) => {
+  let calendarReads = 0;
+  let answerFeed;
+  const feedHeld = new Promise((resolve) => { answerFeed = resolve; });
+  await installOpsSessionStub(page);
+  await page.addInitScript(() => {
+    try { localStorage.setItem('sw_ops_tab', 'calendar'); } catch (e) { /* storage unavailable */ }
+  });
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (url.startsWith(baseURL)) return route.continue();
+    const m = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
+    if (m && m[1] === 'calendar') {
+      calendarReads += 1;
+      await feedHeld;
+      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'e2e calendar feed down' }) });
+    }
+    return route.fulfill({ status: m ? 200 : 404, contentType: 'application/json', body: '{}' });
+  });
+  // beforeEach left this page on /ops.html; a hash-only goto would not reload it
+  await page.goto('about:blank');
+  await page.goto('/ops.html#calendar');
+  const chromeIsV3 = async () => {
+    await expect(page.locator('#viewCalendar')).toHaveClass(/cal-v3/);
+    // the old sidebar and its live tick boxes are never on screen with v3 on
+    await expect(page.locator('#viewCalendar .cal-sidebar').first()).toBeHidden();
+    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(8);
   };
-  expect(await opened('2pm')).toBe('r3');
-  expect(await opened('3pm')).toBe('m5');
-  expect(await opened('9am')).toBe('m3');
+  await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
+  await expect.poll(() => calendarReads, { message: 'the calendar feed was never read' }).toBeGreaterThan(0);
+  // the feed has been asked and has not answered yet
+  await expect(page.locator('#calendarBody .cal-loading')).toBeVisible();
+  await chromeIsV3();
+
+  answerFeed();
+  await expect(page.locator('#calendarBody .cal-loading')).toHaveCount(0);
+  await expect(page.locator('#calendarBody .cal-schedule-grid')).toHaveCount(0);
+  await chromeIsV3();
 });
 
 test('a meeting linked to a job is a business line of its own, never part of the job line', async ({ page }) => {

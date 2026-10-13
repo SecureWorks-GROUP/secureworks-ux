@@ -215,16 +215,26 @@ async function runDynamicHelperCheck() {
     total: 96.8,
   })
   assert.strictEqual(gstOnLegacyTotal.complete, false, 'GST-on money rejects legacy total without authoritative total_inc')
-  const gstOnLegacyAmount = context._invoicePersistedMoney({
+  const gstOnServerShape = context._invoicePersistedMoney({
     gross_earned: 100,
     super_rate: 0.12,
     super_amount: 12,
-    net_pay: 88,
+    net_pay: 94,
     gst_on: true,
-    gst: 8.8,
-    total_inc: 96.8,
+    gst: 10,
+    total_inc: 110,
   })
-  assert.strictEqual(gstOnLegacyAmount.complete, false, 'GST-on money rejects legacy gst without authoritative gst_amount')
+  assert.strictEqual(gstOnServerShape.complete, true, 'GST-on money is complete from the gst figure ops-api sends')
+  assert.strictEqual(gstOnServerShape.gst_amount, 10, 'GST-on money reads the gst figure ops-api sends')
+  const gstOnNoFigure = context._invoicePersistedMoney({
+    gross_earned: 100,
+    super_rate: 0.12,
+    super_amount: 12,
+    net_pay: 94,
+    gst_on: true,
+    total_inc: 110,
+  })
+  assert.strictEqual(gstOnNoFigure.complete, false, 'GST-on money with no GST figure at all stays incomplete')
   const generatedPending = context._invoiceGeneratedStatusMessage({
     code: 'XERO_PUSH_FAILED',
     success: true,

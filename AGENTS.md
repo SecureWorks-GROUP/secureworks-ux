@@ -813,8 +813,11 @@ although the server applies it to a weekly Work Order Invoice: add it there
 before any per-metre trade is given a rule. `my_hours` works its outcome out
 from clocked hours and a draft save from the typed extras alone, so before
 submit only the label and amount are shown; the not-taken reason is shown
-only from the submit response. With none of the fields every screen, the PDF and the Trade
-Bills table stay exactly as they were, which
+only from the submit response. A My money period card reads the server's
+period `payable` only when the period holds an invoice carrying a deduction.
+ops-api names the GST figure `gst`, never `gst_amount`
+(`_invoicePersistedMoney` is the one reader). With none of the fields every
+screen, the PDF and the Trade Bills table stay exactly as they were, which
 `tests/e2e/trade-invoice-recurring-deduction.spec.js` holds to the pre-change
 markup; a change to the invoice money summary updates those strings on purpose.
 Search `// <trade-recurring-deduction>` (`MyMoneyCore.deductionOf` /

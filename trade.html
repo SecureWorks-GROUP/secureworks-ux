@@ -22412,7 +22412,12 @@
       var split = resolveSuperSplit(t);
       h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.worker_withhold) + ' from you &middot; company covers ' + money(split.company_contribution);
       if (Number(t.gst || 0) > 0) h += ' &middot; GST ' + money(t.gst);
-      h += ' &middot; You get ' + money(split.amount_payable) + '</div>';
+      // A period holding an invoice with a weekly deduction is paid the
+      // server's period payable, so it agrees with the rows under it and with
+      // paid plus still owed. Every other period is worked out as it always
+      // was. [trade-recurring-deduction]
+      var youGet = opts.deducted && hasMoney(t.payable) ? round2(t.payable) : split.amount_payable;
+      h += ' &middot; You get ' + money(youGet) + '</div>';
       // Live audit 2026-09-23: most invoices before the super split carry no
       // gross_earned, so Earned and Super leave them out while Paid and Still
       // owed count them. Say exactly that rather than let Paid look bigger
@@ -22450,13 +22455,18 @@
       var h = '<div class="mm" data-mm-view>';
       h += '<div class="mm-head"><h2>My money</h2><div class="mm-head-btns"><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">Invoices</button><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div></div>';
       h += profileHTML(res.profile);
-      h += periodHTML((res.month && res.month.label) ? res.month.label : 'This month', res.month, { key: 'month' });
-      h += periodHTML((res.fy_label || 'This financial year') + ' to date', res.fytd, { key: 'fytd' });
+      var rows = Array.isArray(res.invoices) ? res.invoices : [];
+      // The months (YYYY-MM) of the counted invoices that carry a weekly
+      // deduction; the server files an invoice under the same `bucket`.
+      var deductedMonths = rows.filter(function (r) { return r && r.counts !== false && deductionOf(r); }).map(function (r) { return String(r.bucket || ''); });
+      var thisMonth = String((res.month && res.month.month) || '');
+      var fyStart = String(res.fy_start || '');
+      h += periodHTML((res.month && res.month.label) ? res.month.label : 'This month', res.month, { key: 'month', deducted: !!thisMonth && deductedMonths.indexOf(thisMonth) !== -1 });
+      h += periodHTML((res.fy_label || 'This financial year') + ' to date', res.fytd, { key: 'fytd', deducted: !!fyStart && deductedMonths.some(function (m) { return !!m && m + '-01' >= fyStart; }) });
       // Invoices from before this financial year only showed up in the month
       // table; the server already sends all_time, so show it.
-      if (res.all_time) h += periodHTML('All time', res.all_time, { key: 'all' });
+      if (res.all_time) h += periodHTML('All time', res.all_time, { key: 'all', deducted: deductedMonths.length > 0 });
       h += monthsHTML(res.months);
-      var rows = Array.isArray(res.invoices) ? res.invoices : [];
       h += '<div class="mm-card"><div class="mm-card-t">Every invoice<span class="mm-card-n">' + rows.length + '</span></div>';
       if (!rows.length) h += '<div class="mm-empty">No invoices yet. Your first weekly invoice will show here with its paid status.</div>';
       rows.forEach(function (r) { h += invoiceRowHTML(r); });
@@ -22691,7 +22701,8 @@
     var superAmount = source.super_amount;
     var netPay = source.net_pay;
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
-    var gstAmount = source.gst_amount;
+    // ops-api names the GST figure `gst` on every invoice answer and read.
+    var gstAmount = source.gst_amount != null ? source.gst_amount : source.gst;
     var split = MyMoneyCore.resolveSuperSplit({
       gross_earned: gross,
       super_rate: superRate,
@@ -22745,10 +22756,8 @@
   // as My money. Live audit 2026-09-23:
   // 186 of 231 invoices predate the super split (no gross_earned / super /
   // net_pay). Their bill total is the whole amount due, so they show it
-  // instead of "Figures unavailable". The API names the GST figure `gst`,
-  // not `gst_amount`; without that mapping every GST-registered split
-  // invoice also read "Figures unavailable". A row whose split is present
-  // but does not reconcile still shows "Figures unavailable".
+  // instead of "Figures unavailable". A row whose split is present but
+  // does not reconcile still shows "Figures unavailable".
   function _invoiceHistoryMoneyRow(inv) {
     inv = inv || {};
     var payable = null;
@@ -22763,7 +22772,7 @@
     } else if (isWorkOrderInvoice && _invoiceHasPersistedNumber(inv.to_be_paid)) {
       payable = Number(inv.to_be_paid);
     } else if (hasSplit) {
-      var money = _invoicePersistedMoney(Object.assign({}, inv, { gst_amount: inv.gst_amount != null ? inv.gst_amount : inv.gst }));
+      var money = _invoicePersistedMoney(inv);
       if (money.complete && _invoiceHasPersistedNumber(money.amount_payable)) {
         payable = Number(money.amount_payable) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
       }

@@ -14,6 +14,14 @@
 // Writes: ops-api approve_work_order {work_order_id, expected_updated_at},
 //         only from the approver's button, with the updated_at of the draft
 //         this panel shows, so the seal covers exactly what was read.
+//         ops-api create_work_order {kind:'job', job_id}, only from the
+//         "Open the draft" button on a job with no work order yet; the
+//         server opens the job's draft and fills it from the accepted quote.
+//
+// Create work order: while the preview is on, a fencing or patio job's
+// "Create work order" (job quick view, calendar, the old office form) comes
+// here (openForJob) instead of the old form, so the job work order is the one
+// way to make a work order for those jobs. Other job types keep the old form.
 // ════════════════════════════════════════════════════════════
 
 var JobWorkOrderOps = (function () {
@@ -66,7 +74,8 @@ var JobWorkOrderOps = (function () {
       busy: _state.busy,
       message: _state.message,
       messageLevel: _state.level,
-      preview: true
+      preview: true,
+      canOpen: true
     });
     if (_state.confirming && h) {
       var wo = shownWorkOrder(data);
@@ -184,6 +193,68 @@ var JobWorkOrderOps = (function () {
     else done();
   }
 
+  // Open the job's draft on a job with no work order yet. The server opens it
+  // (or answers with the one already open) and fills it from the accepted
+  // quote; the job is then read again so the draft is shown as stored.
+  function openDraft() {
+    var C = core();
+    var data = currentData();
+    if (!C || !data || data !== _state.data || _state.busy) return;
+    var block = data.job_work_order;
+    if (!block || block.unreadable || block.work_order) return;
+    var seq = _state.seq;
+    _state.busy = true;
+    _state.message = '';
+    repaint();
+    opsPost('create_work_order', { kind: 'job', job_id: _state.jobId }).then(function (res) {
+      if (seq !== _state.seq) return;
+      rereadJob(C.openedWords(res), 'ok');
+    }).catch(function (e) {
+      if (seq !== _state.seq) return;
+      var code = (e && e.code) || '';
+      var words = C.openRefusalWords(code, e && e.message);
+      if (C.openRefusalNeedsReread(code)) {
+        rereadJob(words, 'warn');
+      } else {
+        _state.busy = false;
+        _state.message = words;
+        _state.level = 'error';
+        repaint();
+      }
+    });
+  }
+
+  // 'job' when this job type's "Create work order" goes to the job work order,
+  // else 'crew' (the old office form).
+  function createRoute(type) {
+    var C = core();
+    return C ? C.createRoute(type, previewOn()) : 'crew';
+  }
+
+  // The job page, on the Build tab, where the job work order is.
+  function openForJob(jobId) {
+    if (!jobId || typeof openJobDetail !== 'function') return Promise.resolve();
+    return Promise.resolve(openJobDetail(jobId)).then(function () {
+      var data = currentData();
+      var current = (typeof _currentJobId !== 'undefined') ? _currentJobId : null;
+      if (data && String(current) === String(jobId) && typeof showJobSubView === 'function') showJobSubView('build');
+    });
+  }
+
+  // From the old office form's notice: close the form, open the job page.
+  function openFromForm(jobId) {
+    if (typeof closeModal === 'function') closeModal('woModal');
+    return openForJob(jobId);
+  }
+
+  // The old office form's notice for a fencing or patio job.
+  function formNoticeHtml(job) {
+    var C = core();
+    if (!C) return '';
+    injectCss();
+    return C.crewFormNoticeHtml(job);
+  }
+
   function openPdf() {
     var data = currentData();
     if (data && typeof generateRichWorkOrder === 'function') generateRichWorkOrder(data);
@@ -244,6 +315,8 @@ var JobWorkOrderOps = (function () {
       '.jwo-rule-info{color:var(--sw-text-sec);}' +
       '.jwo-rv{padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;}' +
       '.jwo-rv-desc{white-space:pre-wrap;}' +
+      '.jwo .btn:disabled,#woSubmitBtn:disabled{opacity:0.45;cursor:not-allowed;}' +
+      '.jwo-redirect{border:1px solid var(--sw-border);background:var(--sw-light);padding:10px 12px;font-size:13px;color:var(--sw-text);display:flex;flex-direction:column;gap:8px;align-items:flex-start;}' +
       '@media (max-width:600px){.jwo-actions{margin-left:0;width:100%;}}';
     var tag = document.createElement('style');
     tag.setAttribute('data-job-wo-css', '');
@@ -257,6 +330,11 @@ var JobWorkOrderOps = (function () {
     approve: approve,
     approveConfirmed: approveConfirmed,
     cancelApprove: cancelApprove,
+    openDraft: openDraft,
+    createRoute: createRoute,
+    openForJob: openForJob,
+    openFromForm: openFromForm,
+    formNoticeHtml: formNoticeHtml,
     openPdf: openPdf,
     pdfSections: pdfSections
   };

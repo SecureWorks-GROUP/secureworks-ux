@@ -78,6 +78,14 @@ var JobWorkOrderCore = (function () {
 
   function eligibleType(type) { return ELIGIBLE_TYPES.indexOf(lower(type)) >= 0; }
 
+  // Which way "Create work order" goes for a job: 'job' (the one job work
+  // order, on the job page) for a fencing or patio job while the preview is on,
+  // else 'crew' (the old office form, unchanged: repairs, make-safe, builder
+  // crew work orders, and every job while the preview is off).
+  function createRoute(type, previewOn) {
+    return previewOn && eligibleType(type) ? 'job' : 'crew';
+  }
+
   // ── Numbers and dates ──
   function numWords(n) {
     if (!isFinite(n)) return '';
@@ -259,6 +267,45 @@ var JobWorkOrderCore = (function () {
     return code === 'stale_review' || code === 'expected_updated_at_required' || code === 'not_a_draft';
   }
 
+  // create_work_order {kind:'job'} (open the job's draft) refusals, in words.
+  var OPEN_REFUSALS = {
+    job_type_not_eligible: 'Job work orders are for fencing and patio jobs.',
+    work_order_sealed: 'This job\'s work order is already approved and sealed. A later change is a variation.',
+    draft_not_created: 'The draft could not be opened. Try again.',
+    draft_not_updated: 'The draft could not be opened. Try again.',
+    not_a_draft: 'This job\'s work order is already approved and sealed.'
+  };
+  function openRefusalWords(code, message) {
+    return OPEN_REFUSALS[str(code)] || str(message) || 'The draft could not be opened.';
+  }
+  // A refusal that means the job already has a work order the page has not shown.
+  function openRefusalNeedsReread(code) {
+    return code === 'work_order_sealed' || code === 'not_a_draft';
+  }
+  // What opening the draft did, from the answer's quote_fill.reason.
+  function openedWords(res) {
+    var fill = res && obj(res.quote_fill);
+    var reason = fill ? str(fill.reason) : '';
+    var opened = res && res.created === false ? 'The draft was already open' : 'Draft opened';
+    if (reason === 'filled') return opened + ', filled from the accepted quote. Check it, then approve.';
+    if (reason === 'no_accepted_quote') return opened + '. The job has no accepted quote to fill it from.';
+    if (reason === 'no_quote_lines') return opened + '. The accepted quote has no labour lines to fill it from.';
+    return opened + '.';
+  }
+
+  // The old office "New Work Order" form, when a fencing or patio job is picked
+  // while the preview is on: it makes no work order for that job and points to
+  // the job work order instead. job: {id, job_number, type}.
+  function crewFormNoticeHtml(job) {
+    var j = obj(job) || {};
+    var kind = lower(j.type) === 'patio' ? 'a patio job' : 'a fencing job';
+    return '<div class="jwo-redirect" data-wo-form-job-wo>' +
+      '<div>' + (j.job_number ? '<b>' + esc(j.job_number) + '</b> is ' : 'This is ') + kind +
+      '. Fencing and patio jobs have one work order, made from the accepted quote on the job page, so this form does not make one for it.</div>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-wo-form-open-job-wo data-job-id="' + esc(j.id) + '" onclick="JobWorkOrderOps.openFromForm(this.getAttribute(\'data-job-id\'))">Open the job work order</button>' +
+      '</div>';
+  }
+
   // ── Ops panel (office staff) ──
   // block: job_detail.job_work_order. detail: the job_work_order read (null
   // while it loads), detailState: 'loading' | 'ready' | 'failed'.
@@ -292,7 +339,13 @@ var JobWorkOrderCore = (function () {
       return h;
     }
     if (st.key === 'none') {
-      h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. One opens as a draft when the job is approved.</div></div>';
+      if (opts.canOpen) {
+        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. Open its draft: it fills from the accepted quote, then Shaun approves it.</div>' +
+          '<button type="button" class="btn btn-primary btn-sm" data-job-wo-open' + (opts.busy ? ' disabled' : '') +
+          ' onclick="JobWorkOrderOps.openDraft()">' + (opts.busy ? 'Opening...' : 'Open the draft') + '</button></div>';
+      } else {
+        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. One opens as a draft when the job is approved.</div></div>';
+      }
       return h;
     }
 
@@ -532,6 +585,7 @@ var JobWorkOrderCore = (function () {
   return {
     previewState: previewState,
     eligibleType: eligibleType,
+    createRoute: createRoute,
     lineOf: lineOf,
     groupLines: groupLines,
     hoursTotal: hoursTotal,
@@ -547,6 +601,10 @@ var JobWorkOrderCore = (function () {
     canApprove: canApprove,
     refusalWords: refusalWords,
     refusalNeedsReread: refusalNeedsReread,
+    openRefusalWords: openRefusalWords,
+    openRefusalNeedsReread: openRefusalNeedsReread,
+    openedWords: openedWords,
+    crewFormNoticeHtml: crewFormNoticeHtml,
     renderOpsPanel: renderOpsPanel,
     pdfSections: pdfSections,
     renderTrade: renderTrade,

@@ -21,8 +21,9 @@ unchanged until the captain says "make it live".
 - Open `ops.html?wo=preview` or `trade.html?wo=preview`. The browser remembers it in
   `localStorage.sw_wo_preview = '1'`, so the Trade App keeps it after it restores a screen.
 - `?wo=live` turns it off and forgets it. Any other `wo` value is ignored.
-- With it off: no work order panel, the Work Order PDF prints exactly as before, the Trade App
-  never reads `my_job_work_order`, and the invoice keeps the typed Work Order mode.
+- With it off: no work order panel, the Work Order PDF prints exactly as before, every
+  "Create Work Order" opens the old office form for every job, the Trade App never reads
+  `my_job_work_order`, and the invoice keeps the typed Work Order mode.
 
 Making it live means making `previewState` answer on by default (one line in
 `shared/job-work-order.js`) and updating these tests.
@@ -38,7 +39,13 @@ the panel never shows an older work order than the job page.
 What it shows:
 
 - **Work order number and status**: "Draft, not approved" or "Approved and sealed" with the
-  date. A job with none yet, and a work order that could not be read, each say so.
+  date. A work order that could not be read says so.
+- **A job with none yet** says so and offers **Open the draft**, which sends
+  `create_work_order {kind: 'job', job_id}`. The server opens the job's draft (or answers
+  with the one already open) and fills it from the accepted quote. The job is then read
+  again, and the panel says what happened ("filled from the accepted quote", "no accepted
+  quote to fill it from", "no labour lines"). A refusal reads in words; `work_order_sealed`
+  re-reads the job.
 - **Task lines**: task, quantity as quoted (`37.6 m`, `21 each`), hours, and the allocation
   with its rate. A lump line with no hours ("Root removal, 1 job") is marked **No hours**, so
   it is fixed before approval. Total hours and total allocation underneath. An empty draft
@@ -58,6 +65,27 @@ What it shows:
   `approve_work_order {work_order_id, expected_updated_at}` where `expected_updated_at` is the
   `updated_at` of the very draft on screen. Any refusal reads in words; `stale_review` (and
   `not_a_draft`) re-read the job so the fresh draft is shown before anyone approves again.
+
+## Create Work Order: one way for fencing and patio
+
+The old office "New Work Order" form (`#woModal`) made a crew work order whose prefill
+(`autoWOFromScope`) asked `scope_to_po` for a labour figure the backend never returns. With
+the preview on, a fencing or patio job has one way to get a work order: the job work order
+above. `JobWorkOrderCore.createRoute(type, previewOn)` decides it (`// <job-work-order-route>`
+in `ops.html`):
+
+- The job quick view (Processing, "Still need: work order") and the calendar's
+  "No work order yet" button say **Open Work Order** and open the job page on the Build tab
+  (`JobWorkOrderOps.openForJob`). `openCreateWOModal` does the same for those jobs.
+- In the old form, picking a fencing or patio job shows a notice that the form makes no work
+  order for it, with **Open the job work order**, and holds Create WO; Load from Scope and
+  Create WO read and write nothing for it (`woFormSyncJobWorkOrder`).
+- Every other job type (repairs, make-safe, builder crew work orders) keeps the old form and
+  its prefill exactly as before, preview on or off.
+
+The quick view's "Still need: work order" hint still comes from `pipeline`'s `wo_count`,
+which counts crew work orders only, so a fencing or patio job keeps that hint even once its
+job work order exists.
 
 ## Office Work Order PDF
 
@@ -120,7 +148,9 @@ the staff read and is not affected.
 - `tests/e2e/job-work-order-core.spec.js`: the core in node (line reading, addenda, status,
   approver, refusal words, Ops and trade HTML, PDF sections, no money in the trade view).
 - `tests/e2e/ops-job-work-order.spec.js`: the Build tab panel, approve with the exact
-  `updated_at`, the stale review, preview off, and the PDF (fencing, patio, preview off).
+  `updated_at`, the stale review, preview off, the PDF (fencing, patio, preview off), opening
+  a draft, and Create Work Order leading fencing and patio to the job work order while other
+  job types keep the old form.
 - `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload
   `my_job_work_order` sends today) and the invoice, preview on and off, including a per-metre
   trade's server-issued crew work order keeping its Work Order mode.

@@ -155,7 +155,9 @@ as "(cancelled|completed visit still holds that date)". Guard:
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 `data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`
-persisted at `localStorage.sw_cal_divs`) is a flat list of independently
+persisted at `localStorage.sw_cal_divs`) is on screen and applied only with
+calendar v3 OFF (v3 is default on, hides the sidebar and filters through its
+own Show / Type row; see the next section). It is a flat list of independently
 toggleable job-type buckets, not a hierarchy — Repair (Captain ruling
 2026-09-16) is its own division alongside Patios/Fencing/Make Safes, never
 folded under Make Safes. Which bucket an event belongs to is decided in ONE
@@ -208,8 +210,9 @@ week and jobs start under them; an org event stretches across its days instead
 of the corner badge, and a meeting on a job is its own purple line, never merged
 into the job's line. The Show / Type focus row (`_calFocus`, `setCalFocus`,
 stored at `sw_cal_focus`) works in BOTH views. Show sets the in-memory
-`_calEventFilters`, read only through `calEventShown` (business lines follow the
-business filters, only jobs follow Jobs). Type is read off `_calFocus` by
+`_calEventFilters`; a calendar row is let through only by `calEventShown`
+(business lines follow the business filters, only jobs follow Jobs). Type is
+read off `_calFocus` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair

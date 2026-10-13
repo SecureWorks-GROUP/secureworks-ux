@@ -655,6 +655,35 @@ test.describe('Customer variations on the job work order (preview)', () => {
     expect(await posts(page)).toEqual([{ action: 'cancel_customer_variation', body: { variation_id: 'cv-1', expected_updated_at: CV_DRAFT_AT, reason: 'Customer changed their mind' } }]);
   });
 
+  test('a typed cancel reason survives a repaint while the confirm is open', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const draft = draftVariation({ id: 'cv-2' });
+    const { data, read } = withVariations([approvedVariation(), draft]);
+    await openBuild(page, data, {
+      job_work_order: [read, read],
+      cancel_customer_variation: { customer_variation: Object.assign({}, draft, { status: 'cancelled' }) },
+      job_detail: data,
+    }, 'esther@secureworkswa.com.au');
+    await page.evaluate(() => {
+      const post = window.opsPost;
+      window.opsPost = function (action, body) {
+        if (action !== 'prepare_customer_variation_invoice_line') return post(action, body);
+        window.__calls.push({ method: 'POST', action, body });
+        return new Promise((resolve) => { window.__answerPreview = () => resolve({ line: { description: 'Variation 1', quantity: 1, unit_price: 921.6 } }); });
+      };
+    });
+    await page.locator('[data-job-wo-cv-invoice-line][data-cv-id="cv-1"]').click();
+    await page.locator('[data-job-wo-cv-cancel][data-cv-id="cv-2"]').click();
+    await page.locator('[data-job-wo-cv-cancel-reason]').fill('Customer changed their mind');
+    await page.evaluate(() => window.__answerPreview());
+    await expect(page.locator('[data-job-wo-cv-invoice-preview]')).toBeVisible();
+    await expect(page.locator('[data-job-wo-cv-cancel-reason]')).toHaveValue('Customer changed their mind');
+    await page.locator('[data-job-wo-cv-confirm-yes]').click();
+    await expect(page.locator('[data-job-wo-cv-message]')).toContainText('Variation cancelled');
+    const sent = (await posts(page)).filter((c) => c.action === 'cancel_customer_variation');
+    expect(sent).toEqual([{ action: 'cancel_customer_variation', body: { variation_id: 'cv-2', expected_updated_at: CV_DRAFT_AT, reason: 'Customer changed their mind' } }]);
+  });
+
   test('an approved variation previews its customer invoice line, and nothing creates a Xero draft', async ({ page }) => {
     await page.goto('/ops.html?wo=preview');
     const { data, read } = withVariations([approvedVariation()]);

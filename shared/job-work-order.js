@@ -770,7 +770,7 @@ var JobWorkOrderCore = (function () {
 
     var confirm = obj(ui.confirm);
     if (confirm && confirm.id === c.id) {
-      h += renderCustomerVariationConfirm(confirm.kind, c, wo, ui.busy);
+      h += renderCustomerVariationConfirm(confirm, c, wo, ui.busy);
     } else if (st.key === 'draft') {
       var approver = canApproveCustomerVariation(c, viewerEmail);
       var hold = approver ? customerVariationApproveHold(c, wo) : '';
@@ -792,9 +792,9 @@ var JobWorkOrderCore = (function () {
     return h + '</div>';
   }
 
-  function renderCustomerVariationConfirm(kind, c, wo, busy) {
+  function renderCustomerVariationConfirm(confirm, c, wo, busy) {
     var id = esc(c.id);
-    if (kind === 'approve') {
+    if (confirm.kind === 'approve') {
       return '<div class="jwo-confirm" data-job-wo-cv-confirm="approve">' +
         '<div>Approve this variation as shown? It joins ' + esc((wo && wo.wo_number) || 'the work order') +
         ' as the next numbered addendum and is sealed: it cannot change or be cancelled after.</div>' +
@@ -804,7 +804,7 @@ var JobWorkOrderCore = (function () {
     }
     return '<div class="jwo-confirm" data-job-wo-cv-confirm="cancel">' +
       '<div>Cancel this draft variation? It stays on the record as cancelled and never joins the work order.</div>' +
-      '<input type="text" class="form-input" data-job-wo-cv-cancel-reason maxlength="500" placeholder="Reason (optional)">' +
+      '<input type="text" class="form-input" data-job-wo-cv-cancel-reason maxlength="500" placeholder="Reason (optional)" value="' + esc(confirm.reason || '') + '">' +
       '<div class="jwo-confirm-actions"><button type="button" class="btn btn-primary btn-sm" data-job-wo-cv-confirm-yes data-cv-id="' + id + '"' + (busy ? ' disabled' : '') +
       ' onclick="JobWorkOrderOps.cvConfirmed()">' + (busy ? 'Cancelling...' : 'Cancel variation') + '</button>' +
       '<button type="button" class="btn btn-secondary btn-sm" onclick="JobWorkOrderOps.cvConfirmBack()">Keep it</button></div></div>';

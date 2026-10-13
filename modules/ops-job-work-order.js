@@ -300,6 +300,9 @@ var JobWorkOrderOps = (function () {
   function syncForm() {
     var form = _state.cv.form;
     var el = document.getElementById(MOUNT_ID);
+    var confirm = _state.cv.confirm;
+    var reason = el && el.querySelector('[data-job-wo-cv-cancel-reason]');
+    if (confirm && confirm.kind === 'cancel' && reason) confirm.reason = reason.value;
     var box = el && el.querySelector('[data-job-wo-cv-form]');
     if (!form || !box) return;
     var values = { description: '', tasks: [], trade_allocation_ex: '', customer_price_ex: '' };
@@ -449,9 +452,8 @@ var JobWorkOrderOps = (function () {
       action = 'approve_customer_variation';
     } else {
       action = 'cancel_customer_variation';
-      var el = document.getElementById(MOUNT_ID);
-      var input = el && el.querySelector('[data-job-wo-cv-cancel-reason]');
-      var reason = input ? String(input.value || '').trim() : '';
+      syncForm();
+      var reason = String(confirm.reason || '').trim();
       if (reason) body.reason = reason;
     }
     _state.cv.busy = true;

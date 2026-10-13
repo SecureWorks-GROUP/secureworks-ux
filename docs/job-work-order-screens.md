@@ -76,8 +76,9 @@ still print from the scope. A job with no stored work order prints the old docum
   work order: each task with its hours, per-metre lines as quoted, a total, variations as marked
   addenda, and the instructions. It reads task, quantity, unit and hours only, never a money
   field, for every viewer. A job with no approved work order says the office is preparing it.
-  The read is cached per job for two minutes; a failed read is retried when the tab is opened
-  again.
+  The read is cached per job for two minutes. A failed refresh keeps the last good answer (on
+  the Scope tab and for the invoice below) and is retried after those two minutes; only a job
+  whose read never landed reads as failed, and it is retried when the tab is opened again.
 - **Invoice**: for each fencing or patio job card with no server-issued crew work order, the
   builder reads `my_job_work_order`. On a job with an approved work order that card is billed
   by the hours worked: its Work Order mode is switched off and disabled (so the blank typed

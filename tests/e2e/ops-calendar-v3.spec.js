@@ -17,7 +17,7 @@
 // draw. Every name here is made up. Dates are pinned through window._calDate,
 // so nothing in this file compares against "today" and it cannot date-rot.
 const { test, expect } = require('@playwright/test');
-const { revealOpsStaticFixture } = require('../helpers/ops-auth');
+const { installOpsSessionStub, revealOpsStaticFixture } = require('../helpers/ops-auth');
 
 function ev(o) {
   return Object.assign({
@@ -82,7 +82,7 @@ async function seedAndRender(page, opts = {}) {
     window._calDeliveries = opts.noDeliveries ? [] : DELIVERIES;
     // list_pos, null until that read lands (the page's own starting state)
     window._calPOs = opts.pos || null;
-    window._crewList = CREW;
+    if (!opts.keepCrew) window._crewList = opts.crew || CREW;
     window._calLeaveByDate = { '2026-08-05': ['Ivy'] };
     window._calAvailability = {};
     window._calReadiness = { j1: { status: 'ready', score: 100, blockers: [], warnings: [], completeness: [] } };
@@ -111,6 +111,7 @@ function snapshot(page) {
       crew: [...b.querySelectorAll('.crew-initial')].map((c) => c.textContent),
       noCrew: !!b.querySelector('.v3-nocrew'),
       lock: !!b.querySelector('.bar-lock'),
+      dot: !!b.querySelector('.bar-dot'),
       bg: getComputedStyle(b).backgroundColor,
       r: rect(b),
     }));
@@ -129,6 +130,9 @@ function snapshot(page) {
       grid: (cal.querySelector('.cal-schedule-grid') || { className: '' }).className,
       bars, cells,
       crewDels: [...cal.querySelectorAll('.cal-delivery-block')].map((d) => d.getAttribute('data-po-id')),
+      // Crew view: what each block is (client, or the label of a meeting), and any dimmed row
+      crewBlocks: [...new Set([...cal.querySelectorAll('.cal-job-block')].map((b) => (b.getAttribute('title') || '').split(' \u2014 ')[0]))].sort(),
+      dimmed: cal.querySelectorAll('.dimmed').length,
       divs: window._calDivFilters, storedDivs: localStorage.getItem('sw_cal_divs'), storedEvt: localStorage.getItem('sw_cal_evt_filters'),
     };
   });
@@ -165,6 +169,8 @@ test('a job line carries type square, client, job number, staff circles and the 
   expect(alice.crew.sort()).toEqual(['RL', 'SR']);
   expect(alice.lock).toBe(false);
   expect(alice.classes).toContain('v3s-placeholder');
+  // readiness is on record for this job, and the line still carries no dot for it
+  expect(alice.dot).toBe(false);
 
   const bob = bar(s, 'j2');
   expect(bob.classes).toContain('v3s-locked');
@@ -316,8 +322,8 @@ test('Type filters by colour group, and Insurance is a view over make safes and 
   await page.locator('#calFocus [data-focus-type="insurance"]').click();
   s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job).sort()).toEqual(['j3', 'j4']);
-  // a view filter: the divisions underneath are still two separate ones
-  expect(s.divs).toEqual(['makesafe', 'repair']);
+  // a view filter: the sidebar's divisions underneath are left exactly as they were
+  expect(s.divs).toEqual(['all']);
   // and the sidebar's own stored choices were never written by the focus row
   expect(s.storedDivs).toBeNull();
   expect(s.storedEvt).toBeNull();
@@ -381,6 +387,103 @@ test('a delivery whose job is not in view still has its colour, job number and a
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-2', 'po-5']);
 });
 
+test('the Crew view honours Type: other jobs are dropped, no crew row is dimmed, business stays', async ({ page }) => {
+  // installers carry the division "trade", which is no job type at all
+  const crew = CREW.map((c) => Object.assign({}, c, { role: 'installer', division: 'trade' }));
+  const meetings = ['Toolbox talk', 'Weekly ops meeting'];
+  await seedAndRender(page, { view: 'crew', crew });
+  let s = await snapshot(page);
+  expect(s.crewBlocks).toEqual(['Alice Adams', 'Bob Baker', 'Cara Chen', 'Dana Diaz', 'Eli Evans'].concat(meetings));
+
+  await page.locator('#calFocus [data-focus-type="insurance"]').click();
+  s = await snapshot(page);
+  expect(s.crewBlocks).toEqual(['Cara Chen', 'Dana Diaz'].concat(meetings));
+  expect(s.dimmed).toBe(0);
+
+  await page.locator('#calFocus [data-focus-type="patio"]').click();
+  s = await snapshot(page);
+  expect(s.crewBlocks).toEqual(['Alice Adams', 'Eli Evans'].concat(meetings));
+  expect(s.dimmed).toBe(0);
+
+  await page.locator('#calFocus [data-focus-type="all"]').click();
+  s = await snapshot(page);
+  expect(s.crewBlocks).toHaveLength(7);
+});
+
+test('a meeting linked to a job is a business line of its own, never part of the job line', async ({ page }) => {
+  const withJobMeeting = EVENTS.concat([ev({ job_id: 'j1', assignment_id: 'm3', assignment_type: 'meeting', start_time: '09:00:00',
+    job_number: 'SWP-27001', client_name: 'Alice Adams', job_type: 'patio',
+    scheduled_date: '2026-08-05', scheduled_end: '2026-08-05', user_id: 'u3', crew_name: 'Ivy' })]);
+  const LABEL = 'Meeting \u00b7 Alice Adams';
+  await seedAndRender(page, { events: withJobMeeting });
+  let s = await snapshot(page);
+  const line = bizBars(s).find((b) => b.label === LABEL);
+  expect(line, 'the meeting is drawn as a business line').toBeTruthy();
+  expect(line.classes).toContain('v3u-biz');
+  expect(line.num).toBe('SWP-27001');
+  expect(line.time).toBe('9am');
+  expect(line.crew).toEqual(['I']);
+  // on top, like every business line
+  const lowestBiz = Math.max(...bizBars(s).map((b) => b.r.bottom));
+  for (const j of jobBars(s)) expect(j.r.y).toBeGreaterThanOrEqual(lowestBiz - 1);
+  // the job's own line is untouched: its two days, its two people
+  const alice = bar(s, 'j1');
+  const mon = s.cells.find((c) => c.date === '2026-08-03'), tue = s.cells.find((c) => c.date === '2026-08-04');
+  expect(Math.abs(alice.r.w - (mon.w + tue.w))).toBeLessThan(2);
+  expect(alice.crew.sort()).toEqual(['RL', 'SR']);
+
+  await page.evaluate(() => window.setCalFocus('show', 'business'));
+  s = await snapshot(page);
+  expect(bizBars(s).map((b) => b.label)).toContain(LABEL);
+  expect(jobBars(s)).toHaveLength(0);
+
+  for (const show of ['labour', 'materials']) {
+    await page.evaluate((v) => window.setCalFocus('show', v), show);
+    s = await snapshot(page);
+    expect(s.bars.map((b) => b.label), 'Show = ' + show).not.toContain(LABEL);
+  }
+
+  // a business line is not a type
+  await page.evaluate(() => window.setCalFocus('show', 'everything'));
+  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  s = await snapshot(page);
+  expect(bizBars(s).map((b) => b.label)).toContain(LABEL);
+  expect(jobBars(s).map((b) => b.job)).toEqual(['j2']);
+});
+
+test('staff circles take the surname from the user list: full_name, else a raw name of two words', async ({ page, baseURL }) => {
+  const users = [
+    { id: 'u1', name: 'Rex Lawson', email: 'rex@example.test', role: 'installer' },
+    { id: 'u2', name: 'Sam', full_name: 'Sam Example Rivers', email: 'sam@example.test', role: 'installer' },
+    { id: 'u3', name: 'Ivy', email: 'ivy@example.test', role: 'installer' },
+  ];
+  await installOpsSessionStub(page);
+  await page.route('**/*', (route) => {
+    const url = route.request().url();
+    if (url.startsWith(baseURL)) return route.continue();
+    const m = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
+    const body = m && m[1] === 'list_users' ? { users } : {};
+    return route.fulfill({ status: m ? 200 : 404, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('/ops.html');
+  await page.waitForFunction(() => typeof window.loadCrewList === 'function');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(async () => {
+    // the page shows some staff under a one-word name; do the same to this made-up one
+    window.CREW_NAME_MAP.rexlawson = 'Rex';
+    window._crewList = [];
+    await window.loadCrewList();
+  });
+  await revealOpsStaticFixture(page);
+  await seedAndRender(page, { keepCrew: true });
+  const s = await snapshot(page);
+  // shown as "Rex", yet the circle still has the surname's letter from the raw name
+  expect(await page.evaluate(() => window._crewList.map((c) => c.name).sort())).toEqual(['Ivy', 'Rex', 'Sam']);
+  expect(bar(s, 'j1').crew.sort()).toEqual(['RL', 'SR']);
+  // one word and nothing else on record: one letter
+  expect(bar(s, 'j2').crew).toEqual(['I']);
+});
+
 test('the Crew view honours Show: deliveries only under Everything and Materials', async ({ page }) => {
   await seedAndRender(page, { view: 'crew' });
   let s = await snapshot(page);
@@ -439,6 +542,7 @@ test.describe('the switch', () => {
     expect(alice.strong).toBe('SWP-27001');        // old format: number in bold before the name
     expect(alice.square).toBe(false);
     expect(alice.crew.sort()).toEqual(['R', 'S']);  // old format: one letter
+    expect(alice.dot).toBe(true);                   // old format: the readiness dot stays
     expect(alice.classes.some((k) => k.indexOf('v3') === 0)).toBe(false);
     // company days are back to the corner badge
     expect(s.cells.filter((c) => c.holidayBadge).map((c) => c.date)).toEqual(['2026-08-06', '2026-08-07']);

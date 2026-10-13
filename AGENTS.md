@@ -192,7 +192,8 @@ bar's `left`/`width` stay plain percentages that match the day columns
 `calc()` and no pixel offsets, so the overlap and resize guards keep measuring
 the real box; v3 insets the line with transparent side borders instead.
 Line format: type square, client, job number, staff circles, lock; a job line
-carries no start time (a business line keeps its time). TWO states
+carries no start time (a business line keeps its time) and no readiness dot
+(readiness stays in the tooltip and popup). TWO states
 only (Captain ruling 2026-10-13): placeholder, and client locked in
 (`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
 one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
@@ -200,14 +201,19 @@ repair, family-first through `calDivisionOf`; anything else, such as general or
 miscellaneous, sits with patios); the symbol still tells a make safe from a
 repair. The v3 Type filter and deliveries read that same `calV3Unit`, never
 `calDivisionOf`, so a job cannot vanish under the filter it is coloured for;
-the flag-off sidebar Divisions rule is unchanged. Business lines (job-less label
-rows and org events) take the TOP lanes of the week and jobs start under them;
-an org event stretches across its days instead of the corner badge. A job-less
-label row follows the business filter with v3 on (`calJoblessLabelShown`). The Show / Type focus row
-(`_calFocus`, `setCalFocus`, stored at `sw_cal_focus`) drives the same in-memory
-`_calEventFilters` / `_calDivFilters` the hidden sidebar drove, but never writes
-the sidebar's storage keys, and "Insurance" is a VIEW filter only: Repair stays
-its own division (ruling 2026-09-16). Leave, holidays and reminders show under
+the flag-off sidebar Divisions rule is unchanged. A business line is decided in
+ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
+job-less label row, plus org events. Business lines take the TOP lanes of the
+week and jobs start under them; an org event stretches across its days instead
+of the corner badge, and a meeting on a job is its own purple line, never merged
+into the job's line. The Show / Type focus row (`_calFocus`, `setCalFocus`,
+stored at `sw_cal_focus`) works in BOTH views. Show sets the in-memory
+`_calEventFilters`, read only through `calEventShown` (business lines follow the
+business filters, only jobs follow Jobs). Type is read off `_calFocus` by
+`calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
+with v3 on) and never filters a business line. Neither writes the sidebar's
+storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
+stays its own division (ruling 2026-09-16). Leave, holidays and reminders show under
 Everything and Business. Deliveries are read-only and come from
 `calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
 order, see `// <calendar-delivery-row>`) passed through the Show and Type

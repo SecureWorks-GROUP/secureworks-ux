@@ -7345,7 +7345,7 @@ async function loadCrewList() {
       // full_name is not sent by list_users today, so a raw name of two or more
       // words stands in for it; when the backend adds full_name it wins here.
       var rawFull = String(u.name || '').trim();
-      var fullName = u.full_name || (u.trade_details && u.trade_details.fullName) || (rawFull.split(/\s+/).length > 1 ? rawFull : '');
+      var fullName = u.full_name || (rawFull.split(/\s+/).length > 1 ? rawFull : '');
       return { id: u.id, name: displayName, fullName: fullName, email: u.email, role: u.role || '', division: div };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
   } catch (e) {
@@ -8357,10 +8357,12 @@ var _calEventFilters = (function() {
 
 // ── Calendar v3 focus row: Show (everything / labour / materials / business)
 // and Type (all / patio / fencing / insurance). Single choice in each, and the
-// two combine. They drive the SAME in-memory filters the sidebar tick boxes
-// drive (_calEventFilters, _calDivFilters), so both calendar views honour them,
-// but they persist under their own key and never write the sidebar's keys:
-// turning v3 off gives back exactly the filters the operator had before.
+// two combine, and both calendar views honour them. Show drives the in-memory
+// _calEventFilters the sidebar tick boxes drive (read through calEventShown);
+// Type is read straight off _calFocus (calV3TypeShown) and leaves the sidebar's
+// divisions alone. They persist under their own key and never write the
+// sidebar's keys: turning v3 off gives back exactly the filters the operator
+// had before.
 // "Insurance" is a view filter only — make safes and repairs stay separate
 // divisions in the data (Captain ruling 2026-09-16 stands).
 var _calFocus = (function() {
@@ -8376,9 +8378,6 @@ function applyCalFocus() {
   if (!window.__SW_CAL_V3_ENABLED) return;
   var s = _calFocus.show, biz = (s === 'everything' || s === 'business');
   _calEventFilters = { jobs: (s === 'everything' || s === 'labour'), meetings: biz, holidays: biz, leave: biz, reminders: biz };
-  var t = _calFocus.type;
-  _calDivFilters = t === 'patio' ? ['patio'] : t === 'fencing' ? ['fencing'] : t === 'insurance' ? ['makesafe', 'repair'] : ['all'];
-  _calDivFilter = _calDivFilters.indexOf('all') !== -1 ? 'all' : _calDivFilters;
 }
 function setCalFocus(kind, val) {
   if (kind !== 'show' && kind !== 'type') return;
@@ -8388,11 +8387,17 @@ function setCalFocus(kind, val) {
   renderCalendar();
 }
 applyCalFocus();
-// A job-less row that is neither a meeting nor a reminder (a typed label from
-// New > Job assignment). v3 draws it as a business line, so there it follows
-// the business filter; with v3 off it follows Jobs as it always has.
-function calJoblessLabelShown() {
-  return window.__SW_CAL_V3_ENABLED ? _calEventFilters.meetings : _calEventFilters.jobs;
+// Whether the Show filters let a calendar row through, for both views. v3 off:
+// the sidebar tick boxes, where a meeting on a job needs Jobs too and a typed
+// job-less row follows Jobs. v3 on: every business line (calV3IsBusiness)
+// follows the business filters and only a job follows Jobs.
+function calEventShown(ev) {
+  var aType = ev.assignment_type || 'install';
+  if (aType === 'meeting' && !_calEventFilters.meetings) return false;
+  if (aType === 'reminder' && !_calEventFilters.reminders) return false;
+  if (aType === 'meeting' || aType === 'reminder') return !!window.__SW_CAL_V3_ENABLED || !ev.job_id || _calEventFilters.jobs;
+  if (!ev.job_id && window.__SW_CAL_V3_ENABLED) return _calEventFilters.meetings;
+  return _calEventFilters.jobs;
 }
 
 function toggleCalEventFilter(key, el) {
@@ -9253,11 +9258,8 @@ function renderSwimlaneView(container, range) {
   // Group events by crew, handle multi-day (with event type filters)
   var crewMap = {};
   _calEvents.forEach(function(ev) {
-    var aType = ev.assignment_type || 'install';
-    if (aType === 'meeting' && !_calEventFilters.meetings) return;
-    if (aType === 'reminder' && !_calEventFilters.reminders) return;
-    if (ev.job_id && !_calEventFilters.jobs) return;
-    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !calJoblessLabelShown()) return;
+    if (!calEventShown(ev)) return;
+    if (window.__SW_CAL_V3_ENABLED && !calV3TypeShown(ev)) return;
     var crew = crewDisplayName(ev);
     if (!crewMap[crew]) crewMap[crew] = { division: guessDivision(ev), events: {} };
     var startDate = ev.scheduled_date;
@@ -9413,7 +9415,7 @@ function renderSwimlaneView(container, range) {
   crewNames.forEach(function(crew) {
     var crewData = crewMap[crew] || { division: '', events: {} };
     var div = crewData.division || '';
-    var isDimmed = _calDivFilter !== 'all' && div && (Array.isArray(_calDivFilters) ? _calDivFilters.indexOf(div) === -1 : true);
+    var isDimmed = !window.__SW_CAL_V3_ENABLED && _calDivFilter !== 'all' && div && (Array.isArray(_calDivFilters) ? _calDivFilters.indexOf(div) === -1 : true);
 
     // Division divider removed — single unified crew list
 
@@ -9744,16 +9746,14 @@ function renderScheduleView(container, range) {
   var jobMap = {};
   var labelMap = {};
   _calEvents.forEach(function(ev) {
-    var aType = ev.assignment_type || 'install';
-    if (aType === 'meeting' && !_calEventFilters.meetings) return;
-    if (aType === 'reminder' && !_calEventFilters.reminders) return;
-    if (ev.job_id && !_calEventFilters.jobs) return;
-    if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !calJoblessLabelShown()) return;
+    if (!calEventShown(ev)) return;
 
-    if (!ev.job_id) {
+    // v3: a meeting or reminder on a job is its own business line, never part
+    // of the job's line.
+    if (v3 ? calV3IsBusiness(ev) : !ev.job_id) {
       // Collect label (internal) events
       // Group job-less entries by label+date so multiple crew appear on one bar
-      var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date;
+      var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date + (ev.job_id ? '_' + ev.job_id : '');
       if (!labelMap[aid]) {
         var crewName = crewDisplayName(ev);
         var crew = {};
@@ -9761,7 +9761,8 @@ function renderScheduleView(container, range) {
         labelMap[aid] = {
           id: aid,
           assignmentId: ev.assignment_id,
-          label: ev.label || 'Internal',
+          label: ev.label || (ev.job_id ? calV3JobLinkedLabel(ev) : 'Internal'),
+          job_number: ev.job_id ? (ev.job_number || '') : '',
           job_type: ev.job_type || null,
           start: ev.scheduled_date,
           end: spanEnd(ev),
@@ -9786,7 +9787,7 @@ function renderScheduleView(container, range) {
     // Division filter (multi-select). v3's Type row filters on the same group
     // that colours the line, so a job never vanishes under its own colour.
     if (v3) {
-      if (_calFocus.type !== 'all' && calV3Unit(ev) !== _calFocus.type) return;
+      if (!calV3TypeShown(ev)) return;
     } else if (_calDivFilter !== 'all') {
       var div = calDivisionOf(ev);
       var match = false;
@@ -10107,6 +10108,7 @@ function renderScheduleView(container, range) {
           html += '<span class="cal-v3-sq">' + calV3Icon('biz', 12) + '</span>';
           if (job.v3Time) html += '<span class="v3-time">' + calV3Time(job.v3Time) + '</span>';
           html += '<span class="bar-label">' + escapeHtml(job.label) + '</span>';
+          if (job.job_number) html += '<span class="v3-num">' + escapeHtml(job.job_number) + '</span>';
         } else {
         html += '<span class="bar-dot" style="background:' + (job.job_type ? '' : '#9CA3AF') + ';"></span>';
         if (job.start_time) html += '<span style="font-weight:700;font-size:8px;margin-right:2px;">' + job.start_time.slice(0,5) + '</span>';
@@ -10174,8 +10176,8 @@ function renderScheduleView(container, range) {
           }
         }
 
-        // Readiness dot
-        if (readiness) {
+        // Readiness dot (not on a v3 line: two states only; the tooltip and popup still say)
+        if (readiness && !v3) {
           var dotColors = { ready: '#22C55E', at_risk: '#F59E0B', blocked: '#EF4444' };
           html += '<span class="bar-dot" style="background:' + (dotColors[readiness.status] || '#999') + ';"></span>';
         }
@@ -10254,6 +10256,23 @@ function calV3Icon(name, size) {
 function calV3Unit(ev) {
   var d = calDivisionOf(ev);
   return (d === 'repair' || d === 'makesafe') ? 'insurance' : d === 'fencing' ? 'fencing' : 'patio';
+}
+// A meeting, a reminder and any job-less row is a business line, even a meeting
+// or reminder linked to a job. Everything else is a job.
+function calV3IsBusiness(ev) {
+  var t = ev.assignment_type || 'install';
+  return t === 'meeting' || t === 'reminder' || !ev.job_id;
+}
+// The Type focus, for both views: a job outside the chosen colour group is
+// dropped. A business line is not a type, so it always passes.
+function calV3TypeShown(ev) {
+  return _calFocus.type === 'all' || calV3IsBusiness(ev) || calV3Unit(ev) === _calFocus.type;
+}
+// A meeting or reminder linked to a job has no label of its own (Add Event
+// keeps the title only on a job-less row), so its line says what it is and
+// whose job it is on.
+function calV3JobLinkedLabel(ev) {
+  return (ev.assignment_type === 'reminder' ? 'Reminder' : 'Meeting') + (ev.client_name ? ' \u00b7 ' + ev.client_name : '');
 }
 function calV3Symbol(ev) {
   var d = calDivisionOf(ev);

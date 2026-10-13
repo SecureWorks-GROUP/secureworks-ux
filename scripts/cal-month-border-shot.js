@@ -129,6 +129,12 @@ async function main() {
       if (url.startsWith(base)) return route.continue();
       return route.abort();
     });
+    // The subject is the calendar's border rules with the v3 design switched
+    // off. v3 draws its own grid, and the direct renderer calls below never
+    // apply its scoped styles, so pin the switch off before load.
+    await page.addInitScript(() => {
+      try { localStorage.setItem('sw_cal_v3', '0'); } catch (e) { /* storage unavailable */ }
+    });
     await page.goto(`${base}/ops.html`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
     await revealOpsStaticFixture(page);

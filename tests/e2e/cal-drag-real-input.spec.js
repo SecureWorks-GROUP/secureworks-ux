@@ -333,6 +333,9 @@ test.describe('Captain ruling cp1-askuser-2 — Perth timezone', () => {
     await expect.poll(() => writes.length).toBeGreaterThan(0);
     expect(writes[0].scheduledDate).toBe(D.MON);
     expect(writes[0].scheduledEnd).toBe(D.MON);
+    // The first create closes the modal when its response lands; reopening
+    // before that lets the late close shut the second form.
+    await expect(page.locator('#calSchedModal')).not.toHaveClass(/open/);
     // 3-day create: flag off counts CALENDAR days — Mon..Wed.
     await page.evaluate((date) => openScheduleModal('j-new', '', date), D.MON);
     await page.selectOption('#schedCrew', 'u-hugo');

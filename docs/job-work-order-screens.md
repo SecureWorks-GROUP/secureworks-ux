@@ -18,10 +18,9 @@ the one rate source.
 Built for real, published behind a preview, using the same live data. The live screens are
 unchanged until the captain says "make it live".
 
-- Open `ops.html?wo=preview` or `trade.html?wo=preview` (also `=1` or `=on`). The browser
-  remembers it in `localStorage.sw_wo_preview = '1'`, so the Trade App keeps it after it
-  restores a screen.
-- `?wo=live` (or `=0`, `=off`) turns it off and forgets it.
+- Open `ops.html?wo=preview` or `trade.html?wo=preview`. The browser remembers it in
+  `localStorage.sw_wo_preview = '1'`, so the Trade App keeps it after it restores a screen.
+- `?wo=live` turns it off and forgets it. Any other `wo` value is ignored.
 - With it off: no work order panel, the Work Order PDF prints exactly as before, the Trade App
   never reads `my_job_work_order`, and the invoice keeps the typed Work Order mode.
 
@@ -32,8 +31,9 @@ Making it live means making `previewState` answer on by default (one line in
 
 `renderBuildView` (`// <job-work-order-panel>`) calls `JobWorkOrderOps.buildTabHtml(data)`.
 It reads `job_detail.job_work_order` (fencing and patio only; `null` on other jobs, so nothing
-shows) and then `ops-api job_work_order` once per job open for the billed lines and the
-trade-reported variations.
+shows) and then `ops-api job_work_order` for the billed lines and the trade-reported
+variations, once for every `job_detail` read (each job open and each `refreshJobDetail()`), so
+the panel never shows an older work order than the job page.
 
 What it shows:
 
@@ -78,35 +78,41 @@ still print from the scope. A job with no stored work order prints the old docum
   field, for every viewer. A job with no approved work order says the office is preparing it.
   The read is cached per job for two minutes; a failed read is retried when the tab is opened
   again.
-- **Invoice**: for each fencing or patio job on the invoice the builder reads
-  `my_job_work_order`. A job with an approved work order is billed by the hours worked: its
-  Work Order mode is switched off and disabled (so the typed "WO allocated $" box and the
-  paid-to-other-trades deductions are not offered), and the card says which work order it is
-  billed against. The backend stamps each billed line against the job's work order and checks
-  billed labour against the agreed amount on the server. A job without one keeps the existing
-  behaviour.
+- **Invoice**: for each fencing or patio job card with no server-issued crew work order, the
+  builder reads `my_job_work_order`. On a job with an approved work order that card is billed
+  by the hours worked: its Work Order mode is switched off and disabled (so the blank typed
+  "WO allocated $" box and the paid-to-other-trades deductions are not offered), and the card
+  says which work order it is billed against. The backend stamps each billed line against the
+  job's work order and checks billed labour against the agreed amount on the server. A card
+  hydrated from a server-issued crew work order (`work_order_id`, prefilled from the order's
+  subtotal) and every card of a per-metre trade keep their Work Order mode exactly as before;
+  a per-metre trade's invoice never reads `my_job_work_order`. A job without an approved work
+  order keeps the existing behaviour.
 
 ## Line fields the screens read
 
 The backend line builder fills `work_orders.scope_items` from the accepted quote. The screens
-accept these keys (first one present wins):
+read exactly these keys and no other spelling:
 
-| Meaning | Keys |
+| Meaning | Key |
 |---|---|
-| Task | `description`, `task`, `name`, `title`, `label`, `text` |
-| Quantity, unit | `qty`, `quantity`, `metres`; `unit`, `units` |
-| Hours | `hours`, `hrs`, `labour_hours`, `estimated_hours`; a line whose unit is `h`/`hr`/`hrs`/`hour`/`hours` is its own hours |
-| Kind | `kind`, `line_kind` (`labour` / `material`) |
-| Allocation (Ops only) | `allocation_ex`, `labour_ex`, `amount_ex`, `line_total_ex`, `total_ex`; rate `rate_ex`, `cost_rate_ex`, `rate`, `unit_cost_ex` |
-| Note | `notes`, `note`, `instructions` |
-| Variation addendum | `variation_id`, `variation_number`, `addendum_id`, or `variation: true`, `addendum: true`, `kind: 'variation'`, `section: 'variation'`; title `addendum_label` / `variation_label` (else "Variation n"); date `variation_approved_at` |
+| Task | `description` |
+| Quantity, unit | `qty`, `unit` |
+| Kind | `kind` (`labour` / `material`) |
+| Note | `notes` |
+| Hours | `hours`; a line whose `unit` is `h`/`hr`/`hrs`/`hour`/`hours` is its own hours |
+| Rate, allocation (Ops only) | `rate_ex`, `allocation_ex` |
+| Variation addendum | `variation_number` (or, with no number, `variation_label`) marks the line; title `variation_label` (else "Variation n"); date `variation_approved_at` |
 
-Backend gap, not built here: the trade read (`my_job_work_order`) passes scope items through
-the shared allowlist `TRADE_WO_SCOPE_ITEM_ALLOWLIST`, which keeps only text, `qty`/`quantity`,
-`unit`/`units` and `kind`. A line's `hours` field and the variation keys are dropped before the
-trade sees them, so until the backend adds them to that allowlist a trade sees hours only on a
-line priced in hours (`qty` with unit `hrs`, which the allowlist keeps) and sees variation lines
-unmarked. The Ops page reads the staff read and is not affected.
+Backend gap, not built here (follow-up tracked by firstmate): the trade read
+(`my_job_work_order`) passes scope items through the shared allowlist
+`TRADE_WO_SCOPE_ITEM_ALLOWLIST`, which keeps only text, `qty`/`quantity`, `unit`/`units`,
+`kind` and the note fields. A line's `hours` field and the variation keys are dropped before
+the trade sees them, so today a trade sees hours only on a line priced in hours (`qty` with
+unit `hrs`, which the allowlist keeps) and sees variation lines unmarked among the approved
+lines. Showing hours on the other lines and marked variations to trades needs that backend
+allowlist change; the trade screen already renders both when they arrive. The Ops page reads
+the staff read and is not affected.
 
 ## Tests
 
@@ -114,4 +120,6 @@ unmarked. The Ops page reads the staff read and is not affected.
   approver, refusal words, Ops and trade HTML, PDF sections, no money in the trade view).
 - `tests/e2e/ops-job-work-order.spec.js`: the Build tab panel, approve with the exact
   `updated_at`, the stale review, preview off, and the PDF (fencing, patio, preview off).
-- `tests/e2e/trade-job-work-order.spec.js`: the Scope tab and the invoice, preview on and off.
+- `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload
+  `my_job_work_order` sends today) and the invoice, preview on and off, including a per-metre
+  trade's server-issued crew work order keeping its Work Order mode.

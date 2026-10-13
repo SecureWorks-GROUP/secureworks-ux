@@ -150,6 +150,24 @@ test.describe('Job work order on the Ops job page (preview)', () => {
     expect(reads).toBe(1);
   });
 
+  test('every job_detail read reads the work order again, so a draft filled later is not shown empty', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const empty = workOrder({ scope_items: [], agreed_labour_ex: null });
+    const filled = workOrder({ updated_at: '2026-10-13T06:00:00Z' });
+    await openBuild(page, detailPayload(empty), {
+      job_work_order: [{ work_order: empty, figures: {}, variations: [] }, { work_order: filled, figures: {}, variations: [] }],
+      job_detail: detailPayload(filled),
+    }, SHAUN);
+    await expect(page.locator('[data-job-wo-no-lines]')).toBeVisible();
+    await page.evaluate(() => refreshJobDetail());
+    const panel = page.locator('[data-job-wo-panel]');
+    await expect(panel).toContainText('Install Colorbond fencing');
+    await expect(page.locator('[data-job-wo-no-lines]')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-approve]')).toBeEnabled();
+    const reads = await page.evaluate(() => window.__calls.filter((c) => c.action === 'job_work_order').length);
+    expect(reads).toBe(2);
+  });
+
   test('anyone but Shaun sees the work order with no Approve button', async ({ page }) => {
     await page.goto('/ops.html?wo=preview');
     await openBuild(page, detailPayload(workOrder()), { job_work_order: { work_order: workOrder(), figures: {}, variations: [] } }, 'esther@secureworkswa.com.au');

@@ -9,7 +9,8 @@
 //
 // Reads:  job_detail.job_work_order (already loaded by openJobDetail) and
 //         ops-api job_work_order (the billed lines and trade-reported
-//         variations), read once per job open.
+//         variations), read again for every job_detail read (job open or
+//         refresh), so the panel never shows an older copy than job_detail.
 // Writes: ops-api approve_work_order {work_order_id, expected_updated_at},
 //         only from the approver's button, with the updated_at of the draft
 //         this panel shows, so the seal covers exactly what was read.
@@ -21,8 +22,8 @@ var JobWorkOrderOps = (function () {
   var STORE_KEY = 'sw_wo_preview';
   var MOUNT_ID = 'jdJobWorkOrder';
   var _preview = null;
-  // One state per open job: the job_work_order read and the approve button.
-  var _state = { jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0 };
+  // One state per job_detail read: the job_work_order read and the approve button.
+  var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0 };
 
   function core() { return window.JobWorkOrderCore || null; }
 
@@ -51,9 +52,9 @@ var JobWorkOrderOps = (function () {
     return (typeof _currentJobData !== 'undefined' && _currentJobData) || null;
   }
 
-  function resetFor(jobId) {
-    if (_state.jobId === jobId) return;
-    _state = { jobId: jobId, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1 };
+  function resetFor(data) {
+    if (_state.data === data) return;
+    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1 };
   }
 
   function panelHtml(data) {
@@ -82,20 +83,21 @@ var JobWorkOrderOps = (function () {
       '<button type="button" class="btn btn-secondary btn-sm" onclick="JobWorkOrderOps.cancelApprove()">Cancel</button></div></div>';
   }
 
-  // The work order on screen: the job_work_order read when it has landed,
-  // else the copy job_detail carried. Approval carries ITS updated_at.
+  // The work order on screen: the job_work_order read made for this
+  // job_detail read when it has landed, else the copy job_detail carried.
+  // Approval carries ITS updated_at.
   function shownWorkOrder(data) {
-    if (_state.detail && _state.detail.work_order) return _state.detail.work_order;
+    if (_state.data === data && _state.detail && _state.detail.work_order) return _state.detail.work_order;
     var block = data && data.job_work_order;
     return (block && block.work_order) || null;
   }
 
   // The Build tab calls this; it returns the mount, filled with what is known
-  // now, and starts the job_work_order read once per job open.
+  // now, and starts the job_work_order read once per job_detail read.
   function buildTabHtml(data) {
     if (!previewOn() || !data || !data.job || !data.job_work_order) return '';
     injectCss();
-    resetFor(data.job.id);
+    resetFor(data);
     if (_state.detailState === 'idle' && data.job_work_order.work_order) loadDetail(data.job.id);
     return '<div id="' + MOUNT_ID + '">' + panelHtml(data) + '</div>';
   }
@@ -103,7 +105,7 @@ var JobWorkOrderOps = (function () {
   function repaint() {
     var data = currentData();
     var el = document.getElementById(MOUNT_ID);
-    if (!el || !data || !data.job || data.job.id !== _state.jobId) return;
+    if (!el || !data || data !== _state.data) return;
     el.innerHTML = panelHtml(data);
   }
 
@@ -111,12 +113,12 @@ var JobWorkOrderOps = (function () {
     var seq = _state.seq;
     _state.detailState = 'loading';
     opsFetch('job_work_order', { job_id: jobId }).then(function (res) {
-      if (seq !== _state.seq || _state.jobId !== jobId) return;
+      if (seq !== _state.seq) return;
       _state.detail = res || null;
       _state.detailState = res ? 'ready' : 'failed';
       repaint();
     }).catch(function () {
-      if (seq !== _state.seq || _state.jobId !== jobId) return;
+      if (seq !== _state.seq) return;
       _state.detailState = 'failed';
       repaint();
     });
@@ -142,17 +144,17 @@ var JobWorkOrderOps = (function () {
     var data = currentData();
     var wo = shownWorkOrder(data);
     if (!C || !C.canApprove(wo, viewerEmail()) || _state.busy) return;
-    var jobId = _state.jobId;
+    var seq = _state.seq;
     _state.busy = true;
     _state.confirming = false;
     _state.message = '';
     repaint();
     opsPost('approve_work_order', { work_order_id: wo.id, expected_updated_at: wo.updated_at }).then(function () {
-      if (_state.jobId !== jobId) return;
+      if (seq !== _state.seq) return;
       rereadJob('Approved and sealed.', 'ok');
       if (typeof showToast === 'function') showToast('Work order approved and sealed', 'success');
     }).catch(function (e) {
-      if (_state.jobId !== jobId) return;
+      if (seq !== _state.seq) return;
       var code = (e && e.code) || '';
       var words = C.refusalWords(code, e && e.message);
       if (C.refusalNeedsReread(code)) {
@@ -167,18 +169,19 @@ var JobWorkOrderOps = (function () {
   }
 
   // Read the job (and so the work order) again after an approval or a
-  // refusal that says the draft moved, then show the message on the fresh copy.
+  // refusal that says the draft moved, then show the message on the fresh
+  // copy: the fresh job_detail read resets this panel and reads its work order.
   function rereadJob(message, level) {
     var jobId = _state.jobId;
-    _state.seq++;
-    _state.detail = null;
-    _state.detailState = 'idle';
-    _state.busy = false;
-    _state.message = message;
-    _state.level = level;
-    var done = function () { if (_state.jobId === jobId) repaint(); };
+    var done = function () {
+      if (_state.jobId !== jobId) return;
+      _state.busy = false;
+      _state.message = message;
+      _state.level = level;
+      repaint();
+    };
     if (typeof refreshJobDetail === 'function') refreshJobDetail().then(done, done);
-    else repaint();
+    else done();
   }
 
   function openPdf() {

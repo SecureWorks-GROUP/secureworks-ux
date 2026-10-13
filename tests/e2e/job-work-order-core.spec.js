@@ -8,7 +8,6 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 
 const SHARED = resolve(__dirname, '../../shared/job-work-order.js');
-const OPS_MODULE = resolve(__dirname, '../../modules/ops-job-work-order.js');
 const OPEN = '// <job-work-order-core>';
 const CLOSE = '// </job-work-order-core>';
 const SOURCE = readFileSync(SHARED, 'utf8');
@@ -61,23 +60,57 @@ function approvedBlock() {
 }
 
 test.describe('Job work order core (extracted from shared/job-work-order.js)', () => {
-  test('the shared file and the Ops module hold no long dash and no emoji', () => {
-    for (const src of [SOURCE, readFileSync(OPS_MODULE, 'utf8')]) {
-      expect(src).not.toMatch(/[–—]/);
-      expect(src).not.toMatch(/\p{Extended_Pictographic}/u);
+  test('nothing the screens render holds a long dash or an emoji', () => {
+    const detail = {
+      work_order: draftBlock().work_order,
+      figures: draftBlock().figures,
+      labour_before_approval: { amount_ex: 432.5, line_count: 2, note: 'It links and counts when the work order is approved.' },
+      variations: [{ id: 'v1', reported_by_name: 'Alyx', description: 'Extra roots', amount_ex: 300, counted: false, over_invoice_labour: true, created_at: '2026-10-12T01:00:00Z', corrected_at: '2026-10-12T03:00:00Z', original_description: 'Roots', original_amount_ex: 250 }],
+    };
+    const approvedRead = { work_order: approvedBlock().work_order };
+    const outputs = [
+      C.renderOpsPanel(draftBlock(), null, 'loading', { viewerEmail: SHAUN, preview: true }),
+      C.renderOpsPanel(draftBlock(), detail, 'ready', { viewerEmail: SHAUN, busy: true, message: 'Approved and sealed.', messageLevel: 'ok' }),
+      C.renderOpsPanel(draftBlock({ scope_items: [], agreed_labour_ex: null }), null, 'failed', { viewerEmail: SHAUN }),
+      C.renderOpsPanel(approvedBlock(), detail, 'ready', { viewerEmail: SHAUN }),
+      C.renderOpsPanel({ work_order: null }, null, 'idle', {}),
+      C.renderOpsPanel({ unreadable: true }, null, 'idle', {}),
+      C.renderTrade(approvedRead, 'ready'),
+      C.renderTrade({ work_order: Object.assign({}, approvedRead.work_order, { scope_items: [] }) }, 'ready'),
+      C.renderTrade({ work_order: null }, 'ready'),
+      C.renderTrade(null, 'loading'),
+      C.renderTrade(null, 'failed'),
+      C.invoiceNote(approvedRead),
+      C.invoiceNote({ work_order: Object.assign({}, approvedRead.work_order, { scope_items: [{ description: 'Gate rehang', hours: 2 }] }) }),
+    ];
+    for (const block of [draftBlock(), approvedBlock()]) {
+      const pdf = C.pdfSections(block);
+      outputs.push(pdf.title, pdf.scopeHtml, pdf.costHtml);
+    }
+    for (const code of ['stale_review', 'expected_updated_at_required', 'approver_required', 'approver_identity_missing',
+      'approver_not_set', 'terminal_approval_switched_off', 'work_order_not_ready', 'not_a_draft', 'work_order_not_found',
+      'not_a_job_work_order', '']) {
+      outputs.push(C.refusalWords(code, ''));
+    }
+    for (const out of outputs) {
+      expect(out).toBeTruthy();
+      expect(out).not.toMatch(/[\u2013\u2014]/);
+      expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
     }
   });
 
-  test('preview switch: off by default, the URL turns it on or off and asks to be remembered', () => {
+  test('preview switch: off by default, ?wo=preview / ?wo=live turn it on or off and ask to be remembered', () => {
     expect(C.previewState('', null)).toEqual({ on: false, persist: null });
     expect(C.previewState('', '1')).toEqual({ on: true, persist: null });
     expect(C.previewState('', '0')).toEqual({ on: false, persist: null });
     expect(C.previewState('?wo=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?jobId=x&wo=1', null)).toEqual({ on: true, persist: '1' });
+    expect(C.previewState('?jobId=x&wo=preview', null)).toEqual({ on: true, persist: '1' });
     expect(C.previewState('?wo=live', '1')).toEqual({ on: false, persist: '0' });
-    expect(C.previewState('?wo=off', '1')).toEqual({ on: false, persist: '0' });
-    // An unknown value leaves the remembered setting alone.
-    expect(C.previewState('?wo=banana', '1')).toEqual({ on: true, persist: null });
+    // Any other value, including the old 1/on/0/off spellings, leaves the remembered setting alone.
+    for (const v of ['1', 'on', '0', 'off', 'banana']) {
+      expect(C.previewState(`?wo=${v}`, '1')).toEqual({ on: true, persist: null });
+      expect(C.previewState(`?wo=${v}`, null)).toEqual({ on: false, persist: null });
+    }
     expect(C.previewState('?two=1', null)).toEqual({ on: false, persist: null });
   });
 
@@ -102,17 +135,20 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     expect(C.needsHours(lump)).toBe(true);
     expect(variation.hours).toBe(4);
     expect(variation.addendumKey).toBe('n:1');
-    // Other spellings of the same fields.
-    expect(C.lineOf({ task: 'Gate rehang', quantity: '3', units: 'hours' }).hours).toBe(3);
-    expect(C.lineOf({ name: 'Post set', hrs: '1.5', qty: 4, unit: 'each' })).toMatchObject({ task: 'Post set', hours: 1.5, qty: 4 });
+    expect(C.lineOf({ description: 'Gate rehang', qty: '3', unit: 'hours' }).hours).toBe(3);
+    expect(C.lineOf({ description: 'Post set', hours: '1.5', qty: 4, unit: 'each', notes: 'Corner first' }))
+      .toMatchObject({ task: 'Post set', hours: 1.5, qty: 4, notes: 'Corner first' });
     expect(C.needsHours(C.lineOf({ description: 'Material', qty: 1, unit: 'job', kind: 'material' }))).toBe(false);
+    // Only the backend contract's keys are read: no other spelling stands in for a field.
+    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, rate: 9, note: 'x', variation: true }))
+      .toMatchObject({ task: '', qty: null, unit: '', hours: null, allocationEx: null, rateEx: null, notes: '', addendumKey: '' });
   });
 
   test('variations are their own marked addenda; the approved lines are never mixed with one', () => {
     const items = scopeItems().concat([
       { description: 'Extra gate post', hours: 1, variation_number: 2 },
       { description: 'Second variation line', hours: 0.5, variation_number: 2 },
-      { description: 'Flagged only', hours: 2, variation: true, variation_label: 'Neighbour request' },
+      { description: 'Labelled only', hours: 2, variation_label: 'Neighbour request' },
       { description: '' },
     ]);
     const g = C.groupLines(items);

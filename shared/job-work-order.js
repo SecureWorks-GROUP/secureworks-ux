@@ -8,14 +8,14 @@
 // the invoice). Both pages read a work order's lines through this file only,
 // so a task, its hours and a variation addendum read the same everywhere.
 //
-// Preview (captain's rule for new screens): off unless ?wo=preview (or =1, =on)
-// or localStorage sw_wo_preview = '1'. ?wo=live (or =0, =off) turns it off.
+// Preview (captain's rule for new screens): off unless ?wo=preview or
+// localStorage sw_wo_preview = '1'. ?wo=live turns it off.
 // With it off, both pages behave exactly as before.
 //
 // Money: the Ops renderer shows the agreed labour, each line's allocation and
 // the billed figures (office staff only). The trade renderer reads no money
 // field at all and prints no dollar figure, for every trade, the lead included
-// (captain, 12 Oct 2026). No emoji and no long dashes in this file
+// (captain, 12 Oct 2026). No emoji and no long dashes in what it renders
 // (tests/e2e/job-work-order-core.spec.js checks it).
 // ════════════════════════════════════════════════════════════
 
@@ -70,8 +70,8 @@ var JobWorkOrderCore = (function () {
     var m = /[?&]wo=([^&#]*)/.exec(str(search));
     if (m) {
       var v = lower(m[1].replace(/%20|\+/g, ''));
-      if (v === 'preview' || v === '1' || v === 'on') return { on: true, persist: '1' };
-      if (v === 'live' || v === '0' || v === 'off') return { on: false, persist: '0' };
+      if (v === 'preview') return { on: true, persist: '1' };
+      if (v === 'live') return { on: false, persist: '0' };
     }
     return { on: str(stored) === '1', persist: null };
   }
@@ -115,52 +115,38 @@ var JobWorkOrderCore = (function () {
 
   // ── One scope line ──
   // The backend line builder fills work_orders.scope_items from the accepted
-  // quote. These are the keys read (docs/job-work-order-screens.md):
-  //   task       description | task | name | title | label | text
-  //   quantity   qty | quantity | metres, with unit | units
-  //   hours      hours | hrs | labour_hours | estimated_hours; a line priced
-  //              in hours (unit h / hr / hrs / hour / hours) is its own hours
-  //   money      allocation_ex | labour_ex | amount_ex | line_total_ex | total_ex
-  //              and rate_ex | cost_rate_ex | rate | unit_cost_ex (Ops only)
-  //   addendum   variation_id | variation_number | addendum_id, or
-  //              variation / addendum true, kind 'variation', section
-  //              'variation'; named by addendum_label | variation_label, dated
-  //              by variation_approved_at | approved_at
+  // quote. Exactly these keys are read (docs/job-work-order-screens.md):
+  //   description, qty, unit, kind, notes   the scope line (backend #1022)
+  //   hours                                 a line priced in hours (unit h /
+  //                                         hr / hrs / hour / hours) is its
+  //                                         own hours
+  //   rate_ex, allocation_ex                Ops only
+  //   variation_number, variation_label,    a variation addendum
+  //   variation_approved_at
   function lineOf(item) {
     var it = obj(item) || {};
-    var unit = firstText(it.unit, it.units);
-    var qty = firstNum(it.qty, it.quantity, it.metres);
-    var hours = firstNum(it.hours, it.hrs, it.labour_hours, it.estimated_hours);
+    var unit = firstText(it.unit);
+    var qty = firstNum(it.qty);
+    var hours = firstNum(it.hours);
     var unitIsHours = HOUR_UNITS.indexOf(lower(unit)) >= 0;
     if (hours == null && unitIsHours && qty != null) hours = qty;
-    var kind = lower(it.kind || it.line_kind);
-    var addKey = addendumKey(it, kind);
+    var number = firstNum(it.variation_number);
+    var label = firstText(it.variation_label);
     return {
-      task: firstText(it.description, it.task, it.name, it.title, it.label, it.text),
+      task: firstText(it.description),
       qty: qty,
       unit: unit,
       unitIsHours: unitIsHours,
       hours: hours,
-      kind: kind,
-      notes: firstText(it.notes, it.note, it.instructions),
-      allocationEx: firstNum(it.allocation_ex, it.labour_ex, it.amount_ex, it.line_total_ex, it.total_ex),
-      rateEx: firstNum(it.rate_ex, it.cost_rate_ex, it.rate, it.unit_cost_ex),
-      addendumKey: addKey,
-      addendumLabel: firstText(it.addendum_label, it.variation_label),
-      addendumNumber: firstNum(it.variation_number),
-      addendumAt: firstText(it.variation_approved_at, addKey ? it.approved_at : '')
+      kind: lower(it.kind),
+      notes: firstText(it.notes),
+      allocationEx: firstNum(it.allocation_ex),
+      rateEx: firstNum(it.rate_ex),
+      addendumKey: number != null ? 'n:' + number : (label ? 'label:' + lower(label) : ''),
+      addendumLabel: label,
+      addendumNumber: number,
+      addendumAt: firstText(it.variation_approved_at)
     };
-  }
-
-  function addendumKey(it, kind) {
-    var id = firstText(str(it.variation_id || ''), str(it.addendum_id || ''));
-    if (id) return 'id:' + id;
-    var n = firstNum(it.variation_number);
-    if (n != null) return 'n:' + n;
-    if (it.variation === true || it.addendum === true || kind === 'variation' || lower(it.section) === 'variation') {
-      return 'label:' + lower(firstText(it.addendum_label, it.variation_label) || 'variation');
-    }
-    return '';
   }
 
   // A labour line whose quantity is a lump ("Root removal, 1 job") with no

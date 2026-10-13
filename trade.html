@@ -4884,9 +4884,17 @@
   }
 
   // The job work order's trade read carries no money by design; strip any
-  // money key a scope line might still carry before anything renders it.
+  // money key it or a scope line might still carry before anything caches it.
+  var TRADE_JOB_WO_MONEY_KEYS = ['allocation_ex', 'labour_ex', 'rate_ex', 'cost_rate_ex', 'unit_cost_ex',
+    'total_ex', 'agreed_labour_ex', 'figures'];
   function tradeStripJobWorkOrderMoney(res) {
-    if (res && res.work_order && typeof res.work_order === 'object') tradeStripMoneyKeys(res.work_order);
+    delete res.figures;
+    var wo = res.work_order;
+    if (!wo || typeof wo !== 'object') return;
+    tradeStripMoneyKeys(wo);
+    [wo].concat(Array.isArray(wo.scope_items) ? wo.scope_items : []).forEach(function(node) {
+      if (node && typeof node === 'object') TRADE_JOB_WO_MONEY_KEYS.forEach(function(k) { delete node[k]; });
+    });
   }
 
   var TRADE_MONEY_DOOR = {
@@ -13719,9 +13727,6 @@
     }
   }
 
-  // Office instructions for the crew: work order special instructions (+ est.
-  // hours), else the scoping tool's installer note. Rendered at the top of the
-  // Scope tab so a tier-1 installer sees them without the Work tab.
   // <trade-job-work-order>
   // The job's work order (one per fencing or patio job, approved by the office)
   // as the trade reads it: each task with its hours, per-metre lines as quoted,
@@ -13756,11 +13761,12 @@
     return !!(window.JobWorkOrderCore && JobWorkOrderCore.eligibleType(type));
   }
 
-  // The cached my_job_work_order answer for a job, or null when none has
-  // landed. A failed read is never cached as "no work order".
+  // The cached my_job_work_order answer for a job (kept while a refresh is
+  // in flight), or null when none has landed. A failed read is never cached
+  // as "no work order".
   function tradeJobWoRead(jobId) {
     var e = _tradeJobWo[jobId];
-    return e && e.state === 'ready' ? e.read : null;
+    return e && e.state !== 'failed' ? e.read : null;
   }
 
   // The approved work order on a job, from the cache only.
@@ -13788,9 +13794,9 @@
   }
 
   function tradeJobWoSlotHtml(jobId) {
-    var e = _tradeJobWo[jobId] || { state: 'loading', read: null };
-    var state = e.state === 'ready' ? 'ready' : (e.state === 'failed' ? 'failed' : 'loading');
-    return JobWorkOrderCore.renderTrade(e.read, state);
+    var read = tradeJobWoRead(jobId);
+    var e = _tradeJobWo[jobId];
+    return JobWorkOrderCore.renderTrade(read, read ? 'ready' : (e && e.state === 'failed' ? 'failed' : 'loading'));
   }
 
   // The Work Order and Scope tabs: the job's work order scope, on an
@@ -13809,14 +13815,20 @@
     return '<div data-trade-job-wo-slot="' + esc(jobId) + '">' + tradeJobWoSlotHtml(jobId) + '</div>';
   }
 
-  // Invoice: a job with an approved work order is billed by the hours worked.
-  // The typed "WO allocated $" amount is retired on that job, so its card
-  // leaves Work Order mode. Returns true when a card changed.
+  // Invoice: on a job with an approved work order the blank typed
+  // "WO allocated $" box is retired and the card bills the hours worked. A
+  // card carrying a server-issued crew work order (work_order_id) and a
+  // per-metre trade's cards keep their Work Order mode.
+  function tradeJobWoRetiresTypedBox(c) {
+    return !!(c && c.job_id && !c.work_order_id && tradeJobWoPreviewOn() && !isPerMetreUser()
+      && tradeJobWoApproved(c.job_id));
+  }
+
+  // Takes each such card out of Work Order mode. Returns true when a card changed.
   function retireTypedWorkOrderOnJobWorkOrders(cards) {
-    if (!tradeJobWoPreviewOn()) return false;
     var changed = false;
     (cards || []).forEach(function(c) {
-      if (!c || !c.job_id || !tradeJobWoApproved(c.job_id)) return;
+      if (!tradeJobWoRetiresTypedBox(c)) return;
       if (c.wo_mode) {
         c.wo_mode = false;
         c.hours_mode_locked = true;
@@ -13827,11 +13839,12 @@
   }
 
   // Start reading the work order of every fencing or patio job on the
-  // invoice; when one turns out to have an approved work order, repaint.
+  // invoice whose typed box it could retire; when one turns out to have an
+  // approved work order, repaint.
   function loadInvoiceJobWorkOrders(onChange) {
-    if (!tradeJobWoPreviewOn()) return;
+    if (!tradeJobWoPreviewOn() || isPerMetreUser()) return;
     (_jobCards || []).forEach(function(c) {
-      if (!c || !c.job_id || c.is_makesafe) return;
+      if (!c || !c.job_id || c.work_order_id || c.is_makesafe) return;
       var t = String(c.job_type || '').toLowerCase();
       if (t && !tradeJobWoEligibleType(t)) return;
       tradeJobWoLoad(c.job_id, function(changed) { if (changed && onChange) onChange(); });
@@ -13839,14 +13852,16 @@
   }
 
   function invoiceJobWorkOrderNoteHtml(c) {
-    if (!tradeJobWoPreviewOn() || !c || !c.job_id) return '';
+    if (!tradeJobWoRetiresTypedBox(c)) return '';
     var read = tradeJobWoRead(c.job_id);
-    if (!read || !read.work_order) return '';
     return '<div data-job-wo-invoice-note="' + c._idx + '" style="margin-top:8px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;background:var(--sw-light);font-size:12px;color:var(--sw-text-sec)">'
       + esc(JobWorkOrderCore.invoiceNote(read)) + '</div>';
   }
   // </trade-job-work-order>
 
+  // Office instructions for the crew: work order special instructions (+ est.
+  // hours), else the scoping tool's installer note. Rendered at the top of the
+  // Scope tab so a tier-1 installer sees them without the Work tab.
   function renderTradeInstructions(data) {
     var wo = (data && (data.workOrder || data.work_order)) || {};
     var scope = (data && data.job && data.job.scope_json) || {};
@@ -24471,7 +24486,7 @@
         html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
           + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
           + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
-        var jobWoOn = !!(tradeJobWoPreviewOn() && c.job_id && tradeJobWoApproved(c.job_id));
+        var jobWoOn = tradeJobWoRetiresTypedBox(c);
         var woLocked = jobWoOn || (!c.work_order_id && !!c.requires_work_order_id);
         html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="' + (jobWoOn ? 'This job has a work order: bill the hours you worked' : 'No work order on this job yet') + '" ' : '')
           + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
@@ -24979,7 +24994,7 @@
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
   window.setJobCardMode = function(idx, mode) {
     var c = _jobCards[idx]; if (!c) return;
-    if (mode === 'work_order' && tradeJobWoPreviewOn() && c.job_id && tradeJobWoApproved(c.job_id)) {
+    if (mode === 'work_order' && tradeJobWoRetiresTypedBox(c)) {
       toast('This job has a work order. Bill the hours you worked; the office checks them against it.', true);
       return;
     }

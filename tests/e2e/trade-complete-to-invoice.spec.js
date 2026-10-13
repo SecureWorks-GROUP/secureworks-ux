@@ -4,6 +4,7 @@ const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { signOff } = require('../helpers/wizard-signoff');
 const { perthDate, perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
+const { dayText } = require('../helpers/invoice-time');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
@@ -81,7 +82,7 @@ function baseRoutes(page, log, detail, queue) {
 test.describe('Complete-to-invoice: hourly trade', () => {
   test.use({ persona: 'installer' });
 
-  test('after Job complete an hourly trade gets one-tap hours on the success screen', async ({ appPage: page }) => {
+  test('after Job complete an hourly trade says when they worked on the success screen', async ({ appPage: page }) => {
     const log = [];
     await page.route(`${UPLOAD_URL}**`, (route) => route.fulfill({ status: 200, body: '' }));
     await baseRoutes(page, log, fenceDetail('e2e-job-1', 'e2e-installer', 'E2E Installer'), { lane: 'hours', hours_logged: null, work_orders: [] });
@@ -90,10 +91,21 @@ test.describe('Complete-to-invoice: hourly trade', () => {
     await runWizardToComplete(page);
     const hours = page.locator('#wizBody #rrHours');
     await expect(hours).toBeVisible();
-    await hours.locator('[data-rr-hour="2"]').click();
+    // Hours are worked out from the times; there is no figure to type or tap.
+    await expect(hours.locator('#rrHoursInput, [data-rr-hour]')).toHaveCount(0);
+    await expect(hours.locator('#rrHoursDate')).toHaveValue('');
+    await hours.locator('#rrHoursDate').fill(perthDate());
+    await hours.locator('#rrHoursStart').fill('07:00');
+    await hours.locator('#rrHoursFinish').fill('09:00');
+    await expect(hours.locator('#rrHoursCalc')).toHaveText('2 hrs');
+    await hours.locator('#rrHoursSave').click();
     await expect.poll(() => log.filter((e) => e[0] === 'log_my_job_hours').length).toBe(1);
-    expect(log.find((e) => e[0] === 'log_my_job_hours')[1]).toMatchObject({ job_id: 'e2e-job-1', hours: 2 });
-    await expect(page.locator('#wizBody #rrHours')).toContainText('2 hrs on your week (w/e Sun 13 Sep)');
+    expect(log.find((e) => e[0] === 'log_my_job_hours')[1]).toEqual({
+      job_id: 'e2e-job-1', hours: 2,
+      work_date: perthDate(), start_time: '07:00', finish_time: '09:00', break_minutes: 0,
+      source: 'job_view'
+    });
+    await expect(page.locator('#wizBody #rrHours')).toContainText(`2 hrs recorded against this job (w/e Sun 13 Sep). ${dayText(perthDate())}, 07:00 to 09:00.`);
   });
 
   test('hours already clocked are shown instead of the chips', async ({ appPage: page }) => {
@@ -103,7 +115,8 @@ test.describe('Complete-to-invoice: hourly trade', () => {
     await signIn(page, PERSONAS.installer);
     await page.evaluate(() => window.openJob('e2e-job-1'));
     await runWizardToComplete(page);
-    await expect(page.locator('#wizBody')).toContainText('6.5 hrs on your week for this job');
+    await expect(page.locator('#wizBody')).toContainText('6.5 hrs recorded against this job');
+    await expect(page.locator('#wizBody')).toContainText('Your Weekly Invoice will still ask for the times you worked.');
     await expect(page.locator('#wizBody #rrHours')).toHaveCount(0);
   });
 });

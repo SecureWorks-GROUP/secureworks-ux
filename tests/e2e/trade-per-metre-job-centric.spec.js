@@ -1,10 +1,11 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 // Fixtures date work orders from perthWeekMonday(). A UTC browser after Perth
 // Monday midnight filters that week out and the job-centric hydrate paints Hours.
-test.use({ persona: 'fencing_manager', timezoneId: 'Australia/Perth' });
+test.use({ persona: 'fencing_manager', timezoneId: 'Australia/Perth', appWeekDay: 6 });
 
 test('Henry Financial invoices jobs with WO-trade deducts and a 12% super preview', async ({ appPage: page, feedRequests }) => {
   await signIn(page, PERSONAS.fencing_manager);
@@ -166,6 +167,7 @@ test('a partial work-order money payload keeps restored deductions and blocks WO
           source_line_id: 'wo-fence-charge-israel'
         }],
         hours: 8,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -243,6 +245,7 @@ test('a truncated work-order listing keeps restored deductions and blocks WO sub
           source_line_id: 'wo-fence-charge-israel'
         }],
         hours: 8,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -396,14 +399,17 @@ test('Hours typed while hydrate is pending stay Hours after the WO arrives', asy
   const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toBeVisible();
   await expect(card.locator('[data-cardhours]')).toBeVisible();
-  await card.locator('[data-cardhours]').evaluate((el) => {
+  // Typed but not yet blurred: start and finish sit in the fields, with the
+  // cursor still in Finish, when the work-order read lands.
+  await card.locator('[data-cardstart]').evaluate((el) => { el.value = '07:00'; });
+  await card.locator('[data-cardfinish]').evaluate((el) => {
     el.focus();
-    el.value = '3';
+    el.value = '10:00';
   });
   releaseHydrate();
 
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
-  await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+  await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
   await expect(card.locator('[data-cardwoalloc]')).toHaveCount(0);
   await card.getByRole('button', { name: 'Work Order', exact: true }).click();
   await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
@@ -463,7 +469,7 @@ test.describe('Henry job-centric submit', () => {
     await expect(anyCard).toBeVisible();
     // Work Order mode is open on any job, with or without an ops work order.
     await expect(anyCard.getByRole('button', { name: 'Work Order', exact: true })).toBeEnabled();
-    await anyCard.locator('[data-cardhours]').fill('2');
+    await fillCardTime(anyCard, 2, { date: perthWeekMonday() });
     await anyCard.locator('[data-cardrate]').fill('55');
     await anyCard.locator('input[placeholder="Description of work"]').fill('Install extra panels');
     await anyCard.locator('input[placeholder="Description of work"]').press('Tab');
@@ -704,7 +710,7 @@ test.describe('Henry Hours submit after hydrate fail', () => {
 
     const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
     await expect(card.locator('[data-cardhours]')).toBeVisible();
-    await card.locator('[data-cardhours]').fill('3');
+    await fillCardTime(card, 3);
     // Assigned job: the office rate is shown read-only, never typed.
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$55.00/hr');
     await expect(page.locator('#invSubmitBtn')).toBeEnabled();
@@ -836,6 +842,7 @@ test.describe('stale restored work-order id', () => {
           wo_allocated: 99,
           wo_labour_lines: [],
           hours: 2,
+          work_date: start, start_time: '07:00', finish_time: '09:00', break_minutes: 0,
           rate: 55,
           description: 'stale wo hours',
           manually_added: true
@@ -864,7 +871,7 @@ test.describe('stale restored work-order id', () => {
 
     await stale.locator('[data-wo-hours-ack]').click();
     await expect(stale.locator('[data-wo-block]')).toHaveCount(0);
-    await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
+    await expect(stale.locator('[data-cardhours]')).toHaveText('2 hrs');
 
     await page.locator('#invSubmitBtn').click();
     // One invoice per week: the submit confirm must be ticked deliberately.
@@ -916,6 +923,7 @@ test('hydrate overwrites stale allocated money and rematches server pass-through
         }],
         wo_lump_lines: [{ description: 'Materials', amount: 10 }],
         hours: 8,
+        work_date: jobDate, start_time: '07:00', finish_time: '15:00', break_minutes: 0,
         rate: 55
       }],
       weekStart: start,
@@ -999,6 +1007,7 @@ test.describe('already-invoiced work order stays blocked', () => {
             source_line_id: 'wo-already-israel'
           }],
           hours: 3,
+          work_date: date, start_time: '07:00', finish_time: '10:00', break_minutes: 0,
           rate: 55,
           description: 'already invoiced hours',
           manually_added: true
@@ -1079,6 +1088,7 @@ test.describe('hydrate ignores out-of-week work orders', () => {
           wo_allocated: 250,
           wo_labour_lines: [],
           hours: 2,
+          work_date: last, start_time: '07:00', finish_time: '09:00', break_minutes: 0,
           rate: 55,
           description: 'last week wo',
           manually_added: true
@@ -1101,7 +1111,7 @@ test.describe('hydrate ignores out-of-week work orders', () => {
     await expect(page.locator('#invSubmitBtn')).toBeDisabled();
 
     await stale.locator('[data-wo-hours-ack]').click();
-    await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
+    await expect(stale.locator('[data-cardhours]')).toHaveText('2 hrs');
 
     await page.locator('#invSubmitBtn').click();
     // One invoice per week: the submit confirm must be ticked deliberately.

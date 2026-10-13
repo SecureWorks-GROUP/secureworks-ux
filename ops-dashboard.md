@@ -16,6 +16,8 @@ A fresh open of the plain address lands on Jobs (Captain 2026-10-06). Every tab 
 
 Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Health and Job P&L are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
 
+**When a trade's hours were worked (Captain 2026-10-12).** Trades now give the date, start and finish for every line of hours they invoice (`trade-app.md` → "Pay tab: when the time was worked"). Ops shows them beside the hours on a trade invoice's lines, and shows nothing extra for an older line that carries no times: Trade Bills lists them in a "Times worked" fold under the trade's name (`swTradeInvoiceWhenHtml`), and the job P&L "Trade Line Detail" table shows the day and the span under the hours. The job's Labour Reconciliation panel does not show them: the `labour_reconciliation` read carries no lines today. One reader, `swTradeTimeEntry`, under `// <trade-time-entry-ops>` in `ops.html`. Guard: `tests/e2e/ops-trade-invoice-times.spec.js`.
+
 ## Key Features
 - AI chat sidebar (Claude sonnet via ops-ai)
 - Morning brief (auto-generated, 30-min cache) and actionable attention items (click to schedule/invoice/create PO): on the hidden Today view, so not on screen

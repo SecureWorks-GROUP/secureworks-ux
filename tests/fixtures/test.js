@@ -58,14 +58,21 @@ const PERSONAS = {
 const test = base.extend({
   persona: ['installer', { option: true }],
   feedScenario: ['normal', { option: true }],
+  // Days after this Perth week's Monday that the app's clock starts on; null
+  // is the real clock. A date worked cannot be after today, so a spec that
+  // enters times on the week's jobs runs the app at the end of that week (6).
+  appWeekDay: [null, { option: true }],
   feedRequests: async ({}, use) => {
     const requests = [];
     await use(requests);
   },
 
-  appPage: async ({ page, persona, feedScenario, feedRequests }, use) => {
+  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
+    if (appWeekDay != null) {
+      await page.clock.install({ time: new Date(addIsoDays(perthWeekMonday(), appWeekDay) + 'T12:00:00+08:00') });
+    }
 
     const guard = await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
 
@@ -139,6 +146,11 @@ const test = base.extend({
           job_id: 'e2e-wo-holder-job',
           scheduled_date: addIsoDays(weekStart, 1),
           hours_worked: 8,
+          // Clocked on and off that day. The invoice card never copies these:
+          // the trade types the times they worked.
+          clocked_on_at: addIsoDays(weekStart, 1) + 'T07:00:00+08:00',
+          clocked_off_at: addIsoDays(weekStart, 1) + 'T15:00:00+08:00',
+          break_minutes: 0,
           jobs: {
             id: 'e2e-wo-holder-job',
             job_number: 'SWF-26767',
@@ -1048,7 +1060,12 @@ const test = base.extend({
               // Stale-week guard fixture: the card belongs to LAST week while the
               // builder is on this week, the exact shape that lost Alyx a week.
               ...(feedScenario === 'trade-invoice-stale-week'
-                ? { assignments: labourExplainerHours.assignments.map((a) => ({ ...a, scheduled_date: addIsoDays(weekStart, -6) })) }
+                ? { assignments: labourExplainerHours.assignments.map((a) => ({
+                  ...a,
+                  scheduled_date: addIsoDays(weekStart, -6),
+                  clocked_on_at: addIsoDays(weekStart, -6) + 'T07:00:00+08:00',
+                  clocked_off_at: addIsoDays(weekStart, -6) + 'T15:00:00+08:00'
+                })) }
                 : {}),
               super_rate: 0.12,
               gross_earned: 400,

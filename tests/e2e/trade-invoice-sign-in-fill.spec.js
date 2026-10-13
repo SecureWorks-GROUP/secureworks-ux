@@ -1,7 +1,7 @@
 // Sign in and sign out carry over to the invoice (Captain, 2026-10-13).
 //
 // The taps fill date worked, start, finish and break on that job's invoice
-// line, one line per signed-in day, rounded to 15 minutes. The line says
+// line, one line per signed-in day, rounded to 15 minutes by ops-api. The line says
 // "From your sign in", stays the trade's to change, and posts the sign ins it
 // came from. The rules and payload are pinned against the shipped code in
 // scripts/test-trade-site-visit.js; this spec proves them on the real card.
@@ -83,7 +83,6 @@ test('a signed-in day fills the line, says so, and posts the sign in it came fro
   await expect(card.locator('[data-cardbreak]')).toHaveValue('30');
   await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
   await expect(card.locator('[data-cardsv] [data-sv-tag]')).toHaveText('From your sign in');
-  await expect(card.locator('[data-cardsv] [data-sv-use]')).toBeHidden();
   // The line names its own source: the older "hours on record" reminder is not repeated.
   await expect(card.locator('[data-cardtimehint]')).toBeHidden();
   await expect(card.locator('[data-cardamt]')).toHaveText('$400.00');
@@ -97,7 +96,7 @@ test('a signed-in day fills the line, says so, and posts the sign in it came fro
   }]);
 });
 
-test('a time they change is what is billed; the line shows the tap, and can put it back', async ({ appPage: page, feedRequests }) => {
+test('a time they change is what is billed, and the line shows what the tap was', async ({ appPage: page, feedRequests }) => {
   await serveHours(page, hours([signedInDay(TUE)]));
   const card = await openBuilder(page);
   await card.locator('[data-cardfinish]').fill('16:00');
@@ -106,17 +105,15 @@ test('a time they change is what is billed; the line shows the tap, and can put 
   await expect(card.locator('[data-cardsv] [data-sv-text]')).toHaveText('You signed out at 3:34 pm. The office sees both.');
   await expect(card.locator('[data-cardsv] [data-sv-tag]')).toHaveText('From your sign in');
 
-  await card.locator('[data-cardsv] [data-sv-use]').click();
-  await expect(card.locator('[data-cardfinish]')).toHaveValue('15:30');
-  await expect(card.locator('[data-cardsv] [data-sv-text]')).toHaveText('');
-
   await card.locator('[data-cardstart]').fill('06:30');
   await card.locator('[data-cardstart]').blur();
-  await expect(card.locator('[data-cardsv] [data-sv-text]')).toHaveText('You signed in at 7:02 am. The office sees both.');
+  await expect(card.locator('[data-cardhours]')).toHaveText('9 hrs');
+  await expect(card.locator('[data-cardsv] [data-sv-text]')).toHaveText('You signed in at 7:02 am. You signed out at 3:34 pm. The office sees both.');
+  await expect(card.locator('[data-cardsv] [data-sv-tag]')).toBeHidden();
   await confirmSubmit(page);
   await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
   expect(invoicePosts(feedRequests)[0].body.manual_assignments).toEqual([
-    expect.objectContaining({ hours: 8.5, start_time: '06:30', finish_time: '15:30', break_minutes: 30, site_visit_ids: ['visit-' + TUE] })
+    expect.objectContaining({ hours: 9, start_time: '06:30', finish_time: '16:00', break_minutes: 30, site_visit_ids: ['visit-' + TUE] })
   ]);
 });
 
@@ -157,32 +154,49 @@ test('several signed-in days on one job: one line per day on the same card, each
   await expect(card.locator('[data-cardallhours]')).toHaveText('23 hrs');
   await expect(card.locator('[data-cardamt]')).toHaveText('$1150.00');
 
-  // A further day has no booking behind it, so the office needs to know what was done.
-  await page.locator('#invSubmitBtn').click();
-  await expect(page.locator('#toast')).toContainText('SWF-26767: add a description of works done.');
-  expect(invoicePosts(feedRequests)).toEqual([]);
-  await card.locator('[data-carddesc]').fill('Fence install, street side');
-  await card.locator('[data-carddesc]').blur();
-
   // They did not work the Thursday after all.
   await days.nth(1).locator('[data-daydrop]').click();
   await expect(card.locator('[data-cardday]')).toHaveCount(1);
   await expect(card.locator('[data-cardallhours]')).toHaveText('16 hrs');
-  await expect(card.locator('[data-carddesc]')).toHaveValue('Fence install, street side');
 
+  // Nothing was typed, a description included: the job is theirs by booking.
   await confirmSubmit(page);
   await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
   const body = invoicePosts(feedRequests)[0].body;
   expect(body.manual_assignments).toEqual([
-    expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 8, work_date: TUE, site_visit_ids: ['visit-' + TUE], description: 'Fence install, street side' })
+    expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 8, work_date: TUE, rate_source: 'server_resolved', site_visit_ids: ['visit-' + TUE] })
   ]);
+  // The further day says it came from a sign in at their usual rate, never
+  // that they searched the job in and typed a rate.
   expect(body.extra_items).toEqual([{
-    type: 'Labour', row_type: 'labour', description: 'Fence install, street side', quantity: 8, unit: 'hr', rate: 50,
+    type: 'Labour', row_type: 'labour', description: '', quantity: 8, unit: 'hr', rate: 50,
     date: WED, work_date: WED, start_time: '07:00', finish_time: '15:30', break_minutes: 30,
     job_id: 'e2e-wo-holder-job', job_number: 'SWF-26767', division: 'fencing', client_name: 'Kelvin Gillies',
-    manually_added: true, source: 'manual_job_search', rate_source: 'client_entered', client_rate_entered: true,
+    manually_added: false, source: 'site_visit_day', rate_source: 'server_resolved', client_rate_entered: false,
     site_visit_ids: ['visit-' + WED]
   }]);
+});
+
+test('the first day left blank: the further signed-in days are still billed as the card shows', async ({ appPage: page, feedRequests }) => {
+  await serveHours(page, hours([signedInDay(TUE), signedInDay(WED)]));
+  const card = await openBuilder(page);
+  await expect(card.locator('[data-cardday]')).toHaveCount(1);
+  // They did not work the Tuesday: its line is cleared, the Wednesday stands.
+  await card.locator('[data-carddate]').fill('');
+  await card.locator('[data-cardstart]').fill('');
+  await card.locator('[data-cardfinish]').fill('');
+  await card.locator('[data-cardbreak]').fill('');
+  await card.locator('[data-cardbreak]').blur();
+  await expect(card.locator('[data-cardhours]')).toHaveText('0 hrs');
+  await expect(card.locator('[data-cardamt]')).toHaveText('$400.00');
+
+  await confirmSubmit(page);
+  await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+  const body = invoicePosts(feedRequests)[0].body;
+  expect(body.manual_assignments || []).toEqual([]);
+  expect(body.extra_items).toEqual([
+    expect.objectContaining({ job_id: 'e2e-wo-holder-job', quantity: 8, rate: 50, work_date: WED, source: 'site_visit_day', site_visit_ids: ['visit-' + WED] })
+  ]);
 });
 
 test('a job signed in to that is not on the week\'s cards is offered, never added for them', async ({ appPage: page, feedRequests }) => {
@@ -252,9 +266,4 @@ test('times the trade already typed are never overwritten, a restored draft incl
   await expect(card.locator('[data-cardstart]')).toHaveValue('06:00');
   await expect(card.locator('[data-cardfinish]')).toHaveValue('14:00');
   await expect(card.locator('[data-cardsv] [data-sv-tag]')).toBeHidden();
-  await card.locator('[data-cardsv] [data-sv-use]').click();
-  await expect(card.locator('[data-cardstart]')).toHaveValue('07:00');
-  await expect(card.locator('[data-cardfinish]')).toHaveValue('15:30');
-  await expect(card.locator('[data-cardbreak]')).toHaveValue('30');
-  await expect(card.locator('[data-cardsv] [data-sv-tag]')).toHaveText('From your sign in');
 });

@@ -100,10 +100,13 @@ test.describe('Accept gate and job stepper', () => {
     await expect(page.locator('#jobDetailContent')).toContainText('Trappers');
     await expect(page.locator('.jd-action-bar a.act-call')).toBeVisible();
     await expect(page.locator('[data-job-stepper]')).toHaveAttribute('data-stepper-state', 'accepted');
-    await expect(page.locator('[data-stepper-start]')).toHaveText('Sign in');
+    await expect(page.locator('[data-stepper-start]')).toHaveText('Start work');
   });
 
-  test('Sign in is one tap; the signed-in state offers Job complete and Sign out', async ({ appPage: page }) => {
+  // This feed is the ops-api that is live today (no open_site_visit on
+  // my_jobs), so the job keeps its start and end taps. The one-tap Sign in and
+  // Sign out are held in trade-sign-in-out.spec.js.
+  test('Start work is one tap; the working state offers Job complete and End my day', async ({ appPage: page }) => {
     const log = [];
     await stub(page, () => fenceDetail('confirmed'), log);
     await openJob(page);
@@ -114,9 +117,8 @@ test.describe('Accept gate and job stepper', () => {
     await expect(stepper).toHaveAttribute('data-stepper-state', 'working');
     await expect(stepper.locator('#timerElapsed')).toBeVisible();
     await expect(stepper.locator('[data-stepper-finish]')).toHaveText('Job complete');
-    await expect(stepper).toContainText('Signed in');
-    await expect(stepper).not.toContainText('Working since');
-    await expect(stepper.locator('[data-stepper-endday]')).toHaveText('Sign out');
+    await expect(stepper).toContainText('Working since');
+    await expect(stepper.locator('[data-stepper-endday]')).toHaveText('End my day (job continues)');
     await expect(stepper.locator('[data-stepper-start]')).toHaveCount(0);
   });
 

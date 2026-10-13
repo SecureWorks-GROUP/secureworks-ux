@@ -789,10 +789,18 @@ confirm; signing in is optional; the words are Sign in, Sign out and "Signed in
 7:02 am", never clock, timer or shift; a sign in is never refused or held up
 for a location; the app never guesses a finish (a forgotten sign out is typed
 by the trade and marked as typed); no text, push or reminder of any kind is
-sent (not approved). The app must work with an ops-api that has none of the
-visit fields: every new field is read if present and never required. The full
-contract, field names and the both-ways deploy behaviour live in `trade-app.md`
-→ "Sign in and sign out". Guards: `scripts/test-trade-site-visit.js`,
+sent (not approved). ONE FIELD SWITCHES IT ON: the one-tap Sign in and Sign
+out (the Today card taps, the bar, the switch question, the leave-time
+question) run only while `my_jobs` carries the `open_site_visit` key, null
+included (`_siteVisitLive`, remembered per trade for a start with no signal).
+Against an ops-api without it the job screen keeps Start work and End my day
+(that end tap completes the day's row, so it is never a one-tap Sign out on a
+card or a bar), nothing asks to switch jobs, no finish is sent that the trade
+did not give, and no error shows. Do not read a visit from any other key or
+shape. The bar's Sign out acts on the open sign in's own job, never
+`_currentAssignment`. A `my_jobs` answer asked for before a tap never replaces
+what the tap set (`_siteTapSeq`). The full contract, field names and the
+both-ways deploy behaviour live in `trade-app.md` → "Sign in and sign out". Guards: `scripts/test-trade-site-visit.js`,
 `tests/e2e/trade-sign-in-out.spec.js`,
 `tests/e2e/trade-invoice-sign-in-fill.spec.js`.
 
@@ -810,8 +818,9 @@ on a line: no default date or start, no device memory, no prefill from the
 schedule or from the stamps on the assignment row. One source only may fill a
 line (Captain 2026-10-13: "sign in, sign out, and then that's what carries over
 to the invoice"): the trade's own sign in and sign out on that job, handed over
-as `my_hours` `site_visit_days`, rounded to 15 minutes, tagged "From your sign
-in", still editable, and never over something they typed. Without one, a card, an
+as `my_hours` `site_visit_days`, rounded to 15 minutes by ops-api (the app
+rounds nothing), tagged "From your sign in", still editable, and never over
+something they typed. Without one, a card, an
 Extras row and the job-view row open blank; a card shows hours on record only
 as a reminder. The job-view row
 records times against the job and never promises the week or the invoice.

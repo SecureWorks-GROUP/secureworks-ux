@@ -111,6 +111,10 @@ test('own fresh 14h+ clock: "No" loads that job and opens its end-of-day report;
   await page.locator('#confirmCancel').click();
   await expect.poll(() => requestLog.some((r) => r.action === 'trade_job_detail' && new URL(r.url).searchParams.get('jobId') === 'e2e-job-own-fresh')).toBe(true);
   await expect(page.locator('#eodOverlay')).toBeVisible();
+  // The end-of-day report says Sign out, in the same plain words as the job.
+  await page.evaluate(() => window.eodGoStep(3));
+  await expect(page.locator('#eodSubmitBtn')).toHaveText('Submit & Sign out');
+  await expect(page.locator('#eodOverlay')).not.toContainText(/clock|timer|shift/i);
 
   await page.evaluate((id) => window.timerAction('clock_off', id), ownRow.id);
   await expect.poll(() => requestLog.filter((r) => r.action === 'clock_event').length).toBe(1);

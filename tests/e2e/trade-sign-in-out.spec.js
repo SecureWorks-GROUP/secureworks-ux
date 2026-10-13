@@ -4,9 +4,11 @@
 // when they leave they just click like leave ... it shouldn't be complicated
 // or clunky." The pure rules are pinned in scripts/test-trade-site-visit.js;
 // this spec proves a trade on a phone meets them on the real screens: the
-// Today card, the job screen and the signed-in bar. Every case runs against
-// both an ops-api that keeps a visit record and one that does not yet, because
-// the app ships whichever side goes live first. No request leaves the machine.
+// Today card, the job screen and the signed-in bar. The one-tap Sign in and
+// Sign out switch on only where ops-api keeps the visit record, which the app
+// reads from one field: `open_site_visit` on my_jobs (null counts). Against
+// the ops-api that is live today the job screen keeps "Start work" and "End
+// my day", and the last cases here hold that. No request leaves the machine.
 const { test, expect } = require('@playwright/test');
 const { installSupabaseAuthStub, signIn } = require('../helpers/auth');
 const { installFeedStubs, installExternalRequestGuard, perthDate, addIsoDays } = require('../helpers/feed-stub');
@@ -83,6 +85,15 @@ async function boot(page, persona, actions, { allowedWriteActions = ['clock_even
   return { requestLog };
 }
 
+function detail(row, crewRow) {
+  return {
+    access_tier: 'allocated', job: row.jobs,
+    crew: [crewRow || { id: row.id, user_id: P.alyx.profile.id, users: { id: P.alyx.profile.id, name: 'Alyx' }, status: row.status, scheduled_date: TODAY, start_time: '07:00', started_at: row.started_at, clocked_on_at: row.clocked_on_at, clocked_off_at: row.clocked_off_at }],
+    purchaseOrders: [], media: [], notes: [], documents: [], quote_packs: [], quote_extracts: [], workOrder: null
+  };
+}
+
+const PLAIN = /clock|timer|shift/i;
 const taps = (log) => log.filter((r) => r.action === 'clock_event').map((r) => r.body);
 const card = (page, number) => page.locator('#myJobsList .jc').filter({ hasText: number });
 
@@ -102,6 +113,7 @@ test('Today card: one tap signs in, one tap signs out, and nothing else is asked
   await north.locator('[data-card-signin]').click();
   await expect.poll(() => taps(requestLog).length).toBe(1);
   await expect(page.locator('#toast')).toContainText(/Signed in \d{1,2}:\d{2} (am|pm)/);
+  await expect(page.locator('#toast')).not.toContainText(PLAIN);
   await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
   await expect(page.locator('#viewMyJobs')).toHaveClass(/active/);
   const signIn = taps(requestLog)[0];
@@ -114,6 +126,8 @@ test('Today card: one tap signs in, one tap signs out, and nothing else is asked
   await expect(bar).toBeVisible();
   await expect(bar).toContainText(/Signed in \d{1,2}:\d{2} (am|pm)/);
   await expect(bar).toContainText('Northfield');
+  await expect(bar).not.toContainText(PLAIN);
+  await expect(north).not.toContainText(PLAIN);
   await page.locator('[data-view="hours"]').click();
   await expect(bar).toBeVisible();
   await page.locator('[data-view="myJobs"]').click();
@@ -124,9 +138,11 @@ test('Today card: one tap signs in, one tap signs out, and nothing else is asked
   await expect.poll(() => taps(requestLog).length).toBe(2);
   expect(taps(requestLog)[1]).toEqual(expect.objectContaining({ event: 'clock_off', assignment_id: 'e2e-asg-north', job_id: 'e2e-job-north' }));
   await expect(page.locator('#toast')).toContainText(/Signed out \d{1,2}:\d{2} (am|pm)/);
+  await expect(page.locator('#toast')).not.toContainText(PLAIN);
 
   // Afterwards, and only as an offer: had a break? Skipping it means none.
   await expect(bar.locator('[data-site-break]')).toContainText('Had a break?');
+  await expect(bar).not.toContainText(PLAIN);
   await bar.locator('[data-site-break-min="30"]').click();
   await expect.poll(() => requestLog.filter((r) => r.action === 'set_site_visit_break').map((r) => r.body)).toEqual([{ visit_id: 'e2e-visit-1', break_minutes: 30 }]);
   await expect(bar).toBeHidden();
@@ -150,27 +166,6 @@ test('the location rides inside the tap when the phone gives one; a sign in is n
   expect(taps(requestLog)[0].location).toEqual({ lat: -31.9523, lng: 115.8613, accuracy: 12 });
   // The separate location note is gone: the tap is the only write.
   expect(requestLog.filter((r) => r.method !== 'GET').map((r) => r.action)).toEqual(['clock_event']);
-});
-
-test('an ops-api with no visit record yet: the same two taps work, with no break offer and no error', async ({ page }) => {
-  let rows = [NORTHFIELD()];
-  const { requestLog } = await boot(page, 'alyx', {
-    my_jobs: () => ({ ...EMPTY, today: rows }),
-    clock_event: olderApi()
-  });
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
-  const north = card(page, 'SWF-270010');
-  await north.locator('[data-card-signin]').click();
-  await expect(page.locator('#toast')).toContainText('Signed in');
-  await expect(page.locator('#siteVisitBar')).toContainText('Signed in');
-  await north.locator('[data-card-signout]').click();
-  await expect(page.locator('#toast')).toContainText('Signed out');
-  await expect(page.locator('#siteVisitBar')).toBeHidden();
-  await expect(page.locator('[data-site-break]')).toHaveCount(0);
-  expect(taps(requestLog).map((b) => b.event)).toEqual(['clock_on', 'clock_off']);
-  expect(requestLog.filter((r) => ['set_site_visit_break', 'close_site_visit_late'].includes(r.action))).toEqual([]);
-  expect(errors).toEqual([]);
 });
 
 test('signed in at another job: asked once, and one tap signs out there and in here', async ({ page }) => {
@@ -198,8 +193,8 @@ test('signed in at another job: asked once, and one tap signs out there and in h
 test('the server knows of a sign in this phone does not: its 409 asks the same question, then switches', async ({ page }) => {
   const state = { open: { visit_id: 'e2e-visit-north', job_id: 'e2e-job-north', job_number: 'SWF-270010', site_suburb: 'Northfield', signed_in_at: `${TODAY}T07:02:00+08:00`, status: 'open' }, n: 5 };
   const { requestLog } = await boot(page, 'alyx', {
-    // An older my_jobs: no open_site_visit, so the phone cannot know.
-    my_jobs: () => ({ ...EMPTY, today: [KINROSS()] }),
+    // They signed in on another phone after this one last asked: it cannot know.
+    my_jobs: () => ({ ...EMPTY, today: [KINROSS()], open_site_visit: null }),
     clock_event: visitApi(state)
   });
   await card(page, 'SWF-270011').locator('[data-card-signin]').click();
@@ -211,6 +206,72 @@ test('the server knows of a sign in this phone does not: its 409 asks the same q
   expect(taps(requestLog)[0].switch).toBeUndefined();
   expect(taps(requestLog)[1]).toEqual(expect.objectContaining({ event: 'clock_on', job_id: 'e2e-job-kinross', switch: true, timestamp: taps(requestLog)[0].timestamp }));
   await expect(page.locator('#siteVisitBar')).toContainText('Kinross');
+});
+
+test('the bar signs out of the job they are signed in to, never the job screen opened last', async ({ page }) => {
+  const state = { open: { visit_id: 'e2e-visit-north', job_id: 'e2e-job-north', job_number: 'SWF-270010', site_suburb: 'Northfield', signed_in_at: `${TODAY}T07:02:00+08:00`, status: 'open' }, n: 5 };
+  const north = { ...NORTHFIELD(), status: 'in_progress', started_at: `${TODAY}T07:02:00+08:00`, clocked_on_at: `${TODAY}T07:02:00+08:00` };
+  const kinross = KINROSS();
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [north, kinross], open_site_visit: state.open }),
+    trade_job_detail: () => detail(kinross),
+    clock_event: visitApi(state)
+  });
+  const bar = page.locator('#siteVisitBar');
+  await expect(bar).toContainText('Northfield');
+
+  // They open the other job to look at it. They are not signed in there.
+  await card(page, 'SWF-270011').click();
+  const stepper = page.locator('[data-job-stepper]');
+  await expect(stepper).toHaveAttribute('data-signed-in', '0');
+  await expect(stepper.locator('[data-stepper-start]')).toHaveText('Sign in');
+  await expect(bar).toContainText('Northfield');
+
+  await bar.locator('[data-site-bar-signout]').click();
+  await expect.poll(() => taps(requestLog).length).toBe(1);
+  expect(taps(requestLog)[0]).toEqual(expect.objectContaining({ event: 'clock_off', assignment_id: 'e2e-asg-north', job_id: 'e2e-job-north' }));
+  await expect(page.locator('#toast')).toContainText(/Signed out \d{1,2}:\d{2} (am|pm)/);
+  // The job on screen was never touched, and the break offer is for the job they left.
+  await expect(bar.locator('[data-site-break]')).toContainText('Had a break?');
+  await expect(stepper.locator('[data-stepper-start]')).toHaveText('Sign in');
+  expect(state.open).toBe(null);
+});
+
+test('a my_jobs answer asked for before a sign in does not undo it', async ({ page }) => {
+  const state = { open: null, n: 0 };
+  let holdNext = false;
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: async () => {
+      // Answered from before the tap: nobody signed in, the row not started.
+      const stale = { ...EMPTY, today: [NORTHFIELD()], open_site_visit: null };
+      if (holdNext) { holdNext = false; await held; return stale; }
+      return { ...EMPTY, today: [NORTHFIELD()], open_site_visit: state.open };
+    },
+    clock_event: visitApi(state)
+  });
+  const north = card(page, 'SWF-270010');
+  await expect(north.locator('[data-card-signin]')).toHaveText('Sign in');
+
+  // The list repaints from what it holds and refreshes behind it.
+  await page.locator('[data-view="hours"]').click();
+  holdNext = true;
+  const before = requestLog.filter((r) => r.action === 'my_jobs').length;
+  await page.locator('[data-view="myJobs"]').click();
+  await expect.poll(() => requestLog.filter((r) => r.action === 'my_jobs').length).toBe(before + 1);
+  await north.locator('[data-card-signin]').click();
+  await expect.poll(() => taps(requestLog).length).toBe(1);
+  const bar = page.locator('#siteVisitBar');
+  await expect(bar).toContainText(/Signed in \d{1,2}:\d{2} (am|pm)/);
+
+  const answered = page.waitForResponse((r) => new URL(r.url()).searchParams.get('action') === 'my_jobs');
+  release();
+  await answered;
+  await page.waitForTimeout(400);
+  await expect(bar).toContainText(/Signed in \d{1,2}:\d{2} (am|pm)/);
+  await expect(north.locator('[data-card-signout]')).toHaveText('Sign out');
+  await expect(north.locator('[data-card-signin]')).toHaveCount(0);
 });
 
 test('forgot to sign out: the trade types the time they left, and it is saved as typed', async ({ page }) => {
@@ -355,5 +416,82 @@ test('job screen: Sign in, "Signed in 7:02 am", Sign out, the break offer, and a
   await expect(stepper.locator('[data-stepper-finish]')).toHaveText('Job complete');
 
   // Nothing on these screens says clock, timer or shift.
-  await expect(page.locator('#jobDetailContent')).not.toContainText(/clock|timer|shift/i);
+  await expect(page.locator('#jobDetailContent')).not.toContainText(PLAIN);
+});
+
+// ── The ops-api that is live today: no visit record ────────────────────────
+// my_jobs carries no open_site_visit key, so the one-tap Sign in and Sign out
+// stay off and the app keeps the flow it had: the start and end taps on the
+// job screen, where the end tap completes the day's row.
+test('an ops-api with no visit record keeps today\'s flow: Start work and End my day on the job, nothing on the card or the bar', async ({ page }) => {
+  const north = NORTHFIELD();
+  const crewRow = { id: north.id, user_id: P.alyx.profile.id, users: { id: P.alyx.profile.id, name: 'Alyx' }, status: 'confirmed', scheduled_date: TODAY, start_time: '07:00', clocked_on_at: null, clocked_off_at: null };
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [north] }),
+    trade_job_detail: () => detail(north, crewRow),
+    clock_event: async (ctx) => {
+      const out = await olderApi()(ctx);
+      Object.assign(crewRow, out.assignment);
+      return out;
+    }
+  });
+  const bar = page.locator('#siteVisitBar');
+  await expect(card(page, 'SWF-270010')).toBeVisible();
+  await expect(card(page, 'SWF-270010').locator('[data-card-signin], [data-card-signout]')).toHaveCount(0);
+  await expect(bar).toBeHidden();
+
+  await card(page, 'SWF-270010').click();
+  const stepper = page.locator('[data-job-stepper]');
+  await expect(stepper.locator('[data-stepper-start]')).toHaveText('Start work');
+  await stepper.locator('[data-stepper-start]').click();
+  await expect.poll(() => taps(requestLog).map((b) => b.event)).toEqual(['clock_on']);
+  await expect(page.locator('#toast')).not.toContainText(PLAIN);
+  await expect(stepper).toHaveAttribute('data-stepper-state', 'working');
+  await expect(stepper).toContainText('Working since');
+  await expect(stepper.locator('[data-stepper-finish]')).toHaveText('Job complete');
+  await expect(stepper.locator('[data-stepper-endday]')).toHaveText('End my day (job continues)');
+  await expect(page.locator('#jobDetailContent')).not.toContainText(PLAIN);
+  await expect(bar).toBeHidden();
+
+  await stepper.locator('[data-stepper-endday]').click();
+  await expect.poll(() => taps(requestLog).map((b) => b.event)).toEqual(['clock_on', 'clock_off']);
+  await expect(page.locator('#toast')).not.toContainText(PLAIN);
+  await expect(page.locator('[data-site-break]')).toHaveCount(0);
+  await expect(bar).toBeHidden();
+  await page.locator('[data-view="myJobs"]').click();
+  await expect(card(page, 'SWF-270010').locator('[data-card-signin], [data-card-signout]')).toHaveCount(0);
+  await expect(bar).toBeHidden();
+  expect(requestLog.filter((r) => ['set_site_visit_break', 'close_site_visit_late'].includes(r.action))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('an ops-api with no visit record: starting a second job asks nothing and gives the first no finish time', async ({ page }) => {
+  const since = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+  const north = { ...NORTHFIELD(), status: 'in_progress', started_at: since, clocked_on_at: since };
+  const kinross = KINROSS();
+  const { requestLog } = await boot(page, 'alyx', {
+    my_jobs: () => ({ ...EMPTY, today: [north, kinross] }),
+    trade_job_detail: ({ url }) => (new URL(url).searchParams.get('jobId') === 'e2e-job-kinross' ? detail(kinross) : detail(north)),
+    clock_event: olderApi()
+  }, { openJobs: false });
+
+  // The app opens the job they started, as it does today.
+  const stepper = page.locator('[data-job-stepper]');
+  await expect(page.locator('#viewJob')).toHaveClass(/active/, { timeout: 10000 });
+  await expect(stepper.locator('[data-stepper-endday]')).toHaveText('End my day (job continues)');
+  await expect(page.locator('#siteVisitBar')).toBeHidden();
+
+  await page.locator('[data-view="myJobs"]').click();
+  await card(page, 'SWF-270011').click();
+  await expect(stepper.locator('[data-stepper-start]')).toHaveText('Start work');
+  await stepper.locator('[data-stepper-start]').click();
+  await expect.poll(() => taps(requestLog).length).toBe(1);
+  await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
+  await expect(stepper.locator('[data-stepper-endday]')).toHaveText('End my day (job continues)');
+  // One tap went out, for the second job. Nothing ended the first for them.
+  const sent = taps(requestLog);
+  expect(sent.map((b) => [b.event, b.job_id])).toEqual([['clock_on', 'e2e-job-kinross']]);
+  expect(sent[0].switch).toBeUndefined();
 });

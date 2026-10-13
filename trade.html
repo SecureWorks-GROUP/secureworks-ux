@@ -2681,8 +2681,7 @@
     .jct-sv { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: var(--sw-text-sec); }
     .jct-sv[hidden] { display: none; }
     .jct-sv-tag { font-weight: 800; color: #0B6B3A; background: rgba(39,174,96,0.12); border-radius: 999px; padding: 2px 8px; }
-    .jct-sv-tag[hidden], .jct-sv-use[hidden] { display: none; }
-    .jct-sv-use { min-height: 32px; padding: 4px 10px; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: 700 12px var(--sw-font); cursor: pointer; }
+    .jct-sv-tag[hidden] { display: none; }
     .jct-day { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--sw-border); }
     .jct-dayhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: var(--sw-dark); }
     .jct-dayhead button { background: none; border: 0; color: var(--sw-red); font: 600 12px var(--sw-font); cursor: pointer; min-height: 32px; }
@@ -4381,10 +4380,10 @@
   }
 
   // Server clock recovery — check my_jobs data for this trade's own active clock
-  function checkServerClockRecovery(data, requestedAll) {
+  function checkServerClockRecovery(data, requestedAll, tapSeq) {
     // The server's own record of this trade's open sign in wins when it is
     // sent: it feeds the signed-in bar and asks for a forgotten leave time.
-    if (adoptServerSiteVisit(data)) return;
+    if (adoptServerSiteVisit(data, tapSeq)) return;
     if (_clockState === 'on' || _siteTapWaiting) return; // already signed in on this phone
     try {
       // Each item in these arrays IS an assignment (flat structure from my_jobs)
@@ -4410,24 +4409,17 @@
         // Also set current job so job detail can render
         if (asg.jobs) _currentJobId = asg.jobs.id;
         saveTimerState();
-        _siteVisit = TradeSiteVisitCore.openVisit({
-          job_id: (asg.jobs || {}).id, assignment_id: asg.id, job_number: (asg.jobs || {}).job_number,
-          site_suburb: (asg.jobs || {}).site_suburb, signed_in_at: asg.clocked_on_at
-        });
-        renderSiteVisitBar();
         // Check if stale (14+ hours)
         var clockedHours = (Date.now() - new Date(asg.clocked_on_at).getTime()) / 3600000;
         if (clockedHours > 14) {
           showStaleClockPrompt(asg, clockedHours);
         } else if (asg.jobs) {
-          // Open the job they are signed in to, so Sign out is one tap away.
+          // Open the job they are signed in to.
           toast('You are signed in here');
           openJob(asg.jobs.id, asg.id);
         }
         return;
       }
-      // No open sign in on any of their rows: nothing to show in the bar.
-      if (_siteVisit && !_siteVisit.visit_id) { _siteVisit = null; renderSiteVisitBar(); }
       // An old sign in or one on a closed job cannot be ended from here.
       if (staleOwn) showOpenClockOfficeNotice(staleOwn);
     } catch (e) { /* non-blocking */ }
@@ -7361,6 +7353,7 @@
     // backend limits managed leads to their tenant-scoped managed verticals.
     var requestToken = ++_myJobsRequestToken;
     var requestCacheKey = jobListCacheKey();
+    var requestTapSeq = _siteTapSeq;
 
     // Always fetch fresh data — if cache was shown, this is a background refresh
     fetchMyJobsForActiveLens().then(function(data) {
@@ -7376,7 +7369,7 @@
       }
       ncAdoptOwnWorkDefault();
       // Check for active server-side clock (survives app reinstall / device switch)
-      checkServerClockRecovery(data, canUseEveryoneLens() && _adminViewAll);
+      checkServerClockRecovery(data, canUseEveryoneLens() && _adminViewAll, requestTapSeq);
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);
@@ -8513,15 +8506,16 @@
   // My Jobs installer action row (Call / Text / Notes / Navigate), styled as
   // the unified card's quiet .jc-actions — orange stays reserved for allocate.
   // Sign in and Sign out on the job's card: one tap from the Today list, the
-  // same two taps as the job screen. Only on the viewer's own accepted job.
+  // same two taps as the job screen. Only on the viewer's own accepted job,
+  // and only where ops-api keeps the visit record (_siteVisitLive).
   // The job they are signed in to keeps its Sign out wherever its card shows.
   function siteCardTapHTML(job, a, secKey) {
-    if (!job || !job.id || !a || !a.id || a._makesafePool) return '';
+    if (!_siteVisitLive || !job || !job.id || !a || !a.id || a._makesafePool) return '';
     if (!isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll)) return '';
     var status = String(a.status || '').toLowerCase();
     if (status !== 'confirmed' && status !== 'in_progress') return '';
     var args = '(\'' + esc(a.id) + '\', \'' + esc(job.id) + '\')';
-    if (signedInOnRow(job, a)) {
+    if (signedInOnJob(job)) {
       return '<button type="button" class="act sv-out" data-card-signout="' + esc(a.id) + '" onclick="event.stopPropagation();siteSignOut' + args + '">Sign out</button>';
     }
     var visit = currentSiteVisit();
@@ -10665,9 +10659,8 @@
     var jobDone = phase === 'complete';
     var job = data.job || {};
     var isMs = getTradeJobType(job) === 'makesafe';
-    var visit = currentSiteVisit();
-    var mine = visit && visit.job_id === job.id ? visit : null;
-    var signedIn = !done && (working || !!mine) && signedInOnRow(job, a);
+    var live = _siteVisitLive;
+    var signedIn = !done && signedInOnJob(job);
     var breakAsk = _siteBreakAsk && _siteBreakAsk.job_id === job.id;
     var aid = esc(a.id), jid = esc(job.id || '');
     var stepCls = function(n) {
@@ -10689,18 +10682,25 @@
         ? '<button type="button" class="' + cls + '" data-stepper-finish onclick="switchJobTab(\'ms_report\')">Do the report</button>'
         : '<button type="button" class="' + cls + '" data-stepper-finish onclick="confirmThenComplete()">Job complete</button>';
     };
-    var signInBtn = '<button type="button" class="js-primary" data-stepper-start onclick="siteSignIn(\'' + aid + '\', \'' + jid + '\')">Sign in</button>';
+    var signInBtn = '<button type="button" class="js-primary" data-stepper-start onclick="siteSignIn(\'' + aid + '\', \'' + jid + '\')">' + (live ? 'Sign in' : 'Start work') + '</button>';
     if (done) {
       h += '<div class="js-state js-state-done">' + (jobDone ? 'Job complete' : 'Your day on this job is complete') + '</div>';
       if (breakAsk) h += siteBreakAskHTML();
     } else if (signedIn) {
       // "Signed in 7:02 am" and a running count. One tap signs out.
-      var since = (mine && mine.signed_in_at) || myAssignmentStartedAt(a);
-      var label = mine ? TradeSiteVisitCore.signedInText(mine) : (since ? 'Signed in ' + siteClock(since) : 'Signed in');
-      h += '<div class="js-state" data-signed-in-state>' + esc(label)
-        + (since ? ' · <span id="timerElapsed" data-since="' + esc(since) + '">' + esc(formatElapsed(since)) + '</span>' : '') + '</div>';
+      var mine = currentSiteVisit();
+      h += '<div class="js-state" data-signed-in-state>' + esc(TradeSiteVisitCore.signedInText(mine))
+        + ' · <span id="timerElapsed" data-since="' + esc(mine.signed_in_at) + '">' + esc(formatElapsed(mine.signed_in_at)) + '</span></div>';
       h += finishBtn('js-primary');
       h += '<button type="button" class="js-secondary js-out" data-stepper-endday onclick="siteSignOut(\'' + aid + '\', \'' + jid + '\')">Sign out</button>';
+    } else if (working && !live) {
+      // An ops-api with no visit record: its end tap completes the day's row,
+      // so it keeps its own words and stays a link inside the job.
+      var startedAt = myAssignmentStartedAt(a);
+      h += '<div class="js-state">Working' + (startedAt ? ' since ' + esc(siteClock(startedAt))
+        + ' · <span id="timerElapsed" data-since="' + esc(startedAt) + '">' + esc(formatElapsed(startedAt)) + '</span>' : '') + '</div>';
+      h += finishBtn('js-primary');
+      h += '<button type="button" class="js-secondary" data-stepper-endday onclick="siteSignOut(\'' + aid + '\', \'' + jid + '\')">' + (isMs ? 'Leaving site (no report yet)' : 'End my day (job continues)') + '</button>';
     } else if (working) {
       // On the job but not signed in right now: signed out earlier, or
       // never signed in. Signing in again is a second visit.
@@ -24416,34 +24416,16 @@
     var show = !!(n.tag || n.text);
     return '<div class="jct-sv" ' + attr + (show ? '' : ' hidden') + '>'
       + '<span class="jct-sv-tag" data-sv-tag' + (n.tag ? '' : ' hidden') + '>' + esc(n.tag) + '</span>'
-      + '<span data-sv-text>' + esc(n.text) + '</span>'
-      + '<button type="button" class="jct-sv-use" data-sv-use' + (n.restore ? '' : ' hidden') + '>Use my sign in times</button></div>';
+      + '<span data-sv-text>' + esc(n.text) + '</span></div>';
   }
   function _refreshSiteVisitNote(line, el) {
     if (!el || !line) return;
     var n = TradeSiteVisitCore.note(line, line.sv);
     el.hidden = !(n.tag || n.text);
-    var tag = el.querySelector('[data-sv-tag]'), text = el.querySelector('[data-sv-text]'), use = el.querySelector('[data-sv-use]');
+    var tag = el.querySelector('[data-sv-tag]'), text = el.querySelector('[data-sv-text]');
     if (tag) { tag.textContent = n.tag; tag.hidden = !n.tag; }
     if (text) text.textContent = n.text;
-    if (use) use.hidden = !n.restore;
   }
-  // "Use my sign in times" puts the sign in back on the line.
-  document.addEventListener('click', function(ev) {
-    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-sv-use]') : null;
-    if (!btn) return;
-    var host = btn.closest('[data-cardsv],[data-daysv]');
-    if (!host) return;
-    var key = host.getAttribute('data-cardsv') != null ? host.getAttribute('data-cardsv') : host.getAttribute('data-daysv');
-    var parts = String(key).split('_');
-    var c = _jobCards[Number(parts[0])];
-    var line = !c ? null : (parts.length > 1 ? (c.more_days || [])[Number(parts[1])] : c);
-    if (!line || !line.sv) return;
-    _syncJobCardsFromDOM(true);
-    TradeSiteVisitCore.fill(line, line.sv);
-    if (line === c) { _setJobCardWorkDate(c, line.sv.work_date); _jobCardSyncHours(c); } else _jobCardDaySyncHours(line);
-    renderInvoiceBuilder();
-  });
 
   // One further signed-in day of the same job, drawn on the same card. It
   // posts as its own line (one line is one job on one day).
@@ -24563,11 +24545,13 @@
     if (!c || !c.included || c.wo_mode || c.commission_mode) return;
     var errEl = document.querySelector('[data-cardtimeerr="' + idx + '"]');
     if (!errEl) return;
-    if (!TradeTimeEntryCore.touched(c) && _woLumpSum(c) > 0) return;
-    var chk = _timeCheck(c);
-    errEl.textContent = chk.ok ? '' : chk.error;
-    errEl.hidden = chk.ok;
-    _jobCardMoreDays(c).forEach(function(line) {
+    var days = _jobCardMoreDays(c);
+    if (TradeTimeEntryCore.touched(c) || !(_woLumpSum(c) > 0 || days.length > 0)) {
+      var chk = _timeCheck(c);
+      errEl.textContent = chk.ok ? '' : chk.error;
+      errEl.hidden = chk.ok;
+    }
+    days.forEach(function(line) {
       var dayErr = document.querySelector('[data-daytimeerr="' + idx + '_' + c.more_days.indexOf(line) + '"]');
       if (!dayErr) return;
       var dayChk = _timeCheck(line);
@@ -25720,14 +25704,6 @@
       return dayText(line.work_date) + ', ' + normTime(line.start_time) + ' to ' + normTime(line.finish_time)
         + (b > 0 ? ', ' + b + ' min break' : '');
     }
-    // A tap lands on an odd minute; an invoice line carries it to the nearest
-    // quarter hour. The one place the app rounds a time.
-    function roundQuarter(v) {
-      var n = minutesOf(v);
-      if (n == null) return '';
-      n = Math.min(Math.round(n / 15) * 15, 23 * 60 + 45);
-      return pad(Math.floor(n / 60)) + ':' + pad(n % 60);
-    }
     // "7:02 am", as the app words a time of day.
     function clock12(v) {
       var n = minutesOf(v);
@@ -25745,7 +25721,7 @@
       REFUSAL_CODE: REFUSAL_CODE, REFUSAL_MSG: REFUSAL_MSG,
       isDate: isDate, earliest: earliest, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
       touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused,
-      roundQuarter: roundQuarter, clock12: clock12
+      clock12: clock12
     };
   })();
   // </trade-time-entry>
@@ -25754,8 +25730,8 @@
   // Sign in and sign out on a job (Captain 2026-10-13): one tap each, and the
   // taps carry over to that job's invoice line. A visit is one sign in. The
   // exact taps stay on the job; the invoice line is filled with them rounded
-  // to the quarter hour, says "From your sign in", and stays the trade's to
-  // change. This is the ONLY source the app carries a time from: never the
+  // to the quarter hour by the server, says "From your sign in", and stays
+  // the trade's to change. This is the ONLY source the app carries a time from: never the
   // schedule, the device, memory or another person, and never an invented
   // finish. Signing in is optional: no taps means the blank line, unchanged.
   // Pure and DOM-free: scripts/test-trade-site-visit.js runs this block as
@@ -25779,12 +25755,12 @@
     // answer gives it. Null when there is none.
     function openVisit(raw) {
       if (!raw || typeof raw !== 'object') return null;
-      var at = str(raw.signed_in_at || raw.clocked_on_at);
+      var at = str(raw.signed_in_at);
       var jobId = str(raw.job_id);
       var status = str(raw.status || 'open');
       if (!jobId || !perth(at) || status === 'closed' || raw.signed_out_at) return null;
       return {
-        visit_id: str(raw.visit_id || raw.id), job_id: jobId, assignment_id: str(raw.assignment_id),
+        visit_id: str(raw.visit_id), job_id: jobId, assignment_id: str(raw.assignment_id),
         job_number: str(raw.job_number), site_suburb: str(raw.site_suburb), signed_in_at: at,
         status: status === 'no_sign_out' ? 'no_sign_out' : 'open', pending: raw.pending === true
       };
@@ -25818,24 +25794,23 @@
       return '';
     }
     // One signed-in day for an invoice line, from my_hours site_visit_days.
-    // The server's rounded times are the source; a day sent with only its
-    // exact taps is rounded here. A day whose rounding leaves the finish not
-    // after the start is not offered.
+    // Its start and finish arrive rounded to the quarter hour by the server.
+    // A day whose rounding leaves the finish not after the start is not
+    // offered.
     function day(raw) {
       raw = raw || {};
       var date = str(raw.work_date).slice(0, 10);
       if (!T.isDate(date)) return null;
-      var tin = T.normTime(raw.tapped_in), tout = T.normTime(raw.tapped_out);
-      var start = T.normTime(raw.start_time) || T.roundQuarter(tin);
+      var start = T.normTime(raw.start_time);
       if (!start) return null;
-      var finish = T.normTime(raw.finish_time) || T.roundQuarter(tout);
+      var finish = T.normTime(raw.finish_time);
       if (finish && T.minutesOf(finish) <= T.minutesOf(start)) return null;
       var brk = T.breakOf(raw.break_minutes) || 0;
       if (finish && T.minutesOf(finish) - T.minutesOf(start) - brk <= 0) brk = 0;
-      var ids = (Array.isArray(raw.visit_ids) ? raw.visit_ids : (raw.visit_id ? [raw.visit_id] : [])).map(str).filter(Boolean);
       return {
         work_date: date, start_time: start, finish_time: finish, break_minutes: brk,
-        tapped_in: tin, tapped_out: tout, out_capture: str(raw.out_capture), visit_ids: ids
+        tapped_in: T.normTime(raw.tapped_in), tapped_out: T.normTime(raw.tapped_out), out_capture: str(raw.out_capture),
+        visit_ids: (Array.isArray(raw.visit_ids) ? raw.visit_ids : []).map(str).filter(Boolean)
       };
     }
     // One entry per Perth day, oldest first.
@@ -25891,13 +25866,12 @@
       return line;
     }
     // What a line says about its sign in: the tag while the sign in still
-    // stands on it, what the taps were where the trade changed a time, and
-    // whether "Use my sign in times" has anything to put back.
+    // stands on it, and what the taps were where the trade changed a time.
     function note(line, sv) {
-      if (!sv) return { tag: '', text: '', restore: false };
+      if (!sv) return { tag: '', text: '' };
       line = line || {};
       if (str(line.work_date) !== sv.work_date) {
-        return { tag: '', text: 'You signed in on ' + T.dayText(sv.work_date) + '.', restore: true };
+        return { tag: '', text: 'You signed in on ' + T.dayText(sv.work_date) + '.' };
       }
       var startChanged = T.normTime(line.start_time) !== sv.start_time;
       var finish = T.normTime(line.finish_time);
@@ -25908,7 +25882,7 @@
       else if (finishChanged) parts.push('You signed out at ' + T.clock12(sv.tapped_out || sv.finish_time) + '.');
       else if (sv.out_capture === 'typed_later') parts.push('You typed the time you left. It was not a tap.');
       if (startChanged || finishChanged) parts.push('The office sees both.');
-      return { tag: startChanged ? '' : 'From your sign in', text: parts.join(' '), restore: startChanged || finishChanged };
+      return { tag: startChanged ? '' : 'From your sign in', text: parts.join(' ') };
     }
     // The sign ins a line was filled from. Only while the line is still on
     // that day: a line moved to another day is no longer that sign in.
@@ -25916,23 +25890,22 @@
       return (sv && line && str(line.work_date) === sv.work_date) ? sv.visit_ids.slice() : [];
     }
     // Jobs signed in to that have no card in the week (my_hours
-    // site_visit_days_other), one entry per job with its days.
+    // site_visit_days_other: one entry per signed-in day, naming its job),
+    // gathered into one entry per job with its days.
     function otherJobs(raw) {
       var by = {}, order = [];
       (Array.isArray(raw) ? raw : []).forEach(function(e) {
-        if (!e || typeof e !== 'object') return;
-        var job = e.job && typeof e.job === 'object' ? e.job : e;
-        var jobId = str(e.job_id || job.id);
+        var jobId = str(e && e.job_id);
         if (!jobId) return;
         var g = by[jobId];
         if (!g) {
           g = by[jobId] = {
-            job_id: jobId, job_number: str(e.job_number || job.job_number), site_suburb: str(e.site_suburb || job.site_suburb),
-            client_name: str(e.client_name || job.client_name), job_type: str(e.job_type || job.type), raw: []
+            job_id: jobId, job_number: str(e.job_number), site_suburb: str(e.site_suburb),
+            client_name: str(e.client_name), job_type: str(e.job_type), raw: []
           };
           order.push(jobId);
         }
-        g.raw = g.raw.concat(Array.isArray(e.site_visit_days) ? e.site_visit_days : (Array.isArray(e.days) ? e.days : [e]));
+        g.raw.push(e);
       });
       return order.map(function(id) {
         var g = by[id];
@@ -25941,9 +25914,7 @@
     }
     // A sign in to another job the server would not double up on.
     function alreadySignedIn(err) {
-      var body = err && err.body && typeof err.body === 'object' ? err.body : {};
-      if (!err || (str(err.code) !== 'already_signed_in' && str(body.code) !== 'already_signed_in')) return null;
-      return openVisit(body.visit || body.open_site_visit || body) || { visit_id: '', job_id: '', assignment_id: '', job_number: str(body.job_number), site_suburb: str(body.site_suburb), signed_in_at: '', status: 'open', pending: false };
+      return err && str(err.code) === 'already_signed_in' ? openVisit(err.body) : null;
     }
     return {
       perth: perth, openVisit: openVisit, where: where, signedInText: signedInText, owesFinish: owesFinish,
@@ -26195,12 +26166,11 @@
     }
     var timeBad = [];
     var timeSeen = {};
-    included.forEach(function(c) {
-      if (!_isTimeCard(c)) return;
+    function _checkCardLine(c, lbl) {
       var touched = TradeTimeEntryCore.touched(c);
-      // An amount-only card bills no time, so it owes no times.
-      if (!touched && _completeLumps(c).length > 0) return;
-      var lbl = _timeCardLabel(c);
+      // A card that bills only an amount, or only its further signed-in
+      // days, owes no times on its own line.
+      if (!touched && (_completeLumps(c).length > 0 || _jobCardMoreDays(c).length > 0)) return;
       if (!touched) {
         timeBad.push({ idx: c._idx, msg: lbl + ': add the date, start time and finish time you worked, or add an amount.' });
         return;
@@ -26233,8 +26203,14 @@
         }
         if (!timeSeen[key]) timeSeen[key] = c;
       }
+    }
+    included.forEach(function(c) {
+      if (!_isTimeCard(c)) return;
+      var lbl = _timeCardLabel(c);
+      _checkCardLine(c, lbl);
       // Further signed-in days of the same job: each is its own line, in
-      // this invoice week, and no day twice.
+      // this invoice week, and no day twice. Checked whatever the card's own
+      // line holds.
       _jobCardMoreDays(c).forEach(function(line) {
         var dayChk = TradeTimeEntryCore.check(line, opts.today);
         var dayLbl = lbl + (line.work_date ? ' (' + TradeTimeEntryCore.dayText(line.work_date) + ')' : ' (another day)');
@@ -26265,11 +26241,9 @@
     }
     var missing = included.filter(function(c) {
       if (!_isTimeCard(c)) return false;
-      var hasHours = _cardHours(c) > 0 && Number(c.rate) > 0;
+      var hasHours = (_cardHours(c) > 0 || _jobCardMoreDays(c).length > 0) && Number(c.rate) > 0;
       if (hasHours) {
-        // A further day posts as its own line with no assignment behind it,
-        // so the office needs the card's description to know what was done.
-        if ((c.manually_added || _jobCardMoreDays(c).length > 0) && !c.description) return true;
+        if (c.manually_added && !c.description) return true;
         return false;
       }
       if (_completeLumps(c).length > 0) return false;
@@ -26279,7 +26253,7 @@
       var _msgs = missing.map(function(c) {
         var _lbl = _timeCardLabel(c);
         var _noRate = !(Number(c.rate) > 0);
-        var _noDesc = (c.manually_added || _jobCardMoreDays(c).length > 0) && !c.description;
+        var _noDesc = c.manually_added && !c.description;
         if (_noDesc && _noRate) return _lbl + ': add a description and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
         return _lbl + ': enter your rate, or add an amount.';
@@ -26300,9 +26274,13 @@
       return row;
     }
     // Each further signed-in day of a job is its own line: no assignment
-    // row exists for that day, so it rides extra_items like a searched-in job.
+    // row exists for that day, so it rides extra_items. On an assigned job it
+    // says it came from a sign in and carries the card's own rate source; on
+    // a job the trade searched in it is labelled like that card's first line.
     function _pushMoreDays(c) {
       if (!(Number(c.rate) > 0)) return;
+      var assigned = !!c.assignment_id;
+      var rateSource = assigned ? (c.rate_source || 'server_resolved') : 'client_entered';
       _jobCardMoreDays(c).forEach(function(line) {
         var chk = TradeTimeEntryCore.check(line, opts.today);
         if (!chk.ok || !(chk.hours > 0)) return;
@@ -26324,10 +26302,10 @@
           job_number: c.job_number || '',
           division: c.job_type || '',
           client_name: c.client_name || '',
-          manually_added: true,
-          source: 'manual_job_search',
-          rate_source: 'client_entered',
-          client_rate_entered: true
+          manually_added: !assigned,
+          source: assigned ? 'site_visit_day' : 'manual_job_search',
+          rate_source: rateSource,
+          client_rate_entered: rateSource === 'client_entered'
         }, line));
       });
     }
@@ -26413,8 +26391,8 @@
             // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
             justification: (_isMakesafeCard(c) && searchedQty > 2) ? (c.justification || '') : undefined
           }, c));
-          _pushMoreDays(c);
         }
+        _pushMoreDays(c);
       } else {
         var assignedQty = _cardHours(c);
         var assignedHours = assignedQty > 0 && Number(c.rate) > 0;
@@ -26435,8 +26413,8 @@
             // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
             justification: (_isMakesafeCard(c) && assignedQty > 2) ? (c.justification || '') : undefined
           }, c));
-          _pushMoreDays(c);
         }
+        _pushMoreDays(c);
       }
     });
     return {
@@ -29820,20 +29798,42 @@
   // ══════════════════════════════════════════════════
   // SIGN IN AND SIGN OUT: one tap each [trade-site-visit]
   // ══════════════════════════════════════════════════
-  // _siteVisit is the signed-in trade's open sign in, or null. Whenever
-  // my_jobs sends open_site_visit that is its source; an ops-api that does
-  // not send it yet leaves the trade's own in-progress row to stand in
-  // (checkServerClockRecovery). A tap that could not be sent keeps its tap
-  // time in the offline queue and shows "waiting for signal" until it lands.
-  // No reminder, text or push is ever sent from here.
+  // _siteVisit is the signed-in trade's open sign in, or null; my_jobs
+  // open_site_visit is its source. _siteVisitLive says ops-api keeps that
+  // visit record: it is true once a my_jobs answer carries the
+  // open_site_visit key (null included), and is remembered per trade so a
+  // start with no signal still knows. While it is false the one-tap Sign in
+  // and Sign out stay off: no bar, no taps on the Today card, no switch or
+  // leave-time question, and the job screen keeps "Start work" and "End my
+  // day" (checkServerClockRecovery covers a sign in left open). A tap that
+  // could not be sent keeps its tap time in the offline queue and shows
+  // "waiting for signal" until it lands. _siteTapSeq counts the changes this
+  // phone made to _siteVisit, so a my_jobs answer asked for before one of
+  // them cannot undo it. No reminder, text or push is ever sent from here.
   var _siteVisit = null;
-  var _siteVisitFromServer = false;
+  var _siteVisitLive = false;
+  var _siteTapSeq = 0;
   var _siteTapWaiting = null;   // { event, assignment_id, job_id, job_number, site_suburb, at, idempotency_key }
   var _siteBreakAsk = null;     // { visit_id, job_id, at }: the optional break after a sign out
   var _siteLateAsked = {};
   var _siteTapBusy = false;
 
   function siteTapWaitingKey() { return _user && _user.id ? 'sw_site_tap_waiting_' + _user.id : ''; }
+  function siteVisitLiveKey() { return _user && _user.id ? 'sw_site_visit_live_' + _user.id : ''; }
+  function setSiteVisit(visit) {
+    _siteVisit = visit;
+    _siteTapSeq++;
+  }
+  function setSiteVisitLive(live) {
+    if (_siteVisitLive === live) return false;
+    _siteVisitLive = live;
+    var key = siteVisitLiveKey();
+    try {
+      if (key && live) localStorage.setItem(key, '1');
+      else if (key) localStorage.removeItem(key);
+    } catch (e) {}
+    return true;
+  }
   function saveSiteTapWaiting() {
     var key = siteTapWaitingKey();
     if (!key) return;
@@ -29845,13 +29845,14 @@
   // Called at sign-in to the app: nothing of the last account's stays.
   function resetSiteVisitSession() {
     _siteVisit = null;
-    _siteVisitFromServer = false;
+    _siteVisitLive = false;
     _siteBreakAsk = null;
     _siteLateAsked = {};
     _siteTapWaiting = null;
     _siteTapBusy = false;
     dismissLateFinish();
     try {
+      _siteVisitLive = !!siteVisitLiveKey() && localStorage.getItem(siteVisitLiveKey()) === '1';
       var raw = siteTapWaitingKey() ? localStorage.getItem(siteTapWaitingKey()) : null;
       var w = raw ? JSON.parse(raw) : null;
       if (w && (w.event === 'clock_on' || w.event === 'clock_off') && w.at) _siteTapWaiting = w;
@@ -29860,7 +29861,7 @@
   }
   function clearSiteVisitSession() {
     _siteVisit = null;
-    _siteVisitFromServer = false;
+    _siteVisitLive = false;
     _siteBreakAsk = null;
     _siteTapWaiting = null;
     _siteTapBusy = false;
@@ -29869,7 +29870,9 @@
   }
 
   // The sign in the screens show: a tap still waiting for signal counts.
+  // None while ops-api keeps no visit record.
   function currentSiteVisit() {
+    if (!_siteVisitLive) return null;
     var w = _siteTapWaiting;
     if (w && w.event === 'clock_off') return null;
     if (w && w.event === 'clock_on') {
@@ -29881,14 +29884,10 @@
     return _siteVisit;
   }
   function siteVisitOwesFinish(v) { return !!(v && v.visit_id && TradeSiteVisitCore.owesFinish(v)); }
-  // Is this trade signed in on this row's job? With a visit record the
-  // record decides; without one, the row's own sign in and sign out stamps.
-  function signedInOnRow(job, a) {
+  // Is this trade signed in to this job? The visit record decides.
+  function signedInOnJob(job) {
     var v = currentSiteVisit();
-    if (v) return !!(job && job.id && v.job_id === job.id) && !siteVisitOwesFinish(v);
-    if (_siteVisitFromServer || _siteTapWaiting) return false;
-    if (!a || String(a.status || '') !== 'in_progress' || !a.clocked_on_at) return false;
-    return !a.clocked_off_at || new Date(a.clocked_off_at).getTime() < new Date(a.clocked_on_at).getTime();
+    return !!(v && job && job.id && v.job_id === job.id) && !siteVisitOwesFinish(v);
   }
   function siteClock(iso) {
     var p = TradeSiteVisitCore.perth(iso);
@@ -29897,14 +29896,19 @@
 
   // my_jobs open_site_visit, when the server sends it. Returns false for an
   // ops-api that does not: the caller falls back to the trade's own rows.
-  function adoptServerSiteVisit(data) {
-    if (!data || !Object.prototype.hasOwnProperty.call(data, 'open_site_visit')) return false;
-    _siteVisitFromServer = true;
-    if (!_siteTapWaiting) _siteVisit = TradeSiteVisitCore.openVisit(data.open_site_visit);
-    renderSiteVisitBar();
-    if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
-    maybeAskLateFinish();
-    return true;
+  // tapSeq is _siteTapSeq as it stood when that my_jobs was asked for: an
+  // answer older than a tap made since does not replace what the tap set.
+  function adoptServerSiteVisit(data, tapSeq) {
+    var live = !!data && Object.prototype.hasOwnProperty.call(data, 'open_site_visit');
+    var turned = setSiteVisitLive(live);
+    if (live && !_siteTapWaiting && tapSeq === _siteTapSeq) _siteVisit = TradeSiteVisitCore.openVisit(data.open_site_visit);
+    if (live || turned) {
+      renderSiteVisitBar();
+      if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
+    }
+    if (turned && _currentView === 'job' && _currentJob) renderJobDetail(_currentJob);
+    if (live) maybeAskLateFinish();
+    return live;
   }
 
   // A queued tap reached the server (or was refused for good).
@@ -29916,28 +29920,31 @@
     if (refused) {
       toast((w.event === 'clock_on' ? 'Your sign in' : 'Your sign out') + ' at ' + siteClock(w.at) + ' was not saved. Ask the office to check this job.', true);
     } else if (w.event === 'clock_on') {
-      _siteVisit = siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
+      setSiteVisit(siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
         job_id: w.job_id, assignment_id: w.assignment_id, job_number: w.job_number, site_suburb: w.site_suburb, signed_in_at: w.at
-      });
+      }));
     } else {
-      _siteVisit = null;
+      setSiteVisit(null);
     }
     renderSiteVisitBar();
     if (_currentView === 'myJobs') loadMyJobs();
   }
   function siteVisitFromResult(result) {
-    result = result || {};
-    return TradeSiteVisitCore.openVisit(result.site_visit || result.visit || result.open_site_visit);
+    return TradeSiteVisitCore.openVisit((result || {}).site_visit);
   }
 
-  // The job a tap is for, from whichever list or screen it was tapped on.
+  // The job a tap is for, from whichever list or screen it was tapped on. A
+  // tap that names only the job (the bar) takes the trade's own row for it.
   function siteTapContext(assignmentId, jobId) {
     var row = null;
+    var everyone = canUseEveryoneLens() && _adminViewAll;
     var lists = _lastJobData ? [].concat(_lastJobData.today || [], _lastJobData.thisWeek || [], _lastJobData.upcoming || [],
       _lastJobData.recent || [], _lastJobData.recentCompleted || [], _lastJobData.unscheduled || []) : [];
     lists.concat(_cachedMyJobs || []).some(function(a) {
-      if (a && a.id && a.id === assignmentId && a.jobs) { row = a; return true; }
-      return false;
+      if (!a || !a.id || !a.jobs) return false;
+      if (assignmentId ? a.id !== assignmentId : !(jobId && a.jobs.id === jobId && isOwnClockRow(a, everyone))) return false;
+      row = a;
+      return true;
     });
     var job = row ? row.jobs : null;
     if (!job && _currentJob && _currentJob.job && (!jobId || _currentJob.job.id === jobId)) {
@@ -29945,7 +29952,7 @@
       if (onCrew) job = _currentJob.job;
     }
     return {
-      assignment_id: assignmentId || '',
+      assignment_id: assignmentId || (row && row.id) || '',
       job_id: (job && job.id) || jobId || '',
       job_number: (job && job.job_number) || '',
       site_suburb: (job && job.site_suburb) || ''
@@ -30023,16 +30030,17 @@
   function renderSiteVisitBar() {
     var bar = document.getElementById('siteVisitBar');
     if (!bar) return;
-    var v = _user ? currentSiteVisit() : null, w = _siteTapWaiting, ask = _siteBreakAsk, h = '';
+    var on = !!_user && _siteVisitLive;
+    var v = on ? currentSiteVisit() : null, w = _siteTapWaiting, ask = _siteBreakAsk, h = '';
     if (v && siteVisitOwesFinish(v)) {
       h = '<span class="sv-bar-where"><b>You did not sign out</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></span>'
         + '<button type="button" class="sv-bar-btn" data-site-bar-late onclick="siteAskLateFinish()">Add the time you left</button>';
     } else if (v) {
       h = '<button type="button" class="sv-bar-where" data-site-bar-open onclick="siteVisitOpenJob()"><b>' + esc(TradeSiteVisitCore.signedInText(v)) + '</b><span>' + esc(TradeSiteVisitCore.where(v)) + '</span></button>'
         + '<button type="button" class="sv-bar-btn" data-site-bar-signout onclick="siteSignOut()">Sign out</button>';
-    } else if (_user && w && w.event === 'clock_off') {
+    } else if (on && w && w.event === 'clock_off') {
       h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(w.at)) + ' · waiting for signal</b><span>' + esc(TradeSiteVisitCore.where(w)) + '</span></span>';
-    } else if (_user && ask && !(_currentView === 'job' && _currentJobId === ask.job_id)) {
+    } else if (on && ask && !(_currentView === 'job' && _currentJobId === ask.job_id)) {
       h = '<span class="sv-bar-where"><b>Signed out ' + esc(siteClock(ask.at)) + '</b></span>' + siteBreakAskHTML();
     }
     bar.innerHTML = h;
@@ -30106,7 +30114,7 @@
         save.disabled = true;
         api('close_site_visit_late', null, { visit_id: v.visit_id, finish_time: time }).then(function(res) {
           if (res && res.success === false) throw new Error(res.error || 'Not saved');
-          if (_siteVisit && _siteVisit.visit_id === v.visit_id) _siteVisit = null;
+          if (_siteVisit && _siteVisit.visit_id === v.visit_id) setSiteVisit(null);
           _siteLateDismiss = null;
           overlay.remove();
           renderSiteVisitBar();
@@ -30204,53 +30212,38 @@
     return showConfirm('Signed in at another job', 'Sign out of ' + TradeSiteVisitCore.where(other) + ' and sign in here?', 'Yes, sign in here');
   }
 
-  function sendSiteSignIn(ctx, tappedAt, opts) {
-    opts = opts || {};
-    var extra = { timestamp: tappedAt, job_id: ctx.job_id || undefined };
-    var before = Promise.resolve();
-    var from = opts.switchFrom;
-    if (from && from.visit_id) {
-      extra['switch'] = true;
-    } else if (from && from.assignment_id) {
-      // An ops-api with no visit record cannot switch in one call: sign out
-      // of the other job first, at the same tap time.
-      before = clockEvent('clock_off', from.assignment_id, { timestamp: tappedAt, job_id: from.job_id || undefined }).then(function(res) {
-        patchOwnAssignmentRow(from.assignment_id, (res && res.assignment) || { clocked_off_at: tappedAt });
-      }, function(err) {
-        if (!(err && err.site_tap_queued)) throw err;
-      });
-    }
-    return before.then(function() {
-      return clockEvent('clock_on', ctx.assignment_id, extra);
-    }).then(function(result) {
+  // switching: the trade said yes to "Sign out of ... and sign in here?", so
+  // the one call signs out there and in here at the same tap time.
+  function sendSiteSignIn(ctx, tappedAt, switching) {
+    var extra = { timestamp: tappedAt, job_id: ctx.job_id || undefined, 'switch': switching ? true : undefined };
+    return clockEvent('clock_on', ctx.assignment_id, extra).then(function(result) {
       _siteTapWaiting = null;
       saveSiteTapWaiting();
       _siteBreakAsk = null;
       var ass = result.assignment || {};
-      _siteVisit = siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
+      setSiteVisit(siteVisitFromResult(result) || TradeSiteVisitCore.openVisit({
         job_id: ctx.job_id, assignment_id: ctx.assignment_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
         signed_in_at: ass.clocked_on_at || tappedAt
-      });
+      }));
       toast(TradeSiteVisitCore.signedInText(_siteVisit) || 'Signed in');
       afterSiteTap(ctx, result.assignment || { status: 'in_progress', clocked_on_at: tappedAt, clocked_off_at: null });
       return true;
     }, function(err) {
-      var other = !extra['switch'] && TradeSiteVisitCore.alreadySignedIn(err);
+      var other = switching ? null : TradeSiteVisitCore.alreadySignedIn(err);
       if (other) {
         return confirmSiteSwitch(other).then(function(ok) {
-          if (!ok) return false;
-          return sendSiteSignIn(ctx, tappedAt, { switchFrom: Object.assign({}, other, { visit_id: other.visit_id || 'open' }) });
+          return ok ? sendSiteSignIn(ctx, tappedAt, true) : false;
         });
       }
       if (err && err.site_tap_queued) {
-        _siteVisit = null;
+        setSiteVisit(null);
         _siteBreakAsk = null;
         _siteTapWaiting = {
           event: 'clock_on', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
           at: tappedAt, idempotency_key: err.site_tap_payload.idempotency_key
         };
         saveSiteTapWaiting();
-        toast(TradeSiteVisitCore.signedInText(currentSiteVisit()));
+        toast('Signed in ' + siteClock(tappedAt) + ' \u00B7 waiting for signal');
         afterSiteTap(ctx, { status: 'in_progress', clocked_on_at: tappedAt, clocked_off_at: null });
         return true;
       }
@@ -30273,12 +30266,12 @@
     var late = siteVisitOwesFinish(open) ? askLateFinish(open) : Promise.resolve(false);
     return late.then(function() {
       open = currentSiteVisit();
-      if (open && open.job_id && open.job_id !== ctx.job_id && !siteVisitOwesFinish(open)) {
+      if (open && open.job_id !== ctx.job_id && !siteVisitOwesFinish(open)) {
         return confirmSiteSwitch(open).then(function(ok) {
-          return ok ? sendSiteSignIn(ctx, tappedAt, { switchFrom: open }) : false;
+          return ok ? sendSiteSignIn(ctx, tappedAt, true) : false;
         });
       }
-      return sendSiteSignIn(ctx, tappedAt, {});
+      return sendSiteSignIn(ctx, tappedAt, false);
     }).then(function(ok) { _siteTapBusy = false; return ok; }, function(err) {
       _siteTapBusy = false;
       console.warn('[trade] sign in failed:', err);
@@ -30287,11 +30280,15 @@
   };
 
   // Sign out: one tap, no confirm. The optional break is asked afterwards.
+  // Called with no job (the bar), it signs out of the open sign in's own job
+  // and of nothing else: never the job screen that happens to be open.
   window.siteSignOut = function(assignmentId, jobId) {
     if (navigator.vibrate) navigator.vibrate(10);
     var open = currentSiteVisit();
-    assignmentId = assignmentId || (open && open.assignment_id) || _currentAssignment;
-    if (!jobId && open && (!assignmentId || !open.assignment_id || open.assignment_id === assignmentId)) jobId = open.job_id;
+    if (!assignmentId && !jobId && open) {
+      assignmentId = open.assignment_id;
+      jobId = open.job_id;
+    }
     if (!assignmentId && !jobId) { toast('No job selected', true); return Promise.resolve(false); }
     if (_siteTapBusy) return Promise.resolve(false);
     _siteTapBusy = true;
@@ -30299,9 +30296,8 @@
     var ctx = siteTapContext(assignmentId, jobId);
     var visitId = open && open.job_id === ctx.job_id ? open.visit_id : '';
     return clockEvent('clock_off', ctx.assignment_id, { timestamp: tappedAt, job_id: ctx.job_id || undefined }).then(function(result) {
-      var closed = (result && (result.site_visit || result.visit)) || {};
-      visitId = String(closed.visit_id || closed.id || visitId || '');
-      _siteVisit = null;
+      visitId = String(((result && result.site_visit) || {}).visit_id || visitId || '');
+      setSiteVisit(null);
       _siteTapWaiting = null;
       saveSiteTapWaiting();
       _siteBreakAsk = visitId ? { visit_id: visitId, job_id: ctx.job_id, at: tappedAt } : null;
@@ -30311,7 +30307,7 @@
       return true;
     }, function(err) {
       if (err && err.site_tap_queued) {
-        _siteVisit = null;
+        setSiteVisit(null);
         _siteBreakAsk = null;
         _siteTapWaiting = {
           event: 'clock_off', assignment_id: ctx.assignment_id, job_id: ctx.job_id, job_number: ctx.job_number, site_suburb: ctx.site_suburb,
@@ -30332,9 +30328,9 @@
   function siteVisitJobFinished(jobId, result) {
     var v = currentSiteVisit();
     if (result && Object.prototype.hasOwnProperty.call(result, 'open_site_visit')) {
-      _siteVisit = TradeSiteVisitCore.openVisit(result.open_site_visit);
+      setSiteVisit(TradeSiteVisitCore.openVisit(result.open_site_visit));
     } else if (v && v.job_id === jobId) {
-      _siteVisit = null;
+      setSiteVisit(null);
     }
     if (_siteTapWaiting && _siteTapWaiting.job_id === jobId) { _siteTapWaiting = null; saveSiteTapWaiting(); }
     if (_siteBreakAsk && _siteBreakAsk.job_id === jobId) _siteBreakAsk = null;
@@ -32822,7 +32818,7 @@
 
   window.eodBack = function() {
     if (_eodStep <= 1) {
-      showConfirm('Exit Report', 'You must complete this to clock off. Leave anyway?', 'Leave').then(function(ok) {
+      showConfirm('Exit Report', 'You must complete this to sign out. Leave anyway?', 'Leave').then(function(ok) {
         if (ok) closeEOD();
       });
     } else {
@@ -33038,7 +33034,7 @@
     var canSubmit = totalPhotos >= 1;
     var fh = '<div style="display:flex;gap:8px">';
     fh += '<button class="wiz-btn wiz-btn-secondary" onclick="eodBack()">Back</button>';
-    fh += '<button class="wiz-btn wiz-btn-primary" id="eodSubmitBtn" onclick="eodSubmit()"' + (canSubmit ? '' : ' disabled style="opacity:0.5"') + '>Submit &amp; Clock Off</button>';
+    fh += '<button class="wiz-btn wiz-btn-primary" id="eodSubmitBtn" onclick="eodSubmit()"' + (canSubmit ? '' : ' disabled style="opacity:0.5"') + '>Submit &amp; Sign out</button>';
     fh += '</div>';
     if (!canSubmit) {
       fh += '<div style="font-size:11px;color:var(--sw-yellow);text-align:center;margin-top:6px">Take at least 1 photo to submit</div>';
@@ -33155,7 +33151,7 @@
       var footer = document.getElementById('eodFooter');
       body.innerHTML = '<div style="text-align:center;padding:32px 16px">' +
         '<div style="font-size:48px;margin-bottom:12px">&#9989;</div>' +
-        '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Clocked Off' + (jobNum ? ' \u2014 ' + esc(jobNum) : '') + '</div>' +
+        '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Signed out' + (jobNum ? ' \u2014 ' + esc(jobNum) : '') + '</div>' +
         '<div style="margin:16px auto;max-width:240px;text-align:left;font-size:14px;line-height:2;">' +
           '<div style="display:flex;justify-content:space-between;"><span style="color:var(--sw-text-sec);">Travel</span><strong>' + formatMins(travelMins) + '</strong></div>' +
           '<div style="display:flex;justify-content:space-between;"><span style="color:var(--sw-text-sec);">On-site</span><strong>' + formatMins(onsiteMins - breakMins) + '</strong></div>' +
@@ -33169,7 +33165,7 @@
       document.getElementById('eodTitle').textContent = 'Day Complete';
     }).catch(function(err) {
       toast('Error submitting: ' + friendlyError(err), true);
-      if (btn) { btn.disabled = false; btn.textContent = 'Submit & Clock Off'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit & Sign out'; }
     });
   };
 

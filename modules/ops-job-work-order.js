@@ -17,6 +17,13 @@
 //         ops-api create_work_order {kind:'job', job_id}, only from the
 //         "Open the draft" button on a job with no work order yet; the
 //         server opens the job's draft and fills it from the accepted quote.
+//         Customer variations (staff): create_customer_variation,
+//         update_customer_variation, approve_customer_variation (the
+//         approver) and cancel_customer_variation, each edit, approval and
+//         cancellation with the updated_at of the variation on screen; and
+//         prepare_customer_variation_invoice_line, which only builds the
+//         customer's invoice line for a preview. Nothing here creates a Xero
+//         draft (create_customer_variation_xero_draft is never called).
 //
 // Create work order: while the preview is on, a fencing or patio job's
 // "Create work order" (job quick view, calendar, the old office form) comes
@@ -31,7 +38,13 @@ var JobWorkOrderOps = (function () {
   var MOUNT_ID = 'jdJobWorkOrder';
   var _preview = null;
   // One state per job_detail read: the job_work_order read and the approve button.
-  var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0 };
+  var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0, cv: freshCv() };
+
+  // The customer variations section: the open form, the confirm row, the
+  // invoice line previews, and its own message.
+  function freshCv() {
+    return { form: null, confirm: null, busy: false, previews: {}, previewBusyId: null, message: '', level: 'info' };
+  }
 
   function core() { return window.JobWorkOrderCore || null; }
 
@@ -62,7 +75,7 @@ var JobWorkOrderOps = (function () {
 
   function resetFor(data) {
     if (_state.data === data) return;
-    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1 };
+    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1, cv: freshCv() };
   }
 
   function panelHtml(data) {
@@ -75,7 +88,8 @@ var JobWorkOrderOps = (function () {
       message: _state.message,
       messageLevel: _state.level,
       preview: true,
-      canOpen: true
+      canOpen: true,
+      cv: _state.cv
     });
     if (_state.confirming && h) {
       var wo = shownWorkOrder(data);
@@ -111,7 +125,15 @@ var JobWorkOrderOps = (function () {
     return '<div id="' + MOUNT_ID + '">' + panelHtml(data) + '</div>';
   }
 
+  // Repaint with what is typed in the variation form kept.
   function repaint() {
+    syncForm();
+    render();
+  }
+
+  // Repaint from the state alone: for a change made to the form's state
+  // itself (a task row added or removed) after it was read from the page.
+  function render() {
     var data = currentData();
     var el = document.getElementById(MOUNT_ID);
     if (!el || !data || data !== _state.data) return;
@@ -180,13 +202,20 @@ var JobWorkOrderOps = (function () {
   // Read the job (and so the work order) again after an approval or a
   // refusal that says the draft moved, then show the message on the fresh
   // copy: the fresh job_detail read resets this panel and reads its work order.
-  function rereadJob(message, level) {
+  // where 'cv' shows the message in the customer variations section.
+  function rereadJob(message, level, where) {
     var jobId = _state.jobId;
     var done = function () {
       if (_state.jobId !== jobId) return;
       _state.busy = false;
-      _state.message = message;
-      _state.level = level;
+      _state.cv.busy = false;
+      if (where === 'cv') {
+        _state.cv.message = message;
+        _state.cv.level = level;
+      } else {
+        _state.message = message;
+        _state.level = level;
+      }
       repaint();
     };
     if (typeof refreshJobDetail === 'function') refreshJobDetail().then(done, done);
@@ -255,6 +284,212 @@ var JobWorkOrderOps = (function () {
     return C.crewFormNoticeHtml(job);
   }
 
+  // ── Customer variations ──
+  function customerVariations() {
+    return (_state.detail && Array.isArray(_state.detail.customer_variations)) ? _state.detail.customer_variations : [];
+  }
+
+  function findVariation(id) {
+    var list = customerVariations();
+    for (var i = 0; i < list.length; i++) if (list[i] && String(list[i].id) === String(id)) return list[i];
+    return null;
+  }
+
+  // The form's typed values, read from the page into the state before any
+  // repaint, so a read landing while someone types never loses their words.
+  function syncForm() {
+    var form = _state.cv.form;
+    var el = document.getElementById(MOUNT_ID);
+    var box = el && el.querySelector('[data-job-wo-cv-form]');
+    if (!form || !box) return;
+    var values = { description: '', tasks: [], trade_allocation_ex: '', customer_price_ex: '' };
+    var fields = box.querySelectorAll('[data-cv-f]');
+    for (var i = 0; i < fields.length; i++) values[fields[i].getAttribute('data-cv-f')] = fields[i].value;
+    var rows = box.querySelectorAll('[data-cv-task]');
+    for (var r = 0; r < rows.length; r++) {
+      var task = { description: '', hours: '', qty: '', unit: '' };
+      var cells = rows[r].querySelectorAll('[data-cv-tf]');
+      for (var c = 0; c < cells.length; c++) task[cells[c].getAttribute('data-cv-tf')] = cells[c].value;
+      values.tasks.push(task);
+    }
+    form.values = values;
+  }
+
+  function cvAdd() {
+    var C = core();
+    if (!C || _state.cv.busy || _state.cv.form) return;
+    _state.cv.form = { mode: 'create', id: null, updatedAt: null, values: C.customerVariationFormValues(null), errors: [] };
+    _state.cv.confirm = null;
+    _state.cv.message = '';
+    repaint();
+  }
+
+  function cvEdit(id) {
+    var C = core();
+    var v = findVariation(id);
+    if (!C || !v || v.status !== 'draft' || _state.cv.busy || _state.cv.form) return;
+    _state.cv.form = { mode: 'edit', id: v.id, updatedAt: v.updated_at, values: C.customerVariationFormValues(v), errors: [] };
+    _state.cv.confirm = null;
+    _state.cv.message = '';
+    repaint();
+  }
+
+  function cvAddTask() {
+    if (!_state.cv.form) return;
+    syncForm();
+    _state.cv.form.values.tasks.push({ description: '', hours: '', qty: '', unit: '' });
+    render();
+  }
+
+  function cvRemoveTask(i) {
+    if (!_state.cv.form) return;
+    syncForm();
+    var tasks = _state.cv.form.values.tasks;
+    tasks.splice(Number(i), 1);
+    if (!tasks.length) tasks.push({ description: '', hours: '', qty: '', unit: '' });
+    render();
+  }
+
+  function cvCloseForm() {
+    if (_state.cv.busy) return;
+    _state.cv.form = null;
+    repaint();
+  }
+
+  // A refused variation write: in words, and read again when the variation
+  // moved on (or the work order did) so nobody acts on an old copy.
+  function cvRefused(e, seq) {
+    var C = core();
+    if (seq !== _state.seq) return;
+    var code = (e && e.code) || '';
+    var words = C.customerVariationRefusalWords(code, e && e.message);
+    if (C.customerVariationNeedsReread(code)) {
+      _state.cv.form = null;
+      _state.cv.confirm = null;
+      rereadJob(words, 'warn', 'cv');
+      return;
+    }
+    _state.cv.busy = false;
+    if (_state.cv.form) {
+      _state.cv.form.errors = [words];
+    } else {
+      _state.cv.message = words;
+      _state.cv.level = 'error';
+    }
+    repaint();
+  }
+
+  function cvSave() {
+    var C = core();
+    var form = _state.cv.form;
+    if (!C || !form || _state.cv.busy) return;
+    syncForm();
+    var checked = C.customerVariationFields(form.values);
+    if (checked.errors.length) {
+      form.errors = checked.errors;
+      repaint();
+      return;
+    }
+    var seq = _state.seq;
+    var body;
+    var action;
+    if (form.mode === 'edit') {
+      action = 'update_customer_variation';
+      body = Object.assign({ variation_id: form.id, expected_updated_at: form.updatedAt }, checked.fields);
+    } else {
+      action = 'create_customer_variation';
+      body = Object.assign({ job_id: _state.jobId }, checked.fields);
+    }
+    form.errors = [];
+    _state.cv.busy = true;
+    repaint();
+    opsPost(action, body).then(function () {
+      if (seq !== _state.seq) return;
+      _state.cv.form = null;
+      rereadJob(form.mode === 'edit' ? 'Variation saved.' : 'Variation saved as a draft. Shaun approves it to join the work order.', 'ok', 'cv');
+    }).catch(function (e) { cvRefused(e, seq); });
+  }
+
+  function cvApprove(id) {
+    var C = core();
+    var v = findVariation(id);
+    if (!C || !v || !C.canApproveCustomerVariation(v, viewerEmail()) || _state.cv.busy) return;
+    if (C.customerVariationApproveHold(v, shownWorkOrder(currentData()))) return;
+    _state.cv.confirm = { kind: 'approve', id: v.id };
+    _state.cv.message = '';
+    repaint();
+  }
+
+  function cvCancel(id) {
+    var v = findVariation(id);
+    if (!v || v.status !== 'draft' || _state.cv.busy) return;
+    _state.cv.confirm = { kind: 'cancel', id: v.id };
+    _state.cv.message = '';
+    repaint();
+  }
+
+  function cvConfirmBack() {
+    if (_state.cv.busy) return;
+    _state.cv.confirm = null;
+    repaint();
+  }
+
+  // The confirmed approve or cancel, carrying the updated_at of the variation
+  // on screen, so the seal covers exactly what was read.
+  function cvConfirmed() {
+    var C = core();
+    var confirm = _state.cv.confirm;
+    var v = confirm && findVariation(confirm.id);
+    if (!C || !v || _state.cv.busy) return;
+    var seq = _state.seq;
+    var action;
+    var body = { variation_id: v.id, expected_updated_at: v.updated_at };
+    if (confirm.kind === 'approve') {
+      if (!C.canApproveCustomerVariation(v, viewerEmail())) return;
+      action = 'approve_customer_variation';
+    } else {
+      action = 'cancel_customer_variation';
+      var el = document.getElementById(MOUNT_ID);
+      var input = el && el.querySelector('[data-job-wo-cv-cancel-reason]');
+      var reason = input ? String(input.value || '').trim() : '';
+      if (reason) body.reason = reason;
+    }
+    _state.cv.busy = true;
+    repaint();
+    opsPost(action, body).then(function (res) {
+      if (seq !== _state.seq) return;
+      _state.cv.confirm = null;
+      var saved = res && res.customer_variation;
+      var words = confirm.kind === 'approve'
+        ? ((saved && saved.label) || 'Variation approved') + '. It is on the work order as an addendum.'
+        : 'Variation cancelled. It never joins the work order.';
+      rereadJob(words, 'ok', 'cv');
+      if (confirm.kind === 'approve' && typeof showToast === 'function') showToast('Variation approved and added to the work order', 'success');
+    }).catch(function (e) { cvRefused(e, seq); });
+  }
+
+  // The customer's invoice line for an approved variation, shown as a preview.
+  // prepare_customer_variation_invoice_line builds it from the record and
+  // writes nothing to Xero; no Xero draft is ever made from this screen.
+  function cvInvoiceLine(id) {
+    var v = findVariation(id);
+    if (!v || v.status !== 'approved' || _state.cv.busy || _state.cv.previewBusyId) return;
+    var seq = _state.seq;
+    _state.cv.previewBusyId = v.id;
+    _state.cv.message = '';
+    repaint();
+    opsPost('prepare_customer_variation_invoice_line', { variation_id: v.id }).then(function (res) {
+      if (seq !== _state.seq) return;
+      _state.cv.previewBusyId = null;
+      _state.cv.previews[v.id] = res || null;
+      repaint();
+    }).catch(function (e) {
+      if (seq !== _state.seq) return;
+      _state.cv.previewBusyId = null;
+      cvRefused(e, seq);
+    });
+  }
+
   function openPdf() {
     var data = currentData();
     if (data && typeof generateRichWorkOrder === 'function') generateRichWorkOrder(data);
@@ -267,7 +502,14 @@ var JobWorkOrderOps = (function () {
     if (!previewOn() || !C || !data || !data.job_work_order || !data.job_work_order.work_order) return null;
     var block = data.job_work_order;
     var wo = shownWorkOrder(data);
-    if (wo && wo !== block.work_order) block = Object.assign({}, block, { work_order: wo });
+    var fresher = {};
+    if (wo && wo !== block.work_order) fresher.work_order = wo;
+    // The job_work_order read for this job_detail read, once landed, carries
+    // the newest addenda (approved customer variations) and figures.
+    var detail = _state.data === data ? _state.detail : null;
+    if (detail && Array.isArray(detail.addenda)) fresher.addenda = detail.addenda;
+    if (detail && detail.figures && detail.figures.agreed_ex !== undefined) fresher.figures = detail.figures;
+    if (Object.keys(fresher).length) block = Object.assign({}, block, fresher);
     return C.pdfSections(block);
   }
 
@@ -303,6 +545,27 @@ var JobWorkOrderOps = (function () {
       '.jwo-line-note{font-size:11px;color:var(--sw-text-sec);}' +
       '.jwo-warn{font-size:10px;font-weight:700;color:#B45309;}' +
       '.jwo-addendum{border-left:3px solid var(--sw-orange);padding-left:10px;margin-top:8px;}' +
+      '.jwo-add-desc{font-size:12px;white-space:pre-wrap;margin-bottom:4px;}' +
+      '.jwo-add-money{font-size:12px;font-weight:600;color:var(--sw-dark);margin-top:4px;}' +
+      '.jwo-cv{margin-top:14px;}' +
+      '.jwo-cv-row{border:1px solid var(--sw-border);padding:8px 10px;margin:6px 0;font-size:12px;}' +
+      '.jwo-cv-cancelled{opacity:0.6;}' +
+      '.jwo-cv-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}' +
+      '.jwo-cv-desc{font-weight:600;color:var(--sw-dark);white-space:pre-wrap;}' +
+      '.jwo-cv-tasks{margin:6px 0 4px 18px;padding:0;}' +
+      '.jwo-cv-money{font-size:12px;color:var(--sw-text-sec);}' +
+      '.jwo-cv-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}' +
+      '.jwo-cv-inv{margin-top:8px;}' +
+      '.jwo-cv-form{border:1px solid var(--sw-border);background:var(--sw-light);padding:10px;margin:8px 0;display:flex;flex-direction:column;gap:8px;}' +
+      '.jwo-cv-label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700;color:var(--sw-text-sec);}' +
+      '.jwo-cv-form .form-input{width:100%;box-sizing:border-box;}' +
+      '.jwo-cv-form > .btn{align-self:flex-start;}' +
+      '.jwo-cv-task-table{min-width:0;}' +
+      '.jwo-cv-num{max-width:90px;}' +
+      '.jwo-cv-unit{max-width:70px;}' +
+      '.jwo-cv-amounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;}' +
+      '.jwo-cv-task-table td{padding:3px 4px;}' +
+      '.jwo-confirm .form-input{flex:1 1 200px;}' +
       '.jwo-instr{font-size:12px;white-space:pre-wrap;}' +
       '.jwo-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px;}' +
       '.jwo-fig{background:var(--sw-light);padding:8px 10px;}' +
@@ -317,7 +580,12 @@ var JobWorkOrderOps = (function () {
       '.jwo-rv-desc{white-space:pre-wrap;}' +
       '.jwo .btn:disabled,#woSubmitBtn:disabled{opacity:0.45;cursor:not-allowed;}' +
       '.jwo-redirect{border:1px solid var(--sw-border);background:var(--sw-light);padding:10px 12px;font-size:13px;color:var(--sw-text);display:flex;flex-direction:column;gap:8px;align-items:flex-start;}' +
-      '@media (max-width:600px){.jwo-actions{margin-left:0;width:100%;}}';
+      '@media (max-width:600px){.jwo-actions{margin-left:0;width:100%;}' +
+      '.jwo-cv-task-table thead{display:none;}' +
+      '.jwo-cv-task-table tr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:6px 0;border-bottom:1px solid var(--sw-border);}' +
+      '.jwo-cv-task-table td{display:block;border-bottom:none;padding:0;}' +
+      '.jwo-cv-task-table td:first-child{grid-column:1/-1;}' +
+      '.jwo-cv-num,.jwo-cv-unit{max-width:none;}}';
     var tag = document.createElement('style');
     tag.setAttribute('data-job-wo-css', '');
     tag.textContent = css;
@@ -336,7 +604,18 @@ var JobWorkOrderOps = (function () {
     openFromForm: openFromForm,
     formNoticeHtml: formNoticeHtml,
     openPdf: openPdf,
-    pdfSections: pdfSections
+    pdfSections: pdfSections,
+    cvAdd: cvAdd,
+    cvEdit: cvEdit,
+    cvAddTask: cvAddTask,
+    cvRemoveTask: cvRemoveTask,
+    cvCloseForm: cvCloseForm,
+    cvSave: cvSave,
+    cvApprove: cvApprove,
+    cvCancel: cvCancel,
+    cvConfirmBack: cvConfirmBack,
+    cvConfirmed: cvConfirmed,
+    cvInvoiceLine: cvInvoiceLine
   };
 })();
 window.JobWorkOrderOps = JobWorkOrderOps;

@@ -27,7 +27,7 @@
        it hides the trade login UI and confuses crew sign-in after the ops JWT cutover. -->
   <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
   <!-- Job work order (docs/job-work-order-screens.md): read only while the ?wo=preview switch is on. -->
-  <script src="shared/job-work-order.js?v=1"></script>
+  <script src="shared/job-work-order.js?v=2"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -2682,6 +2682,8 @@
     .two-addendum { margin-top: 12px; border-left: 3px solid var(--sw-orange); padding-left: 10px; }
     .two-add-k { font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; margin-bottom: 4px; }
     .two-add-k span { letter-spacing: 0; text-transform: none; color: var(--sw-text-sec); font-weight: 400; }
+    .two-add-desc { font-size: 14px; line-height: 1.5; color: var(--sw-text); white-space: pre-wrap; margin-bottom: 4px; }
+    .two-var-tag { display: inline-block; margin-right: 6px; padding: 1px 6px; border: 1px solid var(--sw-orange-line); border-radius: var(--sw-r-chip); font-family: var(--sw-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; vertical-align: 1px; }
     .two-instr { margin-top: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
     .two-k { display: block; font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-text-sec); margin-bottom: 4px; }
 
@@ -4887,13 +4889,19 @@
   // The job work order's trade read carries no money by design; strip any
   // money key it or a scope line might still carry before anything caches it.
   var TRADE_JOB_WO_MONEY_KEYS = ['allocation_ex', 'labour_ex', 'rate_ex', 'cost_rate_ex', 'unit_cost_ex',
-    'total_ex', 'agreed_labour_ex', 'figures'];
+    'total_ex', 'agreed_labour_ex', 'figures', 'trade_allocation_ex', 'customer_price_ex'];
   function tradeStripJobWorkOrderMoney(res) {
     delete res.figures;
     var wo = res.work_order;
     if (!wo || typeof wo !== 'object') return;
     tradeStripMoneyKeys(wo);
-    [wo].concat(Array.isArray(wo.scope_items) ? wo.scope_items : []).forEach(function(node) {
+    // The work order, its lines, and each variation addendum with its lines.
+    var nodes = [wo].concat(Array.isArray(wo.scope_items) ? wo.scope_items : []);
+    (Array.isArray(wo.addenda) ? wo.addenda : []).forEach(function(a) {
+      nodes.push(a);
+      if (a && Array.isArray(a.scope_items)) nodes = nodes.concat(a.scope_items);
+    });
+    nodes.forEach(function(node) {
       if (node && typeof node === 'object') TRADE_JOB_WO_MONEY_KEYS.forEach(function(k) { delete node[k]; });
     });
   }

@@ -50,12 +50,17 @@ What it shows:
   with its rate. A lump line with no hours ("Root removal, 1 job") is marked **No hours**, so
   it is fixed before approval. Total hours and total allocation underneath. An empty draft
   says the lines come from the accepted quote and it has none yet.
-- **Variation addenda**: each variation as its own marked block under the approved lines,
-  never mixed into them.
+- **Variation addenda**: each approved customer variation (`addenda[]` on the job_detail block
+  and the `job_work_order` read) as its own marked block under the approved lines, never mixed
+  into them: its label ("Variation 1 - approved 13 Oct 2026"), what the office wrote, its tasks
+  with quantity and hours, and the trade allocation and customer price (office only).
 - **Special instructions.**
 - **Figures**: approved: agreed labour, billed to date, remaining, and the backend's rules
-  (`over_agreed` flag, `near_agreed` warn, `has_variations`). Draft: the agreed labour as
-  drafted and the labour billed before approval.
+  (`over_agreed` flag, `near_agreed` warn, `has_variations`, `has_customer_variations`). With
+  approved customer variations it also shows **Approved variations** (their trade allocation and
+  count) and **Agreed total** (`figures.agreed_total_ex`, what billed and remaining are measured
+  against). Draft: the agreed labour as drafted and the labour billed before approval.
+- **Customer variations** (below): the office's record of extra work the customer agreed to.
 - **Variations reported by trades** (the `variations[]` of the staff read), with corrections
   and the "more than its invoice's labour" flag.
 - **Work order PDF** button.
@@ -65,6 +70,42 @@ What it shows:
   `approve_work_order {work_order_id, expected_updated_at}` where `expected_updated_at` is the
   `updated_at` of the very draft on screen. Any refusal reads in words; `stale_review` (and
   `not_a_draft`) re-read the job so the fresh draft is shown before anyone approves again.
+
+## Customer variations (Ops job page)
+
+Captain, 12 and 13 Oct 2026: a variation joins the existing work order as a marked addendum,
+and no trade sees a dollar amount. Backend: secureworks-backend `docs/job-work-orders-v1.md`
+("Customer variations"), merged in https://github.com/SecureWorks-GROUP/secureworks-backend/pull/1031.
+The section sits on the work order panel under the figures, once the job has a work order.
+Its list is `customer_variations[]` from the `job_work_order` read (every status); while that
+read loads it says so, with `customer_variations_open_count` from job_detail.
+
+- **Add a variation** (any staff): what the customer agreed to, tasks each with its hours (a
+  quantity only with its unit, "6 m"), the trade allocation and the customer price, both ex GST
+  and both optional on a draft. Checked in words before anything is sent (no `$` in any text
+  trades read). Sends `create_customer_variation {job_id, description, tasks,
+  trade_allocation_ex, customer_price_ex}`; an empty amount is sent as `null`.
+- **Edit** a draft: the same form, then `update_customer_variation` with every field and
+  `expected_updated_at`, the `updated_at` of the variation when the form was opened.
+- **Approve** (Shaun only, `APPROVER_EMAILS`; the server checks the approver list): held, with
+  the reason, until the work order is approved and the draft has every task's hours, the
+  allocation and the price (the server's `variation_not_ready`). A confirm row first, then
+  `approve_customer_variation {variation_id, expected_updated_at}` with the shown draft's
+  `updated_at`. The job is read again, so the addendum, the figures and the list come from the
+  server.
+- **Cancel variation** on a draft, with an optional reason: `cancel_customer_variation
+  {variation_id, expected_updated_at, reason?}`. An approved variation is sealed: no edit, no
+  cancel (a mistake is a further variation).
+- **Refusals** read in words (`customerVariationRefusalWords`); `stale_review`,
+  `variation_sealed`, `not_a_draft`, `work_order_not_approved` and a missing variation re-read
+  the job so nobody acts on an old copy.
+- **Customer invoice line**, on an approved variation that charges the customer: **Preview the
+  customer invoice line** sends `prepare_customer_variation_invoice_line {variation_id}` and
+  shows the line it built (description, quantity, unit price ex GST, account, reference). A line
+  already kept on the record (`invoice.line`) shows without a new call; a price of 0 says there
+  is no line. Preview only: no button here creates the Xero draft
+  (`create_customer_variation_xero_draft` is never called; its backend switch is off and a
+  follow-up must land before it is offered).
 
 ## Create Work Order: one way for fencing and patio
 
@@ -90,9 +131,13 @@ job work order exists.
 ## Office Work Order PDF
 
 `generateRichWorkOrder` (`// <job-work-order-pdf>`): when the preview is on and the job has a
-stored work order, the Scope of Work section lists the stored task lines with hours and the
-addenda (no money), the confidential Cost Breakdown lists the stored allocations and the agreed
-labour (plus billed and remaining once approved), and a draft is marked DRAFT. The old
+stored work order, the Scope of Work section lists the stored task lines with hours and each
+approved customer variation as a marked block, "ADDENDUM: Variation 1 - approved 13 Oct 2026",
+with its description and tasks with hours (no money). The confidential Cost Breakdown lists the
+stored allocations, each addendum's trade allocation, and the agreed labour, plus once approved
+the approved variations, the agreed total, billed and remaining; the customer's price is not on
+it. A draft is marked DRAFT. The addenda and figures come from the `job_work_order` read when it
+has landed, else from job_detail. The old
 recomputed labour (`_woConst.COST_PRICES`, "Labour base ... @ $35/m" and margin) is not used.
 A patio job prints its stored work order too. The fence specification, runs, gates and summary
 still print from the scope. A job with no stored work order prints the old document unchanged.
@@ -102,7 +147,8 @@ still print from the scope. A job with no stored work order prints the old docum
 - **Work Order and Scope tabs**: on an allocated fencing or patio job (not another crew's
   view-only job) `renderTradeJobWorkOrder` reads `my_job_work_order` and shows the approved
   work order: each task with its hours, per-metre lines as quoted, a total, variations as marked
-  addenda, and the instructions. It reads task, quantity, unit and hours only, never a money
+  addenda (`work_order.addenda[]`: the label, what the office wrote, and each task marked
+  **Variation** with its hours), and the instructions. It reads task, quantity, unit and hours only, never a money
   field, for every viewer. A job with no approved work order says the office is preparing it.
   The read is cached per job for two minutes. A failed refresh keeps the last good answer (on
   the Scope tab and for the invoice below) and is retried after those two minutes; only a job
@@ -131,26 +177,27 @@ read exactly these keys and no other spelling:
 | Note | `notes` |
 | Hours | `hours`; a line whose `unit` is `h`/`hr`/`hrs`/`hour`/`hours` is its own hours |
 | Rate, allocation (Ops only) | `rate_ex`, `allocation_ex` |
-| Variation addendum | `variation_number` (or, with no number, `variation_label`) marks the line; title `variation_label` (else "Variation n"); date `variation_approved_at` |
+| Variation line | `is_variation`, `variation_number` (or, with no number, `variation_label`) marks the line; title `variation_label` (else "Variation n"); date `variation_approved_at` |
+| Variation addendum | the work order's `addenda[]`: `variation_number`, `label`, `approved_at`, `description`, and its lines in `lines[]` (staff) or `scope_items[]` (trade); `trade_allocation_ex`, `customer_price_ex` (Ops only, `addendaOf(list, {money: true})`) |
 
-Backend gap, not built here (follow-up tracked by firstmate): the trade read
-(`my_job_work_order`) passes scope items through the shared allowlist
-`TRADE_WO_SCOPE_ITEM_ALLOWLIST`, which keeps only text, `qty`/`quantity`, `unit`/`units`,
-`kind` and the note fields. A line's `hours` field and the variation keys are dropped before
-the trade sees them, so today a trade sees hours only on a line priced in hours (`qty` with
-unit `hrs`, which the allowlist keeps) and sees variation lines unmarked among the approved
-lines. Showing hours on the other lines and marked variations to trades needs that backend
-allowlist change; the trade screen already renders both when they arrive. The Ops page reads
-the staff read and is not affected.
+The trade read (`my_job_work_order`) keeps `hours`, `is_variation` and `variation_number` on
+every line since backend #1031, so trades see each line's hours and which lines are
+variations. The trade renderer reads no money field of an addendum, and the Trade App's
+office money door also strips `trade_allocation_ex` and `customer_price_ex` off every addendum
+before render.
 
 ## Tests
 
 - `tests/e2e/job-work-order-core.spec.js`: the core in node (line reading, addenda, status,
-  approver, refusal words, Ops and trade HTML, PDF sections, no money in the trade view).
+  approver, refusal words, Ops and trade HTML, PDF sections, no money in the trade view, and
+  the customer variation rules: addenda from the backend, form checks, approve holds, the
+  invoice line preview).
 - `tests/e2e/ops-job-work-order.spec.js`: the Build tab panel, approve with the exact
   `updated_at`, the stale review, preview off, the PDF (fencing, patio, preview off), opening
   a draft, and Create Work Order leading fencing and patio to the job work order while other
-  job types keep the old form.
+  job types keep the old form; customer variations added, edited, approved (with the shown
+  `updated_at`, and a stale review re-read), cancelled, the invoice line preview with no Xero
+  write, and the PDF addendum.
 - `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload
   `my_job_work_order` sends today) and the invoice, preview on and off, including a per-metre
   trade's server-issued crew work order keeping its Work Order mode.

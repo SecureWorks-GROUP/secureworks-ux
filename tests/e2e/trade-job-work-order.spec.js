@@ -104,6 +104,43 @@ test.describe('Job work order on the Trade App job (preview)', () => {
     expect(reads).toContain('e2e-job-1');
   });
 
+  test('preview on: an approved customer variation is a marked addendum with its hours, and no dollar figure', async ({ appPage: page }) => {
+    // The my_job_work_order shape since backend #1031: work_order.addenda[],
+    // each {variation_number, label, approved_at, description, scope_items[]}.
+    // Money keys are added here to prove the page never shows one.
+    const wo = approvedWorkOrder('e2e-job-1', {
+      addenda: [{
+        variation_number: 1, label: 'Variation 1 - approved 13 Oct 2026', approved_at: '2026-10-13T07:00:00Z',
+        description: 'Remove the tree roots the quote left',
+        trade_allocation_ex: 320, customer_price_ex: 921.6,
+        scope_items: [
+          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, allocation_ex: 320 },
+          { description: 'Extend the fence along the side', qty: 6, unit: 'm', hours: 3, is_variation: true, variation_number: 1 },
+        ],
+      }],
+    });
+    await stub(page, {
+      detail: fencingDetail(),
+      workOrderRead: { schema: 'trade-job-work-order.v1', job_id: 'e2e-job-1', work_order: wo, reason: null, can_report_variation: true, my_variations: [] },
+    });
+    await signIn(page, PERSONAS.installer);
+    await setPreview(page, true);
+    await openJob(page, 'E2E-JOB-001');
+    const view = page.locator('#jdTab_scope [data-trade-job-wo]');
+    const add = view.locator('[data-trade-job-wo-addendum][data-variation-number="1"]');
+    await expect(add).toContainText('Variation 1 - approved 13 Oct 2026');
+    await expect(add).toContainText('Remove the tree roots the quote left');
+    await expect(add.locator('[data-trade-job-wo-variation-line]')).toHaveCount(2);
+    await expect(add.locator('[data-trade-job-wo-variation-line]').filter({ hasText: 'Remove tree roots' }).locator('.two-hours')).toHaveText('4 h');
+    await expect(add.locator('[data-trade-job-wo-variation-line]').filter({ hasText: 'Extend the fence' })).toContainText('6 m');
+    await expect(add.locator('[data-trade-job-wo-variation-line]').filter({ hasText: 'Extend the fence' }).locator('.two-hours')).toHaveText('3 h');
+    // The original lines carry no variation mark.
+    await expect(view.locator('.two-line').filter({ hasText: 'Install Colorbond fencing' }).locator('.two-var-tag')).toHaveCount(0);
+    const text = await view.textContent();
+    expect(text).not.toContain('$');
+    for (const money of ['320', '921']) expect(text).not.toContain(money);
+  });
+
   test('preview on: a job with no approved work order says so', async ({ appPage: page }) => {
     await stub(page, {
       detail: fencingDetail(),

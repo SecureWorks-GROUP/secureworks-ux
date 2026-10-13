@@ -759,20 +759,24 @@ trade request never reads as approved. The form never shows or uses a share
 link, and never queues a refused or unsent request offline. Search
 `// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
 
-## Trade hourly rate: office only (`trade.html`)
+## Trade invoice rate: a box, opened on the usual rate (`trade.html`)
 
-Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes
-no `set_trade_rate` call; Profile and assigned job cards show the office rate
-read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
-or extra line keeps a typed rate, because ops-api flags that client-entered rate
-for office verification and never saves it as the trade's rate. A missing rate
-points the trade to the office, never to Profile. A restored session draft
-cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
-clears it on every builder paint, even when hours data is missing or has no
-positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
-on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
-next trade before that user's `my_hours` lands. Guard:
-`tests/e2e/trade-rate-office-only.spec.js`.
+Captain 2026-10-13, reversing the read-only rate of 2026-09-23: "it should look
+like the same boxes as the other inputs, and just have like an auto fill to
+their rate that they normally set so they can change the rate per job and it
+should just have like a brief description of work as well." On an hours card
+the rate (`[data-cardrate]`) and the description of work (`[data-carddesc]`)
+are boxes in the same block as date, start, finish and break. The rate opens on
+the trade's usual rate (`my_hours.rate`) and the app sends whatever is left in
+the box: `rate_source` is `server_resolved` while it equals the usual rate,
+`client_entered` once changed. What a changed rate means is ops-api's call; do
+not add a client rule for it. `_pinAssignedCardRates` keeps an untouched card on
+the usual rate and never overwrites one the trade changed (`rate_user_edited`).
+`trade.html` still makes no `set_trade_rate` call and Profile stays read-only:
+the app never saves a rate as the trade's usual one. `_hoursData` and
+`_tradeRate` clear in `resetInvoiceSession` and on the `onLogin` owner-change
+path so one trade's usual rate cannot open in the next trade's box before that
+user's `my_hours` lands. Guard: `tests/e2e/trade-invoice-rate-box.spec.js`.
 
 ## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
 

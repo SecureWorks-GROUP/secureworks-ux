@@ -695,6 +695,41 @@ test.describe('Customer variations on the job work order (preview)', () => {
     expect(await posts(page)).toEqual([{ action: 'prepare_customer_variation_invoice_line', body: { variation_id: 'cv-1' } }]);
   });
 
+  test('a refused invoice line preview leaves a save still in flight busy', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const { data, read } = withVariations([approvedVariation()]);
+    await openBuild(page, data, { job_work_order: read }, SHAUN);
+    await page.evaluate(() => {
+      const post = window.opsPost;
+      window.opsPost = function (action, body) {
+        if (action === 'prepare_customer_variation_invoice_line') {
+          window.__calls.push({ method: 'POST', action, body });
+          return new Promise((resolve, reject) => { window.__refusePreview = () => { const e = new Error('The invoice line could not be built.'); e.code = 'invoice_line_unavailable'; reject(e); }; });
+        }
+        if (action === 'create_customer_variation') {
+          window.__calls.push({ method: 'POST', action, body });
+          return new Promise(() => {});
+        }
+        return post(action, body);
+      };
+    });
+    await page.locator('[data-job-wo-cv-add]').click();
+    const form = page.locator('[data-job-wo-cv-form="create"]');
+    await form.locator('[data-cv-f="description"]').fill('Second gate');
+    await form.locator('[data-cv-task="0"] [data-cv-tf="description"]').fill('Hang a second gate');
+    await form.locator('[data-cv-task="0"] [data-cv-tf="hours"]').fill('2');
+    await form.locator('[data-cv-f="trade_allocation_ex"]').fill('90');
+    await form.locator('[data-cv-f="customer_price_ex"]').fill('250');
+    await page.locator('[data-job-wo-cv-invoice-line][data-cv-id="cv-1"]').click();
+    await form.locator('[data-job-wo-cv-save]').click();
+    await expect(form.locator('[data-job-wo-cv-save]')).toBeDisabled();
+    await page.evaluate(() => window.__refusePreview());
+    await expect(page.locator('[data-job-wo-cv-message]')).toHaveText('The invoice line could not be built.');
+    await expect(form.locator('[data-job-wo-cv-save]')).toBeDisabled();
+    await expect(form.locator('[data-job-wo-cv-errors]')).toHaveCount(0);
+    expect((await posts(page)).map((c) => c.action)).toEqual(['prepare_customer_variation_invoice_line', 'create_customer_variation']);
+  });
+
   test('the Work Order PDF prints the approved variation as a marked addendum, its allocation only in the cost breakdown', async ({ page }) => {
     await page.goto('/ops.html?wo=preview');
     const { data, read } = withVariations([approvedVariation()]);

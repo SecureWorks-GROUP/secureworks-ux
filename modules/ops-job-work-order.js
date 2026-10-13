@@ -358,21 +358,19 @@ var JobWorkOrderOps = (function () {
 
   // A refused variation write: in words, and read again when the variation
   // moved on (or the work order did) so nobody acts on an old copy.
-  function cvRefused(e, seq, preview) {
+  function cvRefused(e, seq) {
     var C = core();
     if (seq !== _state.seq) return;
     var code = (e && e.code) || '';
     var words = C.customerVariationRefusalWords(code, e && e.message);
     if (C.customerVariationNeedsReread(code)) {
-      if (!preview) {
-        _state.cv.form = null;
-        _state.cv.confirm = null;
-      }
+      _state.cv.form = null;
+      _state.cv.confirm = null;
       rereadJob(words, 'warn', 'cv');
       return;
     }
     _state.cv.busy = false;
-    if (_state.cv.form && !preview) {
+    if (_state.cv.form) {
       _state.cv.form.errors = [words];
     } else {
       _state.cv.message = words;
@@ -487,8 +485,11 @@ var JobWorkOrderOps = (function () {
       repaint();
     }).catch(function (e) {
       if (seq !== _state.seq) return;
+      var C = core();
       _state.cv.previewBusyId = null;
-      cvRefused(e, seq, true);
+      _state.cv.message = C.customerVariationRefusalWords((e && e.code) || '', e && e.message);
+      _state.cv.level = 'error';
+      repaint();
     });
   }
 

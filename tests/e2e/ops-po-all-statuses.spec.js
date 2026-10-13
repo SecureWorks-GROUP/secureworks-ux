@@ -68,6 +68,16 @@ async function bootOps(page, { responses = {}, failures = {} } = {}) {
   const apiCalls = [];
   const bodies = Object.assign({ pipeline: { columns: {} } }, responses);
   await installOpsSessionStub(page);
+  // These tests read the Crew view's Deliveries row over the default one-week
+  // window. Calendar v3 opens a first-time browser on the job-based Month
+  // (sw_cal_v3_intro), so pin the view and range this spec was written against.
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('sw_cal_v3_intro', '1');
+      localStorage.setItem('sw_cal_view_mode', 'crew');
+      localStorage.setItem('sw_cal_range', '1w');
+    } catch (e) { /* storage unavailable: the page falls back to its defaults */ }
+  });
   await page.route('**/*', async (route) => {
     const url = route.request().url();
     if (url.startsWith('file://')) return route.continue();

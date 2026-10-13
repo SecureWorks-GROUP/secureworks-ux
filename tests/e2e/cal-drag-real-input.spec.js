@@ -99,6 +99,9 @@ async function bootCalendar(page, opts = {}) {
   });
   await page.addInitScript((dragLs) => {
     try {
+      // Calendar v3 lands a first-time browser on the job-based Month once
+      // (sw_cal_v3_intro). These specs pick their own view, so mark it seen.
+      localStorage.setItem('sw_cal_v3_intro', '1');
       localStorage.setItem('sw_ops_tab', 'calendar');
       localStorage.setItem('sw_cal_range', '2w');
       localStorage.setItem('sw_cal_view_mode', 'crew');

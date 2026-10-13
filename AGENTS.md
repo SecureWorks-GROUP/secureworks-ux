@@ -176,6 +176,40 @@ which `renderScheduleView`'s division filter compares against with
 events; the Crew swimlane view only dims. Guard:
 `tests/e2e/ops-calendar-repair-division.spec.js`.
 
+## Ops Dash calendar v3 look (`ops.html`)
+
+The job-based (Schedule) view's signed-off design is behind
+`window.__SW_CAL_V3_ENABLED`, DEFAULT ON. Kill switch: `?calv3=0` or
+`localStorage.sw_cal_v3='0'`. It is a LOOK, not a second calendar: v3 adds
+classes and markup inside the same `renderScheduleView` bars and cells, so drag,
+resize, the popup and every write path are shared. Flag off must stay
+byte-identical (checked against the default branch when this shipped), so every
+v3 branch sits behind the one `v3` variable and its CSS is scoped to
+`#viewCalendar.cal-v3`; do not style a calendar class outside that scope and do
+not change the bar's `left`/`width` percentages (the overlap and resize guards
+measure that box; v3 insets the line with transparent side borders instead).
+Line format: type square, client, job number, staff circles, lock. TWO states
+only (Captain ruling 2026-10-13): placeholder, and client locked in
+(`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
+one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
+repair, family-first through `calDivisionOf`); the symbol still tells a make
+safe from a repair. Business lines (job-less label rows and org events) take the
+TOP lanes of the week and jobs start under them; an org event stretches across
+its days instead of the corner badge. The Show / Type focus row
+(`_calFocus`, `setCalFocus`, stored at `sw_cal_focus`) drives the same in-memory
+`_calEventFilters` / `_calDivFilters` the hidden sidebar drove, but never writes
+the sidebar's storage keys, and "Insurance" is a VIEW filter only: Repair stays
+its own division (ruling 2026-09-16). Leave, holidays and reminders show under
+Everything and Business. Deliveries are read-only from the feed's `deliveries`
+and Materials with none says "No deliveries booked". Staff circles are first +
+surname initial; `list_users` sends no surname today, so a one-word name falls
+back to its first two letters until the backend adds `full_name`.
+`sw_cal_v3_intro` lands a first-time browser on Schedule + Month ONCE; a spec
+that picks its own view must set it to `'1'` first or its choice is overwritten.
+Search `// <calendar-v3>`. Guard: `tests/e2e/ops-calendar-v3.spec.js`; the
+sidebar Divisions guard (`ops-calendar-repair-division.spec.js`) runs with v3
+off because the sidebar only exists there.
+
 ## Ops Insurance Repairs board (`ops.html`)
 
 A NEW pipeline tab (`Repairs`, next to Patio) that is PARALLEL to and separate

@@ -75,6 +75,14 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       C.renderOpsPanel(approvedBlock(), detail, 'ready', { viewerEmail: SHAUN }),
       C.renderOpsPanel({ work_order: null }, null, 'idle', {}),
       C.renderOpsPanel({ unreadable: true }, null, 'idle', {}),
+      C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true }),
+      C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true, busy: true }),
+      C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' }),
+      C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' }),
+      C.openedWords({ created: true, quote_fill: { reason: 'filled' } }),
+      C.openedWords({ created: false, quote_fill: { reason: 'no_accepted_quote' } }),
+      C.openedWords({ created: true, quote_fill: { reason: 'no_quote_lines' } }),
+      C.openedWords({ created: true, quote_fill: null }),
       C.renderTrade(approvedRead, 'ready'),
       C.renderTrade({ work_order: Object.assign({}, approvedRead.work_order, { scope_items: [] }) }, 'ready'),
       C.renderTrade({ work_order: null }, 'ready'),
@@ -91,6 +99,9 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       'approver_not_set', 'terminal_approval_switched_off', 'work_order_not_ready', 'not_a_draft', 'work_order_not_found',
       'not_a_job_work_order', '']) {
       outputs.push(C.refusalWords(code, ''));
+    }
+    for (const code of ['job_type_not_eligible', 'work_order_sealed', 'draft_not_created', 'draft_not_updated', 'not_a_draft', '']) {
+      outputs.push(C.openRefusalWords(code, ''));
     }
     for (const out of outputs) {
       expect(out).toBeTruthy();
@@ -119,6 +130,58 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     expect(C.eligibleType('Patio')).toBe(true);
     expect(C.eligibleType('makesafe')).toBe(false);
     expect(C.eligibleType('')).toBe(false);
+  });
+
+  test('Create work order goes to the job work order for fencing and patio only, and only while the preview is on', () => {
+    expect(C.createRoute('fencing', true)).toBe('job');
+    expect(C.createRoute('Patio', true)).toBe('job');
+    for (const type of ['repair', 'makesafe', 'decking', 'renovation', '', null, undefined]) {
+      expect(C.createRoute(type, true)).toBe('crew');
+    }
+    expect(C.createRoute('fencing', false)).toBe('crew');
+    expect(C.createRoute('patio', false)).toBe('crew');
+  });
+
+  test('the old office form says why it makes no work order for a fencing or patio job, and points to the job work order', () => {
+    const html = C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' });
+    expect(html).toContain('data-wo-form-job-wo');
+    expect(html).toContain('<b>SWF-26904</b> is a fencing job');
+    expect(html).toContain('so this form does not make one for it');
+    expect(html).toContain('data-job-id="job-1"');
+    expect(html).toContain("JobWorkOrderOps.openFromForm(this.getAttribute('data-job-id'))");
+    expect(html).toContain('Open the job work order');
+    expect(C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' })).toContain('This is a patio job');
+    const hostile = C.crewFormNoticeHtml({ id: "x');alert(1);//", job_number: '<img src=x>', type: 'fencing' });
+    expect(hostile).not.toContain('<img');
+    // The job id is only ever an escaped attribute value, never script text.
+    expect(hostile).toContain('data-job-id="x&#39;);alert(1);//"');
+    expect(hostile.split('alert(1)')).toHaveLength(2);
+  });
+
+  test('opening the draft: the button on a job with none yet, what it did, and its refusals in words', () => {
+    const none = C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true });
+    expect(none).toContain('data-job-wo-none');
+    expect(none).toContain('it fills from the accepted quote');
+    expect(none).toContain('JobWorkOrderOps.openDraft()');
+    expect(none).toMatch(/data-job-wo-open onclick/);
+    expect(C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true, busy: true })).toMatch(/data-job-wo-open disabled[^>]*>Opening\.\.\./);
+    expect(C.renderOpsPanel({ work_order: null }, null, 'idle', {})).not.toContain('data-job-wo-open');
+    // A job that has a work order, or one that could not be read, never offers it.
+    expect(C.renderOpsPanel(draftBlock(), null, 'idle', { canOpen: true, viewerEmail: SHAUN })).not.toContain('data-job-wo-open');
+    expect(C.renderOpsPanel({ unreadable: true }, null, 'idle', { canOpen: true })).not.toContain('data-job-wo-open');
+
+    expect(C.openedWords({ created: true, quote_fill: { reason: 'filled' } })).toBe('Draft opened, filled from the accepted quote. Check it, then approve.');
+    expect(C.openedWords({ created: false, quote_fill: { reason: 'no_accepted_quote' } })).toBe('The draft was already open. The job has no accepted quote to fill it from.');
+    expect(C.openedWords({ created: true, quote_fill: { reason: 'no_quote_lines' } })).toContain('no labour lines');
+    expect(C.openedWords({ created: true, quote_fill: null })).toBe('Draft opened.');
+    expect(C.openedWords(null)).toBe('Draft opened.');
+
+    expect(C.openRefusalWords('job_type_not_eligible', 'raw')).toBe('Job work orders are for fencing and patio jobs.');
+    expect(C.openRefusalWords('work_order_sealed', 'raw')).toContain('already approved and sealed');
+    expect(C.openRefusalWords('something_new', 'Server words')).toBe('Server words');
+    expect(C.openRefusalWords('', '')).toBe('The draft could not be opened.');
+    expect(C.openRefusalNeedsReread('work_order_sealed')).toBe(true);
+    expect(C.openRefusalNeedsReread('draft_not_created')).toBe(false);
   });
 
   test('a line priced in hours is its own hours; per metre stays as quoted; a lump job has no hours', () => {

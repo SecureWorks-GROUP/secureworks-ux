@@ -5671,7 +5671,7 @@ __swOpsStampAssets([
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('woModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitWO()">Create WO</button>
+      <button class="btn btn-primary" id="woSubmitBtn" onclick="submitWO()">Create WO</button>
     </div>
   </div>
 </div>
@@ -10860,7 +10860,7 @@ function _buildCalActions(ev, assignmentId, confStatus, isLocked, isReady, readi
     html += '<div class="cal-popup-blocker">';
     unmetBlockers.forEach(function(b) {
       html += '<div class="cal-popup-blocker-item">&#128308; ' + escapeHtml(readinessDisplayLabel(b.key, false));
-      var fixBtn = getBlockerFixButton(b.key, ev.job_id);
+      var fixBtn = getBlockerFixButton(b.key, ev.job_id, false, ev.job_type);
       if (fixBtn) html += fixBtn;
       html += '</div>';
     });
@@ -10898,8 +10898,10 @@ function _buildCalActions(ev, assignmentId, confStatus, isLocked, isReady, readi
 }
 
 // Helper: blocker fix button
-function getBlockerFixButton(key, jobId, primary) {
+function getBlockerFixButton(key, jobId, primary, jobType) {
   var cls = primary ? 'btn-primary-action' : '';
+  // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+  if (key === 'work_order' && window.JobWorkOrderOps && JobWorkOrderOps.createRoute(jobType) === 'job') return '<button class="' + cls + '" onclick="closeCalJobPopup();JobWorkOrderOps.openForJob(\'' + jobId + '\')">Open Work Order</button>';
   if (key === 'pos_created') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'money\')},300)">Create Materials PO</button>';
   if (key === 'work_order') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'build\')},300)">Create Work Order</button>';
   if (key && key.indexOf('_doc') !== -1) return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'files\')},300)">Upload Document</button>';
@@ -11787,6 +11789,8 @@ function getNextAction(j) {
         result.hint = 'Still need: ' + pMissing.join(', ');
         if (j.po_count === 0) result.actions.push({ label: 'Create PO', onclick: "closeQuickView();openPOModal('" + j.id + "')", primary: true });
         else if (j.assignment_count === 0) result.actions.push({ label: 'Assign Crew', onclick: "closeQuickView();openJobDetail('" + j.id + "')", primary: true });
+        // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+        else if (window.JobWorkOrderOps && JobWorkOrderOps.createRoute(j.type) === 'job') result.actions.push({ label: 'Open Work Order', onclick: "closeQuickView();JobWorkOrderOps.openForJob('" + j.id + "')", primary: true });
         else result.actions.push({ label: 'Create Work Order', onclick: "closeQuickView();openCreateWOModal('" + j.id + "')", primary: true });
         result.actions.push({ label: 'Start Job', onclick: "closeQuickView();changeJobStatus('" + j.id + "','in_progress')" });
       }
@@ -25006,6 +25010,7 @@ function selectJobPicker(prefix, jobId) {
   // Picker-specific post-select hooks
   if (prefix === 'po') onPOJobSelect(jobId);
   if (prefix === 'inv') onInvJobSelect(jobId);
+  if (prefix === 'wo') woFormSyncJobWorkOrder(jobId);
 }
 
 // Legacy wrappers for PO modal (existing code calls these)
@@ -25067,11 +25072,46 @@ async function openWOModal() {
   document.getElementById('woJobSearch').value = '';
   document.getElementById('woJobSelect').value = '';
   document.getElementById('woScopeItems').innerHTML = 'No job selected';
+  document.getElementById('woSubmitBtn').disabled = false;
   _woScopeItems = [];
   await loadPOJobList();
 }
 
+// <job-work-order-route> The job this old office form is about, when it goes
+// to the job work order instead (a fencing or patio job while ?wo=preview is
+// on, modules/ops-job-work-order.js); null for every other job, which keeps
+// this form exactly as before (repairs, make-safe, builder crew work orders).
+function woFormJobWorkOrderJob(jobId) {
+  if (!jobId || !window.JobWorkOrderOps) return null;
+  var job = _poJobList.find(function(j) { return String(j.id) === String(jobId); });
+  return job && JobWorkOrderOps.createRoute(job.type) === 'job' ? job : null;
+}
+
+// Show the form's notice and hold Create WO for such a job (true), or lift
+// both once another job is picked (false). Preview off: never changes a thing.
+function woFormSyncJobWorkOrder(jobId) {
+  var container = document.getElementById('woScopeItems');
+  var submitBtn = document.getElementById('woSubmitBtn');
+  var job = woFormJobWorkOrderJob(jobId);
+  if (job) {
+    _woScopeItems = [];
+    submitBtn.disabled = true;
+    container.innerHTML = JobWorkOrderOps.formNoticeHtml(job);
+    return true;
+  }
+  if (submitBtn.disabled) {
+    submitBtn.disabled = false;
+    _woScopeItems = [];
+    container.innerHTML = 'No job selected';
+  }
+  return false;
+}
+
 async function openCreateWOModal(jobId) {
+  if (jobId && window.JobWorkOrderOps && JobWorkOrderOps.previewOn()) {
+    await loadPOJobList();
+    if (woFormJobWorkOrderJob(jobId)) { JobWorkOrderOps.openForJob(jobId); return; }
+  }
   await openWOModal();
   if (jobId) {
     selectJobPicker('wo', jobId);
@@ -25081,6 +25121,7 @@ async function openCreateWOModal(jobId) {
 
 async function autoWOFromScope(jobId) {
   var container = document.getElementById('woScopeItems');
+  if (woFormSyncJobWorkOrder(jobId)) return;
   if (!jobId) { container.innerHTML = 'No job selected'; _woScopeItems = []; return; }
   container.innerHTML = '<span style="color:var(--sw-text-sec);">Loading scope...</span>';
   try {
@@ -25646,6 +25687,7 @@ async function switchPOModalTab(tab) {
 async function submitWO() {
   var jobId = document.getElementById('woJobSelect').value;
   if (!jobId) { alert('Please select a job.'); return; }
+  if (woFormSyncJobWorkOrder(jobId)) return;
 
   try {
     var priceVal = document.getElementById('woPrice').value;

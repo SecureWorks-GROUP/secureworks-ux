@@ -759,20 +759,24 @@ trade request never reads as approved. The form never shows or uses a share
 link, and never queues a refused or unsent request offline. Search
 `// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
 
-## Trade hourly rate: office only (`trade.html`)
+## Trade invoice rate: a box once ops-api honours it (`trade.html`)
 
-Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes
-no `set_trade_rate` call; Profile and assigned job cards show the office rate
-read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
-or extra line keeps a typed rate, because ops-api flags that client-entered rate
-for office verification and never saves it as the trade's rate. A missing rate
-points the trade to the office, never to Profile. A restored session draft
-cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
-clears it on every builder paint, even when hours data is missing or has no
-positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
-on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
-next trade before that user's `my_hours` lands. Guard:
-`tests/e2e/trade-rate-office-only.spec.js`.
+The app never shows a rate the server will not pay (Captain 2026-10-13), and
+today's ops-api bills its own rate on an assigned job whatever the browser
+posts. So the rate box on an assigned hours card (`[data-cardrate]`) is DORMANT
+until `my_hours` answers `trade_rate_editable: true` (`_assignedRateEditable`);
+absent or false, the read-only office rate of 2026-09-23 stands. No usual rate
+on file is the contact-the-office wording and block in both states. A rate the
+trade types lives in `typed_rate` on the card, and `c.rate` / `rate_source`
+come only from `_pinAssignedCardRates`, so a typed rate in a draft bills
+nothing until the capability is on. `trade.html` makes no `set_trade_rate`
+call and Profile stays read-only. `_hoursData` and `_tradeRate` clear in
+`resetInvoiceSession` and on the `onLogin` owner-change path so one trade's
+rate cannot show on the next trade's card before that user's `my_hours` lands.
+Both states, the on-card wording, the description of work box and the back end
+contract: `trade-app.md` → "Rate and description". Guard:
+`tests/e2e/trade-invoice-rate-box.spec.js` (fixture option `tradeRateEditable`;
+off, its invoice stub refuses a typed assigned rate).
 
 ## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
 

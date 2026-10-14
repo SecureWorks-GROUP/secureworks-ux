@@ -11119,7 +11119,7 @@ function openCalJobPopup(event, assignmentId) {
     var headerDiv = popup.querySelector('.cal-job-popup-title');
     if (headerDiv) {
       var copyBtn = document.createElement('button');
-      copyBtn.onclick = function(e) { e.stopPropagation(); copyJobInfo(j.id); };
+      copyBtn.onclick = function(e) { e.stopPropagation(); copyJobInfo(j.id, j); };
       copyBtn.title = 'Copy job info';
       copyBtn.style.cssText = 'background:none;border:none;padding:4px;cursor:pointer;color:var(--sw-text-sec,#8896A6);display:inline-flex;align-items:center;border-radius:6px;vertical-align:middle;margin-left:4px;';
       copyBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -16870,9 +16870,14 @@ async function geocodeMissingMakesafes() {
   }
 }
 
-function copyJobInfo(jobId) {
-  var j = null;
-  if (_pipelineData && _pipelineData.columns) {
+// `job` is the caller's own record of the job (the calendar pop-up passes its
+// job_detail read). Without one, the job is looked up on the Jobs board's loaded
+// data, which holds only the board last opened (one job type, any search
+// applied). That lookup alone made the calendar pop-up's copy answer
+// "Job not found" for any job outside that board.
+function copyJobInfo(jobId, job) {
+  var j = job && job.id === jobId ? job : null;
+  if (!j && _pipelineData && _pipelineData.columns) {
     Object.keys(_pipelineData.columns).some(function(col) {
       return (_pipelineData.columns[col] || []).some(function(job) {
         if (job.id === jobId) { j = job; return true; }

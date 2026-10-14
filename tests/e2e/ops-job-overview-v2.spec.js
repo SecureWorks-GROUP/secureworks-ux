@@ -5,8 +5,8 @@
 // before the backend deploys.
 //
 // Contract under guard:
-//  - Off by default: the classic Overview renders and staff see a small "Try the new Overview".
-//    ?overview=v2 or localStorage sw_overview_v2 = '1' turn it on; ?overview=classic wins.
+//  - Signed-in staff default to v2, with one-click Back to classic that sticks.
+//    URL overrides browser choice, which overrides the staff default. Other defaults stay classic.
 //  - The staff toggle flips both ways, remembers the choice and strips ?overview= from the URL.
 //  - Header (customer, money, whose move), files strip, timeline, story and conversation render;
 //    the buttons go through the page's own handlers (call bridge, name edit, invoice preview).
@@ -81,7 +81,7 @@ async function openJob(page, id = JOB_ID) {
 const overviewFetches = (page) => page.evaluate(() => window.__ov2.fetches.filter((f) => f.action === 'job_overview').length);
 const filterButton = (page, name) => page.locator('.ov2-seg').getByRole('button', { name, exact: true });
 
-test('switch off: the classic Overview, no job_overview read, and the toggle only for staff', async ({ page }) => {
+test('signed-out defaults stay classic; staff default to v2', async ({ page }) => {
   await boot(page, { url: '/ops.html', staff: false });
   await openJob(page);
   await expect(page.locator('#jdOverview')).toContainText('Progress');
@@ -89,8 +89,8 @@ test('switch off: the classic Overview, no job_overview read, and the toggle onl
   await expect(page.locator('#jdOverview [data-ov2-act="try"]')).toHaveCount(0);
   expect(await overviewFetches(page)).toBe(0);
   await page.evaluate(() => { window.JobOverviewV2.isStaffViewer = () => true; renderOverviewView(_currentJobData); });
-  await expect(page.locator('#jdOverview [data-ov2-act="try"]')).toHaveText('Try the new Overview');
-  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#ov2Root')).toBeVisible();
+  await expect(page.locator('#ov2Toggle')).toHaveText('Back to classic');
 });
 
 test('?overview=v2 turns it on', async ({ page }) => {
@@ -375,4 +375,104 @@ test.describe('on a phone', () => {
     await page.locator('#ov2Timeline .ov2-tlall').click();
     await expect(page.locator('#ov2Timeline .ov2-tlall')).toHaveCount(0);
   });
+});
+
+
+test('live quote envelope paints its recorded value and view count', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const fetch = window.opsFetch;
+    window.opsFetch = async (...args) => {
+      const data = await fetch(...args);
+      if (args[0] === 'job_overview') data.files.quotes = { documents: data.files.quotes.map(q => ({ ...q, value_inc_gst: 1735.25 })) };
+      return data;
+    };
+  });
+  await openJob(page);
+  await expect(page.locator('#ov2Story .ov2-story-money>div').first()).toContainText('$1,735.25');
+  await expect(page.locator('#ov2Files .ov2-file').first()).toContainText('opened 15 times');
+});
+
+test('writer off is named without offering Rewrite; off response never says Asked', async ({ page }) => {
+  await boot(page);
+  await openJob(page);
+  await page.evaluate(() => { window.opsPost = async () => ({ outcome: 'off' }); });
+  await page.locator('#ov2Rewrite').click();
+  await expect(page.locator('#ov2Asked')).toHaveText('Rewriting is not switched on yet.');
+  await expect(page.locator('#ov2Asked')).not.toContainText('Asked at');
+  await page.evaluate(() => {
+    const entry = window.JobOverviewV2._state.cache[_currentJobData.job.id];
+    entry.data.story_text.writer.on = false;
+    renderOverviewView(_currentJobData);
+  });
+  await expect(page.locator('#ov2WriterOff')).toContainText('not switched on yet');
+  await expect(page.locator('#ov2Rewrite')).toHaveCount(0);
+});
+
+test('partial source failure and a failed refresh are visible while the job stays usable', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const fetch = window.opsFetch;
+    window.opsFetch = async (...args) => {
+      const data = await fetch(...args);
+      if (args[0] === 'job_overview') {
+        data.messages = null;
+        data.sources = { messages: { ok: false, state: 'failed' }, story_text: { ok: false, state: 'not_deployed' } };
+      }
+      return data;
+    };
+  });
+  await openJob(page);
+  await expect(page.locator('#ov2ReadNotice')).toContainText('Could not read: conversation, written story.');
+  await expect(page.locator('#ov2Cust')).toContainText('Avery Lin');
+  await page.evaluate(() => { window.opsFetch = async () => { throw new Error('offline'); }; });
+  await page.locator('#ov2Story').getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.locator('#ov2ReadNotice')).toContainText('Refresh failed. Showing the previous read.');
+});
+
+
+test('staff browser choice survives reload; either explicit URL still wins', async ({ page }) => {
+  await boot(page, { url: '/ops.html' });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toBeVisible();
+  await page.locator('#ov2Toggle').click();
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await boot(page, { url: '/ops.html' });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('[data-ov2-act="try"]')).toBeVisible();
+  await boot(page, { url: '/ops.html?overview=v2' });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toBeVisible();
+  await boot(page, { url: '/ops.html?overview=classic', storage: { sw_overview_v2: '1' } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+});
+
+test('the actual staff check leaves every trade role and signed-out user on classic', async ({ page }) => {
+  await boot(page, { url: '/ops.html', staff: false });
+  for (const role of ['installer', 'lead_installer', 'crew', 'trade', 'subcontractor']) {
+    await page.evaluate(role => { window.SECUREWORKS_CLOUD = { auth: { isLoggedIn: () => true, getRole: () => role } }; }, role);
+    expect(await page.evaluate(() => JobOverviewV2.isOn())).toBe(false);
+  }
+  await page.evaluate(() => { window.SECUREWORKS_CLOUD = { auth: { isLoggedIn: () => false, getRole: () => 'admin' } }; });
+  expect(await page.evaluate(() => JobOverviewV2.isOn())).toBe(false);
+  await page.evaluate(() => { window.SECUREWORKS_CLOUD = { auth: { isLoggedIn: () => true, getRole: () => 'ops_manager' } }; });
+  expect(await page.evaluate(() => JobOverviewV2.isOn())).toBe(true);
+});
+
+test('staff default still leaves make-safe on its own detail with no overview read', async ({ page }) => {
+  await boot(page, { url: '/ops.html' });
+  await page.evaluate(() => {
+    const fetch = window.opsFetch;
+    window.opsFetch = async (...args) => {
+      const data = await fetch(...args);
+      if (args[0] === 'job_detail') data.job.type = 'makesafe';
+      return data;
+    };
+  });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).not.toBeEmpty();
+  expect(await overviewFetches(page)).toBe(0);
 });

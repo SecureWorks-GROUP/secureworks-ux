@@ -33,8 +33,15 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(SOURCE).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 
-  test('switch: the URL wins over the browser setting both ways; off by default', () => {
+  test('switch: URL, then browser choice, then signed-in staff default', () => {
     expect(C.flagOn('', null)).toBe(false);
+    expect(C.flagOn('', null, false)).toBe(false);
+    expect(C.flagOn('', null, true)).toBe(true);
+    expect(C.flagOn('', '0', true)).toBe(false);
+    expect(C.flagOn('', '1', false)).toBe(true);
+    expect(C.flagOn('?overview=classic', '1', true)).toBe(false);
+    expect(C.flagOn('?overview=v2', '0', true)).toBe(true);
+    expect(C.flagOn('?overview=banana', null, true)).toBe(true);
     expect(C.flagOn('', '1')).toBe(true);
     expect(C.flagOn('', '0')).toBe(false);
     expect(C.flagOn('?overview=v2', null)).toBe(true);
@@ -290,4 +297,82 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(C.isNotDeployed(Object.assign(new Error('Server error'), { status: 500 }))).toBe(false);
     expect(C.isNotDeployed(Object.assign(new Error('Unknown action'), { status: 500 }))).toBe(false);
   });
+});
+
+
+test('the deployed quotes.documents envelope supplies values, views and joined PDF links', () => {
+  const ov = overview();
+  ov.files.quotes = { status: 'quoted', documents: ov.files.quotes.map(q => ({ ...q, value_inc_gst: 1735.25 })), history_total: 2 };
+  const q = C.quoteRows(detail(), ov);
+  expect(q[0]).toMatchObject({ value: 1735.25, views: 15, doc: { id: IDS.q3 } });
+  expect(C.files(detail(), ov, NOW)[0].meta).toContain('$1,735.25');
+  ov.files.quotes.documents = [];
+  expect(C.quoteRows(detail(), ov)).toEqual([]);
+});
+
+test('unlinked name matches and unissued invoices never become this job\'s invoiced money', () => {
+  const d = detail();
+  d.invoices = [{ id: 'unlinked', job_id: null, status: 'PAID', total: 999, amount_paid: 999 }];
+  expect(C.moneySummary(d, null)).toMatchObject({ invoiced: 0, paid: 0, nameOnly: 1 });
+  const ov = { files: { invoices: d.invoices } };
+  expect(C.moneySummary(d, ov)).toMatchObject({ invoiced: 999, paid: 999, nameOnly: 0 });
+  d.invoices = [{ id: 'pending', job_id: d.job.id, status: 'SUBMITTED', total: 500 }, { id: 'unknown', job_id: d.job.id, status: 'UNKNOWN', total: 600 }];
+  expect(C.moneySummary(d, null)).toMatchObject({ invoiced: 0, paid: 0, draftTotal: 500 });
+  expect(C.files(d, null, NOW).find(f => f.key === 'inv:pending').pill.words).toBe('Awaiting approval, cannot be paid');
+});
+
+test('writer off, refusal and unrecognised outcomes are never successful rewrite requests', () => {
+  for (const result of [{ outcome: 'off' }, { outcome: 'not_live' }, {}, { ok: false, outcome: 'queued', error: 'refused' }]) {
+    expect(C.rewriteAccepted(result)).toBe(false);
+    expect(C.rewriteWords(result)).not.toBe('');
+  }
+  expect(C.rewriteWords({ outcome: 'off' })).toBe('Rewriting is not switched on yet.');
+  for (const outcome of ['queued', 'already_open', 'recent']) expect(C.rewriteAccepted({ outcome })).toBe(true);
+});
+
+test('partial reads name each unavailable section and stored emoji cannot reach the screen', () => {
+  expect(C.sourceFailures({ sources: { story: { ok: true }, messages: { ok: false }, story_text: { state: 'not_deployed' }, quotes: { state: 'failed' } } }))
+    .toEqual(['conversation', 'quotes', 'written story']);
+  expect(C.clean('Booked \uD83D\uDC4D\uD83C\uDFFD for 2\u20133 days \uD83C\uDDE6\uD83C\uDDFA 1\uFE0F\u20E3')).toBe('Booked for 2 to 3 days');
+});
+
+
+test('the quote headline cannot borrow an older value or one run of a shared job', () => {
+  const ov = overview();
+  ov.files.quotes = { documents: ov.files.quotes, headline: null };
+  expect(C.quotedValue(detail(), ov)).toBeNull();
+  ov.files.quotes.headline = { value_inc_gst: 1735.25 };
+  expect(C.quotedValue(detail(), ov)).toBe(1735.25);
+  ov.files.quotes.headline = { value_inc_gst: null };
+  expect(C.quotedValue(detail(), ov)).toBeNull();
+  ov.files.quotes = [{ id: 'old', sent_at: '2026-10-01', value_inc_gst: 300 }, { id: 'new', sent_at: '2026-10-02', value_inc_gst: null }];
+  expect(C.quotedValue(detail(), ov)).toBeNull();
+});
+
+
+test('live Xero payment dates do not invent an 8am payment time', () => {
+  const story = { timeline: [{ at: '2026-10-05T00:00:00+00:00', date: '2026-10-05', kind: 'payment', state: 'paid', source_table: 'xero_invoices', what: 'Payment received on INV-9001' }] };
+  const row = C.timeline(story, { now: NOW })[0];
+  expect(row.dateOnly).toBe(true);
+  expect(C.when(row.at, NOW)).toBe('Mon 5 Oct');
+  story.timeline[0].source_table = 'business_events';
+  expect(C.when(C.timeline(story, { now: NOW })[0].at, NOW)).toContain('8:00am');
+});
+
+test('inconsistent recorded split amounts are named without changing the stored money', () => {
+  const d = detail();
+  d.job.pricing_json.neighbour_splits.client_portion_inc_gst = 7065.85;
+  const money = C.moneySummary(d, overview());
+  expect(money.value).toBe(7065.85);
+  expect(money.splits[0].amount).toBe(7065.85);
+  expect(money.splitWarning).toBe('Recorded shares total $10,336.98, which differs from the job value. Check the scope split.');
+});
+
+
+test('the live uploaded attachment is not described as an email', () => {
+  const ov = overview();
+  ov.files.attachments = [{ source: 'upload', file_name: 'site.png', at: '2026-10-12T05:47:00Z' }];
+  const file = C.files(detail(), ov, NOW).find(f => f.kind === 'attachment');
+  expect(file.meta).toBe('uploaded 12 Oct 1:47pm');
+  expect(file.pill.words).toBe('Uploaded document');
 });

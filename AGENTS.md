@@ -705,9 +705,11 @@ Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
 ## Job page Overview v2 (`modules/ops-job-overview-v2.js`)
 
 The job page Overview rebuilt around the job context system (customer and money,
-files strip, timeline, story, conversation). Off by default: `?overview=v2` or
-`localStorage.sw_overview_v2 = '1'`, `?overview=classic` wins; staff get a
-Try / Back to classic link. `renderOverviewView` calls `JobOverviewV2.render(data)`
+files strip, timeline, story, conversation). Default on for signed-in staff;
+`localStorage.sw_overview_v2 = '0'` keeps classic, `'1'` keeps v2. Explicit
+`?overview=classic` / `?overview=v2` win; staff get a Try / Back to classic
+link that saves the browser choice. Trade roles and signed-out defaults stay
+unchanged. `renderOverviewView` calls `JobOverviewV2.render(data)`
 after the make-safe branch (`// <job-overview-v2-switch>`) and paints the classic
 Overview whenever it returns false, so a throw there must keep returning false,
 never break the page. It reads `job_detail` plus ops-api `job_overview` (slow:

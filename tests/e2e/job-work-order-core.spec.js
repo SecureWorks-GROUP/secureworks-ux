@@ -28,11 +28,11 @@ const SHAUN = 'shaun@secureworkswa.com.au';
 // no hours (the captain's example), and a variation addendum.
 function scopeItems() {
   return [
-    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate_ex: 35, allocation_ex: 1316 },
-    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate_ex: 10, allocation_ex: 210 },
-    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate_ex: 80, allocation_ex: 160 },
-    { description: 'Root removal', qty: 1, unit: 'job', kind: 'labour', allocation_ex: 250 },
-    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', allocation_ex: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
+    { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour', rate: 35, rate_unit: 'm', total: 1316 },
+    { description: 'Plinth install', qty: 21, unit: 'each', kind: 'labour', rate: 10, rate_unit: 'each', total: 210 },
+    { description: 'Root removal / hard digging', qty: 2, unit: 'hrs', kind: 'labour', rate: 80, rate_unit: 'hr', total: 160 },
+    { description: 'Root removal', qty: 1, unit: 'job', kind: 'labour', total: 250 },
+    { description: 'Remove tree roots between 378/1 and 378/2', hours: 4, kind: 'labour', total: 320, variation_number: 1, variation_approved_at: '2026-10-14T02:00:00Z' },
   ];
 }
 
@@ -203,7 +203,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       .toMatchObject({ task: 'Post set', hours: 1.5, qty: 4, notes: 'Corner first' });
     expect(C.needsHours(C.lineOf({ description: 'Material', qty: 1, unit: 'job', kind: 'material' }))).toBe(false);
     // Only the backend contract's keys are read: no other spelling stands in for a field.
-    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, rate: 9, note: 'x', variation: true }))
+    expect(C.lineOf({ task: 'Gate', quantity: 3, units: 'hours', hrs: 2, total_ex: 500, allocation_ex: 500, rate_ex: 9, cost_per_hour: 9, note: 'x', variation: true }))
       .toMatchObject({ task: '', qty: null, unit: '', hours: null, allocationEx: null, rateEx: null, notes: '', addendumKey: '' });
   });
 
@@ -371,5 +371,373 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     } finally {
       process.env.TZ = saved;
     }
+  });
+});
+
+// Customer variations (secureworks-backend docs/job-work-orders-v1.md,
+// "Customer variations"): the office records one, Shaun approves it, and it
+// joins the approved work order as a marked addendum. Fixtures follow the
+// shapes the backend sends: the staff addenda[] carry lines[] and the money,
+// the trade addenda[] carry scope_items[] and never any money.
+function staffAddendum(over) {
+  return Object.assign({
+    id: 'cv-1', variation_number: 1, label: 'Variation 1 - approved 13 Oct 2026', approved_at: '2026-10-13T02:00:00Z',
+    approved_by: 'user-shaun', description: 'Extra works the customer agreed on site',
+    lines: [
+      { line_key: 'variation:1:0', source: 'variation', is_variation: true, variation_number: 1, description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4 },
+      { line_key: 'variation:1:1', source: 'variation', is_variation: true, variation_number: 1, description: 'Extend the fence along the side', qty: 6, unit: 'm', hours: 3 },
+    ],
+    hours_total: 7, trade_allocation_ex: 320, customer_price_ex: 921.6,
+  }, over || {});
+}
+
+function approvedWithVariation() {
+  const b = approvedBlock();
+  b.work_order.scope_items = scopeItems().slice(0, 4);
+  b.addenda = [staffAddendum()];
+  b.customer_variations_open_count = 2;
+  b.figures = {
+    agreed_ex: 2256, customer_variations_ex: 320, customer_variations_price_ex: 921.6, customer_variation_count: 1,
+    agreed_total_ex: 2576, billed_to_date_ex: 2400, variations_ex: 0, variation_count: 0, billed_within_agreed_scope_ex: 2400,
+    remaining_ex: 176, used_ratio: 0.9317, over_agreed: false,
+    rules: [{ key: 'has_customer_variations', level: 'info', message: '1 approved customer variation added to the agreed labour.' }],
+  };
+  return b;
+}
+
+const CV_UPDATED_AT = '2026-10-13T06:00:00.123456+00:00';
+function customerVariations() {
+  return [
+    { id: 'cv-1', status: 'approved', variation_number: 1, label: 'Variation 1 - approved 13 Oct 2026', description: 'Extra works the customer agreed on site',
+      tasks: [{ description: 'Remove tree roots between 378/1 and 378/2', hours: 4 }, { description: 'Extend the fence along the side', hours: 3, qty: 6, unit: 'm' }],
+      hours_total: 7, trade_allocation_ex: 320, customer_price_ex: 921.6, created_at: '2026-10-12T02:00:00Z', updated_at: '2026-10-13T02:00:00Z', approved_at: '2026-10-13T02:00:00Z', invoice: null },
+    { id: 'cv-2', status: 'draft', variation_number: null, label: null, description: 'Second gate', tasks: [{ description: 'Hang a second gate', hours: 2 }],
+      hours_total: 2, trade_allocation_ex: 90, customer_price_ex: 250, created_at: '2026-10-13T06:00:00Z', updated_at: CV_UPDATED_AT },
+    { id: 'cv-3', status: 'cancelled', variation_number: null, label: null, description: 'Paint the fence', tasks: [],
+      hours_total: 0, trade_allocation_ex: null, customer_price_ex: null, created_at: '2026-10-11T06:00:00Z', updated_at: '2026-10-12T06:00:00Z',
+      cancelled_at: '2026-10-12T06:00:00Z', cancel_reason: 'Customer changed their mind' },
+    { id: 'cv-4', status: 'draft', description: 'Not priced yet', tasks: [{ description: 'Retaining wall', hours: 5 }],
+      hours_total: 5, trade_allocation_ex: null, customer_price_ex: null, created_at: '2026-10-13T07:00:00Z', updated_at: '2026-10-13T07:00:00Z' },
+  ];
+}
+
+function readWith(block, list) {
+  return { work_order: block.work_order, figures: block.figures, addenda: block.addenda || [], customer_variations: list, variations: [] };
+}
+
+test.describe('Customer variations on the job work order (core)', () => {
+  test('backend addenda become marked addenda under the approved lines; money only for the office', () => {
+    const office = C.addendaOf([staffAddendum()], { money: true });
+    expect(office).toHaveLength(1);
+    expect(office[0]).toMatchObject({ number: 1, title: 'Variation 1 - approved 13 Oct 2026', description: 'Extra works the customer agreed on site', tradeAllocationEx: 320, customerPriceEx: 921.6, fromServer: true });
+    expect(office[0].lines.map((l) => [l.task, l.hours, C.qtyWords(l), l.isVariation])).toEqual([
+      ['Remove tree roots between 378/1 and 378/2', 4, '', true],
+      ['Extend the fence along the side', 3, '6 m', true],
+    ]);
+    // Without opts.money no money field is read, even if one is sent.
+    const trade = C.addendaOf([Object.assign(staffAddendum(), { scope_items: [{ description: 'x', hours: 1, total: 99, rate: 9, rate_unit: 'hr' }], lines: [] })]);
+    expect(trade[0].tradeAllocationEx).toBeUndefined();
+    expect(trade[0].customerPriceEx).toBeUndefined();
+    expect(trade[0].lines[0].allocationEx).toBe(null);
+
+    // A server addendum replaces an inline group with the same number and the order is by number.
+    const g = C.groupLines(scopeItems(), C.addendaOf([staffAddendum({ variation_number: 2, label: 'Variation 2 - approved 14 Oct 2026' }), staffAddendum()]));
+    expect(g.addenda.map((a) => a.title)).toEqual(['Variation 1 - approved 13 Oct 2026', 'Variation 2 - approved 14 Oct 2026']);
+    expect(g.base.map((l) => l.task)).not.toContain('Remove tree roots between 378/1 and 378/2');
+  });
+
+  test('Ops panel: approved variations are addenda after the original lines, and the figures use the agreed total', () => {
+    const block = approvedWithVariation();
+    const html = C.renderOpsPanel(block, readWith(block, customerVariations()), 'ready', { viewerEmail: SHAUN });
+    const lastBase = html.indexOf('Root removal</td>');
+    const addendum = html.indexOf('data-job-wo-addendum');
+    expect(lastBase).toBeGreaterThan(0);
+    expect(addendum).toBeGreaterThan(lastBase);
+    expect(html).toContain('Variation 1 - approved 13 Oct 2026');
+    expect(html).toContain('Extra works the customer agreed on site');
+    expect(html).toContain('Remove tree roots between 378/1 and 378/2');
+    expect(html).toContain('6 m');
+    expect(html).toContain('7 h');
+    expect(html).toContain('Trade allocation $320.00 · Customer price $921.60 ex GST');
+    expect(html).toContain('Approved variations');
+    expect(html).toContain('data-job-wo-agreed-total');
+    expect(html).toContain('$2,576.00');
+    expect(html).toContain('$176.00');
+    expect(html).toContain('data-job-wo-rule="has_customer_variations"');
+
+    // Variations without an agreed total read Not set, never the agreed labour.
+    const noTotal = approvedWithVariation();
+    delete noTotal.figures.agreed_total_ex;
+    const unset = C.renderOpsPanel(noTotal, readWith(noTotal, customerVariations()), 'ready', { viewerEmail: SHAUN });
+    expect(unset).toMatch(/data-job-wo-agreed-total><div class="jwo-fig-k">Agreed total<\/div><div class="jwo-fig-v">Not set</);
+
+    // No variations: no agreed total cell, the figures stay as before.
+    const plain = C.renderOpsPanel(approvedBlock(), null, 'ready', { viewerEmail: SHAUN });
+    expect(plain).not.toContain('data-job-wo-agreed-total');
+  });
+
+  test('Ops panel: the customer variations list, with edit, approve (approver only) and cancel on drafts', () => {
+    const block = approvedWithVariation();
+    const html = C.renderOpsPanel(block, readWith(block, customerVariations()), 'ready', { viewerEmail: SHAUN, cv: {} });
+    expect(html).toContain('data-job-wo-cv');
+    expect((html.match(/data-job-wo-cv-row/g) || [])).toHaveLength(4);
+    expect(html).toContain('data-cv-id="cv-2" data-cv-status="draft"');
+    expect(html).toContain('data-cv-id="cv-3" data-cv-status="cancelled"');
+    expect(html).toContain('Cancelled 12 Oct 2026: Customer changed their mind');
+    expect(html).toContain('Trade allocation $90.00 · Customer price $250.00 ex GST');
+    // cv-2 can be approved; cv-4 is held with the reason.
+    expect(html).toMatch(/data-job-wo-cv-approve data-cv-id="cv-2"\s+onclick/);
+    expect(html).toMatch(/data-job-wo-cv-approve data-cv-id="cv-4" disabled/);
+    expect(html).toContain('Still needs the trade allocation, the customer price.');
+    expect(html).toContain('data-job-wo-cv-edit data-cv-id="cv-2"');
+    expect(html).toContain('data-job-wo-cv-cancel data-cv-id="cv-2"');
+    expect(html).not.toContain('data-job-wo-cv-edit data-cv-id="cv-1"');
+    expect(html).toContain('data-job-wo-cv-add');
+    // The approved one offers the invoice line preview, and nothing that makes a Xero draft.
+    expect(html).toContain('data-job-wo-cv-invoice-line data-cv-id="cv-1"');
+    expect(html).not.toMatch(/xero_draft|Create (the )?Xero|create_customer_variation_xero_draft/i);
+
+    const esther = C.renderOpsPanel(block, readWith(block, customerVariations()), 'ready', { viewerEmail: 'esther@secureworkswa.com.au' });
+    expect(esther).not.toContain('data-job-wo-cv-approve');
+    expect(esther).toContain('data-job-wo-cv-edit data-cv-id="cv-2"');
+
+    // On a draft work order a variation cannot be approved yet, and says why.
+    const draft = draftBlock();
+    const onDraft = C.renderOpsPanel(draft, readWith(draft, customerVariations().slice(1, 2)), 'ready', { viewerEmail: SHAUN });
+    expect(onDraft).toMatch(/data-job-wo-cv-approve data-cv-id="cv-2" disabled/);
+    expect(onDraft).toContain('Approve the work order first');
+
+    // Loading and failed reads say so.
+    expect(C.renderOpsPanel(block, null, 'loading', {})).toContain('Loading the variations (2 recorded)');
+    expect(C.renderOpsPanel(block, null, 'failed', {})).toContain('data-job-wo-cv-failed');
+  });
+
+  test('Ops panel: the form, the confirm rows and the invoice line preview', () => {
+    const block = approvedWithVariation();
+    const read = readWith(block, customerVariations());
+    const create = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { form: { mode: 'create', values: C.customerVariationFormValues(null), errors: ['Describe the variation.'] } } });
+    expect(create).toContain('data-job-wo-cv-form="create"');
+    expect(create).toContain('Describe the variation.');
+    expect(create).toContain('Save draft variation');
+    expect(create).not.toContain('data-job-wo-cv-add ');
+
+    const edit = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { form: { mode: 'edit', id: 'cv-2', values: C.customerVariationFormValues(customerVariations()[1]), errors: [] } } });
+    expect(edit).toContain('data-job-wo-cv-form="edit"');
+    expect(edit).toContain('value="Hang a second gate"');
+    expect(edit).toContain('value="90"');
+    expect(edit).toContain('Save changes');
+
+    const approve = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { confirm: { kind: 'approve', id: 'cv-2' } } });
+    expect(approve).toContain('data-job-wo-cv-confirm="approve"');
+    expect(approve).toContain('It joins WO-0042 as the next numbered addendum');
+    const cancel = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { confirm: { kind: 'cancel', id: 'cv-2' } } });
+    expect(cancel).toContain('data-job-wo-cv-cancel-reason');
+
+    const prepared = {
+      customer_variation_id: 'cv-1',
+      line: { description: 'Variation 1 - approved 13 Oct 2026: Extra works the customer agreed on site\n- Remove tree roots between 378/1 and 378/2', quantity: 1, unit_price: 921.6, account_code: '200' },
+      invoice: { status: 'prepared' },
+      create_invoice_draft: { job_id: 'job-1', line_items: [], reference: 'SWF-26904 Variation 1' },
+      xero_draft_switched_on: false,
+    };
+    const preview = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { previews: { 'cv-1': prepared } } });
+    expect(preview).toContain('data-job-wo-cv-invoice-preview');
+    expect(preview).toContain('$921.60');
+    expect(preview).toContain('Reference SWF-26904 Variation 1');
+    expect(preview).toContain('Preview only: nothing is sent to Xero from here.');
+    expect(preview).not.toContain('data-job-wo-cv-invoice-line data-cv-id="cv-1"');
+    // Even with the backend switch on, this screen offers no Xero draft.
+    const switchedOn = C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { previews: { 'cv-1': Object.assign({}, prepared, { xero_draft_switched_on: true }) } } });
+    expect(switchedOn).not.toMatch(/Create (the )?Xero|create_customer_variation_xero_draft/i);
+
+    // A kept invoice line shows without a new prepare; a zero price has none.
+    const kept = customerVariations();
+    kept[0].invoice = { status: 'prepared', line: prepared.line };
+    expect(C.renderOpsPanel(block, readWith(block, kept), 'ready', {})).toContain('data-job-wo-cv-invoice-preview');
+    kept[0].customer_price_ex = 0;
+    expect(C.renderOpsPanel(block, readWith(block, kept), 'ready', {})).toContain('data-job-wo-cv-no-charge');
+  });
+
+  test('form values are checked in words before anything is sent', () => {
+    const ok = C.customerVariationFields({
+      description: '  Extra roots  ',
+      tasks: [{ description: 'Remove roots', hours: '4', qty: '', unit: '' }, { description: 'Extend fence', hours: '3', qty: '6', unit: 'm' }, { description: '', hours: '', qty: '', unit: '' }],
+      trade_allocation_ex: '$1,320', customer_price_ex: '921.6',
+    });
+    expect(ok.errors).toEqual([]);
+    expect(ok.fields).toEqual({
+      description: 'Extra roots',
+      tasks: [{ description: 'Remove roots', hours: 4 }, { description: 'Extend fence', hours: 3, qty: 6, unit: 'm' }],
+      trade_allocation_ex: 1320, customer_price_ex: 921.6,
+    });
+    // Empty amounts are null: a draft may be saved without them.
+    expect(C.customerVariationFields({ description: 'x', tasks: [], trade_allocation_ex: '', customer_price_ex: '' }).fields)
+      .toMatchObject({ tasks: [], trade_allocation_ex: null, customer_price_ex: null });
+    const bad = C.customerVariationFields({
+      description: 'Costs $300',
+      tasks: [{ description: '', hours: '2' }, { description: 'Dig', hours: '0' }, { description: 'Fence', hours: '1', qty: '6', unit: '' }, { description: 'Paint $50', hours: '1' }],
+      trade_allocation_ex: 'abc', customer_price_ex: '-5',
+    });
+    expect(bad.errors).toEqual([
+      'Leave prices out of the description: trades read it.',
+      'Task 1 needs its words.',
+      'Task 2 needs the hours it takes (more than 0).',
+      'Task 3: give a quantity with its unit (for example 6 and m), or neither.',
+      'Leave prices out of task 4: trades read it.',
+      'The trade allocation must be a dollar amount of zero or more, ex GST.',
+      'The customer price must be a dollar amount of zero or more, ex GST.',
+    ]);
+    expect(C.customerVariationFields({ description: '', tasks: [] }).errors).toEqual(['Describe the variation.']);
+    expect(C.customerVariationFormValues(null).tasks).toHaveLength(1);
+  });
+
+  test('status, readiness, approver and refusal words for a customer variation', () => {
+    const [approved, draft, cancelled, unpriced] = customerVariations();
+    expect(C.customerVariationStatus(approved)).toEqual({ key: 'approved', label: 'Variation 1 - approved 13 Oct 2026' });
+    expect(C.customerVariationStatus(draft).label).toBe('Draft, not approved');
+    expect(C.customerVariationStatus(cancelled).label).toBe('Cancelled');
+    expect(C.customerVariationMissing(draft)).toEqual([]);
+    expect(C.customerVariationMissing(unpriced)).toEqual(['the trade allocation', 'the customer price']);
+    expect(C.customerVariationMissing({ tasks: [], trade_allocation_ex: 0, customer_price_ex: 0 })).toEqual(['a task with its hours']);
+    expect(C.canApproveCustomerVariation(draft, SHAUN)).toBe(true);
+    expect(C.canApproveCustomerVariation(draft, 'esther@secureworkswa.com.au')).toBe(false);
+    expect(C.canApproveCustomerVariation(approved, SHAUN)).toBe(false);
+    expect(C.customerVariationApproveHold(draft, approvedBlock().work_order)).toBe('');
+    expect(C.customerVariationApproveHold(draft, draftBlock().work_order)).toMatch(/Approve the work order first/);
+    expect(C.customerVariationRefusalWords('stale_review')).toMatch(/changed after it was read/);
+    expect(C.customerVariationRefusalWords('work_order_not_approved')).toMatch(/Approve the work order first/);
+    expect(C.customerVariationRefusalWords('mystery', 'Server said no')).toBe('Server said no');
+    expect(C.customerVariationNeedsReread('stale_review')).toBe(true);
+    expect(C.customerVariationNeedsReread('variation_sealed')).toBe(true);
+    expect(C.customerVariationNeedsReread('money_in_text')).toBe(false);
+  });
+
+  test('PDF: approved variations print as marked addenda, hours in the scope, the allocation only in the cost breakdown', () => {
+    const p = C.pdfSections(approvedWithVariation());
+    expect(p.scopeHtml).toContain('ADDENDUM: Variation 1 - approved 13 Oct 2026');
+    expect(p.scopeHtml).toContain('Extra works the customer agreed on site');
+    expect(p.scopeHtml).toContain('Remove tree roots between 378/1 and 378/2');
+    expect(p.scopeHtml).toContain('4 h');
+    expect(p.scopeHtml.indexOf('ADDENDUM')).toBeGreaterThan(p.scopeHtml.indexOf('Root removal'));
+    expect(p.scopeHtml).not.toContain('$');
+    expect(p.costHtml).toContain('Trade allocation for this variation');
+    expect(p.costHtml).toContain('$320.00');
+    expect(p.costHtml).toContain('Approved variations (1)');
+    expect(p.costHtml).toContain('Agreed total');
+    expect(p.costHtml).toContain('$2,576.00');
+    // The customer's price is not on the work order.
+    expect(p.costHtml).not.toContain('921');
+  });
+
+  test('trade view: variation lines are marked, with hours, and no dollar figure for anyone', () => {
+    const wo = Object.assign({}, approvedBlock().work_order, {
+      scope_items: scopeItems().slice(0, 3).map((l) => ({ description: l.description, qty: l.qty, unit: l.unit, hours: l.unit === 'hrs' ? l.qty : null })),
+      addenda: [{
+        variation_number: 1, label: 'Variation 1 - approved 13 Oct 2026', approved_at: '2026-10-13T02:00:00Z',
+        description: 'Extra works the customer agreed on site',
+        // Money smuggled onto an addendum is never read by the trade view.
+        trade_allocation_ex: 320, customer_price_ex: 921.6,
+        scope_items: [
+          { description: 'Remove tree roots between 378/1 and 378/2', qty: 4, unit: 'hrs', hours: 4, is_variation: true, variation_number: 1, total: 320, rate: 80, rate_unit: 'hr' },
+          { description: 'Extend the fence along the side', qty: 6, unit: 'm', hours: 3, is_variation: true, variation_number: 1 },
+        ],
+      }],
+    });
+    const html = C.renderTrade({ work_order: wo }, 'ready');
+    expect(html).toContain('data-trade-job-wo-addendum data-variation-number="1"');
+    expect(html).toContain('Variation 1 - approved 13 Oct 2026');
+    expect(html).toContain('Extra works the customer agreed on site');
+    expect((html.match(/data-trade-job-wo-variation-line/g) || [])).toHaveLength(2);
+    expect(html).toContain('<span class="two-var-tag">Variation</span>Remove tree roots');
+    expect(html).toContain('4 h');
+    expect(html).toContain('3 h');
+    expect(html).toContain('6 m');
+    expect(html.indexOf('data-trade-job-wo-addendum')).toBeGreaterThan(html.indexOf('Plinth install'));
+    expect(html).not.toContain('$');
+    for (const money of ['320', '921']) expect(html).not.toContain(money);
+    // The invoice note counts the variation's hours with the rest.
+    const hourly = Object.assign({}, wo, { scope_items: [{ description: 'Gate rehang', hours: 2 }] });
+    expect(C.invoiceNote({ work_order: hourly })).toContain('(9 h of tasks)');
+  });
+
+  test('nothing the variation screens render holds a long dash or an emoji', () => {
+    const block = approvedWithVariation();
+    const read = readWith(block, customerVariations());
+    const outputs = [
+      C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { message: 'Variation saved.', level: 'ok' } }),
+      C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { form: { mode: 'create', values: C.customerVariationFormValues(null), errors: ['x'] } } }),
+      C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { confirm: { kind: 'approve', id: 'cv-2' } } }),
+      C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { confirm: { kind: 'cancel', id: 'cv-2' } } }),
+      C.renderOpsPanel(block, null, 'failed', {}),
+      C.pdfSections(block).scopeHtml,
+      C.pdfSections(block).costHtml,
+      C.renderTrade({ work_order: Object.assign({}, block.work_order, { addenda: [staffAddendum()] }) }, 'ready'),
+    ];
+    for (const code of ['stale_review', 'expected_updated_at_required', 'variation_sealed', 'not_a_draft', 'work_order_not_approved',
+      'variation_not_ready', 'approver_required', 'approver_identity_missing', 'approver_not_set', 'terminal_approval_switched_off',
+      'actor_identity_missing', 'job_type_not_eligible', 'money_in_text', 'invalid_tasks', 'invalid_description', 'nothing_to_update',
+      'customer_variation_not_found', 'variation_not_approved', 'no_customer_charge', '']) {
+      outputs.push(C.customerVariationRefusalWords(code, ''));
+    }
+    for (const out of outputs) {
+      expect(out).toBeTruthy();
+      expect(out).not.toMatch(/[–—]/);
+      expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
+    }
+  });
+});
+
+// The quote line builder's real line shape (secureworks-backend
+// docs/quote-work-order-lines-v1.md, quote_work_order_lines.ts): rate,
+// rate_unit and total, with counted saying whether the quote's labour figure
+// is made of the line. Shaped from SWF-26904 and SWF-261527.
+function backendQuoteLines() {
+  return [
+    { line_key: 'install:0', source: 'quote', basis: 'fence_install', description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', hours: null, rate: 35, rate_unit: 'm', total: 1316, counted: true, flags: [], needs_review: false },
+    { line_key: 'plinths', source: 'quote', basis: 'fence_plinths', description: 'Plinth install', qty: 21, unit: 'each', hours: null, rate: 10, rate_unit: 'each', total: 210, counted: true, flags: [], needs_review: false },
+    { line_key: 'access', source: 'quote', basis: 'fence_access', description: 'Moderate site access, extra time on the install', qty: 1, unit: 'lot', hours: null, rate: 10, rate_unit: 'pct', total: null, counted: false, flags: ['labour_split_unverified'], needs_review: true },
+    { line_key: 'removal:3', source: 'quote', basis: 'removal', description: 'Remove old timber fence', qty: 15, unit: 'm', hours: null, rate: 10, rate_unit: 'm', total: 150, counted: false, flags: ['quote_counted_as_materials'], needs_review: false },
+    { line_key: 'extra:5', source: 'quote', basis: 'quote_extra', description: 'Root removal / hard digging', qty: 2, unit: 'hrs', hours: 2, rate: 80, rate_unit: 'hr', total: 160, counted: false, flags: ['saved_as_material', 'outside_quote_labour'], needs_review: true },
+  ];
+}
+
+test.describe('Quote lines as the backend sends them (core)', () => {
+  test('the office allocation and rate come from total, rate and rate_unit; lines outside the agreed labour are named and left out of the total', () => {
+    const l = C.lineOf(backendQuoteLines()[0]);
+    expect(l).toMatchObject({ allocationEx: 1316, rateEx: 35, rateUnit: 'm', counted: true });
+    expect(C.rateWords(l)).toBe('$35.00/m');
+    expect(C.rateWords(C.lineOf(backendQuoteLines()[4]))).toBe('$80.00/h');
+    expect(C.rateWords(C.lineOf(backendQuoteLines()[2]))).toBe('10%');
+    const lines = backendQuoteLines().map(C.lineOf);
+    // The counted lines are the quote's own labour figure (37.6 m x $35 + 21 x $10).
+    expect(C.allocationTotal(lines)).toBe(1526);
+
+    const block = draftBlock({ scope_items: backendQuoteLines(), agreed_labour_ex: 1526 });
+    const html = C.renderOpsPanel(block, null, 'ready', { viewerEmail: SHAUN });
+    expect(html).toContain('<th class="r">Allocation</th>');
+    expect(html).toContain('$1,316.00');
+    expect(html).toContain('$35.00/m');
+    expect(html).toContain('$210.00');
+    expect(html).toContain('$10.00/each');
+    expect(html).toContain('$80.00/h');
+    expect(html).toContain('10%');
+    expect((html.match(/data-job-wo-not-counted/g) || [])).toHaveLength(2);
+    expect(html).toContain('$1,526.00');
+
+    const pdf = C.pdfSections(block);
+    expect(pdf.costHtml).toContain('$1,316.00');
+    expect(pdf.costHtml).toContain('Not in the agreed labour');
+    expect(pdf.scopeHtml).not.toContain('$');
+  });
+
+  test('office only: the trade view of the same lines shows no rate, no allocation and no dollar figure', () => {
+    const wo = Object.assign({}, approvedBlock().work_order, { scope_items: backendQuoteLines() });
+    const html = C.renderTrade({ work_order: wo }, 'ready');
+    expect(html).toContain('Install Colorbond fencing');
+    expect(html).toContain('37.6 m');
+    expect(html).toContain('2 h');
+    expect(html).not.toContain('$');
+    expect(html).not.toContain('%');
+    for (const money of ['1316', '1,316', '210.00', '160', '150', '35.00', '80.00', '10%']) expect(html).not.toContain(money);
   });
 });

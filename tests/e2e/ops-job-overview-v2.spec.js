@@ -26,7 +26,7 @@ const { JOB_ID, OTHER_JOB_ID, IDS, buildJobDetail, buildJobOverview } = require(
 test.use({ viewport: { width: 1360, height: 1000 } });
 
 // Boots ops.html with every backend call stubbed. overview: 'ok' | 'notdeployed' | 'error' | 'pending'.
-async function boot(page, { url = '/ops.html?overview=v2', staff = true, overview = 'ok', overviewOpts = {}, detailOpts = {}, storage = null, otherJob = false } = {}) {
+async function boot(page, { url = '/ops.html?overview=v2', staff = true, overview = 'ok', overviewOpts = {}, overviewData = null, detailOpts = {}, storage = null, otherJob = false } = {}) {
   const sent = [];
   const stray = [];
   await page.route('**/functions/v1/**', async (route) => {
@@ -47,7 +47,7 @@ async function boot(page, { url = '/ops.html?overview=v2', staff = true, overvie
   const detail = buildJobDetail(detailOpts);
   const other = buildJobDetail();
   other.job = Object.assign({}, other.job, { id: OTHER_JOB_ID, job_number: 'SWF-990202', client_name: 'Riley Shaw', ghl_contact_id: 'ghl-contact-e2e-002' });
-  const ov = buildJobOverview(overviewOpts);
+  const ov = overviewData || buildJobOverview(overviewOpts);
   await page.evaluate(({ detail, other, ov, mode, staff, otherJob }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
@@ -428,4 +428,124 @@ test('partial source failure and a failed refresh are visible while the job stay
   await page.evaluate(() => { window.opsFetch = async () => { throw new Error('offline'); }; });
   await page.locator('#ov2Story').getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.locator('#ov2ReadNotice')).toContainText('Refresh failed. Showing the previous read.');
+});
+
+// Independent card audit regressions. People, ids and wording are invented;
+// the issued/paid pairs retain the six audited arithmetic cases.
+test('B1: held messages stay readable and explicitly uncertain, outside job facts', async ({ page }) => {
+  const ov = buildJobOverview();
+  const at = ov.messages[0].at;
+  ov.story_text = { text: null, writer: { on: false } };
+  ov.story.held_messages = { count: 28, shown: 3, certainty: 'job_not_certain', items: [
+    { id: 'held-text', at, channel: 'sms', kind: 'message', from: 'Morgan Vale', from_role: 'customer', text: 'Please check the bank payment before asking again. <script>unsafe()</script>', held_because: 'the customer has several jobs', other_jobs: ['SWF-990303'], job_certain: false, cut: true },
+    { id: 'held-summary', at, channel: 'call', kind: 'call.transcript_completed', from: 'Morgan Vale', text: 'RAW PRIVATE TRANSCRIPT', summary: 'Sam promised to send the formal quote.', held_because: 'the job is not certain', other_jobs: [], job_certain: false },
+    { id: 'held-call', at, channel: 'call', kind: 'transcript', text: 'RAW PRIVATE TRANSCRIPT', job_certain: false },
+  ] };
+  await boot(page, { overviewData: ov });
+  await openJob(page);
+  const held = page.locator('#ov2Held');
+  await expect(held).toContainText('3 of 28 held messages shown');
+  await expect(held).toContainText('Held, job not certain');
+  await expect(held).toContainText('Please check the bank payment');
+  await expect(held).toContainText('Sam promised to send the formal quote');
+  await expect(held).toContainText('Other possible jobs: SWF-990303');
+  await expect(held).toContainText('Call summary unavailable');
+  await expect(held).toContainText('Only part of this source was returned');
+  await expect(held.locator('script')).toHaveCount(0);
+  await expect(page.locator('#ov2Root')).not.toContainText('RAW PRIVATE TRANSCRIPT');
+  await expect(page.locator('#ov2Conv')).not.toContainText('Please check the bank payment');
+  expect(await page.locator('.ov2-open').allTextContents()).not.toEqual(expect.arrayContaining([expect.stringContaining('Sam promised to send the formal quote')]));
+  await expect(page.locator('.ov2-story-last')).not.toContainText('Please check the bank payment');
+  await expect(page.locator('#ov2WriterOff')).toBeVisible();
+  expect(await page.evaluate(() => window.__ov2.posts)).toEqual([]);
+  if (process.env.OV2_PROOF_DIR) await held.screenshot({ path: process.env.OV2_PROOF_DIR + '/held-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(held).toBeVisible();
+  expect(await page.locator('#ov2Root').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  if (process.env.OV2_PROOF_DIR) await held.screenshot({ path: process.env.OV2_PROOF_DIR + '/held-phone.png' });
+});
+
+test('B2: future money keeps its hold and trigger visible, including an unknown amount', async ({ page }) => {
+  for (const amount of [5248.69, 687.50, null]) {
+    const ov = buildJobOverview();
+    const why = 'Held until the work is complete. No completion invoice is owed now.';
+    ov.story.loops = [{ key: 'future', rule: 'R8_not_yet_invoiced', status: 'not_due', group: 'blocking', owner: 'us', what: 'Future instalment', why, closes_when: 'Issued invoices reach the contract value' }];
+    ov.story.money.not_yet_invoiced = { amount, unconfirmed: amount === null, held: true, status: 'not_due', basis: 'Completion instalment, held until the work is complete, not owed now' };
+    await boot(page, { overviewData: ov });
+    await openJob(page);
+    await expect(page.locator('#ov2FutureMoney')).toContainText(amount === null ? 'Future amount unconfirmed' : amount.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }));
+    await expect(page.locator('#ov2FutureMoney')).toContainText('Held, not owed now');
+    await expect(page.locator('#ov2FutureMoney')).toContainText('held until the work is complete');
+    await expect(page.locator('[data-ov2-group="blocking"]')).toHaveCount(0);
+    await expect(page.locator('[data-ov2-group="know"]')).toBeVisible();
+    await expect(page.locator('.ov2-it > .ov2-im').filter({ hasText: why })).toBeVisible();
+    await expect(page.locator('.ov2-own')).toHaveText('HELD');
+    await expect(page.locator('#ov2Paid')).toContainText('Invoiced $0.00');
+  }
+});
+
+test('B3: conflicting prices are qualified beside the value; all six issued and paid pairs survive', async ({ page }) => {
+  test.setTimeout(60000);
+  const pairs = [[4763, 2381.50, 1190.75], [10497.38, 5248.69, 5248.69], [6298.71, 3790.60, 3790.60], [1375, 687.50, 687.50], [22299.71, 7783.20, 7783.20], [4671.52, 0, 0]];
+  for (const [value, issued, paid] of pairs) {
+    const ov = buildJobOverview();
+    ov.story.money.job_value = { amount: value, basis: 'pricing_json.totalIncGST' };
+    ov.story.money.parties = [{ invoiced: issued, paid, invoices: [] }];
+    const alternative = value === 6298.71 ? 3790.60 : value === 22299.71 ? 12972 : null;
+    ov.story.checks = alternative ? [{ rule: 'C2_value_mismatch', what: `The recorded scope conflicts with the contract amount $${alternative.toFixed(2)} in the invoice evidence.`, cites: [{ t: 'xero_invoices', id: 'invented-invoice' }] }] : [];
+    await boot(page, { overviewData: ov });
+    await openJob(page);
+    const money = (v) => v.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' });
+    await expect(page.locator('#ov2Value')).toHaveText(alternative ? 'Unconfirmed' : money(value));
+    if (alternative) {
+      await expect(page.locator('#ov2ValueCheck')).toContainText(money(value));
+      await expect(page.locator('#ov2ValueCheck')).toContainText('Saved scope price');
+      await expect(page.locator('#ov2ValueCheck')).toContainText(`$${alternative.toFixed(2)}`);
+      await expect(page.locator('#ov2ValueCheck')).toContainText('not a confirmed contract value');
+      if (value === 6298.71 && process.env.OV2_PROOF_DIR) await page.locator('#ov2Cust').screenshot({ path: process.env.OV2_PROOF_DIR + '/price-conflict.png' });
+    }
+    await expect(page.locator('#ov2Paid')).toHaveText(`Invoiced ${money(issued)} \u00b7 Paid ${money(paid)} \u00b7 inc GST`);
+    await expect(page.locator('.ov2-story-money > div').nth(1)).toContainText(money(issued));
+    await expect(page.locator('.ov2-story-money > div').nth(2)).toContainText(money(paid));
+  }
+  for (const mode of ['pending', 'error']) {
+    await boot(page, { overview: mode });
+    await openJob(page);
+    await expect(page.locator('#ov2Value')).toHaveText('Not checked');
+    await expect(page.locator('#ov2ValueCheck')).toContainText('Recorded value $7,065.85');
+    await expect(page.locator('#ov2ValueCheck')).toContainText('The story card has not checked this contract value');
+  }
+});
+
+test('B4: Last word follows the customer exchange, never newer supplier or held words', async ({ page }) => {
+  const ov = buildJobOverview();
+  const at = ov.messages[0].at;
+  ov.story.last_exchange = {
+    customer_said: { at, channel: 'sms', text: 'Morgan asks about the agreed Wednesday visit.' },
+    we_told_customer: { at, channel: 'sms', text: 'Sam will check the visit date with Morgan.' },
+  };
+  ov.messages.push(
+    { id: 'supplier-in', at: new Date().toISOString(), channel: 'email', direction: 'inbound', party: 'other', who: 'Supplier', text: 'Cedar Supplies confirms delivery Thursday.' },
+    { id: 'supplier-out', at: new Date().toISOString(), channel: 'email', direction: 'outbound', party: 'us', who: 'Us', text: 'Please confirm delivery, Cedar Supplies.' },
+  );
+  await boot(page, { overviewData: ov });
+  await openJob(page);
+  const last = page.locator('.ov2-story-last');
+  await expect(last).toContainText('Morgan asks about the agreed Wednesday visit.');
+  await expect(last).toContainText('Sam will check the visit date with Morgan.');
+  await expect(last).not.toContainText('Cedar Supplies');
+  await expect(page.locator('#ov2Conv')).toContainText('Cedar Supplies');
+  const exchange = await page.evaluate(() => {
+    const supplier = [{ channel: 'email', direction: 'outbound', party: 'us', text: 'Supplier order' }];
+    return {
+      missing: JobOverviewV2Core.customerExchange({}, supplier),
+      explicitNull: JobOverviewV2Core.customerExchange({ last_exchange: { customer_said: null, we_told_customer: null } }, [{ channel: 'sms', direction: 'inbound', party: 'customer', text: 'Do not replace canonical null' }]),
+      call: JobOverviewV2Core.customerExchange({ last_exchange: { customer_said: { event_type: 'call.transcript_completed', text: 'PRIVATE WORDS' } } }, supplier),
+      known: JobOverviewV2Core.customerExchange({}, [{ channel: 'sms', direction: 'outbound', customer_party: true, text: 'Confirmed customer message' }]),
+    };
+  });
+  expect(exchange.missing).toEqual({ customer: null, us: null });
+  expect(exchange.explicitNull).toEqual({ customer: null, us: null });
+  expect(exchange.call.customer.text).toContain('Transcript words are not shown');
+  expect(exchange.known.us.text).toBe('Confirmed customer message');
 });

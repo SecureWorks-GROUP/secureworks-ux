@@ -385,6 +385,7 @@ var JobOverviewV2Core = (function () {
   // ── Open items: blocking, waiting on someone, good to know ──
 
   function loopGroup(l) {
+    if (lower(l.status) === 'not_due' || lower(l.status) === 'unconfirmed') return 'know';
     var named = lower(l.group);
     if (named === 'blocking' || named === 'waiting') return named;
     if (named === 'good_to_know' || named === 'know') return 'know';
@@ -431,7 +432,8 @@ var JobOverviewV2Core = (function () {
       groups[g].push({
         key: 'loop:' + str(l.key || ('i' + i + ':' + hash(l.what))),
         group: g,
-        tag: ownerTag(l, job, story),
+        tag: lower(l.status) === 'not_due' ? { cls: 'unk', words: 'HELD' } : ownerTag(l, job, story),
+        status: lower(l.status),
         what: clean(l.what),
         when: since ? (ledger ? 'As at ' : 'Since ') + longDate(since, now) : '',
         blocks: blocks ? 'Holds up ' + (BLOCKS_WORDS[blocks] || clean(blocks).replace(/_/g, ' ')) : '',
@@ -511,6 +513,31 @@ var JobOverviewV2Core = (function () {
     var pj = pricing(job);
     var v = firstNum(pj.totalIncGST, pj.total);
     return v != null && v > 0 ? v : null;
+  }
+  // A recorded price is not a settled contract when the card carries a value check.
+  // Keep the source and the conflicting records beside it; never infer a new contract
+  // or a receivable from invoice percentages in the browser.
+  function valueAuthority(detail, overview) {
+    var story = obj(overview && overview.story) || {};
+    var sm = obj(story.money) || {};
+    var value = obj(sm.job_value) || {};
+    var future = obj(sm.not_yet_invoiced) || {};
+    var checks = arr(story.checks).filter(function (c) { return c && lower(c.rule) === 'c2_value_mismatch'; });
+    var unconfirmed = value.unconfirmed === true || future.unconfirmed === true || checks.length > 0 ||
+      arr(story.loops).some(function (l) { return l && lower(l.rule) === 'r8_not_yet_invoiced' && lower(l.status) === 'unconfirmed'; });
+    var basis = clean(value.basis);
+    if (!basis || /^pricing_json\./.test(basis)) basis = 'Saved scope price';
+    else if (basis === 'jobs.quoted_value') basis = 'Recorded quote value';
+    return { unconfirmed: unconfirmed, recordOnly: !obj(sm.job_value), basis: basis,
+      checks: checks.map(function (c) { return clean(c.what); }).filter(Boolean) };
+  }
+  function futureMoney(story) {
+    var f = obj(story && story.money && story.money.not_yet_invoiced);
+    if (!f) return null;
+    var loop = arr(story.loops).filter(function (l) { return l && lower(l.rule) === 'r8_not_yet_invoiced'; })[0];
+    return { amount: f.amount == null ? null : firstNum(f.amount), unconfirmed: f.unconfirmed === true,
+      held: f.held === true || lower(f.status) === 'not_due' || !!(loop && lower(loop.status) === 'not_due'),
+      basis: clean(f.basis), why: clean(loop && loop.why) };
   }
   // Job value, invoiced and paid. DRAFT invoices are not invoiced; VOIDED and DELETED are ignored
   // (so a false "paid" on a deleted invoice never counts). The story card's money wins when present.
@@ -1001,6 +1028,31 @@ var JobOverviewV2Core = (function () {
       pending: m.pending === true
     };
   }
+  function customerExchange(story, list) {
+    var le = obj(story && story.last_exchange);
+    function words(x) {
+      if (!obj(x) || x.job_certain === false || x.held === true) return null;
+      var n = normMessage(x, 0);
+      if (x.text_withheld === 'call_transcript' || n.channel === 'call') {
+        return { text: 'Call on record. Transcript words are not shown.', at: n.at };
+      }
+      return n.text ? n : null;
+    }
+    // Null entries in the canonical exchange are meaningful. Do not replace them
+    // with a more recent supplier message, or with unplaced contact history.
+    if (le) return { customer: words(le.customer_said), us: words(le.we_told_customer) };
+    var known = arr(list).filter(function (x) {
+      if (!x || x.job_certain === false || x.held === true) return false;
+      if (x.customer_party === false || lower(x.audience) === 'other_party' || lower(x.party) === 'other') return false;
+      var role = lower(x.counterpart_role);
+      if (role && role !== 'customer' && role !== 'client') return false;
+      return x.customer_party === true || role === 'customer' || role === 'client' ||
+        lower(x.audience) === 'customer' || (lower(x.direction) === 'inbound' && lower(x.party) === 'customer');
+    }).map(normMessage).filter(function (n) { return n.text && (n.channel === 'sms' || n.channel === 'email'); });
+    known.sort(function (a, b) { return a.ms - b.ms; });
+    return { customer: known.filter(function (n) { return n.direction === 'inbound'; }).slice(-1)[0] || null,
+      us: known.filter(function (n) { return n.direction === 'outbound'; }).slice(-1)[0] || null };
+  }
   function isMachine(n) {
     if (MACHINE_TYPES.indexOf(n.eventType) >= 0 || MACHINE_TYPES.indexOf(n.kind) >= 0) return true;
     if (n.channel === 'call') return false;
@@ -1100,9 +1152,9 @@ var JobOverviewV2Core = (function () {
     humanStatus: humanStatus, hasBanned: hasBanned, flagOn: flagOn, isNotDeployed: isNotDeployed,
     storyText: storyText, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
-    invoices: invoices, moneySummary: moneySummary, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
+    invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation,
-    callWords: callWords, messagesFromDetail: messagesFromDetail
+    callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange
   };
 })();
 // </job-overview-v2-core>
@@ -1200,6 +1252,8 @@ var JobOverviewV2 = (function () {
       state: !e ? 'loading' : (ov ? 'ok' : e.status) };
     m.first = C.firstName(C.customerName(job, story)) || 'the customer';
     m.money = C.moneySummary(detail, ov);
+    m.valueAuthority = C.valueAuthority(detail, ov);
+    m.futureMoney = C.futureMoney(story);
     m.quoted = C.quotedValue(detail, ov);
     m.text = C.storyText(ov && ov.story_text);
     m.failures = C.sourceFailures(ov);
@@ -1226,11 +1280,9 @@ var JobOverviewV2 = (function () {
     });
     u.sent.forEach(function (s) { list.push({ at: new Date(s.ms).toISOString(), channel: 'sms', direction: 'outbound', who: 'You', text: s.text, pending: true }); });
     m.conv = C.conversation(list, m.filter, now);
-    var words = C.conversation(list, 'all', now).items.filter(function (x) {
-      return x.type === 'msg' && (x.m.channel === 'sms' || x.m.channel === 'email') && x.m.text;
-    }).map(function (x) { return x.m; });
-    m.lastCustomer = words.filter(function (x) { return x.direction === 'inbound'; }).slice(-1)[0] || null;
-    m.lastUs = words.filter(function (x) { return x.direction === 'outbound'; }).slice(-1)[0] || null;
+    var exchange = C.customerExchange(story, list);
+    m.lastCustomer = exchange.customer;
+    m.lastUs = exchange.us;
     m.files = C.files(detail, ov, now).map(function (f) { return decorateFile(f, m); });
     u.files = {};
     m.files.forEach(function (f) { u.files[f.key] = f; });
@@ -1310,9 +1362,13 @@ var JobOverviewV2 = (function () {
     return h;
   }
   function moneyHtml(m) {
-    var s = m.money;
+    var s = m.money, authority = m.valueAuthority;
     var h = '<div class="ov2-money"><div class="ov2-lbl">Job value</div>';
-    h += '<div class="ov2-val" id="ov2Value">' + esc(s.value != null ? C.money(s.value) : 'Not priced yet') + '</div>';
+    h += '<div class="ov2-val" id="ov2Value">' + esc(authority.unconfirmed ? 'Unconfirmed' : (s.value != null ? (authority.recordOnly ? 'Not checked' : C.money(s.value)) : 'Not priced yet')) + '</div>';
+    if (authority.unconfirmed || (authority.recordOnly && s.value != null)) {
+      h += '<div class="ov2-value-check" id="ov2ValueCheck"><p>' + esc((s.value != null ? 'Recorded value ' + C.money(s.value) + '. ' : '') + 'Source: ' + authority.basis + '. ' + (authority.recordOnly ? 'The story card has not checked this contract value.' : 'This is not a confirmed contract value.')) + '</p>' +
+        authority.checks.map(function (s) { return '<p>' + esc(s) + '</p>'; }).join('') + '</div>';
+    }
     h += '<div class="ov2-mrow" id="ov2Paid">Invoiced ' + esc(C.money(s.invoiced)) + DOT + 'Paid ' + esc(C.money(s.paid)) + DOT + 'inc GST</div>';
     if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', not issued</div>';
     else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', not issued') + '</div>';
@@ -1388,7 +1444,7 @@ var JobOverviewV2 = (function () {
     h += nextHtml(m);
     h += storyMomentsHtml(m) + storyMoneyHtml(m);
     h += openItemsHtml(m, true);
-    h += lastWordHtml(m) + unknownHtml(m);
+    h += heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
     if (sec) {
       var more = [['the_job', 'The job'], ['how_we_got_here', 'How we got here'], ['watch_out', 'Watch out']]
         .filter(function (p) { return !!sec[p[0]]; });
@@ -1411,15 +1467,48 @@ var JobOverviewV2 = (function () {
   }
   function storyMoneyHtml(m) {
     var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid', m.money.paid]];
-    return '<div class="ov2-story-money" aria-label="Job money">' + cells.map(function (c) {
+    var h = '<div class="ov2-story-money" aria-label="Job money">' + cells.map(function (c) {
       return '<div><span>' + c[0] + '</span><strong>' + esc(c[1] == null ? 'Not recorded' : C.money(c[1])) + '</strong></div>';
     }).join('') + '</div>';
+    var f = m.futureMoney;
+    if (f) h += '<div class="ov2-future-money" id="ov2FutureMoney"><strong>' +
+      esc(f.unconfirmed || f.amount == null ? 'Future amount unconfirmed' : C.money(f.amount) + ' not yet invoiced') + '</strong>' +
+      '<p>' + esc(f.held ? 'Held, not owed now.' : 'Not an issued debt.') + '</p>' +
+      (f.basis ? '<p>' + esc(f.basis) + '</p>' : '') + (f.why ? '<p>' + esc(f.why) + '</p>' : '') + '</div>';
+    return h;
   }
   function lastWordHtml(m) {
     function row(label, n) {
-      return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(n ? C.cut(n.text, 160) : 'No message on record.') + '</p></div>';
+      return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(n ? C.cut(n.text, 160) : 'No customer-specific message words on this job record.') + '</p></div>';
     }
-    return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told them', m.lastUs) + '</div>';
+    return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told the customer', m.lastUs) + '</div>';
+  }
+  function heldMessagesHtml(m) {
+    var held = C.obj(m.story && m.story.held_messages);
+    if (!held) return '';
+    var items = C.arr(held.items).filter(function (x) { return C.obj(x); });
+    var count = Math.max(items.length, Number(held.count) || 0);
+    var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Held messages, job not certain"><h3>Held messages, job not certain</h3>' +
+      '<p>These messages may belong to this job or another job. They are not settled facts or open items for this job.</p>' +
+      '<p>' + esc(items.length + ' of ' + count + ' held messages shown.') + '</p>';
+    if (held.why) h += '<p>' + esc(C.clean(held.why)) + '</p>';
+    if (!items.length) h += '<p>Held message content is unavailable in this read.</p>';
+    items.forEach(function (x) {
+      var call = /call|transcript/.test(C.lower(x.kind) + ' ' + C.lower(x.channel));
+      // Held calls obey the same no-transcript rule as the conversation. A safe
+      // sourced summary may be supplied by the producer; raw text is never one.
+      var words = C.clean(call ? x.summary : x.text);
+      var meta = [x.at ? C.stamp(x.at, m.now) : 'Date not recorded', call ? 'Call' : C.clean(x.channel),
+        C.clean(x.from), x.ours ? 'From us' : C.clean(x.from_role)].filter(Boolean).join(DOT);
+      h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Held, job not certain</strong>' +
+        '<div class="ov2-im">' + esc(meta) + '</div>' +
+        (x.subject ? '<p>' + esc(C.clean(x.subject)) + '</p>' : '') +
+        '<p class="ov2-held-words">' + esc(words || (call ? 'Call summary unavailable. Transcript words are not shown; commitments in this call may still need review.' : 'Message words unavailable.')) + '</p>' +
+        (x.held_because ? '<p>Held because ' + esc(C.clean(x.held_because)) + '.</p>' : '') +
+        (C.arr(x.other_jobs).length ? '<p>Other possible jobs: ' + esc(x.other_jobs.map(C.clean).join(', ')) + '.</p>' : '') +
+        (x.cut ? '<p>Only part of this source was returned.</p>' : '') + '</article>';
+    });
+    return h + '</section>';
   }
   function unknownHtml(m) {
     var gaps = C.arr(m.story && m.story.not_known).map(function (x) {
@@ -1502,6 +1591,7 @@ var JobOverviewV2 = (function () {
     var owner = it.group === 'waiting' ? 'Waiting on ' + it.tag.words : it.tag.words;
     return '<li' + (open ? ' class="open"' : '') + '><span class="ov2-own o-' + esc(it.tag.cls) + '">' + esc(owner) + '</span><div class="ov2-it">' +
       (more.length ? '<button type="button" class="ov2-itb" data-ov2-act="item" data-ov2-key="' + esc(it.key) + '" aria-expanded="' + open + '">' + esc(it.what) + '</button>' : '<span>' + esc(it.what) + '</span>') +
+      (it.status === 'not_due' || it.status === 'unconfirmed' ? '<p class="ov2-im">' + esc((it.status === 'not_due' ? 'Held, not owed now.' : 'Unconfirmed, not an established debt.') + (it.why ? ' ' + it.why : '')) + '</p>' : '') +
       (meta ? '<div class="ov2-im">' + esc(meta) + '</div>' : '') +
       (more.length ? '<div class="ov2-imore">' + more.map(function (x) { return '<p>' + esc(x) + '</p>'; }).join('') + '</div>' : '') + '</div></li>';
   }
@@ -1923,11 +2013,17 @@ var JobOverviewV2 = (function () {
     '.ov2-money{text-align:right;font-variant-numeric:tabular-nums}',
     '.ov2-val{font-size:22px;font-weight:700;color:var(--sw-dark,#293C46);line-height:1.25}',
     '.ov2-mrow{color:var(--sw-mid,#4C6A7C);font-size:12px;margin-top:2px}',
+    '.ov2-value-check{max-width:48ch;margin-left:auto;font-size:12px;color:var(--sw-dark,#293C46);overflow-wrap:anywhere}',
+    '.ov2-value-check p,.ov2-future-money p{margin:4px 0}',
+    '.ov2-future-money{font-size:12px;color:var(--sw-dark,#293C46);margin:8px 0 12px;overflow-wrap:anywhere}',
+    '.ov2-held{font-size:12px;overflow-wrap:anywhere}.ov2-held p{margin:6px 0}',
+    '.ov2-held-item{border-top:1px solid var(--sw-border,#D4DEE4);margin-top:10px;padding-top:10px}',
+    '.ov2-held-words{white-space:pre-wrap}',
     '.ov2-warnt{color:#B9770E;font-weight:600}',
     '.ov2-who{display:flex;gap:6px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap}',
     '.ov2-chip{font-size:11px;border:1px solid var(--sw-border,#D4DEE4);border-radius:var(--sw-radius-pill,100px);padding:2px 9px;color:var(--sw-mid,#4C6A7C);background:#fff;white-space:nowrap}',
     '.ov2-chip.us{border-color:var(--sw-orange-light,#FADDD2);background:var(--sw-orange-tint,#FDF2EE);color:var(--sw-orange-hover,#C4481F);font-weight:700}',
-    '@media (max-width:820px){.ov2-cust{grid-template-columns:minmax(0,1fr);gap:12px;padding:14px}.ov2-money{text-align:left}.ov2-who{justify-content:flex-start}}',
+    '@media (max-width:820px){.ov2-cust{grid-template-columns:minmax(0,1fr);gap:12px;padding:14px}.ov2-money{text-align:left}.ov2-value-check{margin-left:0}.ov2-who{justify-content:flex-start}}',
     '.ov2-files{margin:12px 0}',
     '.ov2-fhead{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px}',
     '.ov2-strip{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}',

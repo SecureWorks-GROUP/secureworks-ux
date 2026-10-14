@@ -6,9 +6,10 @@
  *
  * Reads (ops-api): pipeline with dispatch=1 (the list, counts and header
  * facts), job_detail once per job open (scope, photos, quote), job_notes
- * (every saved note). Writes exactly one thing: add_note, always with
+ * (every saved note). Slice 1 writes exactly one thing: add_note, always with
  * visibility 'internal_only' and from_ops true. Without that visibility a note
- * is copied to the customer's contact notes. Add no other write here.
+ * is copied to the customer's contact notes. Add no other write here beyond
+ * slice 2's pressed send_sms below.
  *
  * A failed read never renders as empty. An ops-api that does not know
  * dispatch=1 answers with rows missing description / value_inc_gst /

@@ -595,8 +595,7 @@
   // as spaces, never dropped.
   function matStatusLabel(s) {
     if (Object.prototype.hasOwnProperty.call(MAT_STATUS, s)) return MAT_STATUS[s].label;
-    var words = text(s).replace(/_/g, ' ');
-    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Status not recorded';
+    return orderStatusWord(s);
   }
 
   // An order's stored status: first letter capital, underscores as spaces.
@@ -2819,8 +2818,13 @@
   function onFocusOut(e) {
     var t = e.target;
     if (painting || !t || !t.hasAttribute || !state.jobId) return;
-    if (t.hasAttribute('data-dpc-mat-cell')) saveLine(state.jobId, t.getAttribute('data-dpc-mat-line'));
-    else if (t.hasAttribute('data-dpc-mat-pad')) saveText(state.jobId);
+    var jobId = state.jobId;
+    if (t.hasAttribute('data-dpc-mat-cell')) {
+      var id = t.getAttribute('data-dpc-mat-line');
+      setTimeout(function () { saveLine(jobId, id); }, 0);
+    } else if (t.hasAttribute('data-dpc-mat-pad')) {
+      saveText(jobId);
+    }
   }
 
   function onToggle(e) {

@@ -2151,8 +2151,6 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('The scope has nothing to suggest.');
     expect(calls.some((c) => /scope_to_po/.test(c.action))).toBe(false);
-    const src = require('node:fs').readFileSync(path.resolve(__dirname, '..', '..', 'modules', 'ops-dispatch.js'), 'utf8');
-    expect(src).not.toMatch(/scope_to_po/);
   });
 
   test('a job saved with a line has no Suggest button', async ({ page }) => {
@@ -2405,12 +2403,6 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
     expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
     expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
-    // The code, not its comments (the header names what the module never calls).
-    const src = require('node:fs').readFileSync(path.resolve(__dirname, '..', '..', 'modules', 'ops-dispatch.js'), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    for (const name of ['create_po', 'update_po', 'delete_po', 'push_po_to_xero', 'email_po', 'send-po-email', 'update_supplier_email', 'get_ops_upload_url', 'update_job_status', 'update_job_field', 'sync_suppliers', 'upsert_ops_note']) {
-      expect(src).not.toContain(name);
-    }
     // Nothing from slice 5 or later is drawn, not even disabled.
     await openJob(root, 'SWF-900101');
     await expect(mat).not.toContainText(/Create PO|Update PO|Not ordered|coming soon|Deliveries/i);

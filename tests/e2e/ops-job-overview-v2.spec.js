@@ -376,3 +376,56 @@ test.describe('on a phone', () => {
     await expect(page.locator('#ov2Timeline .ov2-tlall')).toHaveCount(0);
   });
 });
+
+
+test('live quote envelope paints its recorded value and view count', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const fetch = window.opsFetch;
+    window.opsFetch = async (...args) => {
+      const data = await fetch(...args);
+      if (args[0] === 'job_overview') data.files.quotes = { documents: data.files.quotes.map(q => ({ ...q, value_inc_gst: 1735.25 })) };
+      return data;
+    };
+  });
+  await openJob(page);
+  await expect(page.locator('#ov2Story .ov2-story-money>div').first()).toContainText('$1,735.25');
+  await expect(page.locator('#ov2Files .ov2-file').first()).toContainText('opened 15 times');
+});
+
+test('writer off is named without offering Rewrite; off response never says Asked', async ({ page }) => {
+  await boot(page);
+  await openJob(page);
+  await page.evaluate(() => { window.opsPost = async () => ({ outcome: 'off' }); });
+  await page.locator('#ov2Rewrite').click();
+  await expect(page.locator('#ov2Asked')).toHaveText('Rewriting is not switched on yet.');
+  await expect(page.locator('#ov2Asked')).not.toContainText('Asked at');
+  await page.evaluate(() => {
+    const entry = window.JobOverviewV2._state.cache[_currentJobData.job.id];
+    entry.data.story_text.writer.on = false;
+    renderOverviewView(_currentJobData);
+  });
+  await expect(page.locator('#ov2WriterOff')).toContainText('not switched on yet');
+  await expect(page.locator('#ov2Rewrite')).toHaveCount(0);
+});
+
+test('partial source failure and a failed refresh are visible while the job stays usable', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const fetch = window.opsFetch;
+    window.opsFetch = async (...args) => {
+      const data = await fetch(...args);
+      if (args[0] === 'job_overview') {
+        data.messages = null;
+        data.sources = { messages: { ok: false, state: 'failed' }, story_text: { ok: false, state: 'not_deployed' } };
+      }
+      return data;
+    };
+  });
+  await openJob(page);
+  await expect(page.locator('#ov2ReadNotice')).toContainText('Could not read: conversation, written story.');
+  await expect(page.locator('#ov2Cust')).toContainText('Avery Lin');
+  await page.evaluate(() => { window.opsFetch = async () => { throw new Error('offline'); }; });
+  await page.locator('#ov2Story').getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.locator('#ov2ReadNotice')).toContainText('Refresh failed. Showing the previous read.');
+});

@@ -263,7 +263,8 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   const tabText = await page.locator('#viewDispatch').innerText();
   expect(tabText).not.toMatch(/concept|sample|DEMO-|coming soon/i);
   expect(tabText).not.toMatch(/—/);
-  for (const later of ['.dpc-banner', '.dpc-tape', '.dpc-next', '.dpc-stage', '.dpc-supcard', '.dpc-mail', '.dpc-deliv', '.dpc-context', '.dpc-float', '[data-dpc-mode]', '[data-dpc-send]', '[data-dpc-tab]']) {
+  // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
+  for (const later of ['.dpc-banner', '.dpc-tape', '.dpc-next', '.dpc-stage', '.dpc-supcard', '.dpc-mail', '.dpc-deliv', '[data-dpc-mode]']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
   await expect(root.locator('.dpc-sec')).toHaveCount(1);

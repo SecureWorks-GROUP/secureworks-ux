@@ -1,6 +1,6 @@
 /* Dispatch tab (modules/ops-dispatch.js). Every rule is scoped under .dpc so
    nothing leaks into the rest of ops.html. Tokens, type and measures are the
-   approved Dispatch design's (round 9); only the parts slice 1 draws are here. */
+   approved Dispatch design's (round 9); only the parts slices 1 and 2 draw are here. */
 .dpc {
   --ink: #1A272E; --steel: #293C46; --steel-2: #34495A; --signal: #F15A29; --signal-deep: #C4481F;
   --paper: #F8F6F3; --galv: #E8EDF0; --galv-2: #F1F4F6; --line: #D4DEE4; --mute: #5E7684; --sage: #4A7259;
@@ -16,6 +16,8 @@
 .dpc button:hover:not(:disabled) { border-color: var(--steel-2); }
 .dpc button:disabled { cursor: default; opacity: .45; }
 .dpc :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.dpc .dpc-primary { background: var(--signal); border-color: var(--signal); color: #fff; font-weight: 600; }
+.dpc .dpc-primary:hover:not(:disabled) { background: var(--signal-deep); border-color: var(--signal-deep); }
 .dpc-muted { color: var(--mute); }
 .dpc-row { display: flex; align-items: center; gap: 10px; }
 .dpc-grow { flex: 1; min-width: 0; }
@@ -25,8 +27,10 @@
 .dpc-header h1 { font: 700 40px/1 var(--display); letter-spacing: .01em; text-transform: uppercase; color: var(--steel); }
 .dpc-header p { color: var(--mute); font-size: 14px; }
 
-.dpc-layout { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 20px; align-items: start; transition: grid-template-columns .25s ease; }
-.dpc-layout.dpc-left-closed { grid-template-columns: 64px minmax(0, 1fr); }
+.dpc-layout { display: grid; grid-template-columns: 264px minmax(0, 1fr) 304px; gap: 20px; align-items: start; transition: grid-template-columns .25s ease; }
+.dpc-layout.dpc-left-closed { grid-template-columns: 64px minmax(0, 1fr) 304px; }
+.dpc-layout.dpc-right-closed { grid-template-columns: 264px minmax(0, 1fr); }
+.dpc-layout.dpc-left-closed.dpc-right-closed { grid-template-columns: 64px minmax(0, 1fr); }
 .dpc-panel { min-width: 0; border-radius: 12px; overflow: hidden; }
 
 /* ---------- left: accepted work (dark steel) ---------- */
@@ -130,6 +134,63 @@
 .dpc-note-msg { font-size: 12.5px; margin-top: 6px; color: var(--mute); }
 .dpc-note-msg-fail { color: var(--signal-deep); font-weight: 600; }
 
+/* ---------- right: job context (slice 2) ---------- */
+/* Sticky under the Ops header like the sidebar, scrolling inside itself. */
+.dpc-context { background: #fff; box-shadow: 0 1px 0 rgba(26,39,46,.04), 0 10px 30px -18px rgba(26,39,46,.35); position: sticky; top: 60px; max-height: calc(100vh - 72px - var(--jarvis-bar-height, 48px)); overflow: auto; }
+.dpc-tabs { display: flex; gap: 4px; padding: 6px; background: var(--galv-2); position: sticky; top: 0; z-index: 1; }
+.dpc .dpc-tabs button { flex: 1; border: 0; background: transparent; font-size: 12.5px; padding: 8px 4px; border-radius: 6px; color: var(--mute); }
+.dpc .dpc-tabs button[aria-selected="true"] { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(26,39,46,.12); }
+.dpc .dpc-side-btn-light { background: transparent; color: var(--mute); align-self: center; }
+.dpc .dpc-side-btn-light:hover { background: #fff; color: var(--ink); }
+.dpc-context .dpc-pad { padding: 14px 16px 16px; }
+.dpc-h4 { font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--mute); margin: 16px 0 8px; }
+.dpc-h4:first-child { margin-top: 0; }
+.dpc-sub { font-size: 12px; color: var(--mute); margin: 0 0 10px; }
+.dpc .dpc-doc { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-bottom: 6px; font-size: 13px; color: var(--ink); text-decoration: none; }
+.dpc a.dpc-doc:hover { border-color: var(--steel-2); }
+.dpc-doc strong, .dpc-doc small { display: block; overflow-wrap: anywhere; }
+.dpc-doc strong { font-weight: 600; }
+.dpc-doc small { font-size: 11px; color: var(--mute); }
+.dpc-doc-ico { flex: 0 0 auto; font: 700 9.5px var(--mono); color: #fff; background: var(--signal-deep); padding: 5px 6px; border-radius: 4px; }
+.dpc-story { list-style: none; padding: 0 0 0 16px; margin: 6px 0 0 6px; border-left: 2px solid var(--galv); }
+.dpc-story li { position: relative; padding: 0 0 14px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-story li::before { content: ''; position: absolute; left: -23px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 3px solid var(--signal); box-sizing: border-box; }
+.dpc-story strong, .dpc-story span, .dpc-story small { display: block; }
+.dpc-story span { font-size: 12px; color: var(--steel-2); }
+.dpc-story small { font: 400 10.5px var(--mono); color: var(--mute); margin-top: 1px; }
+.dpc-joblink { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--galv); font-size: 13px; }
+.dpc-joblink a { color: var(--signal-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.dpc-seg { display: flex; gap: 4px; margin-bottom: 12px; background: var(--galv-2); padding: 3px; border-radius: 8px; }
+.dpc .dpc-seg button { flex: 1; border: 0; background: transparent; font-size: 12px; padding: 6px; border-radius: 6px; }
+.dpc .dpc-seg button[aria-pressed="true"] { background: #fff; font-weight: 600; box-shadow: 0 1px 3px rgba(26,39,46,.12); }
+.dpc-chat { display: flex; flex-direction: column; gap: 7px; }
+.dpc-chat-cap { font: 400 10.5px var(--mono); color: var(--mute); text-align: center; margin-bottom: 4px; }
+.dpc-bubble { max-width: 86%; padding: 8px 11px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dpc-bubble small { display: block; margin-top: 3px; font: 400 10px var(--mono); color: var(--mute); white-space: normal; }
+.dpc-bubble.them { background: var(--galv-2); align-self: flex-start; border-bottom-left-radius: 4px; }
+.dpc-bubble.us { background: #FFE9DF; align-self: flex-end; border-bottom-right-radius: 4px; }
+.dpc-call { align-self: center; font: 400 10.5px var(--mono); color: var(--mute); padding: 2px 0; }
+.dpc-compose { display: flex; gap: 8px; align-items: stretch; margin-top: 10px; }
+.dpc-reply { flex: 1; min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px dashed #9DB0BC; border-radius: 8px; background: #fff; font-size: 13px; resize: vertical; }
+.dpc-reply:focus { border-style: solid; border-color: var(--signal); outline: none; }
+.dpc-reply::placeholder { color: #9DB0BC; }
+.dpc-source { padding: 10px 0; border-top: 1px solid var(--galv); font-size: 13px; overflow-wrap: anywhere; }
+.dpc-source:first-child, .dpc-chat-cap + .dpc-source { border-top: 0; padding-top: 0; }
+.dpc-source p { margin-top: 3px; }
+.dpc-source .dpc-muted { font-size: 12px; }
+.dpc-preview { white-space: pre-line; color: var(--steel-2); font-size: 12.5px; }
+.dpc-foot-line { font-size: 11px; color: var(--mute); margin-top: 12px; }
+/* Collapsed: a dark steel tab on the right edge, the three names running up. */
+.dpc-float { position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 20; display: flex; flex-direction: column; gap: 2px; background: var(--steel); padding: 6px 0 6px 6px; border-radius: 12px 0 0 12px; box-shadow: -6px 10px 30px -10px rgba(26,39,46,.5); }
+.dpc .dpc-float button { writing-mode: vertical-rl; transform: rotate(180deg); border: 0; background: transparent; color: #C9D6DD; padding: 14px 8px; border-radius: 8px; font: 600 12px var(--display); text-transform: uppercase; letter-spacing: .08em; }
+.dpc .dpc-float button:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+@media (max-width: 1199.98px) {
+  .dpc-layout, .dpc-layout.dpc-right-closed { grid-template-columns: 264px minmax(0, 1fr); }
+  .dpc-layout.dpc-left-closed, .dpc-layout.dpc-left-closed.dpc-right-closed { grid-template-columns: 64px minmax(0, 1fr); }
+  .dpc-context { grid-column: 1 / -1; position: static; max-height: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dpc *, .dpc *::before { transition: none !important; }
   .dpc .dpc-job:hover { transform: none; }
@@ -150,6 +211,9 @@
   .dpc .dpc-photo:first-child:not(:only-child) { aspect-ratio: 4 / 3; min-height: 0; }
   .dpc-rail { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; padding: 10px; }
   .dpc-rail-list { flex-direction: row; flex-wrap: wrap; align-items: flex-start; max-height: 132px; flex: 1 1 100%; }
+  /* Clear of the phone nav (about 64 tall) that sits on the Jarvis bar. */
+  .dpc-float { top: auto; bottom: calc(80px + var(--jarvis-bar-height, 48px)); transform: none; flex-direction: row; padding: 6px; }
+  .dpc .dpc-float button { writing-mode: horizontal-tb; transform: none; padding: 8px 10px; }
 }
 @media (max-width: 620px) {
   .dpc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }

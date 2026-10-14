@@ -33,8 +33,15 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(SOURCE).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 
-  test('switch: the URL wins over the browser setting both ways; off by default', () => {
+  test('switch: URL, then browser choice, then signed-in staff default', () => {
     expect(C.flagOn('', null)).toBe(false);
+    expect(C.flagOn('', null, false)).toBe(false);
+    expect(C.flagOn('', null, true)).toBe(true);
+    expect(C.flagOn('', '0', true)).toBe(false);
+    expect(C.flagOn('', '1', false)).toBe(true);
+    expect(C.flagOn('?overview=classic', '1', true)).toBe(false);
+    expect(C.flagOn('?overview=v2', '0', true)).toBe(true);
+    expect(C.flagOn('?overview=banana', null, true)).toBe(true);
     expect(C.flagOn('', '1')).toBe(true);
     expect(C.flagOn('', '0')).toBe(false);
     expect(C.flagOn('?overview=v2', null)).toBe(true);

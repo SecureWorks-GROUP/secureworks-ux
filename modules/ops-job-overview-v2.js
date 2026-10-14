@@ -4,8 +4,9 @@
 // docs/job-overview-v2.md. Layout: customer header with the money, a strip of real
 // files, then three columns: timeline, the story, the conversation.
 //
-// Switch (off by default): ?overview=v2 (or =1) turns it on for that load and
-// ?overview=classic (or =0) turns it off; otherwise localStorage sw_overview_v2 = '1'.
+// Switch: defaults on for signed-in staff. ?overview=v2 (or =1) turns it on
+// for that load; ?overview=classic (or =0) turns it off. Browser choice wins over
+// the staff default: sw_overview_v2 = '1' for new, '0' for classic.
 // Staff also get a small "Try the new Overview" / "Back to classic" link.
 //
 // Reads:  job_detail (already loaded by openJobDetail) and ops-api job_overview
@@ -253,8 +254,8 @@ var JobOverviewV2Core = (function () {
   // ── The switch ──
 
   // ?overview=v2 or =1 turns it on, ?overview=classic or =0 turns it off; the URL wins over
-  // the browser setting both ways. Otherwise localStorage sw_overview_v2 === '1'. Off by default.
-  function flagOn(search, stored) {
+  // the browser setting both ways. A saved choice wins over the signed-in staff default.
+  function flagOn(search, stored, staff) {
     var m = /[?&]overview=([^&#]*)/.exec(str(search));
     if (m) {
       var v = m[1];
@@ -263,7 +264,9 @@ var JobOverviewV2Core = (function () {
       if (v === 'v2' || v === '1' || v === 'new' || v === 'on') return true;
       if (v === 'classic' || v === '0' || v === 'v1' || v === 'off') return false;
     }
-    return str(stored) === '1';
+    if (str(stored) === '0') return false;
+    if (str(stored) === '1') return true;
+    return staff === true;
   }
 
   // An action ops-api does not know yet: the backend part has not been deployed.
@@ -1141,7 +1144,7 @@ var JobOverviewV2 = (function () {
     if (override !== null) return override;
     var search = '';
     try { search = window.location.search || ''; } catch (e) { /* none */ }
-    return C.flagOn(search, readStore(FLAG_KEY));
+    return C.flagOn(search, readStore(FLAG_KEY), api.isStaffViewer());
   }
   function getFilter() {
     var f = readStore(FILTER_KEY) || memFilter;

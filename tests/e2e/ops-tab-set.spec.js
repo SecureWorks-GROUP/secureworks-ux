@@ -202,7 +202,7 @@ const D_NOTES = {
 };
 
 // Slice 1's section, now that slice 4 draws a second one under it.
-const SCOPE_SEC = '.dpc-sec:not(.dpc-mat)';
+const SCOPE_SEC = '.dpc-sec:not(.dpc-mat):not(.dpc-mailsec)';
 const SCOPE_TOGGLE = '[data-dpc-toggle=""]';
 
 // ── Slice 4 fixtures: made-up supplier contacts, lines and orders ──
@@ -225,6 +225,8 @@ const MAT = (over) => Object.assign({
   workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
 }, over);
 
+const MAILS = (over) => Object.assign({ job_id: 'job-f1', job_number: 'SWF-900101', drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }, over);
+
 const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
   id: 'job-n' + i, job_number: 'SWF-' + (910000 + i), type: i % 3 ? 'fencing' : 'patio', site_suburb: 'Suburb ' + i,
   description: i % 2 ? 'A deliberately long one line description to wrap on a narrow phone screen ' + i : null,
@@ -245,6 +247,8 @@ async function bootDispatch(page, api = {}, { viewport = null, open = true, mode
     // Slice 4: an empty Materials by supplier section and the supplier contacts.
     dispatch_materials: (url) => MAT({ job_id: url.searchParams.get('job_id') }),
     list_suppliers: () => D_SUPPLIERS(),
+    // Slice 5: no order email on the job.
+    dispatch_order_emails: (url) => MAILS({ job_id: url.searchParams.get('job_id') }),
   }, api);
   if (viewport) await page.setViewportSize(viewport);
   if (mode) {
@@ -299,11 +303,11 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
-  // Materials by supplier (slice 4) is drawn under Scope and notes: its own tests below.
-  for (const later of ['.dpc-banner', '.dpc-mail', '.dpc-deliv']) {
+  // Materials by supplier (slice 4) and Emails (slice 5) are drawn under Scope and notes: their own tests below.
+  for (const later of ['.dpc-banner', '.dpc-deliv']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier']);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
   await expect(root).not.toContainText(/items ready|crew/i);
 });
 
@@ -849,8 +853,8 @@ test('Dispatch: reads only pipeline, job_detail, job_notes and the materials rea
   // The failed read, its retry, and the re-read after the save.
   await expect.poll(() => calls.slice(mark).filter((c) => c.action === 'job_notes').length).toBe(3);
   const since = calls.slice(mark);
-  // Slice 4: dispatch_materials once per job open; list_suppliers was read once, before.
-  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_materials', 'job_detail', 'job_notes', 'pipeline']);
+  // Slices 4 and 5: dispatch_materials and dispatch_order_emails once per job open; list_suppliers was read once, before.
+  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_materials', 'dispatch_order_emails', 'job_detail', 'job_notes', 'pipeline']);
   expect(of('list_suppliers')).toHaveLength(1);
   expect(since.filter((c) => c.method !== 'GET').map((c) => c.action)).toEqual(['add_note']);
   expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1', 'job-p2']);
@@ -1802,9 +1806,9 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     const { root, mat, of } = await bootMaterials(page);
     for (const number of ['SWF-900101', 'SWP-900201', 'SWP-900202', 'SWF-900301', 'SWI-900101']) {
       await openJob(root, number);
-      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier']);
+      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
       await expect(mat.locator('.dpc-eyebrow')).toHaveText('Order');
-      await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials and split them by supplier');
+      await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials, split them by supplier, then create the PO and email in one go');
       await expect(mat.locator('.dpc-sec-body')).toContainText('No suppliers chosen for this job yet. Add one to start writing out the materials.');
     }
     expect(of('dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1', 'job-p1', 'job-p2', 'job-r1', 'job-i1']);
@@ -2412,7 +2416,7 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     await root.locator('[data-dpc-search]').fill('Gwelup');
     await page.waitForLoadState('networkidle');
     const calls = booted.calls.slice(before);
-    const allowed = ['pipeline', 'job_detail', 'job_notes', 'dispatch_materials', ...MAT_WRITES];
+    const allowed = ['pipeline', 'job_detail', 'job_notes', 'dispatch_materials', 'dispatch_order_emails', ...MAT_WRITES];
     const seen = [...new Set(calls.map((c) => c.action))];
     expect(seen.filter((a) => !allowed.includes(a))).toEqual([]);
     expect(calls.filter((c) => c.method === 'POST').every((c) => MAT_WRITES.includes(c.action))).toBe(true);
@@ -2420,9 +2424,363 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
     expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
     expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
-    // Nothing from slice 5 or later is drawn, not even disabled.
+    // Nothing from slice 6 or later is drawn, not even disabled.
     await openJob(root, 'SWF-900101');
-    await expect(mat).not.toContainText(/Create PO|Update PO|Not ordered|coming soon|Deliveries/i);
-    await expect(root.locator('.dpc-mail, .dpc-deliv')).toHaveCount(0);
+    await expect(root).not.toContainText(/coming soon|Deliveries|Mark delivery confirmed/i);
+    await expect(root.locator('.dpc-deliv')).toHaveCount(0);
+  });
+});
+
+// ── Slice 5: purchase orders and Emails, over the slice 4 fake ──
+// Made-up orders, drafts and threads. The fake decides the address state the
+// way ops-api does for these made-up contacts: no email is `missing`.
+const ORDER_WRITES = ['dispatch_order_create', 'dispatch_order_update', 'dispatch_order_cancel', 'dispatch_order_draft_save',
+  'dispatch_order_discard', 'dispatch_order_release_unknown', 'dispatch_order_send', 'dispatch_order_reply', 'dispatch_email_link_po'];
+const POID = (n) => `9e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const DRID = (n) => `de000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+function fakeOrders(seed = {}, mailSeed = {}) {
+  const fake = fakeMaterials(seed);
+  const base = fake.api;
+  let n = 0;
+  let tick = 0;
+  const stamp = () => new Date(Date.UTC(2026, 9, 15, 2, 0, 0, tick++)).toISOString();
+  const box = (id) => fake.mail[id] || (fake.mail[id] = Object.assign({ drafts: [], threads: [] }, JSON.parse(JSON.stringify(mailSeed[id] || {}))));
+  fake.mail = {};
+  const forced = (action) => (fake.fail[action] && fake.fail[action].length ? fake.fail[action].shift() : null);
+  const refuse = (status, code, extra) => ({ status, body: Object.assign({ error: code, code }, extra || {}) });
+  const contact = (sid) => D_SUPPLIER_ROWS.find((r) => r.id === sid);
+  const toOf = (sid) => (contact(sid).email ? { email: contact(sid).email, state: 'ok' } : { email: null, state: 'missing' });
+  const openOrder = (j, sid) => j.orders.filter((o) => o.supplier_id === sid && o.source === 'dispatch' && o.status !== 'cancelled').pop() || null;
+  const orderable = (j, sid) => j.lines.filter((l) => l.supplier_id === sid && l.status === 'to_order' && !l.purchase_order_id);
+  const sameSet = (stamps, rows) => stamps.length === rows.length && rows.every((r) => stamps.some((s) => s.id === r.id && s.updated_at === r.updated_at));
+  const chip = (jobId, o) => {
+    const d = box(jobId).drafts.find((x) => x.purchase_order_id === o.id);
+    if (d && d.status === 'send_unknown') return { state: 'send_unknown', text: `${o.po_number} · Send not confirmed`, tone: 'warn', in_xero: false };
+    if (d) return { state: 'draft_ready', text: `${o.po_number} · Draft email ready`, tone: 'info', in_xero: false };
+    if (o.last_sent_at) return { state: 'sent', text: `${o.po_number} · Sent 15/10`, tone: 'info', in_xero: false };
+    return { state: 'not_sent', text: `${o.po_number} · Not sent`, tone: 'warn', in_xero: false };
+  };
+  const supOrder = (jobId, o) => (o ? { id: o.id, po_number: o.po_number, status: o.status, chip: chip(jobId, o), in_xero: false, pdf_version: o.pdf_version,
+    last_sent_pdf_version: o.last_sent_pdf_version, last_sent_at: o.last_sent_at, updated_at: o.updated_at } : null);
+  const project = (l) => Object.assign({}, l, { display_status: l.purchase_order_id ? 'on_po' : l.status });
+  const counts = (j) => ({ total: j.lines.length, ready: j.lines.filter((l) => !l.purchase_order_id && l.status === 'in_stock').length });
+  const writeDraft = (jobId, o, kind) => {
+    const j = fake.job(jobId);
+    const lines = j.lines.filter((l) => l.purchase_order_id === o.id);
+    const b = box(jobId);
+    let d = b.drafts.find((x) => x.purchase_order_id === o.id);
+    if (!d) {
+      d = { id: DRID(++n), purchase_order_id: o.id, po_number: o.po_number, supplier_id: o.supplier_id, supplier_name: o.supplier_name, kind, status: 'draft',
+        to: toOf(o.supplier_id), body_edited: false, order_changed_since_edit: false, last_error: null, created_at: new Date().toISOString() };
+      b.drafts.unshift(d);
+    }
+    Object.assign(d, {
+      subject: `${kind === 'update' ? 'Updated purchase order' : 'Purchase order'} ${o.po_number} for E2E`,
+      body_text: `Hi team,\n\nPlease find attached ${o.po_number}.\n\n${lines.map((l) => l.description).join('\n')}\n\nThanks,\nSecureWorks Group`,
+      pdf: { version: o.pdf_version, file_name: `${o.po_number}.pdf`, line_count: lines.length }, updated_at: stamp(),
+    });
+    d.draft_hash = 'hash-' + d.updated_at;
+    return d;
+  };
+  fake.api = Object.assign({}, base, {
+    dispatch_materials: (url) => {
+      const out = base.dispatch_materials(url);
+      if (out.status || out.orders_status !== 'ok') return out;
+      const id = url.searchParams.get('job_id');
+      const j = fake.job(id);
+      out.suppliers.forEach((s) => { s.order = supOrder(id, openOrder(j, s.supplier_id)); });
+      out.orders = j.orders.map((o) => Object.assign({}, o));
+      out.lines.forEach((l) => { const o = j.orders.find((x) => x.id === l.purchase_order_id); if (o) l.po_number = o.po_number; });
+      return out;
+    },
+    dispatch_order_emails: (url) => {
+      const f = forced('dispatch_order_emails');
+      if (f) return f;
+      const id = url.searchParams.get('job_id');
+      const b = box(id);
+      return { job_id: id, job_number: 'E2E', drafts: b.drafts.map((d) => Object.assign({}, d)), threads: JSON.parse(JSON.stringify(b.threads)),
+        orders_for_link: fake.job(id).orders.filter((o) => o.status !== 'cancelled').map((o) => ({ id: o.id, po_number: o.po_number, supplier_name: o.supplier_name })), threads_status: 'ok' };
+    },
+    dispatch_order_pdf: (url) => forced('dispatch_order_pdf') || { url: `https://files.example.test/${url.searchParams.get('purchase_order_id')}.pdf`, file_name: 'PO.pdf', version: 1, expires_in: 300 },
+    dispatch_order_create: (url, b) => {
+      const f = forced('dispatch_order_create');
+      if (f) return f;
+      const j = fake.job(b.job_id);
+      if (openOrder(j, b.supplier_id)) return refuse(409, 'order_open');
+      const rows = orderable(j, b.supplier_id);
+      if (!rows.length) return refuse(409, 'no_lines_to_order');
+      if (!sameSet(b.lines, rows)) return refuse(409, 'lines_changed', { lines: j.lines.map(project) });
+      n += 1;
+      const o = { id: POID(n), po_number: 'PO-' + (1000000 + n), supplier_name: contact(b.supplier_id).name, status: 'draft', created_at: stamp(), supplier_id: b.supplier_id,
+        source: 'dispatch', pdf_version: 1, last_sent_pdf_version: null, last_sent_at: null, in_xero: false, updated_at: stamp() };
+      rows.forEach((l) => { l.purchase_order_id = o.id; l.updated_at = stamp(); });
+      o.lines = rows.map((l) => ({ line_id: l.id, description: l.description, quantity: l.quantity, unit: l.unit }));
+      j.orders.push(o);
+      const d = writeDraft(b.job_id, o, 'order');
+      return { success: true, order: supOrder(b.job_id, o), draft: Object.assign({}, d), lines: j.lines.map(project), counts: counts(j) };
+    },
+    dispatch_order_update: (url, b) => {
+      const f = forced('dispatch_order_update');
+      if (f) return f;
+      const j = fake.job(b.job_id);
+      const o = j.orders.find((x) => x.id === b.purchase_order_id);
+      if (!o || o.status === 'cancelled') return refuse(409, 'order_cancelled');
+      if (b.expected_order_updated_at !== o.updated_at) return refuse(409, 'order_changed');
+      const add = orderable(j, o.supplier_id);
+      if (!sameSet(b.lines, add)) return refuse(409, 'lines_changed');
+      const on = j.lines.filter((l) => l.purchase_order_id === o.id);
+      const off = on.filter((l) => b.remove_line_ids.includes(l.id));
+      if (!add.length && !off.length) return { success: true, unchanged: true, order: supOrder(b.job_id, o), lines: j.lines.map(project), counts: counts(j) };
+      if (on.length - off.length + add.length === 0) return refuse(409, 'order_would_be_empty');
+      off.forEach((l) => { l.purchase_order_id = null; l.status = 'to_order'; l.updated_at = stamp(); });
+      add.forEach((l) => { l.purchase_order_id = o.id; l.updated_at = stamp(); });
+      o.pdf_version += 1;
+      o.updated_at = stamp();
+      const d = writeDraft(b.job_id, o, o.last_sent_at ? 'update' : 'order');
+      return { success: true, order: supOrder(b.job_id, o), draft: Object.assign({}, d), lines: j.lines.map(project), counts: counts(j) };
+    },
+    dispatch_order_cancel: (url, b) => {
+      const f = forced('dispatch_order_cancel');
+      if (f) return f;
+      const j = fake.job(b.job_id);
+      const o = j.orders.find((x) => x.id === b.purchase_order_id);
+      if (o.last_sent_at) return refuse(409, 'order_sent');
+      if (b.expected_order_updated_at !== o.updated_at) return refuse(409, 'order_changed');
+      o.status = 'cancelled';
+      j.lines.filter((l) => l.purchase_order_id === o.id).forEach((l) => { l.purchase_order_id = null; l.status = 'to_order'; l.updated_at = stamp(); });
+      box(b.job_id).drafts = box(b.job_id).drafts.filter((d) => d.purchase_order_id !== o.id);
+      return { success: true, order: { id: o.id, po_number: o.po_number, status: 'cancelled' }, lines: j.lines.map(project), counts: counts(j) };
+    },
+    dispatch_order_draft_save: (url, b) => {
+      const f = forced('dispatch_order_draft_save');
+      if (f) return f;
+      const d = Object.values(fake.mail).flatMap((x) => x.drafts).find((x) => x.id === b.draft_id);
+      if (!d || d.status !== 'draft') return refuse(409, 'draft_not_editable');
+      if (d.updated_at !== b.expected_updated_at) return refuse(409, 'draft_changed', { draft: d });
+      if ('subject' in b) d.subject = b.subject.trim();
+      if ('body_text' in b) d.body_text = b.body_text;
+      d.updated_at = stamp();
+      d.draft_hash = 'hash-' + d.updated_at;
+      return { success: true, draft: Object.assign({}, d) };
+    },
+    dispatch_order_discard: (url, b) => {
+      const f = forced('dispatch_order_discard');
+      if (f) return f;
+      Object.values(fake.mail).forEach((x) => { x.drafts = x.drafts.filter((d) => d.id !== b.draft_id); });
+      return { success: true };
+    },
+    dispatch_order_send: (url, b) => {
+      const jobId = Object.keys(fake.mail).find((id) => fake.mail[id].drafts.some((d) => d.id === b.draft_id));
+      const d = jobId && fake.mail[jobId].drafts.find((x) => x.id === b.draft_id);
+      if (!d) return refuse(404, 'draft_not_found');
+      if (d.draft_hash !== b.expected_draft_hash) return refuse(409, 'draft_changed', { draft: d });
+      const f = forced('dispatch_order_send');
+      if (f) { if (f.body && f.body.code === 'send_unknown') d.status = 'send_unknown'; return f; }
+      const o = fake.job(jobId).orders.find((x) => x.id === d.purchase_order_id);
+      o.last_sent_at = stamp();
+      o.last_sent_pdf_version = o.pdf_version;
+      o.status = 'sent';
+      fake.mail[jobId].drafts = fake.mail[jobId].drafts.filter((x) => x.id !== d.id);
+      fake.mail[jobId].threads.unshift({ key: 'th-' + d.id, tag: 'supplier', po_id: o.id, po_number: o.po_number, subject: d.subject, counterpart: o.supplier_name,
+        last_at: o.last_sent_at, last_preview: d.body_text.slice(0, 140), can_reply: false, can_link: false,
+        messages: [{ id: 'msg-' + d.id, direction: 'outbound', from_email: 'orders@secureworksgroup.app', to_email: d.to.email, subject: d.subject, text: d.body_text,
+          at: o.last_sent_at, attachments: [{ file_name: `${o.po_number}.pdf` }], delivery_status: 'sent' }] });
+      return { success: true, filed: true, draft: { id: d.id, status: 'sent' } };
+    },
+    dispatch_order_reply: (url, b) => forced('dispatch_order_reply') || { success: true, filed: true },
+    dispatch_email_link_po: (url, b) => forced('dispatch_email_link_po') || { success: true, thread: null },
+  });
+  return fake;
+}
+
+async function bootOrders(page, seed = {}, mailSeed = {}, opts = {}) {
+  const fake = fakeOrders(seed, mailSeed);
+  await page.addInitScript(() => {
+    window.__opened = [];
+    window.open = (u) => {
+      window.__opened.push(String(u || ''));
+      return { closed: false, opener: null, close() { this.closed = true; }, location: { set href(v) { window.__opened.push(String(v)); } } };
+    };
+  });
+  const booted = await bootDispatch(page, Object.assign({}, fake.api, opts.api || {}), opts);
+  const mat = booted.root.locator('.dpc-mat');
+  const mail = booted.root.locator('.dpc-mailsec');
+  const orderWrites = () => booted.calls.filter((c) => c.method === 'POST' && ORDER_WRITES.includes(c.action));
+  return Object.assign(booted, { fake, mat, mail, orderWrites });
+}
+
+const ORDER_SEED = () => ({ 'job-f1': { suppliers: [MSUP(1), MSUP(2)], lines: [
+  MLINE(1, 1, 'Steel posts', { status: 'to_order', quantity: 16, unit: 'posts' }),
+  MLINE(2, 1, 'Rails', { status: 'to_order' }),
+  MLINE(3, 1, 'Caps'),
+  MLINE(4, 1, 'Brackets', { status: 'in_stock' }),
+  MLINE(5, 2, 'Sheets'),
+] } });
+
+test.describe('Dispatch slice 5: purchase orders and Emails', () => {
+  test('Create PO and email makes one order from the To order lines, moves the card on and holds the email; nothing is sent', async ({ page }) => {
+    const { mat, mail, of, orderWrites } = await bootOrders(page, ORDER_SEED());
+    await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials, split them by supplier, then create the PO and email in one go');
+    const acacia = card(mat, 'Acacia Steel');
+    const banksia = card(mat, 'Banksia Roofing');
+    await expect(acacia.locator('.dpc-suphead .dpc-status')).toHaveText('Not ordered');
+    await expect(banksia.locator('[data-dpc-order="create"]')).toBeDisabled();
+    await expect(banksia.locator('[data-dpc-order="create"]')).toHaveAttribute('title', 'Mark lines To order first');
+    await expect(mail.locator('.dpc-sec-body')).toContainText('No email on this job yet.');
+    await expect(mail.locator('.dpc-foot-line')).toHaveText('Email sent and received through the orders address, and system email to the client. Email in staff mailboxes is not listed here yet.');
+
+    await acacia.locator('[data-dpc-order="create"]').click();
+    await expect(acacia.locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Draft email ready');
+    expect(orderWrites().map((c) => c.action)).toEqual(['dispatch_order_create']);
+    expect(orderWrites()[0].body.lines.map((l) => l.id)).toEqual([LID(1), LID(2)]);
+    await expect(acacia.locator('.dpc-note')).toHaveText('PO-1000001 created for Acacia Steel. Its email and PO PDF are waiting in Emails below for you to check and send.');
+    await expect(acacia.locator('[data-dpc-order="update"]')).toBeDisabled();
+    await expect(lineRow(mat, 1).locator('.dpc-status')).toHaveText('On PO');
+    await expect(lineRow(mat, 1).locator('[data-dpc-order="takeoff"]')).toHaveText('Take off');
+    await expect(lineRow(mat, 3).locator('[data-dpc-mat-status]')).toHaveValue('not_reviewed');
+    await expect(lineRow(mat, 4).locator('[data-dpc-mat-status]')).toHaveValue('in_stock');
+    // Dispatch's own order is on its card, not in "Orders on this job".
+    await expect(mat.locator('.dpc-ordercard')).toHaveCount(0);
+
+    const item = mail.locator('.dpc-mail-item');
+    await expect(item).toHaveCount(1);
+    await expect(item).toContainText('Acacia SteelDraft');
+    await expect(item).toContainText('Draft ready to send');
+    const view = mail.locator('.dpc-mail-view');
+    await expect(view.locator('.dpc-mail-head strong')).toHaveText('Draft to Acacia Steel');
+    await expect(view.locator('.dpc-field-val')).toHaveText("orders@acacia.exampleFrom the supplier's contact");
+    await expect(view.locator('.dpc-field-val input')).toHaveCount(0);
+    await expect(view.locator('[data-dpc-mail-subject]')).toHaveValue('Purchase order PO-1000001 for E2E');
+    await expect(view.locator('.dpc-doc small')).toHaveText('PO with 2 lines and the delivery address');
+    await page.waitForLoadState('networkidle');
+    expect(of('dispatch_order_send')).toHaveLength(0);
+    expect(of('dispatch_order_emails')).toHaveLength(2);
+    expect(of('dispatch_materials')).toHaveLength(2);
+  });
+
+  test('Send opens a confirm line and sends nothing; Send now sends once with the hash shown; leaving a box saves once', async ({ page }) => {
+    const { mat, mail, of, fake } = await bootOrders(page, ORDER_SEED());
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();
+    const view = mail.locator('.dpc-mail-view');
+    await view.locator('[data-dpc-mail-subject]').fill('PO-1000001 for the Gwelup fence');
+    await expect(view.locator('[data-dpc-mail="send"]')).toBeDisabled();
+    await view.locator('[data-dpc-mail-body]').click();
+    await expect.poll(() => of('dispatch_order_draft_save').length).toBe(1);
+    expect(of('dispatch_order_draft_save')[0].body).toMatchObject({ subject: 'PO-1000001 for the Gwelup fence' });
+    expect(of('dispatch_order_draft_save')[0].body).not.toHaveProperty('body_text');
+    await expect(view.locator('[data-dpc-mail="send"]')).toBeEnabled();
+
+    await view.locator('[data-dpc-mail="send"]').click();
+    await expect(view.locator('.dpc-mail-confirm p')).toHaveText('Send PO-1000001 to orders@acacia.example with PO-1000001.pdf? It goes from orders@secureworksgroup.app.');
+    await view.locator('[data-dpc-mail="send-no"]').click();
+    await expect(view.locator('.dpc-mail-confirm')).toHaveCount(0);
+    expect(of('dispatch_order_send')).toHaveLength(0);
+
+    const hash = fake.mail['job-f1'].drafts[0].draft_hash;
+    await view.locator('[data-dpc-mail="send"]').click();
+    await view.locator('[data-dpc-mail="send-go"]').click();
+    await expect(mail.locator('.dpc-mail-item')).toHaveCount(1);
+    await expect(mail.locator('.dpc-mail-item')).toContainText('Supplier');
+    await expect(mail.locator('.dpc-mail-view .dpc-bubble.us')).toContainText('Please find attached PO-1000001.');
+    await expect(mail.locator('.dpc-mail-view .dpc-bubble.us small')).toContainText('SecureWorks');
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Sent 15/10');
+    await expect(card(mat, 'Acacia Steel').locator('[data-dpc-order="cancel"]')).toHaveCount(0);
+    expect(of('dispatch_order_send').map((c) => c.body)).toEqual([expect.objectContaining({ draft_id: DRID(2), expected_draft_hash: hash })]);
+  });
+
+  test('a send whose result is not confirmed says so and goes again only on Try the send again; a refused send keeps the draft', async ({ page }) => {
+    const { mat, mail, of, fake } = await bootOrders(page, ORDER_SEED());
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();
+    const view = mail.locator('.dpc-mail-view');
+    fake.fail.dispatch_order_send = [{ status: 502, body: { error: 'Not sent: domain not verified', code: 'send_refused' } }];
+    await view.locator('[data-dpc-mail="send"]').click();
+    await view.locator('[data-dpc-mail="send-go"]').click();
+    await expect(view.locator('.dpc-mail-msg.dpc-mat-fail')).toHaveText('Not sent: domain not verified.');
+    await expect(view.locator('[data-dpc-mail="send"]')).toBeEnabled();
+
+    fake.fail.dispatch_order_send = [{ status: 502, body: { error: 'unknown', code: 'send_unknown' } }];
+    await view.locator('[data-dpc-mail="send"]').click();
+    await view.locator('[data-dpc-mail="send-go"]').click();
+    await expect(view).toContainText('We could not tell whether this email went. Check the thread before trying again.');
+    await expect(mail.locator('.dpc-mail-item')).toContainText('Send not confirmed');
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Send not confirmed');
+    await page.waitForTimeout(400);
+    expect(of('dispatch_order_send')).toHaveLength(2);
+    await view.locator('[data-dpc-mail="send-again"]').click();
+    await expect.poll(() => of('dispatch_order_send').length).toBe(3);
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Sent 15/10');
+  });
+
+  test('Take off sends one update with that line; Cancel order asks first and sends one cancel; Discard keeps the order', async ({ page }) => {
+    const { mat, mail, of, orderWrites } = await bootOrders(page, ORDER_SEED());
+    const acacia = card(mat, 'Acacia Steel');
+    await acacia.locator('[data-dpc-order="create"]').click();
+    await lineRow(mat, 2).locator('[data-dpc-order="takeoff"]').click();
+    await expect(lineRow(mat, 2).locator('[data-dpc-mat-status]')).toHaveValue('to_order');
+    expect(of('dispatch_order_update').map((c) => c.body.remove_line_ids)).toEqual([[LID(2)]]);
+    await expect(mail.locator('.dpc-doc small')).toHaveText('PO with 1 line and the delivery address');
+    await expect(acacia.locator('[data-dpc-order="update"]')).toBeEnabled();
+
+    await mail.locator('[data-dpc-mail="discard"]').click();
+    await expect(mail.locator('.dpc-mail-confirm p')).toHaveText('Discard this email? The order stays.');
+    await mail.locator('[data-dpc-mail="discard-go"]').click();
+    await expect(mail.locator('.dpc-sec-body')).toContainText('No email on this job yet.');
+    await expect(acacia.locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Not sent');
+
+    await acacia.locator('[data-dpc-order="cancel"]').click();
+    await expect(acacia.locator('.dpc-order-confirm p')).toHaveText('Cancel PO-1000001? Its lines go back to To order.');
+    await acacia.locator('[data-dpc-order="cancel-keep"]').click();
+    expect(of('dispatch_order_cancel')).toHaveLength(0);
+    await acacia.locator('[data-dpc-order="cancel"]').click();
+    await acacia.locator('[data-dpc-order="cancel-go"]').click();
+    await expect(acacia.locator('.dpc-suphead .dpc-status')).toHaveText('Not ordered');
+    await expect(lineRow(mat, 1).locator('[data-dpc-mat-status]')).toHaveValue('to_order');
+    expect(orderWrites().map((c) => c.action)).toEqual(['dispatch_order_create', 'dispatch_order_update', 'dispatch_order_discard', 'dispatch_order_cancel']);
+    expect(of('dispatch_order_send')).toHaveLength(0);
+  });
+
+  test('failed reads say so; a supplier with no email cannot be sent; client threads are read only; Sources lists every order', async ({ page }) => {
+    const legacy = { id: 'po-legacy', po_number: 'PO-683376', supplier_name: 'Old Supplies', status: 'draft', created_at: '2026-09-01T02:00:00.000Z', supplier_id: null, source: null,
+      pdf_version: null, last_sent_pdf_version: null, last_sent_at: null, in_xero: false, lines: [{ description: 'Sheets', quantity: 4, unit: null }] };
+    const seed = ORDER_SEED();
+    seed['job-f1'].orders = [legacy];
+    seed['job-f1'].lines[4].status = 'to_order';
+    const client = { key: 'th-c1', tag: 'client', po_id: null, po_number: null, subject: 'Your fence is booked', counterpart: 'Client', last_at: '2026-10-10T01:00:00.000Z',
+      last_preview: 'Booked for next week.', can_reply: false, can_link: false,
+      messages: [{ id: 'c1', direction: 'outbound', from_email: 'quotes@secureworksgroup.app', to_email: 'client@home.test', subject: 'Your fence is booked', text: 'Booked for next week.', at: '2026-10-10T01:00:00.000Z', attachments: [], delivery_status: 'delivered' }] };
+    const { root, mat, mail, of, fake } = await bootOrders(page, seed, { 'job-f1': { threads: [client] } });
+    // The legacy order stays in Orders on this job, with no chip or button.
+    await expect(mat.locator('.dpc-ordercard')).toContainText('PO-683376');
+    await expect(mat.locator('.dpc-ordercard [data-dpc-order]')).toHaveCount(0);
+
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-order="create"]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-note')).toHaveText('PO-1000001 created for Banksia Roofing. There is no usable email on file for this supplier, so it cannot be sent yet.');
+    const view = mail.locator('.dpc-mail-view');
+    await expect(view.locator('.dpc-field-val')).toHaveText("No email on file for Banksia Roofing. Add it to the supplier's contact in Xero; it reaches here after the nightly sync.");
+    await expect(view.locator('[data-dpc-mail="send"]')).toBeDisabled();
+
+    await mail.locator('.dpc-mail-item', { hasText: 'Your fence is booked' }).click();
+    await expect(view.locator('.dpc-bubble.us')).toHaveText(/Booked for next week\./);
+    await expect(view.locator('[data-dpc-mail-reply], [data-dpc-mail-link]')).toHaveCount(0);
+
+    // Sources: oldest first; the legacy order has no PDF, the Dispatch one opens its PDF once.
+    const panel = root.locator('[data-dpc-region="panel"]');
+    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', 'Purchase orders']);
+    await expect(panel.locator('.dpc-doc-nopdf')).toHaveText(/PO-683376Old Supplies, DraftNo PDF on file/);
+    await panel.locator('[data-dpc-order-pdf]').click();
+    await expect.poll(() => page.evaluate(() => window.__opened)).toEqual(['', `https://files.example.test/${POID(1)}.pdf`]);
+    expect(of('dispatch_order_pdf')).toHaveLength(1);
+
+    // A failed email read is never "No email"; threads failing still shows the drafts.
+    await openJob(root, 'SWP-900201');
+    fake.fail.dispatch_order_emails = [{ status: 500, body: { error: 'e2e' } }];
+    await openJob(root, 'SWF-900101');
+    await expect(mail.locator('[role="alert"]')).toHaveText('Could not load email. Retry');
+    await expect(mail).not.toContainText('No email on this job yet.');
+    fake.fail.dispatch_order_emails = [Object.assign(fake.api.dispatch_order_emails(new URL('https://x.test/?job_id=job-f1')), { threads: undefined, threads_status: 'failed' })];
+    await mail.locator('[data-dpc-mail="retry"]').click();
+    await expect(mail.locator('.dpc-mail-item')).toHaveCount(1);
+    await expect(mail.locator('.dpc-mail-listfail')).toHaveText('Could not load the email threads. Retry');
   });
 });

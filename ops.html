@@ -4998,7 +4998,7 @@ __swOpsStampAssets([
           <div style="flex:1;"></div>
           <input type="text" class="filter-search" id="jpJobNumber" placeholder="Open job # (e.g. SWF-26041)" style="width:190px;" onkeydown="if(event.key==='Enter')jpOpenByNumber()">
           <button class="btn btn-secondary btn-sm" onclick="jpOpenByNumber()">Open</button>
-          <button class="btn btn-secondary btn-sm" onclick="showView('materials')" title="Supplier bills on no job yet: place them in Materials > Bill Reconciliation, then Reread profit here">Bills to place</button>
+          <button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job yet: place them in Financials > Bill Reconciliation, then Reread profit here">Bills to place</button>
           <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()" title="Re-read the profit engine (after placing bills)">&#8635; Reread profit</button>
         </div>
         <div class="jp-basis">Gross profit on direct costs (trade labour, materials, commission, other), ex GST, no overhead share. Blank evidence shows as Unknown, never $0. Paid means Xero recorded the payment.</div>
@@ -18003,7 +18003,7 @@ async function loadQuotes() {
 var JP_PAGE = 100;
 var JP_STATUS_SETS = {
   finished: 'complete,invoiced,final_payment,get_review,archived',
-  won: 'complete,invoiced,final_payment,get_review,archived,accepted,partially_accepted,approvals,awaiting_deposit,processing,order_materials,awaiting_supplier,schedule_install,scheduled,in_progress,rectification'
+  won: 'complete,invoiced,final_payment,get_review,archived,accepted,partially_accepted,approvals,awaiting_deposit,deposit,processing,order_materials,awaiting_supplier,order_confirmed,schedule_install,scheduled,in_progress,rectification'
 };
 var JP_FLAG_LABELS = {
   missing_client_invoice: 'No client invoice linked',
@@ -18012,8 +18012,8 @@ var JP_FLAG_LABELS = {
   incomplete_invoice_lines: 'A trade invoice has missing or mismatched lines',
   unclassified_lines: 'Unclassified trade lines',
   text_matched_lines: 'Trade lines matched by job number text',
-  cost_basis_inferred: 'Materials inferred from the Xero Project total',
-  project_below_trade_lines: 'Xero Project total is below the trade lines',
+  xero_project_exceeds_line_costs: 'Xero Project has more expenses on record than the costs linked, so the full cost is unknown',
+  xero_project_linked_by_contact_only: 'Xero Project linked by contact only, so it gives no project figure',
   materials_not_linked: 'Materials owed but none linked',
   unapproved_trade_charges: 'Trade charges not yet approved',
   open_purchase_orders: 'Open purchase orders (committed, not actual)',
@@ -18028,7 +18028,7 @@ var JP_KIND_LABELS = {
 var JP_SOURCE_LABELS = {
   trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)'
 };
-var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, total: null, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
+var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
 
 // Owner only (approved MVP visibility). Client-side gate; ops-api enforces admin/owner.
 var JOB_PROFIT_VIEWERS = ['marnin@secureworkswa.com.au'];
@@ -18082,6 +18082,23 @@ function _jpPaid(paid, paidOn) {
   if (paid === false) return '<span class="jp-tag mute">Not paid</span>';
   return '<span class="jp-unk">Unknown</span>';
 }
+// Quoted only from a sent or accepted quote; expected only from a cost fixed at
+// the quote. Any other source (or none) reads as missing, never as the figure.
+var JP_EXPECTED_SOURCES = ['frozen_at_acceptance', 'accepted_quote_revision', 'sent_quote_revision'];
+function _jpQuoted(j) {
+  return /^sent_quote:/.test(String(j.quoted_source || '')) ? _jpNum(j.quoted_ex) : null;
+}
+function _jpExpected(j, v) {
+  return JP_EXPECTED_SOURCES.indexOf(String(j.expected_source || '')) !== -1 ? _jpNum(v) : null;
+}
+// A Xero Project total above the linked costs leaves the full cost unknown: no
+// profit and no margin, whatever a row carries.
+function _jpCostUnknown(j) {
+  return j.cost_flag === 'xero_project_exceeds_line_costs'
+    || (Array.isArray(j.completeness) && j.completeness.indexOf('xero_project_exceeds_line_costs') !== -1);
+}
+function _jpProfitOf(j) { return _jpCostUnknown(j) ? null : _jpNum(j.profit_ex); }
+function _jpMarginOf(j) { return _jpCostUnknown(j) ? null : _jpNum(j.margin_pct); }
 function _jpTypeLabel(j) {
   var t = j.work_type ? String(j.work_type) : 'unknown type';
   return _jpEsc(t + (j.work_subtype ? ' · ' + j.work_subtype : ''));
@@ -18093,12 +18110,11 @@ function _jpFlags(j) {
   [j.revenue_flag, j.cost_flag].forEach(function(f) { if (f && f !== 'ok' && out.indexOf(f) === -1) out.push(f); });
   return out;
 }
-// Confidence tags for one engine row: whether profit is publishable, which cost
-// basis it rests on, and what Xero says is paid. Labels only, no arithmetic.
+// Confidence tags for one engine row: whether profit is publishable and what
+// Xero says is paid. Labels only, no arithmetic.
 function _jpConfidence(j) {
   var html = '';
-  if (_jpNum(j.profit_ex) == null) html += '<span class="jp-tag bad">Incomplete</span>';
-  else if (j.cost_basis === 'xero_project_inferred' || j.materials_inferred) html += '<span class="jp-tag inf">Inferred</span>';
+  if (_jpProfitOf(j) == null) html += '<span class="jp-tag bad">Incomplete</span>';
   else html += '<span class="jp-tag ok">Line level</span>';
   html += j.revenue_verified_paid ? '<span class="jp-tag ok">Rev paid</span>' : '<span class="jp-tag mute">Rev not verified paid</span>';
   html += j.costs_verified_paid ? '<span class="jp-tag ok">Costs paid</span>' : '<span class="jp-tag mute">Costs not verified</span>';
@@ -18141,7 +18157,7 @@ function _jpRefused() {
 }
 
 // Re-reads the engine: the list or company view, plus the open job, so costs
-// placed in Materials > Bill Reconciliation show up without a page reload.
+// placed in Financials > Bill Reconciliation show up without a page reload.
 function loadJobProfit() {
   if (!_canSeeJobProfit()) { _jpRefused(); return; }
   _jp.typeAvg = {};
@@ -18157,7 +18173,7 @@ async function _jpLoadPage(reset) {
   if (!body) return;
   var seq = ++_jp.listSeq;
   if (reset) {
-    _jp.rows = []; _jp.offset = 0; _jp.more = false; _jp.total = null;
+    _jp.rows = []; _jp.offset = 0; _jp.more = false;
     body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--sw-text-sec);">Loading...</td></tr>';
   }
   if (more) more.innerHTML = '<span class="jp-sub">Loading...</span>';
@@ -18168,10 +18184,8 @@ async function _jpLoadPage(reset) {
     var rows = Array.isArray(data && data.jobs) ? data.jobs : [];
     _jp.rows = _jp.rows.concat(rows);
     _jp.offset += rows.length;
-    // A short page ends the list; total_estimate is a planner estimate only.
-    _jp.more = rows.length === JP_PAGE;
-    var est = data ? (data.total_estimate != null ? data.total_estimate : data.total) : null;
-    _jp.total = _jpNum(est);
+    // The server says whether another page follows; it returns no row count.
+    _jp.more = !!(data && data.has_more) && rows.length > 0;
     if (data && data.labels) _jp.labels = data.labels;
     _jpRenderList();
   } catch (e) {
@@ -18185,13 +18199,19 @@ async function _jpLoadPage(reset) {
 
 function jpLoadMore() { _jpLoadPage(false); }
 
+// Bills to place: the unplaced supplier bills queue is Financials > Bill Reconciliation.
+function jpOpenBillsToPlace() {
+  showView('financials');
+  showSubTab('billrecon');
+}
+
 function _jpRenderList() {
   var body = document.getElementById('jpListBody');
   var status = document.getElementById('jpListStatus');
   var more = document.getElementById('jpMore');
   if (status) {
     status.textContent = _jp.rows.length + ' job' + (_jp.rows.length === 1 ? '' : 's') + ' loaded'
-      + (_jp.total != null ? ' of about ' + _jp.total.toLocaleString() + ' matching' : '')
+      + (_jp.more ? ', more to load' : '')
       + '. Newest first. Page sums are not company totals: use Company for those.';
   }
   if (!_jp.rows.length) {
@@ -18201,13 +18221,13 @@ function _jpRenderList() {
       return '<tr class="jp-row" onclick="openJobProfitDetail(\'' + _jpEsc(j.job_id) + '\')">'
         + '<td><strong>' + _jpEsc(j.job_number || 'No job #') + '</strong><div class="jp-sub">' + _jpEsc(j.client_name || '') + '</div><div class="jp-sub">' + _jpTypeLabel(j) + '</div></td>'
         + '<td>' + _jpEsc(j.status || '') + '</td>'
-        + '<td class="num">' + _jpMoney(j.quoted_ex, 'No quote') + '</td>'
-        + '<td class="num">' + _jpMoney(j.expected_cost_ex) + '</td>'
-        + '<td class="num">' + _jpMoney(j.actual_cost_ex) + (j.materials_inferred ? '<div class="jp-sub">materials inferred</div>' : '') + '</td>'
+        + '<td class="num">' + _jpMoney(_jpQuoted(j), 'No quote sent') + '</td>'
+        + '<td class="num">' + _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote') + '</td>'
+        + '<td class="num">' + _jpMoney(j.actual_cost_ex) + '</td>'
         + '<td class="num">' + _jpMoney(j.invoiced_ex) + '</td>'
         + '<td class="num">' + _jpMoney(j.collected_ex) + '</td>'
-        + '<td class="num">' + _jpProfit(j.profit_ex) + '</td>'
-        + '<td class="num">' + _jpPct(j.margin_pct) + '</td>'
+        + '<td class="num">' + _jpProfit(_jpProfitOf(j)) + '</td>'
+        + '<td class="num">' + _jpPct(_jpMarginOf(j)) + '</td>'
         + '<td>' + _jpConfidence(j) + '</td>'
         + '</tr>';
     }).join('');
@@ -18297,10 +18317,10 @@ function _jpRenderDetail(data) {
     + '<div class="jp-sub">' + _jpTypeLabel(j) + ' &middot; ' + _jpEsc(j.status || '') + (j.created_at ? ' &middot; created ' + _jpDate(j.created_at) : '') + '</div>'
     + '<div style="margin-top:4px;">' + _jpConfidence(j) + '</div></div>'
     + (j.job_id ? '<button class="btn btn-secondary btn-sm" onclick="openJobDetail(\'' + _jpEsc(j.job_id) + '\')">Open job</button>' : '')
-    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="showView(\'materials\')" title="Supplier bills on no job: Materials > Bill Reconciliation">Place bills</button>' : '')
+    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job: Financials > Bill Reconciliation">Place bills</button>' : '')
     + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
 
-  if (_jpNum(j.profit_ex) == null) {
+  if (_jpProfitOf(j) == null) {
     h += '<div class="jp-note"><strong>Profit and margin unknown.</strong> The engine withholds them until the evidence is complete'
       + (flags.length ? ': ' + _jpEsc(flags.map(_jpFlagText).join('; ')) : '') + '.</div>';
   } else if (flags.length) {
@@ -18308,40 +18328,43 @@ function _jpRenderDetail(data) {
   }
 
   h += '<div class="jp-cards">'
-    + _jpCard('Quoted', _jpMoney(j.quoted_ex, 'No quote'), _jpEsc(j.quoted_source || ''))
-    + _jpCard('Expected cost', _jpMoney(j.expected_cost_ex), _jpEsc(j.expected_source || 'no expected cost recorded'))
-    + _jpCard('Actual cost', _jpMoney(j.actual_cost_ex), _jpEsc(j.cost_basis === 'xero_project_inferred' ? 'materials inferred from Xero Project' : (j.cost_basis || '')))
+    + _jpCard('Quoted', _jpMoney(_jpQuoted(j), 'No quote sent'), _jpQuoted(j) != null ? _jpEsc(String(j.quoted_source).replace(/^sent_quote:/, 'sent quote ')) : 'never a live price')
+    + _jpCard('Expected cost', _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote'), _jpExpected(j, j.expected_cost_ex) != null ? _jpEsc(String(j.expected_source).replace(/_/g, ' ')) : 'no cost fixed at a quote; never a live estimate')
+    + _jpCard('Actual cost', _jpMoney(j.actual_cost_ex), 'costs linked line by line')
     + _jpCard('Invoiced', _jpMoney(j.invoiced_ex), j.invoice_count != null ? _jpEsc(j.invoice_count + ' invoice' + (Number(j.invoice_count) === 1 ? '' : 's')) : '')
     + _jpCard('Collected', _jpMoney(j.collected_ex), j.revenue_verified_paid ? 'paid in Xero' + (j.revenue_last_paid_on ? ' ' + _jpDate(j.revenue_last_paid_on) : '') : 'not verified paid')
-    + _jpCard('Gross profit', _jpProfit(j.profit_ex), '')
-    + _jpCard('Margin', _jpPct(j.margin_pct), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
+    + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j)), '')
+    + _jpCard('Margin', _jpPct(_jpMarginOf(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
     + '</div>';
 
   // Expected vs actual by lane
   var lanes = [
-    ['Labour', j.expected_labour_ex, j.actual_labour_ex, ''],
-    ['Materials', j.expected_materials_ex, j.actual_materials_ex, j.materials_inferred ? 'inferred' : ''],
-    ['Commission', j.expected_commission_ex, j.actual_commission_ex, ''],
-    ['Other', null, j.actual_other_ex, '']
+    ['Labour', _jpExpected(j, j.expected_labour_ex), j.actual_labour_ex],
+    ['Materials', _jpExpected(j, j.expected_materials_ex), j.actual_materials_ex],
+    ['Commission', _jpExpected(j, j.expected_commission_ex), j.actual_commission_ex],
+    ['Other', null, j.actual_other_ex]
   ];
   h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table"><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
   lanes.forEach(function(l) {
     var e = _jpNum(l[1]), a = _jpNum(l[2]);
     var diff = (e != null && a != null) ? a - e : null;
-    h += '<tr><td>' + l[0] + (l[3] ? ' <span class="jp-tag inf">' + l[3] + '</span>' : '') + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Unknown') + '</td><td class="num">' + _jpMoney(l[2]) + '</td>'
+    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + _jpMoney(l[2]) + '</td>'
       + '<td class="num">' + (diff == null ? '<span class="jp-unk">n/a</span>' : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(diff)) + '</span>') + '</td></tr>';
   });
-  var te = _jpNum(j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
-  h += '<tr class="jp-total"><td>Total</td><td class="num">' + _jpMoney(j.expected_cost_ex) + '</td><td class="num">' + _jpMoney(j.actual_cost_ex) + '</td><td class="num">'
+  var te = _jpExpected(j, j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
+  h += '<tr class="jp-total"><td>Total</td><td class="num">' + _jpMoney(te) + '</td><td class="num">' + _jpMoney(j.actual_cost_ex) + '</td><td class="num">'
     + (te != null && ta != null ? '<span class="' + (ta - te > 0 ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(ta - te)) + '</span>' : '<span class="jp-unk">n/a</span>') + '</td></tr>';
   h += '</tbody></table></div>';
   var recon = [];
   if (_jpNum(j.committed_open_ex)) recon.push('Open purchase orders ' + fmt$(j.committed_open_ex) + ' (committed, not in actual cost)');
-  if (_jpNum(j.xero_project_expenses_ex) != null && _jpNum(j.xero_project_count)) recon.push('Xero Project expenses ' + fmt$(j.xero_project_expenses_ex) + (_jpNum(j.xero_project_invoiced_ex) != null ? ', invoiced ' + fmt$(j.xero_project_invoiced_ex) : ', invoiced Unknown') + ' (reconciling figures, not added)');
-  if (_jpNum(j.line_level_cost_ex) != null && j.cost_basis === 'xero_project_inferred') recon.push('Line-level costs ' + fmt$(j.line_level_cost_ex));
   if (_jpNum(j.draft_revenue_ex)) recon.push('Draft client invoices ' + fmt$(j.draft_revenue_ex) + ' (not counted)');
   if (_jpNum(j.variations_listed_ex)) recon.push('Variations listed ' + fmt$(j.variations_listed_ex) + ' (not added to invoiced)');
   if (recon.length) h += '<div class="jp-sub" style="margin-top:6px;">' + _jpEsc(recon.join(' · ')) + '</div>';
+  // Xero Project total: evidence only, never actual cost (trade labour may sit outside it).
+  if (_jpNum(j.xero_project_expenses_ex) != null) {
+    h += '<div class="jp-note" data-jp-project-evidence><span class="jp-tag inf">Evidence only</span> Xero Project expenses on record: ' + _jpEsc(fmt$(j.xero_project_expenses_ex))
+      + '. Not the job\'s full cost and not added to actual cost' + (_jpCostUnknown(j) ? '; it is above the costs linked here, so profit and margin stay unknown' : '') + '.</div>';
+  }
 
   // Trades who charged
   h += '<div class="jp-sec">Trades who charged</div>';
@@ -18357,7 +18380,7 @@ function _jpRenderDetail(data) {
   // Materials and other costs (non-trade cost events)
   var other = costs.filter(function(c) { return c && c.source !== 'trade_line'; });
   h += '<div class="jp-sec">Materials and other costs</div>';
-  if (!other.length) h += '<div class="jp-sub">' + (j.materials_inferred ? 'No supplier bills linked line by line; materials are inferred from the Xero Project total.' : 'No supplier bills, materials records or purchase orders linked.') + '</div>';
+  if (!other.length) h += '<div class="jp-sub">No supplier bills, materials records or purchase orders linked.</div>';
   else {
     h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th>Document</th><th>Lane</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
     other.forEach(function(c) {
@@ -18399,7 +18422,7 @@ function _jpRenderDetail(data) {
   }
 
   h += '<div class="jp-labels">';
-  ['profit', 'cost_basis', 'verified_paid', 'margin'].forEach(function(k) { if (labels[k]) h += '<div>' + _jpEsc(labels[k]) + '</div>'; });
+  ['profit', 'quoted_ex', 'expected_cost_ex', 'actual_cost_ex', 'xero_project_expenses_ex', 'verified_paid', 'margin'].forEach(function(k) { if (labels[k]) h += '<div>' + _jpEsc(labels[k]) + '</div>'; });
   h += '</div></div>';
   return h;
 }
@@ -18436,6 +18459,37 @@ function _jpRollupCells(r) {
     + '<td class="num">' + _jpPct(r.margin_pct) + '</td>';
 }
 
+// Quoted vs invoiced and expected vs actual, like for like: each pair covers only
+// the jobs the server counted for it (jobs_with_quote / jobs_with_expected) and
+// says how many jobs in this view it leaves out. Server fields only.
+function _jpLikeCells(r, pair) {
+  var jobs = _jpNum(r.jobs);
+  var n = _jpNum(pair === 'quote' ? r.jobs_with_quote : r.jobs_with_expected);
+  var a = _jpNum(pair === 'quote' ? r.quoted_ex : r.expected_cost_ex);
+  var b = _jpNum(pair === 'quote' ? r.invoiced_on_quoted_ex : r.actual_cost_on_expected_ex);
+  var left = jobs != null && n != null ? jobs - n : null;
+  var diff = a != null && b != null && n ? b - a : null;
+  var bad = pair === 'quote' ? diff != null && diff < 0 : diff != null && diff > 0;
+  return '<td class="num">' + (n != null ? _jpEsc(n.toLocaleString()) : '<span class="jp-unk">Unknown</span>') + '</td>'
+    + '<td class="num">' + (left != null ? _jpEsc(left.toLocaleString()) + (jobs != null ? '<span class="jp-sub"> of ' + _jpEsc(jobs.toLocaleString()) + '</span>' : '') : '<span class="jp-unk">Unknown</span>') + '</td>'
+    + '<td class="num">' + (n ? _jpMoney(a) : '<span class="jp-unk">None</span>') + '</td>'
+    + '<td class="num">' + (n ? _jpMoney(b) : '<span class="jp-unk">None</span>') + '</td>'
+    + '<td class="num">' + (diff == null ? '<span class="jp-unk">n/a</span>' : '<span class="' + (bad ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(diff)) + '</span>') + '</td>';
+}
+function _jpRenderLikeForLike(t, types) {
+  var h = '<div class="jp-sec" data-jp-like>Quoted vs invoiced, expected vs actual (like for like)</div>'
+    + '<div class="jp-sub" style="margin-bottom:4px;">Each comparison counts only jobs with a sent quote, or with a cost fixed at the quote. Jobs left out are in this view but have no such figure; they are not in that comparison.</div>';
+  var head = '<th class="num">Jobs counted</th><th class="num">Left out</th>';
+  h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Group</th><th>Comparison</th>' + head + '<th class="num">Quoted / expected</th><th class="num">Invoiced / actual</th><th class="num">Difference</th></tr></thead><tbody>';
+  [{ label: 'All work types', r: t }].concat(types.map(function(r) { return { label: r.work_type || 'unknown', r: r }; })).forEach(function(g, i) {
+    var cls = i === 0 ? ' class="jp-total"' : '';
+    h += '<tr' + cls + ' data-jp-like-row="quote"><td rowspan="2">' + _jpEsc(g.label) + '</td><td>Quoted vs invoiced</td>' + _jpLikeCells(g.r, 'quote') + '</tr>';
+    h += '<tr' + cls + ' data-jp-like-row="expected"><td>Expected vs actual cost</td>' + _jpLikeCells(g.r, 'expected') + '</tr>';
+  });
+  h += '</tbody></table></div>';
+  return h;
+}
+
 function _jpRenderRollup(d) {
   var t = d.totals || {};
   var h = '<div class="jp-cards">'
@@ -18449,8 +18503,10 @@ function _jpRenderRollup(d) {
     + '</div>';
   h += '<div class="jp-sub" style="margin-top:6px;">Profit and margin cover only the jobs with a publishable margin'
     + (t.published_revenue_ex != null ? ' (revenue ' + _jpEsc(fmt$(t.published_revenue_ex)) + ', cost ' + (_jpNum(t.published_cost_ex) != null ? _jpEsc(fmt$(t.published_cost_ex)) : 'Unknown') + ')' : '')
-    + (t.inferred_jobs ? '; ' + _jpEsc(t.inferred_jobs) + ' of them rest on inferred materials' : '') + '.'
+    + '.'
     + (d.as_of ? ' As of ' + _jpEsc(new Date(d.as_of).toLocaleString('en-AU', { timeZone: 'Australia/Perth' })) + '.' : '') + '</div>';
+
+  h += _jpRenderLikeForLike(t, Array.isArray(d.by_type) ? d.by_type : []);
 
   var head = '<th class="num">Jobs</th><th class="num">With margin</th><th class="num">Invoiced</th><th class="num">Collected</th><th class="num">Actual cost</th><th class="num">Gross profit</th><th class="num">Margin</th>';
   var types = Array.isArray(d.by_type) ? d.by_type : [];

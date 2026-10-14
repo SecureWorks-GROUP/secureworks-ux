@@ -1,7 +1,7 @@
 // Ops sees WHEN a trade says the hours were worked (Captain, 2026-10-12):
-// the date, start and finish sit beside the hours on a trade invoice and on a
-// job's trade lines when the line carries them, and an older line with no times
-// shows exactly what it always did. Search `// <trade-time-entry-ops>` in
+// the date, start and finish sit beside the hours on a trade invoice when the
+// line carries them, and an older line with no times shows exactly what it
+// always did. Search `// <trade-time-entry-ops>` in
 // ops.html. The page makes no network request it is not handed here.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -44,23 +44,6 @@ test('trade bills: an invoice whose lines carry times lists them under the trade
     'Thu 8 Oct · SWF-26001 · 08:00 to 12:00 · 4h'
   ]);
   await expect(rows.filter({ hasText: 'Older Trade' }).locator('[data-invoice-when]')).toHaveCount(0);
-});
-
-test('job P&L trade lines: the times sit beside the hours when the line carries them', async ({ page }) => {
-  await bootOps(page);
-  await page.evaluate(([timed, older]) => {
-    const host = document.createElement('div');
-    host.id = 'e2ePnlHost';
-    host.innerHTML = window.renderJobPnlDetail({ job_id: 'job-1', job_number: 'SWF-26001', lines: [timed, older] });
-    document.body.appendChild(host);
-  }, [TIMED, OLDER]);
-
-  const rows = page.locator('#e2ePnlHost .pnl-lines-table tbody tr');
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0).locator('td').first()).toHaveText('Wed 7 Oct');
-  await expect(rows.nth(0).locator('[data-line-when]')).toHaveText('07:00 to 15:30, 30 min break');
-  await expect(rows.nth(1).locator('[data-line-when]')).toHaveCount(0);
-  await expect(rows.nth(1).locator('td').nth(3)).toHaveText('6.0');
 });
 
 // A trade who hires a ute from us has a weekly amount taken off what he is paid

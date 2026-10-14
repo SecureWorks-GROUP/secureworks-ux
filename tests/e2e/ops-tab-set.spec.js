@@ -10,7 +10,9 @@
 //  - Dispatch is the real Dispatch view of any job (slice 1: job list with search
 //    and work type buttons, job header, Scope and notes with Save note), read
 //    from ops-api and writing only add_note, with the live Purchase orders board
-//    (the old Materials view) below it. See the `Dispatch:` tests.
+//    (the old Materials view) below it. See the `Dispatch:` tests. Slice 3 adds
+//    To do beside All jobs and the six-stop stage rail, whose only writes are
+//    set_dispatch_stage and set_dispatch_next_step on a press (its own describe block).
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
@@ -207,7 +209,9 @@ const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
 
 // Boots Ops on the Dispatch tab against a stubbed ops-api. `api[action]` is a
 // function (url, postBody) returning the JSON body, or { status, body }.
-async function bootDispatch(page, api = {}, { viewport = null, open = true } = {}) {
+// `mode` seeds the list the tab first opens on ('all' for the slice 1 tests,
+// which check the All jobs list; null leaves the tab's own default, To do).
+async function bootDispatch(page, api = {}, { viewport = null, open = true, mode = 'all' } = {}) {
   const calls = [];
   const handlers = Object.assign({
     pipeline: (url) => (url.searchParams.get('search') ? D_FOUND([]) : D_LIST()),
@@ -216,6 +220,9 @@ async function bootDispatch(page, api = {}, { viewport = null, open = true } = {
     list_pos: () => ({ purchase_orders: [] }),
   }, api);
   if (viewport) await page.setViewportSize(viewport);
+  if (mode) {
+    await page.addInitScript((m) => { if (localStorage.getItem('sw_dispatch_mode') === null) localStorage.setItem('sw_dispatch_mode', m); }, mode);
+  }
   await installOpsSessionStub(page);
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -242,7 +249,7 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   await expect(cards).toHaveCount(5);
   await expect(cards.locator('strong')).toHaveText(['SWF-900101 · Gwelup', 'SWP-900201 · Yokine', 'SWP-900202 · High Wycombe', 'SWF-900301', 'SWI-900101 · Morley']);
   // The count is the read's own total, and every list read asks for the paged Dispatch set.
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   expect(of('pipeline').every((c) => c.url.searchParams.get('dispatch') === '1')).toBe(true);
   expect(of('pipeline').some((c) => c.url.searchParams.has('type'))).toBe(false);
   await expect(root.locator('[data-dpc-type]')).toHaveText(['All', 'Fencing', 'Patio', 'Decking', 'Repair']);
@@ -257,18 +264,19 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   await expect(cards.nth(2)).toContainText('Not booked');
   await expect(cards.nth(1)).toContainText(`Last booked 14/9/${PERTH_YEAR - 1}`);
   await expect(cards.nth(4).locator('.dpc-type')).toHaveText('Insurance');
-  await expect(root.locator('.dpc-foot')).toHaveText('All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
+  await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
 
   // Nothing says sample or concept, and nothing from the later slices is drawn.
   const tabText = await page.locator('#viewDispatch').innerText();
   expect(tabText).not.toMatch(/concept|sample|DEMO-|coming soon/i);
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
-  for (const later of ['.dpc-banner', '.dpc-tape', '.dpc-next', '.dpc-stage', '.dpc-supcard', '.dpc-mail', '.dpc-deliv', '[data-dpc-mode]']) {
+  // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
+  for (const later of ['.dpc-banner', '.dpc-supcard', '.dpc-mail', '.dpc-deliv']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
   await expect(root.locator('.dpc-sec')).toHaveCount(1);
-  await expect(root).not.toContainText(/items ready|To do|crew/i);
+  await expect(root).not.toContainText(/items ready|crew/i);
 });
 
 test('Dispatch: work type buttons filter in the browser and All jobs resets', async ({ page }) => {
@@ -278,7 +286,8 @@ test('Dispatch: work type buttons filter in the browser and All jobs resets', as
   const reads = of('pipeline').length;
   await root.locator('[data-dpc-type="fencing"]').click();
   await expect(cards.locator('strong')).toHaveText(['SWF-900101 · Gwelup']);
-  await expect(root.locator('[data-dpc-reset]')).toHaveAttribute('aria-pressed', 'false');
+  // A work type narrows the list that is showing; All jobs stays the list shown.
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveAttribute('aria-pressed', 'true');
   await root.locator('[data-dpc-type="patio"]').click();
   await expect(cards).toHaveCount(2);
   await root.locator('[data-dpc-type="repair"]').click();
@@ -288,11 +297,11 @@ test('Dispatch: work type buttons filter in the browser and All jobs resets', as
   await expect(root.locator('.dpc-job-list')).toHaveText('No decking jobs.');
   await expect(root.locator('.dpc-job-list [role="alert"]')).toHaveCount(0);
   // The count stays the All jobs count, and the open job stays open.
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
-  await root.locator('[data-dpc-reset]').click();
+  await root.locator('[data-dpc-mode="all"]').click();
   await expect(cards).toHaveCount(5);
-  await expect(root.locator('[data-dpc-reset]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveAttribute('aria-pressed', 'true');
   // Filtering never went back to the server, and never as type=repair.
   expect(of('pipeline').length).toBe(reads);
   expect(of('pipeline').some((c) => c.url.searchParams.has('type'))).toBe(false);
@@ -322,7 +331,7 @@ test('Dispatch: make-safe is off the list until searched, and search states are 
   expect(of('pipeline').filter((c) => c.search === 'SWMS-900901').length).toBe(1);
   expect(of('pipeline').every((c) => c.url.searchParams.get('dispatch') === '1')).toBe(true);
   // The count on the button is still the All jobs count, not the search's.
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   // A make-safe job opens through the same view.
   await cards.first().click();
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWMS-900901 · Dalyellup');
@@ -413,9 +422,8 @@ test('Dispatch: the header prints the price, GST label, install day and work typ
 
   await openJob('SWI-900101');
   await expect(head.locator('.dpc-price')).toHaveText('$14,581 inc GST'); // 14580.5, half up
-  // No crew chip, no items ready, no stage rail.
+  // No crew chip, no items ready. The stage rail is slice 3's (the Dispatch: To do tests).
   await expect(head.locator('.dpc-pills > *')).toHaveCount(2);
-  await expect(head.locator('.dpc-tape')).toHaveCount(0);
 });
 
 test('Dispatch: Scope and notes shows the scope facts, scope photos, quote, scoper and council lines', async ({ page }) => {
@@ -708,7 +716,7 @@ test('Dispatch: a failed list read is an error, never an empty list, and Retry r
   const expectFailed = async () => {
     await expect(list.locator('[role="alert"]')).toContainText('Could not load jobs.');
     await expect(root.locator('.dpc-job')).toHaveCount(0);
-    await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs');
+    await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs');
     await expect(root.locator('.dpc-jobhead')).toContainText('Could not load this job.');
     await expect(root.locator('.dpc-sec')).toHaveCount(0);
     await expect(list).not.toContainText(/No jobs|No .* jobs/);
@@ -724,7 +732,7 @@ test('Dispatch: a failed list read is an error, never an empty list, and Retry r
   mode = 'up';
   await root.locator('.dpc-jobhead [data-dpc-retry="list"]').click();
   await expect(root.locator('.dpc-job')).toHaveCount(5);
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
 });
 
@@ -735,7 +743,7 @@ test('Dispatch: an empty list, a degraded read and a failed job read each say so
     pipeline: () => list(),
     job_detail: (url) => (detailDown ? { status: 500, body: { error: 'e2e failure' } } : D_DETAIL[url.searchParams.get('jobId')]),
   });
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 0');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 0');
   await expect(root.locator('.dpc-job-list')).toHaveText('No jobs to show.');
   await expect(root.locator('.dpc-jobhead')).toHaveText('No job to show.');
   expect(of('job_detail').length).toBe(0);
@@ -834,7 +842,7 @@ test('Dispatch: typing in the search box is not interrupted when the first list 
   await page.keyboard.type('Gwel');
   await box.evaluate((el) => { el.dataset.e2eKept = '1'; });
   release();
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
   // Still the same box, still holding the keyboard: the rest of the word lands in it.
   await expect(box).toBeFocused();
@@ -943,7 +951,7 @@ test('Dispatch: a job card keeps the keyboard focus when a list read lands', asy
   await expect(card).toBeFocused();
   release();
   // The read lands and opens the first job; the keyboard is still on the searched card.
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 5');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
   await expect(card).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1043,7 +1051,7 @@ test('Dispatch: a long list is drawn whole, and the phone layout has no sideways
     pipeline: () => ({ columns: { accepted: many }, total: many.length }),
     job_detail: () => D_DETAIL['job-f1'],
   }, { viewport: { width: 390, height: 844 } });
-  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 420');
+  await expect(root.locator('[data-dpc-mode="all"]')).toHaveText('All jobs 420');
   await expect(root.locator('.dpc-job')).toHaveCount(420);
   await expect(root.locator('.dpc-job').last().locator('strong')).toHaveText('SWF-910419 · Suburb 419');
   await expect(root.locator('.dpc-photo')).toHaveCount(6);
@@ -1156,4 +1164,442 @@ test('the Jarvis bar alert badges pick up a new alert without a reload', async (
   // Past the digest's 30 minute cache, so the next 5 minute refresh tick refetches.
   await page.clock.fastForward('35:00');
   await expect(badges).toHaveText(['1 urgent']);
+});
+
+// ── Dispatch, slice 3: To do and the stage rail (modules/ops-dispatch.js) ────
+// Stubbed ops-api with a small in-memory stage record, so a press lands the way
+// set_dispatch_stage answers (secureworks-backend docs/dispatch-slice-3-contract.md).
+// Invented job numbers only. The stops a job is read at, and why it is or is
+// not in To do, mirror the build note's proof jobs.
+test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
+  const STOPS = ['accepted', 'deposit_paid', 'materials_ordered', 'supplier_confirmed', 'materials_on_site', 'trade_scheduled'];
+  const NAMES = ['Accepted', 'Deposit paid', 'Materials ordered', 'Supplier confirmed', 'Materials on site', 'Trade scheduled'];
+  const SET_AT = `${PERTH_YEAR}-10-15T01:30:00+00:00`;
+  const SET_DAY = `${dowOf(PERTH_YEAR, 10, 15)} 15/10`;
+  const idx = (stage) => (stage === 'not_started' ? 0 : STOPS.indexOf(stage) + 1);
+  let minute = 0;
+  const S_ROW = (over) => {
+    const stage = over.stage;
+    const row = D_ROW(Object.assign({
+      id: 'job-' + over.job_number.toLowerCase(), site_suburb: 'Suburb', value: 1000, value_inc_gst: true,
+      updated_at: new Date(Date.UTC(2026, 9, 12, 8) - (minute++) * 60000).toISOString(),
+      dispatch_stage: stage, dispatch_stage_index: stage == null ? null : idx(stage),
+      dispatch_stage_source: stage == null ? null : (over.source || 'job_status'),
+      dispatch_stage_from: over.from === undefined ? (over.source === 'set' || stage == null ? null : over.status) : over.from,
+      dispatch_stage_set_at: over.source === 'set' ? SET_AT : null, dispatch_stage_set_by: over.source === 'set' ? (over.by || null) : null,
+      dispatch_todo: false, dispatch_todo_out: null, dispatch_next_step: null,
+    }, over));
+    delete row.stage; delete row.source; delete row.by; delete row.window;
+    // In the Dispatch window and not held: To do while the stop is 1 to 5.
+    row.dispatch_todo = over.window !== false && !row.dispatch_todo_out && row.dispatch_stage_index >= 1 && row.dispatch_stage_index <= 5;
+    return row;
+  };
+  // To do: 8. Fencing 4, patio 2, repair 2.
+  const S_JOBS = () => [
+    S_ROW({ job_number: 'SWF-920001', type: 'fencing', status: 'awaiting_deposit', stage: 'accepted', dispatch_next_step: 'CHASE DEPOSIT' }),
+    S_ROW({ job_number: 'SWF-920002', type: 'fencing', status: 'order_materials', stage: 'deposit_paid' }),
+    S_ROW({ job_number: 'SWF-920003', type: 'fencing', status: 'awaiting_supplier', stage: 'materials_ordered' }),
+    S_ROW({ job_number: 'SWF-920004', type: 'fencing', status: 'order_materials', stage: 'materials_ordered', source: 'set' }),
+    S_ROW({ job_number: 'SWP-920005', type: 'patio', status: 'schedule_install', stage: 'supplier_confirmed' }),
+    S_ROW({ job_number: 'SWP-920006', type: 'patio', status: 'approvals', stage: 'materials_on_site', source: 'set', by: 'Office Person', window: true }),
+    S_ROW({ job_number: 'SWR-920007', type: 'repair', status: 'accepted', stage: 'accepted', source: 'repairs_board', from: 'approved' }),
+    S_ROW({ job_number: 'SWF-920008', type: 'repair', status: 'schedule_install', stage: 'deposit_paid', source: 'repairs_board', from: 'materials' }),
+    S_ROW({ job_number: 'SWP-920009', type: 'patio', status: 'approvals', stage: 'deposit_paid', dispatch_todo_out: 'in_council' }),
+    S_ROW({ job_number: 'SWP-920010', type: 'patio', status: 'awaiting_deposit', stage: 'accepted', council_required: null, dispatch_todo_out: 'council_not_decided' }),
+    S_ROW({ job_number: 'SWP-920011', type: 'patio', status: 'awaiting_deposit', stage: 'accepted', council_required: true, dispatch_todo_out: 'council_to_come' }),
+    S_ROW({ job_number: 'SWF-920012', type: 'fencing', status: 'scheduled', stage: 'trade_scheduled' }),
+    S_ROW({ job_number: 'SWF-920013', type: 'repair', status: 'order_materials', stage: 'trade_scheduled', source: 'repairs_board', from: 'complete', window: false }),
+    S_ROW({ job_number: 'SWR-920014', type: 'repair', status: 'accepted', stage: 'not_started', source: 'repairs_board', from: 'wo_in' }),
+    S_ROW({ job_number: 'SWF-920015', type: 'fencing', status: 'partially_accepted', stage: 'not_started', window: false }),
+    S_ROW({ job_number: 'SWF-920016', type: 'fencing', status: 'archived', stage: 'trade_scheduled', window: false }),
+  ];
+  const MAKESAFE = S_ROW({ job_number: 'SWMS-920017', type: 'makesafe', status: 'accepted', stage: null, window: false });
+  const S_INDOW = new Set(['SWF-920001', 'SWF-920002', 'SWF-920003', 'SWF-920004', 'SWP-920005', 'SWP-920006', 'SWR-920007', 'SWF-920008', 'SWF-920012']);
+  const answer = (rows) => ({ columns: { accepted: rows.map((r) => Object.assign({}, r)) }, total: rows.length, dispatch_stages: 'ok', todo_total: rows.filter((r) => r.dispatch_todo).length });
+
+  // A stubbed back end that keeps the stage record. `opts.stage` / `opts.next`
+  // may answer a write themselves ({ status, body }); `opts.list` may answer the
+  // base read.
+  async function bootRail(page, opts = {}) {
+    const jobs = S_JOBS();
+    const byNumber = (n) => jobs.find((r) => r.job_number === n);
+    const server = { jobs, byNumber };
+    const api = {
+      pipeline: (url) => {
+        const q = (url.searchParams.get('search') || '').toLowerCase();
+        if (!q) return opts.list ? opts.list(jobs) : answer(jobs);
+        return answer(jobs.concat([MAKESAFE]).filter((r) => r.job_number.toLowerCase().includes(q)));
+      },
+      job_detail: (url) => ({ job: { id: url.searchParams.get('jobId'), type: 'fencing', scope_json: null }, media: [], documents: [], invoices: [] }),
+      set_dispatch_stage: async (url, body) => {
+        if (opts.stage) { const out = await opts.stage(body, server); if (out) return out; }
+        const row = jobs.find((r) => r.id === body.job_id);
+        const prev = { stage: row.dispatch_stage, source: row.dispatch_stage_source };
+        Object.assign(row, {
+          dispatch_stage: body.stage, dispatch_stage_index: idx(body.stage), dispatch_stage_source: 'set', dispatch_stage_from: null,
+          dispatch_stage_set_at: SET_AT, dispatch_stage_set_by: 'Office Person',
+        });
+        row.dispatch_todo = S_INDOW.has(row.job_number) && !row.dispatch_todo_out && row.dispatch_stage_index <= 5;
+        return { success: true, job_id: row.id, job_number: row.job_number, dispatch_stage: row.dispatch_stage, dispatch_stage_index: row.dispatch_stage_index,
+          dispatch_stage_source: 'set', dispatch_stage_set_at: SET_AT, dispatch_stage_set_by: 'Office Person', previous_stage: prev.stage,
+          previous_source: prev.source, dispatch_todo: row.dispatch_todo, dispatch_todo_out: row.dispatch_todo_out, audit_logged: true };
+      },
+      set_dispatch_next_step: async (url, body) => {
+        if (opts.next) { const out = await opts.next(body, server); if (out) return out; }
+        const row = jobs.find((r) => r.id === body.job_id);
+        row.dispatch_next_step = body.text.trim() || null;
+        return { success: true, job_id: row.id, dispatch_next_step: row.dispatch_next_step, next_step_set_at: SET_AT, audit_logged: true };
+      },
+    };
+    const booted = await bootDispatch(page, api, { mode: opts.mode === undefined ? null : opts.mode, viewport: opts.viewport || null });
+    const open = async (number) => {
+      const card = booted.root.locator('.dpc-job', { hasText: number });
+      if (!(await card.count())) await booted.root.locator('[data-dpc-mode="all"]').click();
+      await booted.root.locator('.dpc-job', { hasText: number }).click();
+      await expect(booted.root.locator('.dpc-jobhead h2')).toHaveText(new RegExp('^' + number));
+    };
+    return Object.assign(booted, { server, open, tape: booted.root.locator('.dpc-tape') });
+  }
+  const WRITES = ['set_dispatch_stage', 'set_dispatch_next_step', 'add_note', 'update_job_status', 'update_repair_stage', 'update_job_field'];
+  const writes = (calls) => calls.filter((c) => c.method === 'POST' || WRITES.includes(c.action));
+
+  test('the tab opens on To do, counts it from todo_total, and remembers the list chosen', async ({ page }) => {
+    const { root, of } = await bootRail(page);
+    const cards = root.locator('.dpc-job');
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do 8', 'All jobs 16']);
+    await expect(root.locator('[data-dpc-mode="todo"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(cards).toHaveCount(8);
+    await expect(cards.locator('strong')).toHaveText(['SWF-920001', 'SWF-920002', 'SWF-920003', 'SWF-920004', 'SWP-920005', 'SWP-920006', 'SWR-920007', 'SWF-920008'].map((n) => n + ' · Suburb'));
+    // The first To do job opens.
+    await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-920001 · Suburb');
+    await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
+    expect(of('pipeline').length).toBe(1);
+
+    // All jobs lists every job; a press clears the search and the work type.
+    await root.locator('[data-dpc-type="patio"]').click();
+    await root.locator('[data-dpc-search]').fill('SWF-9200');
+    await root.locator('[data-dpc-mode="all"]').click();
+    await expect(root.locator('[data-dpc-search]')).toHaveValue('');
+    await expect(root.locator('[data-dpc-type="all"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(cards).toHaveCount(16);
+    await expect(root.locator('[data-dpc-mode="all"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
+    await expect(root.locator('[data-dpc-mode="all"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(cards).toHaveCount(16);
+    await root.locator('[data-dpc-mode="todo"]').click();
+    await expect(cards).toHaveCount(8);
+    await page.reload();
+    await expect(root.locator('[data-dpc-mode="todo"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(cards).toHaveCount(8);
+    // The collapsed strip counts the list that is showing.
+    await root.locator('[data-dpc-side]').click();
+    await expect(root.locator('.dpc-rail-count')).toHaveText('8');
+  });
+
+  test('each work type in To do shows its own jobs, and decking says so when there are none', async ({ page }) => {
+    const { root } = await bootRail(page);
+    const cards = root.locator('.dpc-job');
+    for (const [type, n] of [['fencing', 4], ['patio', 2], ['repair', 2]]) {
+      await root.locator(`[data-dpc-type="${type}"]`).click();
+      await expect(cards).toHaveCount(n);
+    }
+    await root.locator('[data-dpc-type="decking"]').click();
+    await expect(cards).toHaveCount(0);
+    await expect(root.locator('.dpc-job-list')).toHaveText('No decking jobs in To do.');
+    await expect(root.locator('.dpc-job-list [role="alert"]')).toHaveCount(0);
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do 8', 'All jobs 16']);
+  });
+
+  test('search in To do keeps To do jobs only; a make-safe is never in To do and has no rail', async ({ page }) => {
+    const { root, tape } = await bootRail(page);
+    const cards = root.locator('.dpc-job');
+    const box = root.locator('[data-dpc-search]');
+    await box.fill('SWF-920002');
+    await expect(cards.locator('strong')).toHaveText(['SWF-920002 · Suburb']);
+    for (const out of ['SWF-920012', 'SWP-920009', 'SWP-920010', 'SWP-920011', 'SWR-920014', 'SWF-920015', 'SWMS-920017']) {
+      await box.fill(out);
+      await expect(root.locator('.dpc-job-list')).toHaveText('No To do jobs match.');
+    }
+    await root.locator('[data-dpc-mode="all"]').click();
+    await box.fill('SWMS-920017');
+    await expect(cards.locator('strong')).toHaveText(['SWMS-920017 · Suburb']);
+    await expect(cards.locator('.dpc-stage')).toHaveCount(0);
+    await cards.first().click();
+    await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWMS-920017 · Suburb');
+    await expect(tape).toHaveCount(0);
+    await expect(root.locator('.dpc-jobhead')).not.toContainText(/Dispatch stage|stage/i);
+  });
+
+  test('cards carry the stage line and the next-step line only when there is one', async ({ page }) => {
+    const { root } = await bootRail(page, { mode: 'all' });
+    const card = (n) => root.locator('.dpc-job', { hasText: n });
+    const expected = {
+      'SWF-920001': 'Stage: Accepted', 'SWF-920002': 'Stage: Deposit paid', 'SWF-920003': 'Stage: Materials ordered', 'SWP-920005': 'Stage: Supplier confirmed',
+      'SWP-920006': 'Stage: Materials on site', 'SWF-920012': 'Done: trade scheduled', 'SWF-920015': 'Not on the rail yet', 'SWR-920014': 'Not on the rail yet',
+    };
+    for (const [n, line] of Object.entries(expected)) await expect(card(n).locator('.dpc-stage')).toHaveText(line);
+    await expect(card('SWF-920012').locator('.dpc-stage')).toHaveClass(/dpc-stage-done/);
+    await expect(card('SWF-920001').locator('.dpc-next')).toHaveText('CHASE DEPOSIT');
+    await expect(root.locator('.dpc-next')).toHaveCount(1);
+    await expect(card('SWF-920002')).not.toContainText(/next step/i);
+    // A card's last line is still the install line.
+    await expect(card('SWF-920002').locator(':scope > span').last()).toHaveText('Not booked');
+  });
+
+  test('the rail draws each stop, its marks and where the place came from', async ({ page }) => {
+    const { tape, open } = await bootRail(page);
+    await expect(tape.locator('.dpc-tape-label')).toHaveText(NAMES);
+    await expect(tape).not.toContainText(/Installed/);
+    const cases = [
+      ['SWF-920015', 'Not started', 0, 'From the job status: Partially Accepted. Not set in Dispatch yet.'],
+      ['SWF-920001', 'Accepted', 1, 'From the job status: Awaiting Deposit. Not set in Dispatch yet.'],
+      ['SWF-920002', 'Deposit paid', 2, 'From the job status: Order Materials. Not set in Dispatch yet.'],
+      ['SWF-920003', 'Materials ordered', 3, 'From the job status: Awaiting Supplier. Not set in Dispatch yet.'],
+      ['SWP-920005', 'Supplier confirmed', 4, 'From the job status: Schedule Install. Not set in Dispatch yet.'],
+      ['SWP-920006', 'Materials on site', 5, `Set by Office Person, ${SET_DAY}`],
+      ['SWF-920012', 'Trade scheduled', 6, 'From the job status: Scheduled. Not set in Dispatch yet.'],
+      ['SWR-920007', 'Accepted', 1, 'From the Repairs board: Approved. Not set in Dispatch yet.'],
+      ['SWF-920008', 'Deposit paid', 2, 'From the Repairs board: Materials. Not set in Dispatch yet.'],
+      ['SWF-920013', 'Trade scheduled', 6, 'From the Repairs board: Complete. Not set in Dispatch yet.'],
+      ['SWR-920014', 'Not started', 0, 'From the Repairs board: WO In. Not set in Dispatch yet.'],
+      ['SWF-920004', 'Materials ordered', 3, `Set ${SET_DAY}`],
+    ];
+    for (const [n, name, i, source] of cases) {
+      await open(n);
+      await expect(tape.locator('.dpc-tape-meta')).toHaveText(new RegExp(`Dispatch stage\\s*${name}\\s*${i} of 6`));
+      await expect(tape.locator('.dpc-tape-mark.done')).toHaveCount(Math.max(i - 1, 0));
+      await expect(tape.locator('.dpc-tape-mark.now')).toHaveCount(i ? 1 : 0);
+      await expect(tape.locator('.dpc-tape-mark:not(.done):not(.now)')).toHaveCount(i ? 6 - i : 6);
+      await expect(tape.locator('.dpc-tape-fill')).toHaveCount(i > 1 ? 1 : 0);
+      await expect(tape.locator('.dpc-tape-note').first()).toHaveText(source);
+    }
+    // Only a job the council rule holds out says why it is not in To do.
+    const outs = { 'SWP-920009': 'Not in To do: in council.', 'SWP-920010': 'Not in To do: council not decided on the Jobs tab.', 'SWP-920011': 'Not in To do: council approval still to come.' };
+    for (const [n, line] of Object.entries(outs)) {
+      await open(n);
+      await expect(tape.locator('.dpc-tape-note')).toHaveText([/^From the job status/, line]);
+    }
+    await open('SWF-920012');
+    await expect(tape.locator('.dpc-tape-note')).toHaveCount(1);
+  });
+
+  test('a press opens the confirm line and sends nothing; Cancel sends nothing; Move sends one set_dispatch_stage', async ({ page }) => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const { root, tape, calls, of } = await bootRail(page, { stage: async () => { await gate; } });
+    await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-920001 · Suburb');
+    await page.waitForLoadState('networkidle');
+    const reads = of('pipeline').length;
+    await tape.locator('[data-dpc-stage="materials_ordered"]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toContainText('Move SWF-920001 from Accepted to Materials ordered?');
+    await tape.locator('[data-dpc-stage-cancel]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toHaveCount(0);
+    expect(writes(calls)).toEqual([]);
+
+    await tape.locator('[data-dpc-stage="materials_ordered"]').click();
+    await tape.locator('[data-dpc-stage-go]').click();
+    // In flight: no stop and neither button can be pressed.
+    await expect(tape.locator('[data-dpc-stage]:not([disabled])')).toHaveCount(0);
+    await expect(tape.locator('[data-dpc-stage-go]')).toBeDisabled();
+    await expect(tape.locator('[data-dpc-stage-cancel]')).toBeDisabled();
+    release();
+    await expect(tape.locator('.dpc-tape-meta strong')).toHaveText('Materials ordered');
+    await expect(tape.locator('.dpc-tape-note').first()).toHaveText(`Set by Office Person, ${SET_DAY}`);
+    await expect(root.locator('.dpc-job', { hasText: 'SWF-920001' }).locator('.dpc-stage')).toHaveText('Stage: Materials ordered');
+    await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-920001 · Suburb');
+    await expect.poll(() => of('pipeline').length).toBe(reads + 1);
+    const sent = writes(calls);
+    expect(sent.map((c) => c.action)).toEqual(['set_dispatch_stage']);
+    expect(sent[0].body).toEqual({ job_id: 'job-swf-920001', stage: 'materials_ordered', expected_stage: 'accepted', operator_email: 'ops-e2e@example.test' });
+    // Nothing that moves a job status, a Repairs board stage, a field or the CRM.
+    expect(calls.some((c) => ['update_job_status', 'update_repair_stage', 'update_job_field'].includes(c.action))).toBe(false);
+  });
+
+  test('moving a job to Trade scheduled takes it out of To do and keeps it open and in All jobs', async ({ page }) => {
+    const { root, tape, open } = await bootRail(page);
+    const requests = [];
+    page.on('request', (r) => requests.push(r.url()));
+    await open('SWF-920003');
+    await tape.locator('[data-dpc-stage="trade_scheduled"]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toContainText('Move SWF-920003 from Materials ordered to Trade scheduled?');
+    await tape.locator('[data-dpc-stage-go]').click();
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do 7', 'All jobs 16']);
+    await expect(root.locator('.dpc-job', { hasText: 'SWF-920003' })).toHaveCount(0);
+    await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-920003 · Suburb');
+    await expect(tape.locator('.dpc-tape-meta')).toContainText('6 of 6');
+    await root.locator('[data-dpc-mode="all"]').click();
+    await expect(root.locator('.dpc-job', { hasText: 'SWF-920003' }).locator('.dpc-stage')).toHaveText('Done: trade scheduled');
+    expect(requests.some((u) => /ghl-proxy|update_job_status|update_repair_stage|update_job_field/.test(u))).toBe(false);
+  });
+
+  test('pinning: the read stop asks to Set; the stop already set does nothing', async ({ page }) => {
+    const { tape, open, calls } = await bootRail(page);
+    await tape.locator('[data-dpc-stage="accepted"]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toContainText('Set SWF-920001 at Accepted?');
+    await expect(tape.locator('[data-dpc-stage-go]')).toHaveText('Set');
+    // Opening another job closes the confirm line.
+    await open('SWF-920004');
+    await expect(tape.locator('.dpc-tape-confirm')).toHaveCount(0);
+    await tape.locator('[data-dpc-stage="materials_ordered"]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toHaveCount(0);
+    await page.waitForTimeout(200);
+    expect(writes(calls)).toEqual([]);
+  });
+
+  test('a failed move says so and is never re-sent; a changed stage shows the latest', async ({ page }) => {
+    let mode = 'fail';
+    const { root, tape, of } = await bootRail(page, {
+      stage: (body, server) => {
+        if (mode === 'fail') return { status: 500, body: { error: 'e2e failure' } };
+        const row = server.jobs.find((r) => r.id === body.job_id);
+        Object.assign(row, { dispatch_stage: 'supplier_confirmed', dispatch_stage_index: 4, dispatch_stage_source: 'set', dispatch_stage_from: null, dispatch_stage_set_at: SET_AT, dispatch_stage_set_by: 'Someone Else' });
+        return { status: 409, body: Object.assign({ error: 'stage changed', code: 'stage_changed', job_id: row.id, job_number: row.job_number }, Object.fromEntries(Object.entries(row).filter(([k]) => k.startsWith('dispatch_')))) };
+      },
+    });
+    await page.waitForLoadState('networkidle');
+    await tape.locator('[data-dpc-stage="deposit_paid"]').click();
+    await tape.locator('[data-dpc-stage-go]').click();
+    await expect(tape.locator('[role="alert"]')).toHaveText('Stage not moved. Retry');
+    await expect(tape.locator('.dpc-tape-meta strong')).toHaveText('Accepted');
+    await page.waitForTimeout(300);
+    expect(of('set_dispatch_stage').length).toBe(1);
+
+    mode = 'changed';
+    const reads = of('pipeline').length;
+    await tape.locator('[data-dpc-stage-retry]').click();
+    await expect(tape.locator('[role="status"]').first()).toHaveText("This job's stage changed. Showing the latest.");
+    await expect(tape.locator('.dpc-tape-meta strong')).toHaveText('Supplier confirmed');
+    await expect(tape.locator('.dpc-tape-note').first()).toHaveText(`Set by Someone Else, ${SET_DAY}`);
+    await expect.poll(() => of('pipeline').length).toBe(reads + 1);
+    expect(of('set_dispatch_stage').length).toBe(2);
+    expect(of('set_dispatch_stage')[1].body.expected_stage).toBe('accepted');
+    await expect(root.locator('.dpc-job', { hasText: 'SWF-920001' }).locator('.dpc-stage')).toHaveText('Stage: Supplier confirmed');
+  });
+
+  test('the next step saves once, shows on the card after the re-read, keeps the text on a failure and clears when empty', async ({ page }) => {
+    let fail = false;
+    const { root, tape, of, calls } = await bootRail(page, { next: () => (fail ? { status: 500, body: { error: 'e2e failure' } } : null) });
+    const box = tape.locator('[data-dpc-next]');
+    const save = tape.locator('[data-dpc-next-save]');
+    const card = root.locator('.dpc-job', { hasText: 'SWF-920001' });
+    await expect(box).toHaveValue('CHASE DEPOSIT');
+    await expect(box).toHaveAttribute('placeholder', 'What happens next on this job');
+    await expect(box).toHaveAttribute('maxlength', '40');
+    await expect(save).toBeDisabled();
+    await box.fill('Order steel Friday');
+    await expect(save).toBeEnabled();
+    const reads = of('pipeline').length;
+    await save.click();
+    await expect(card.locator('.dpc-next')).toHaveText('Order steel Friday');
+    await expect.poll(() => of('pipeline').length).toBe(reads + 1);
+    expect(of('set_dispatch_next_step').map((c) => c.body)).toEqual([{ job_id: 'job-swf-920001', text: 'Order steel Friday', operator_email: 'ops-e2e@example.test' }]);
+    await expect(save).toBeDisabled();
+
+    fail = true;
+    await box.fill('Call the supplier');
+    await save.click();
+    await expect(tape.locator('[role="alert"]')).toHaveText('Next step not saved. Your text is still here.');
+    await expect(box).toHaveValue('Call the supplier');
+    await expect(card.locator('.dpc-next')).toHaveText('Order steel Friday');
+
+    fail = false;
+    await box.fill('');
+    await save.click();
+    await expect(card.locator('.dpc-next')).toHaveCount(0);
+    await expect(box).toHaveValue('');
+    expect(writes(calls).map((c) => c.action)).toEqual(['set_dispatch_next_step', 'set_dispatch_next_step', 'set_dispatch_next_step']);
+    // A job without a next step shows no line and no placeholder on its card.
+    await expect(root.locator('.dpc-job', { hasText: 'SWF-920002' }).locator('.dpc-next')).toHaveCount(0);
+  });
+
+  test('a failed stage read, or an answer without the stage fields, fails To do and the rail but All jobs still lists', async ({ page }) => {
+    let shape = 'failed';
+    const strip = (jobs) => jobs.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('dispatch_'))));
+    const { root, tape } = await bootRail(page, {
+      list: (jobs) => {
+        if (shape === 'failed') return { columns: { accepted: strip(jobs) }, total: jobs.length, dispatch_stages: 'failed', degraded: true };
+        if (shape === 'missing') return { columns: { accepted: strip(jobs) }, total: jobs.length };
+        if (shape === 'mismatch') return Object.assign(answer(jobs), { todo_total: 99 });
+        return answer(jobs);
+      },
+    });
+    const list = root.locator('.dpc-job-list');
+    for (const s of ['failed', 'missing']) {
+      shape = s;
+      await page.reload();
+      await expect(list.locator('[role="alert"]')).toHaveText('Could not load Dispatch stages. Retry');
+      await expect(root.locator('.dpc-job')).toHaveCount(0);
+      await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs 16']);
+      await expect(tape.locator('[role="alert"]')).toHaveText("Could not load this job's stage. Retry");
+      await expect(tape.locator('[data-dpc-stage]')).toHaveCount(0);
+      await expect(root.locator('.dpc-stage')).toHaveCount(0);
+      await root.locator('[data-dpc-mode="all"]').click();
+      await expect(root.locator('.dpc-job')).toHaveCount(16);
+      await expect(root.locator('.dpc-job .dpc-stage')).toHaveCount(0);
+      await root.locator('[data-dpc-mode="todo"]').click();
+    }
+    shape = 'ok';
+    await list.locator('[data-dpc-retry="list"]').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(8);
+    await expect(tape.locator('.dpc-tape-meta strong')).toBeVisible();
+
+    // A To do count that does not match its rows is a failed list read: no numbers.
+    shape = 'mismatch';
+    await page.reload();
+    await expect(list.locator('[role="alert"]')).toHaveText('Could not load jobs. Retry');
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs']);
+  });
+
+  test('a failed list read shows the error and no number on either button', async ({ page }) => {
+    const { root } = await bootRail(page, { list: () => ({ status: 500, body: { error: 'e2e failure' } }) });
+    await expect(root.locator('.dpc-job-list [role="alert"]')).toHaveText('Could not load jobs. Retry');
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs']);
+  });
+
+  test('six stops fit without overlap at 1440 and 1200', async ({ page }) => {
+    const { root, tape } = await bootRail(page, { viewport: { width: 1440, height: 900 } });
+    const labelBoxes = () => tape.locator('.dpc-tape-label').evaluateAll((els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      // The words drawn, not the box: a range over the text.
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const t = range.getBoundingClientRect();
+      return { left: t.left, right: t.right, visible: r.width > 1 };
+    }));
+    const buttonBoxes = () => tape.locator('[data-dpc-stage]').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height }; }));
+    for (const width of [1440, 1200]) {
+      await page.setViewportSize({ width, height: 900 });
+      const labels = await labelBoxes();
+      expect(labels.every((b) => b.visible)).toBe(true);
+      for (let i = 1; i < labels.length; i++) expect(labels[i].left).toBeGreaterThan(labels[i - 1].right);
+      const buttons = await buttonBoxes();
+      for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThanOrEqual(buttons[i - 1].right - 0.5);
+      const panel = await tape.boundingBox();
+      expect(labels[0].left).toBeGreaterThanOrEqual(panel.x);
+      expect(labels[5].right).toBeLessThanOrEqual(panel.x + panel.width);
+    }
+  });
+
+  test('at 390 wide every stop is a 44 by 44 target, the labels are hidden and nothing runs past the screen edge', async ({ page }) => {
+    const { root, tape } = await bootRail(page, { viewport: { width: 390, height: 844 } });
+    await expect(tape.locator('.dpc-tape-meta strong')).toHaveText('Accepted');
+    const buttons = await tape.locator('[data-dpc-stage]').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height }; }));
+    expect(buttons.every((b) => b.width >= 44 && b.height >= 44)).toBe(true);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThanOrEqual(buttons[i - 1].right - 0.5);
+    expect(await tape.locator('.dpc-tape-label').evaluateAll((els) => els.every((e) => e.getBoundingClientRect().width <= 1))).toBe(true);
+    const past = await page.evaluate(() => {
+      const view = document.querySelector('#dispatchRoot');
+      const width = document.documentElement.clientWidth;
+      return [view].concat(Array.from(view.querySelectorAll('*'))).filter((el) => {
+        const box = el.getBoundingClientRect();
+        return box.width > 1 && (box.right > width + 0.5 || box.left < -0.5);
+      }).map((el) => el.className || el.tagName);
+    });
+    expect(past).toEqual([]);
+    // At phone width the confirm line is where the stop is named.
+    await tape.locator('[data-dpc-stage="supplier_confirmed"]').click();
+    await expect(tape.locator('.dpc-tape-confirm')).toContainText('Move SWF-920001 from Accepted to Supplier confirmed?');
+    await expect(root.locator('.dpc-tape-confirm [data-dpc-stage-go]')).toBeVisible();
+  });
 });

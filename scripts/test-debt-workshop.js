@@ -55,6 +55,17 @@ check('Perth dates and words', () => {
   assert.strictEqual(C.perthTime('2026-10-07T23:02:00Z'), '7:02am');
 });
 
+check('invoice names never repeat a word: Invoice INV-1059, Final invoice INV-1705', () => {
+  assert.strictEqual(C.invoiceLabel(null, 'INV-1059'), 'Invoice INV-1059');
+  assert.strictEqual(C.invoiceLabel('invoice', 'INV-1059'), 'Invoice INV-1059');
+  assert.strictEqual(C.invoiceLabel('final', 'INV-1705'), 'Final invoice INV-1705');
+  assert.strictEqual(C.invoiceLabel('go_ahead', 'INV-1068'), 'Go-ahead invoice INV-1068');
+  assert.strictEqual(C.invoiceLabel('deposit', 'INV-1001'), 'Deposit invoice INV-1001');
+  assert.strictEqual(C.invoiceLabel('progress', 'INV-1002'), 'Progress invoice INV-1002');
+  assert.strictEqual(C.invoiceLabel(undefined, ''), 'Invoice');
+  // The screen builds every invoice name through invoiceLabel, never "kind + ' invoice '".
+  assert.ok(src.indexOf("kindWord(i.kind) + ' invoice '") < 0 && src.indexOf("kindWord(row.kind) + ' invoice '") < 0);
+});
 check('job type filter: fencing, patio, and the account lane or make-safe work is Insurance', () => {
   assert.strictEqual(C.typeKey({ job_type: 'fencing', lane: 'homeowner' }), 'fencing');
   assert.strictEqual(C.typeKey({ job_type: 'patio', lane: 'homeowner' }), 'patio');

@@ -185,6 +185,13 @@ var DebtWorkshopCore = (function () {
   function kindWord(kind) {
     return { final: 'Final', progress: 'Progress', account: 'Account', deposit: 'Deposit', go_ahead: 'Go-ahead' }[kind] || 'Invoice';
   }
+  // An invoice's name on screen: "Final invoice INV-1705", "Go-ahead invoice INV-1068", or
+  // plain "Invoice INV-1059" when the kind is unknown (never "Invoice invoice ...").
+  function invoiceLabel(kind, number) {
+    var word = kindWord(kind);
+    var name = word === 'Invoice' ? word : word + ' invoice';
+    return number ? name + ' ' + String(number) : name;
+  }
 
   // A step is ready to act on when the backend says one is due (a draft always exists for a
   // due step: the template when the agent has not written one), or an agent suggestion waits.
@@ -545,7 +552,7 @@ var DebtWorkshopCore = (function () {
     CATS: CATS, FILTERS: FILTERS, BADGES: BADGES, STEPS: STEPS, REFUSALS: REFUSALS, SENDING_OFF_WORDS: SENDING_OFF_WORDS,
     num: num, money: money, money0: money0, plural: plural, perthDate: perthDate, dayNum: dayNum, dateWords: dateWords,
     perthDay: perthDay, perthTime: perthTime, whenWords: whenWords, dayLabel: dayLabel, catByKey: catByKey,
-    typeKey: typeKey, badge: badge, stepLabel: stepLabel, kindWord: kindWord, isReady: isReady, nextStep: nextStep,
+    typeKey: typeKey, badge: badge, stepLabel: stepLabel, kindWord: kindWord, invoiceLabel: invoiceLabel, isReady: isReady, nextStep: nextStep,
     dayText: dayText, statementWords: statementWords, statementGate: statementGate, items: items, totals: totals,
     defaultCategory: defaultCategory, listFor: listFor, notDueRows: notDueRows, donut: donut, sendGate: sendGate,
     hasBanned: hasBanned, refusalCode: refusalCode, refusalText: refusalText, answerRefused: answerRefused,
@@ -1183,7 +1190,7 @@ function dwJobHtml() {
     : '<span class="dw-pill none">Not due yet</span>';
   if (!paid) pill += dwCatMenuHtml(row);
   var site = job.site_address ? String(job.site_address) + (job.site_suburb && String(job.site_address).indexOf(job.site_suburb) < 0 ? ', ' + job.site_suburb : '') : '';
-  var inv = row.invoice_number ? C.kindWord(row.kind) + ' invoice ' + row.invoice_number + (row.invoice_date ? ' sent ' + C.dateWords(row.invoice_date) : '') : '';
+  var inv = row.invoice_number ? C.invoiceLabel(row.kind, row.invoice_number) + (row.invoice_date ? ' sent ' + C.dateWords(row.invoice_date) : '') : '';
   var sub = [site, job.job_number || row.job_number, inv].filter(Boolean).map(dwEsc).join(' · ');
   var paused = C.isPaused(row, today) ? '<div class="dw-paused">Follow-ups paused until ' + dwEsc(C.dateWords(row.paused_until)) + ', a promise to pay.</div>' : '';
   var shareLine = C.shareSummary(job.shares, C.payerOf(J).label);
@@ -1245,7 +1252,7 @@ function dwLeftHtml(J) {
     var paid = String(i.status || '').toUpperCase() === 'PAID' || Number(i.amount_due) <= 0;
     var part = !paid && C.num(i.amount_due) !== C.num(i.total); // part paid: show both figures
     var meta = [paid || part ? C.money(i.total) : '', paid ? 'paid' : C.money(i.amount_due) + ' owing', i.date || i.invoice_date ? C.dateWords(i.date || i.invoice_date) : ''].filter(Boolean).join(' · ');
-    docs += '<button type="button" class="dw-doc" data-dw="inv" data-k="' + dwEsc(id) + '"><span class="ic">PDF</span><span><span class="n">' + dwEsc(C.kindWord(i.kind) + ' invoice ' + (num || '')) + '</span><span class="m">' + dwEsc(meta) + '</span></span></button>';
+    docs += '<button type="button" class="dw-doc" data-dw="inv" data-k="' + dwEsc(id) + '"><span class="ic">PDF</span><span><span class="n">' + dwEsc(C.invoiceLabel(i.kind, num)) + '</span><span class="m">' + dwEsc(meta) + '</span></span></button>';
   });
   (J.documents || []).forEach(function (d) {
     var k = C.fileKind(d.mime, d.name);

@@ -2576,7 +2576,7 @@ function fakeOrders(seed = {}, mailSeed = {}) {
       if (!d) return refuse(404, 'draft_not_found');
       if (d.draft_hash !== b.expected_draft_hash) return refuse(409, 'draft_changed', { draft: d });
       const f = forced('dispatch_order_send');
-      if (f) { if (f.body && f.body.code === 'send_unknown') d.status = 'send_unknown'; return f; }
+      if (f) { if (f.body && f.body.code === 'send_unknown') { d.status = 'send_unknown'; d.updated_at = f.at || stamp(); } return f; }
       const o = fake.job(jobId).orders.find((x) => x.id === d.purchase_order_id);
       o.last_sent_at = stamp();
       o.last_sent_pdf_version = o.pdf_version;
@@ -2587,6 +2587,16 @@ function fakeOrders(seed = {}, mailSeed = {}) {
         messages: [{ id: 'msg-' + d.id, direction: 'outbound', from_email: 'orders@secureworksgroup.app', to_email: d.to.email, subject: d.subject, text: d.body_text,
           at: o.last_sent_at, attachments: [{ file_name: `${o.po_number}.pdf` }], delivery_status: 'sent' }] });
       return { success: true, filed: true, draft: { id: d.id, status: 'sent' } };
+    },
+    dispatch_order_release_unknown: (url, b) => {
+      const f = forced('dispatch_order_release_unknown');
+      if (f) return f;
+      const d = Object.values(fake.mail).flatMap((x) => x.drafts).find((x) => x.id === b.draft_id);
+      if (!d || d.status !== 'send_unknown') return refuse(409, 'draft_not_unknown');
+      if (d.updated_at !== b.expected_updated_at) return refuse(409, 'draft_changed', { draft: d });
+      Object.assign(d, { status: 'draft', last_error: 'Released as not sent by ops@example.test', updated_at: stamp() });
+      d.draft_hash = 'hash-' + d.updated_at;
+      return { success: true, draft: Object.assign({}, d) };
     },
     dispatch_order_reply: (url, b) => forced('dispatch_order_reply') || { success: true, filed: true },
     dispatch_email_link_po: (url, b) => forced('dispatch_email_link_po') || { success: true, thread: null },
@@ -2707,8 +2717,27 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     await expect(card(mat, 'Acacia Steel').locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Send not confirmed');
     await page.waitForTimeout(400);
     expect(of('dispatch_order_send')).toHaveLength(2);
+    await expect(view).not.toContainText('more than 24 hours');
+
+    // It did not go: a confirm line, then one release, nothing sent, and who released it.
+    await view.locator('[data-dpc-mail="release"]').click();
+    await expect(view.locator('.dpc-mail-confirm p')).toContainText('Unlock this draft?');
+    await view.locator('[data-dpc-mail="release-no"]').click();
+    expect(of('dispatch_order_release_unknown')).toHaveLength(0);
+    await view.locator('[data-dpc-mail="release"]').click();
+    await view.locator('[data-dpc-mail="release-go"]').click();
+    await expect(view).toContainText(/Released as not sent by ops@example\.test, \w{3} \d+\/10 .+\. Nothing was sent by the release\./);
+    expect(of('dispatch_order_release_unknown')).toHaveLength(1);
+    expect(of('dispatch_order_send')).toHaveLength(2);
+    await expect(view.locator('[data-dpc-mail="send"]')).toBeEnabled();
+
+    // Stuck for more than a day: the screen says to check before a retry.
+    fake.fail.dispatch_order_send = [{ status: 502, body: { error: 'unknown', code: 'send_unknown' }, at: new Date(Date.now() - 25 * 3600 * 1000).toISOString() }];
+    await view.locator('[data-dpc-mail="send"]').click();
+    await view.locator('[data-dpc-mail="send-go"]').click();
+    await expect(view).toContainText('This send has not been confirmed for more than 24 hours. Check the supplier thread and ask the supplier before trying again');
     await view.locator('[data-dpc-mail="send-again"]').click();
-    await expect.poll(() => of('dispatch_order_send').length).toBe(3);
+    await expect.poll(() => of('dispatch_order_send').length).toBe(4);
     await expect(card(mat, 'Acacia Steel').locator('.dpc-suphead .dpc-status')).toHaveText('PO-1000001 · Sent 15/10');
   });
 

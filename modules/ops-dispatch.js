@@ -1755,7 +1755,7 @@
   function newMail(jobId) {
     return {
       jobId: jobId, status: 'loading', token: 0, drafts: [], threads: [], threadsOk: true, ordersForLink: [],
-      sel: null, edits: {}, ask: null, busy: {}, msg: {}, replies: {}, link: {}, notice: ''
+      sel: null, edits: {}, ask: null, busy: {}, msg: {}, replies: {}, link: {}, notice: '', released: {}
     };
   }
 
@@ -2110,9 +2110,11 @@
     paintMailIf(jobId);
     Promise.resolve().then(function () {
       return global.opsPost('dispatch_order_release_unknown', { draft_id: id, expected_updated_at: d.updated_at });
-    }).then(writeOk).then(function () {
+    }).then(writeOk).then(function (resp) {
       delete m.busy['release:' + id];
       m.msg['send:' + id] = null;
+      // When it was released: the release answer's stamp (the server keeps who).
+      m.released[id] = (resp.draft && resp.draft.updated_at) || new Date().toISOString();
       afterOrderWrite(jobId, null);
     }, function (err) {
       delete m.busy['release:' + id];
@@ -3252,6 +3254,23 @@
       (msg.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</p>';
   }
 
+  // A released send (dispatch_order_release_unknown): the server writes who into
+  // last_error; when comes from the release answer's stamp. A later save moves
+  // the draft's own stamp, so it is never used as the release time.
+  var RELEASED_RE = /^Released as not sent by (.+)$/;
+  function releasedHtml(m, d) {
+    var who = RELEASED_RE.exec(text(d.last_error));
+    if (!who || d.status !== 'draft') return '';
+    var at = m.released[d.id] || null;
+    var when = stampText(at);
+    return '<p class="dpc-mail-msg" role="status">Released as not sent by ' + esc(who[1]) + (when ? ', ' + esc(when) : '') + '. Nothing was sent by the release.</p>';
+  }
+
+  // A send not confirmed for more than a day: Resend's guard against a second
+  // copy has lapsed, so the person must check before trying again.
+  var DAY_MS = 24 * 3600 * 1000;
+  function stuckOverDay(d) { var t = Date.parse(text(d.updated_at)); return isFinite(t) && Date.now() - t > DAY_MS; }
+
   function draftViewHtml(m, d) {
     var id = esc(d.id);
     var ref = 'data-dpc-mail-key="' + id + '"';
@@ -3277,6 +3296,9 @@
     var ask = m.ask && m.ask.id === d.id ? m.ask.kind : null;
     if (unknown) {
       h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">We could not tell whether this email went. Check the thread before trying again.</p>';
+      if (stuckOverDay(d)) {
+        h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">This send has not been confirmed for more than 24 hours. Check the supplier thread and ask the supplier before trying again: a retry now can send them a second copy.</p>';
+      }
       h += msgHtml(m.msg['release:' + d.id]);
       if (ask === 'release') {
         h += confirmHtml('Unlock this draft? Only do this once you have checked the thread and the supplier\'s mailbox and the email did not go. Nothing is sent.',
@@ -3287,6 +3309,7 @@
       }
       return h;
     }
+    h += releasedHtml(m, d);
     h += msgHtml(m.msg['send:' + d.id]);
     h += msgHtml(m.msg['discard:' + d.id], 'data-dpc-mail="discard-go" ' + ref);
     if (ask === 'send' && !sendBlock(m, d)) {

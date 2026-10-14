@@ -46,15 +46,20 @@ lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
-section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slice 1
-of the approved design: job list, job header, Scope and notes). It reads
-`pipeline&dispatch=1`, `job_detail` (once per job open) and `job_notes`, and its
-only write is `add_note`, always `visibility: 'internal_only'`; a failed read
-never renders as empty, and a later slice is not drawn until it is real. Below
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
+and 2 of the approved design: job list, job header, Scope and notes, and the
+right panel of Sources, Context story and Messages). It reads
+`pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
+a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
+`get_conversation` and `get_job_conversation` only when their tab is first shown.
+Its writes are `add_note` (always `visibility: 'internal_only'`) and a pressed
+`send_sms` from `+61489267771`; a quote with no stored PDF is never opened
+through `send-quote/view`, which records a client view. A failed read never
+renders as empty, and a later slice is not drawn until it is real. Below
 it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
-Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
-`tests/e2e/ops-tab-set.spec.js`.
+Rcvd and Mark Paid), loaded when Dispatch opens. Guards:
+`tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`.
 
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /

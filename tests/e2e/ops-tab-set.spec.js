@@ -201,6 +201,30 @@ const D_NOTES = {
   ] },
 };
 
+// Slice 1's section, now that slice 4 draws a second one under it.
+const SCOPE_SEC = '.dpc-sec:not(.dpc-mat)';
+const SCOPE_TOGGLE = '[data-dpc-toggle=""]';
+
+// ── Slice 4 fixtures: made-up supplier contacts, lines and orders ──
+const SID = (n) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const LID = (n) => `1e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const SUP = (n, name, over) => Object.assign({ id: SID(n), org_id: 'org-e2e', name, email: null, phone: null, is_active: true, categories: [], xero_contact_id: null }, over);
+// Tagged (material suppliers): Acacia Steel and Banksia Roofing. Coastal Fixings is
+// entered twice, once in Xero; the second differs only by case, spaces and a full stop.
+const D_SUPPLIER_ROWS = [
+  SUP(1, 'Acacia Steel', { email: 'orders@acacia.example', categories: ['steel'], xero_contact_id: 'xc-1' }),
+  SUP(2, 'Banksia Roofing', { categories: ['roofing'], xero_contact_id: 'xc-2' }),
+  SUP(3, 'Coastal Fixings', { email: 'sales@coastal.example', xero_contact_id: 'xc-3' }),
+  SUP(4, 'coastal  fixings.', { xero_contact_id: null }),
+  SUP(5, 'Dune Timber', { xero_contact_id: 'xc-5' }),
+  SUP(6, 'Emu Concrete', { email: 'yard@emu.example', xero_contact_id: 'xc-6' }),
+];
+const D_SUPPLIERS = () => ({ suppliers: D_SUPPLIER_ROWS.map((r) => Object.assign({}, r)) });
+const MAT = (over) => Object.assign({
+  job_id: 'job-f1', job_number: 'SWF-900101', work_type: 'fencing', suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
+  workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
+}, over);
+
 const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
   id: 'job-n' + i, job_number: 'SWF-' + (910000 + i), type: i % 3 ? 'fencing' : 'patio', site_suburb: 'Suburb ' + i,
   description: i % 2 ? 'A deliberately long one line description to wrap on a narrow phone screen ' + i : null,
@@ -218,6 +242,9 @@ async function bootDispatch(page, api = {}, { viewport = null, open = true, mode
     job_detail: (url) => D_DETAIL[url.searchParams.get('jobId')] || { status: 404, body: { error: 'Job not found' } },
     job_notes: (url) => D_NOTES[url.searchParams.get('jobId')] || { job_id: url.searchParams.get('jobId'), total: 0, notes: [] },
     list_pos: () => ({ purchase_orders: [] }),
+    // Slice 4: an empty Materials by supplier section and the supplier contacts.
+    dispatch_materials: (url) => MAT({ job_id: url.searchParams.get('job_id') }),
+    list_suppliers: () => D_SUPPLIERS(),
   }, api);
   if (viewport) await page.setViewportSize(viewport);
   if (mode) {
@@ -272,10 +299,11 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
-  for (const later of ['.dpc-banner', '.dpc-supcard', '.dpc-mail', '.dpc-deliv']) {
+  // Materials by supplier (slice 4) is drawn under Scope and notes: its own tests below.
+  for (const later of ['.dpc-banner', '.dpc-mail', '.dpc-deliv']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec')).toHaveCount(1);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier']);
   await expect(root).not.toContainText(/items ready|crew/i);
 });
 
@@ -428,7 +456,7 @@ test('Dispatch: the header prints the price, GST label, install day and work typ
 
 test('Dispatch: Scope and notes shows the scope facts, scope photos, quote, scoper and council lines', async ({ page }) => {
   const { root } = await bootDispatch(page);
-  const sec = root.locator('.dpc-sec');
+  const sec = root.locator(SCOPE_SEC);
   await expect(sec.locator('.dpc-eyebrow')).toHaveText('Before ordering');
   await expect(sec.locator('h3')).toHaveText('Scope and notes');
   await expect(sec.locator('.dpc-sec-head p')).toHaveText('From the scope tool, plus notes saved on the job');
@@ -518,7 +546,7 @@ test('Dispatch: a scope picture the office attached as an image counts as a scop
       return D_DETAIL[id];
     },
   });
-  const sec = root.locator('.dpc-sec');
+  const sec = root.locator(SCOPE_SEC);
   const photos = sec.locator('.dpc-photo');
   await expect(photos).toHaveCount(1);
   await expect(photos.first().locator('span')).toHaveText('Office picture');
@@ -593,8 +621,8 @@ test('Dispatch: the fence tool note fields are one list, read by the Jobs tab an
     window.fenceScopingNoteFields = (s) => listed(s).concat([{ key: 'access', label: 'Access notes', text: 'Gate code is at the office' }]);
   });
   expect(await page.evaluate((s) => renderFenceScopingNotes(s), scope)).toContain(block('Access notes', 'Gate code is at the office'));
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await expect(lines).toHaveCount(5);
   await expect(lines.last()).toHaveText('Scoper notes (access): Gate code is at the office');
 });
@@ -625,7 +653,7 @@ test('Dispatch: saved notes show every note, an author only when there is one, a
   await expect(failed).toContainText('Could not load notes.');
   await expect(root.locator('[data-dpc-region="notes"]')).not.toContainText('No notes saved');
   // The scope and the note box still work when only the notes read failed.
-  await expect(root.locator('.dpc-sec')).toContainText('No scope saved on this job.');
+  await expect(root.locator(SCOPE_SEC)).toContainText('No scope saved on this job.');
   await expect(root.locator('[data-dpc-note]')).toBeEnabled();
   notesDown = false;
   const before = of('job_detail').length;
@@ -767,7 +795,7 @@ test('Dispatch: an empty list, a degraded read and a failed job read each say so
   await expect(root.locator('.dpc-photo')).toHaveCount(6);
 });
 
-test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail once per job open', async ({ page }) => {
+test('Dispatch: reads only pipeline, job_detail, job_notes and the materials reads, and job_detail once per job open', async ({ page }) => {
   let notesDown = false;
   const { root, calls, of } = await bootDispatch(page, {
     job_notes: (url) => {
@@ -788,8 +816,8 @@ test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail on
   await root.locator('.dpc-job', { hasText: 'SWF-900101' }).click();
   await root.locator('[data-dpc-type="fencing"]').click();
   await root.locator('[data-dpc-type="all"]').click();
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await root.locator('[data-dpc-side]').click();
   await root.locator('[data-dpc-side]').click();
   await expect(root.locator('.dpc-job')).toHaveCount(5);
@@ -821,7 +849,9 @@ test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail on
   // The failed read, its retry, and the re-read after the save.
   await expect.poll(() => calls.slice(mark).filter((c) => c.action === 'job_notes').length).toBe(3);
   const since = calls.slice(mark);
-  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'job_detail', 'job_notes', 'pipeline']);
+  // Slice 4: dispatch_materials once per job open; list_suppliers was read once, before.
+  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_materials', 'job_detail', 'job_notes', 'pipeline']);
+  expect(of('list_suppliers')).toHaveLength(1);
   expect(since.filter((c) => c.method !== 'GET').map((c) => c.action)).toEqual(['add_note']);
   expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1', 'job-p2']);
 });
@@ -984,8 +1014,8 @@ test('Dispatch: a job found by search opens while the job list itself failed to 
   // It stays open once the search is cleared and the section is folded and unfolded.
   await box.fill('');
   await expect(root.locator('.dpc-job-list [role="alert"]')).toContainText('Could not load jobs.');
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await expectOpen();
   down = false;
   await root.locator('.dpc-job-list [data-dpc-retry="list"]').click();
@@ -1023,12 +1053,12 @@ test('Dispatch: the sidebar collapses to a strip and the section folds, and both
   await strip.nth(2).click();
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900202 · High Wycombe');
 
-  await root.locator('[data-dpc-toggle]').click();
-  await expect(root.locator('.dpc-sec')).toHaveClass(/dpc-collapsed/);
-  await expect(root.locator('.dpc-sec-body')).toHaveCount(0);
-  await expect(root.locator('.dpc-sec-head p')).toHaveCount(0);
-  await expect(root.locator('.dpc-sec h3')).toHaveText('Scope and notes');
-  await expect(root.locator('[data-dpc-toggle]')).toHaveAttribute('aria-expanded', 'false');
+  await root.locator(SCOPE_TOGGLE).click();
+  await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-body')).toHaveCount(0);
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-head p')).toHaveCount(0);
+  await expect(root.locator(SCOPE_SEC + ' h3')).toHaveText('Scope and notes');
+  await expect(root.locator(SCOPE_TOGGLE)).toHaveAttribute('aria-expanded', 'false');
 
   // A reload keeps the strip, the folded section and the open job.
   await page.reload();
@@ -1036,13 +1066,13 @@ test('Dispatch: the sidebar collapses to a strip and the section folds, and both
   await expect(root.locator('.dpc-layout')).toHaveClass(/dpc-left-closed/);
   await expect(root.locator('.dpc-rail-job[aria-pressed="true"]')).toHaveText('900202');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900202 · High Wycombe');
-  await expect(root.locator('.dpc-sec')).toHaveClass(/dpc-collapsed/);
+  await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
 
   await root.getByRole('button', { name: 'Open accepted work' }).click();
   await expect.poll(sidebarWidth).toBe(264);
   await expect(root.locator('.dpc-job[aria-pressed="true"] strong')).toHaveText('SWP-900202 · High Wycombe');
-  await root.locator('[data-dpc-toggle]').click();
-  await expect(root.locator('.dpc-sec-body')).toHaveCount(1);
+  await root.locator(SCOPE_TOGGLE).click();
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-body')).toHaveCount(1);
 });
 
 test('Dispatch: a long list is drawn whole, and the phone layout has no sideways scroll', async ({ page }) => {

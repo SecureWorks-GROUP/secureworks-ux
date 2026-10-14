@@ -293,3 +293,79 @@
   .dpc .dpc-tape-confirm button, .dpc .dpc-tape-next button, .dpc-tape-next input { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .dpc-tape-fill { transition: none; } }
+
+/* ---------- Materials by supplier (slice 4) ---------- */
+.dpc select { font: inherit; color: inherit; }
+.dpc-sec-head > .dpc-addsup, .dpc-sec-head > .dpc-addsup-state { margin-top: 18px; flex: 0 1 auto; min-width: 0; max-width: 46%; }
+.dpc-addsup { font-size: 13px; padding: 7px 10px; border: 1px dashed #9DB0BC; border-radius: 8px; background: #fff; color: var(--steel-2); cursor: pointer; }
+.dpc-addsup:disabled { cursor: default; opacity: .7; }
+.dpc-addsup-state { font-size: 13px; color: var(--mute); }
+.dpc-mat-fail, .dpc-mat-fail .dpc-empty { color: var(--signal-deep); }
+.dpc-mat-notice { font-size: 13px; color: var(--mute); margin: 0 0 10px; }
+.dpc-supcard { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 10px; margin-top: 12px; overflow: hidden; }
+.dpc-sec-body > .dpc-supcard:first-child, .dpc-mat-notice + .dpc-supcard { margin-top: 0; }
+/* Head 50 high with the dashed galv rule under it; a long name or email lets it grow. */
+.dpc-suphead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; min-height: 52px; background: var(--galv-2); border-bottom: 2px dashed var(--galv); }
+.dpc-suphead strong { font: 600 17px var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); overflow-wrap: anywhere; }
+.dpc-supdot { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); flex: 0 0 8px; }
+.dpc-supmail { font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc-lines { padding: 6px 6px 2px; }
+.dpc-line { display: grid; grid-template-columns: minmax(0, 2.4fr) 64px 76px minmax(0, 1.25fr) 104px 28px; gap: 6px; align-items: center; padding: 1px 6px; border-radius: 6px; }
+.dpc-line:hover { background: var(--galv-2); }
+.dpc-line-head, .dpc-line-head:hover { background: none; font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--mute); padding: 8px 6px 4px; }
+.dpc-line input, .dpc-line select { width: 100%; min-width: 0; font-size: 13px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.dpc-line input[data-dpc-mat-cell="quantity"], .dpc-line input[data-dpc-mat-cell="unit"], .dpc-mono { font-family: var(--mono); font-size: 12.5px; }
+.dpc-line input:hover, .dpc-line select:hover { border-color: var(--line); }
+.dpc-line input:focus, .dpc-line select:focus { border-color: var(--signal); background: #fff; outline: none; }
+.dpc-line input[aria-invalid="true"] { border-color: var(--signal-deep); }
+.dpc-line-ro > span, .dpc-oline > span { font-size: 13px; padding: 7px 8px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-line-ro > span:nth-child(5) { padding: 0; }
+.dpc-oline { grid-template-columns: minmax(0, 2.4fr) 64px 76px; }
+.dpc-line-empty { font-size: 13px; color: var(--mute); padding: 12px; }
+.dpc-line-msg { font-size: 13px; color: var(--mute); padding: 2px 14px 6px; }
+.dpc-line-msg.dpc-mat-fail { color: var(--signal-deep); }
+.dpc .dpc-x { border: 0; background: none; color: #9DB0BC; font-size: 18px; line-height: 1; padding: 0 6px; }
+.dpc .dpc-x:hover:not(:disabled) { color: var(--signal-deep); }
+.dpc-status { display: inline-block; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
+/* The status box: the chip's look on a native choice box with no border. */
+.dpc .dpc-line select.dpc-status-pick { width: auto; max-width: 100%; justify-self: start; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 7px; border: 0; border-radius: 4px; cursor: pointer; }
+.dpc .dpc-line select.dpc-status-pick:focus { outline: 2px solid var(--signal); outline-offset: 1px; }
+.dpc .dpc-line select.dpc-tone-muted, .dpc-tone-muted { background: var(--galv); color: var(--mute); }
+.dpc .dpc-line select.dpc-tone-warn, .dpc-tone-warn { background: #FCE7DE; color: #A83C16; }
+.dpc .dpc-line select.dpc-tone-ok, .dpc-tone-ok { background: #E4EFE6; color: var(--sage); }
+.dpc-tone-info { background: #E3EDF5; color: #2F5873; }
+.dpc-card-foot { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 2px 12px 12px; }
+.dpc .dpc-addline { border: 0; background: none; padding: 4px 0; font: 500 12px var(--mono); color: var(--signal-deep); }
+.dpc-card-msg { font-size: 13px; color: var(--mute); padding: 0 12px 6px; }
+.dpc-mat-save { font-size: 13px; color: var(--mute); margin-top: 8px; min-height: 0; }
+.dpc-mat-save:empty { margin-top: 0; }
+.dpc-orders { margin-top: 16px; }
+.dpc-mat-h4 { font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--mute); margin: 0 0 8px; }
+.dpc-orders .dpc-ordercard:first-of-type { margin-top: 0; }
+.dpc-order-note { font-size: 13px; color: var(--mute); padding: 0 12px 10px; }
+.dpc-workout { margin-top: 16px; border-top: 1px solid var(--galv); padding-top: 12px; }
+.dpc-workout summary { cursor: pointer; font: 600 15px var(--display); text-transform: uppercase; letter-spacing: .03em; color: var(--steel-2); }
+.dpc-scratch { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; margin-top: 10px; }
+.dpc-scratch .dpc-textarea { min-height: 160px; font-family: var(--mono); font-size: 12.5px; line-height: 22px; background:
+  repeating-linear-gradient(0deg, transparent 0 21px, #E3E9ED 21px 22px) #fff; }
+.dpc-canvas-wrap { position: relative; }
+.dpc-canvas { display: block; width: 100%; height: 160px; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; background:
+  radial-gradient(circle, #C9D6DD 1px, transparent 1.2px) 0 0 / 14px 14px, #fff; }
+.dpc .dpc-canvas-clear { position: absolute; top: 8px; right: 8px; font: 500 10.5px var(--mono); padding: 3px 8px; }
+@media (max-width: 768px) {
+  .dpc-sec-head > .dpc-addsup, .dpc-sec-head > .dpc-addsup-state { max-width: 100%; }
+  .dpc-mat .dpc-sec-head { flex-wrap: wrap; }
+  /* Item, Qty and Unit on one row; the supplier box, the status and the cross wrap under them. */
+  .dpc-line:not(.dpc-oline) { display: flex; flex-wrap: wrap; gap: 0 6px; padding: 6px; border-radius: 0; }
+  .dpc-line:not(.dpc-oline) > :nth-child(1) { flex: 1 1 calc(100% - 138px); min-width: 0; }
+  .dpc-line:not(.dpc-oline) > :nth-child(2) { flex: 0 0 56px; }
+  .dpc-line:not(.dpc-oline) > :nth-child(3) { flex: 0 0 64px; }
+  .dpc-line:not(.dpc-oline) > :nth-child(4) { flex: 1 1 0; min-width: 0; }
+  .dpc-line:not(.dpc-oline) > :nth-child(5) { flex: 0 0 auto; max-width: calc(100% - 34px); }
+  .dpc-line:not(.dpc-oline) > :nth-child(6) { flex: 0 0 28px; }
+  .dpc-line-wrap { border-bottom: 1px solid var(--galv); }
+  .dpc-line-wrap:last-child { border-bottom: 0; }
+  .dpc-oline { grid-template-columns: minmax(0, 1fr) 56px 64px; padding: 6px; border-radius: 0; border-bottom: 1px solid var(--galv); }
+  .dpc-line-head { display: none; }
+  .dpc-scratch { grid-template-columns: 1fr; }
+}

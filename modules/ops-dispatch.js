@@ -37,10 +37,20 @@
  * that failed, or an answer without the stage fields, shows the failed line
  * for To do and the rail, never an empty To do or a rail at Not started.
  *
- * Guards: tests/e2e/ops-tab-set.spec.js (slices 1 and 3) and
+ * Slice 4 adds Materials by supplier under Scope and notes (never on a
+ * make-safe job). Reads: ops-api dispatch_materials once per job open (the
+ * job's chosen suppliers, material lines, counts, working out, sketch and its
+ * purchase orders, read only), and list_suppliers once a session for Add
+ * supplier; the list's materials_lines_total / materials_lines_ready draw a
+ * card's "x of y items ready". Its six writes, each sent once on a person's
+ * edit or press: dispatch_materials_add_supplier, _remove_supplier,
+ * _save_line, _delete_line, _suggest and _save_workings. They touch only
+ * Dispatch's own tables: no purchase order, no message, no job status.
+ *
+ * Guards: tests/e2e/ops-tab-set.spec.js (slices 1, 3 and 4) and
  * tests/e2e/ops-dispatch-panel.spec.js (slice 2).
- * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md and
- * docs/dispatch-slice-3-contract.md.
+ * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md,
+ * docs/dispatch-slice-3-contract.md and docs/dispatch-slice-4-contract.md.
  */
 (function (global) {
   'use strict';
@@ -77,6 +87,9 @@
     council_not_decided: 'Not in To do: council not decided on the Jobs tab.'
   };
   var NEXT_STEP_MAX = 40;
+  var LS_ORDER = 'sw_dispatch_order_open';
+  var LS_WORKOUT = 'sw_dispatch_workout_open';
+  var WORKOUT_SAVE_MS = 1200; // the pad saves when typing stops this long
   var TABS = [
     { key: 'sources', label: 'Sources' },
     { key: 'story', label: 'Context story' },
@@ -198,6 +211,9 @@
       if (typeof r.value_inc_gst !== 'boolean' || !('description' in r) || typeof r.work_type !== 'string' || !r.work_type.trim()) {
         throw new Error('Job list answer is missing the Dispatch fields');
       }
+      // Slice 4's materials_lines_total / materials_lines_ready are only real
+      // when the list's materials read worked; a failed one is never 0 of 0.
+      if (resp.dispatch_materials !== 'ok') { delete r.materials_lines_total; delete r.materials_lines_ready; }
     });
     rows.sort(function (a, b) {
       var ta = Date.parse(a.updated_at) || 0, tb = Date.parse(b.updated_at) || 0;
@@ -208,9 +224,12 @@
     // every row, so no card, list or rail can draw a stage the read did not give.
     var stages = resp.dispatch_stages === 'ok' && typeof resp.todo_total === 'number' &&
       rows.every(function (r) { return typeof r.dispatch_todo === 'boolean' && stageOf(r) !== null; }) ? 'ok' : 'failed';
+    // A todo_total that does not match the To do rows fails To do only: the
+    // stage fields stay on the rows, and All jobs, the cards and the rail draw.
+    var todo = 'failed';
     if (stages === 'ok') {
-      var todo = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
-      if (todo !== resp.todo_total) throw new Error('To do count does not match the To do rows');
+      var marked = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
+      todo = marked === resp.todo_total ? 'ok' : 'failed';
     } else {
       rows.forEach(function (r) {
         Object.keys(r).forEach(function (k) { if (k.indexOf('dispatch_') === 0) delete r[k]; });
@@ -221,7 +240,8 @@
       total: typeof resp.total === 'number' ? resp.total : rows.length,
       degraded: resp.degraded === true,
       stages: stages,
-      todoTotal: stages === 'ok' ? resp.todo_total : null
+      todo: todo,
+      todoTotal: todo === 'ok' ? resp.todo_total : null
     };
   }
 
@@ -554,6 +574,117 @@
     return text(m.author) || 'Sender not recorded';
   }
 
+  // ── slice 4: Materials by supplier's rules ──
+
+  // The three a person sets. On PO is worked out by the server from the line's
+  // order; Delivered comes in slice 6. Neither is ever offered as a choice.
+  var MAT_SETTABLE = ['not_reviewed', 'to_order', 'in_stock'];
+  var MAT_STATUS = {
+    not_reviewed: { label: 'Not reviewed', tone: 'muted' },
+    to_order: { label: 'To order', tone: 'warn' },
+    in_stock: { label: 'In stock', tone: 'ok' },
+    on_po: { label: 'On PO', tone: 'info' },
+    delivered: { label: 'Delivered', tone: 'ok' }
+  };
+  var MAT_QTY_MAX = 999999999.999;
+  var MAT_SKETCH_MAX = 400000;
+
+  function matSettable(s) { return MAT_SETTABLE.indexOf(s) >= 0; }
+
+  // A display status the screen does not name is printed with its underscores
+  // as spaces, never dropped.
+  function matStatusLabel(s) {
+    if (Object.prototype.hasOwnProperty.call(MAT_STATUS, s)) return MAT_STATUS[s].label;
+    return orderStatusWord(s);
+  }
+
+  // An order's stored status: first letter capital, underscores as spaces.
+  function orderStatusWord(s) {
+    var words = text(s).replace(/_/g, ' ');
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Status not recorded';
+  }
+
+  // A Qty cell: empty, or a plain number 0 or more. Nothing is sent otherwise.
+  function matQty(v) {
+    var s = text(v);
+    if (!s) return { ok: true, value: null };
+    if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) return { ok: false, msg: 'Qty must be a number.' };
+    var n = Number(s);
+    if (!isFinite(n)) return { ok: false, msg: 'Qty must be a number.' };
+    if (n > MAT_QTY_MAX) return { ok: false, msg: 'Qty is too large.' };
+    return { ok: true, value: n };
+  }
+
+  function matQtyText(v) { return typeof v === 'number' && isFinite(v) ? String(v) : (v == null ? '' : String(v)); }
+
+  // Names that are the same once case, spaces and punctuation are ignored.
+  function nameKey(v) { return text(v).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  // list_suppliers' answer as the Add supplier list: every active contact not
+  // already chosen, the ones tagged with a category (the material suppliers)
+  // first. Each reads its name, then its email or "no email on file"; where two
+  // active contacts share a name, each also says whether it is in Xero.
+  function supplierOptions(list, chosen) {
+    var active = list.filter(function (s) { return s && s.id && s.is_active !== false; });
+    var seen = {};
+    active.forEach(function (s) { var k = nameKey(s.name); seen[k] = (seen[k] || 0) + 1; });
+    var taken = {};
+    (chosen || []).forEach(function (id) { taken[id] = true; });
+    var out = { tagged: [], rest: [] };
+    active.forEach(function (s) {
+      if (taken[s.id]) return;
+      var label = (text(s.name) || 'Name not recorded') + ' · ' + (text(s.email) || 'no email on file');
+      if (seen[nameKey(s.name)] > 1) label += ' · ' + (text(s.xero_contact_id) ? 'in Xero' : 'not in Xero');
+      (Array.isArray(s.categories) && s.categories.length ? out.tagged : out.rest).push({ id: String(s.id), label: label });
+    });
+    return out;
+  }
+
+  function suppliersFrom(resp) {
+    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.suppliers)) throw new Error('Unexpected suppliers answer');
+    return resp.suppliers;
+  }
+
+  function isCounts(c) {
+    return !!c && typeof c === 'object' && typeof c.total === 'number' && typeof c.ready === 'number';
+  }
+
+  // dispatch_materials' answer. Throws on anything else, so the section shows
+  // its failed line and never an empty table.
+  function materialsFrom(resp) {
+    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.suppliers) || !Array.isArray(resp.lines) ||
+      !isCounts(resp.counts) || !resp.workings || typeof resp.workings !== 'object') {
+      throw new Error('Unexpected materials answer');
+    }
+    var ordersOk = resp.orders_status === 'ok' && Array.isArray(resp.orders);
+    return {
+      suppliers: resp.suppliers.filter(function (s) { return s && s.supplier_id; }),
+      lines: resp.lines.filter(function (l) { return l && l.id; }),
+      counts: resp.counts,
+      canSuggest: resp.can_suggest === true,
+      workings: resp.workings,
+      ordersOk: ordersOk,
+      orders: ordersOk ? resp.orders.filter(function (o) { return o && typeof o === 'object'; }) : []
+    };
+  }
+
+  // "x of y items ready", or '' when the job has no line or the count is not known.
+  function readyText(total, ready) {
+    if (typeof total !== 'number' || typeof ready !== 'number' || !(total > 0)) return '';
+    return ready + ' of ' + total + ' items ready';
+  }
+
+  function newId() {
+    var c = global.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    var b = new Uint8Array(16);
+    if (c && c.getRandomValues) c.getRandomValues(b); else for (var i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    var h = Array.prototype.map.call(b, function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+
   // ───────────────────────── state ─────────────────────────
 
   function tabKey(v) {
@@ -569,8 +700,8 @@
     search: '',
     leftOpen: readStore('localStorage', LS_LEFT) !== '0',
     scopeOpen: readStore('localStorage', LS_SCOPE) !== '0',
-    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todoTotal: null },
-    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null },
+    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null },
+    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null },
     jobId: null,
     row: null,
     rowStale: false,
@@ -594,7 +725,15 @@
     // state: the one open confirm line, the move in flight, the last answer's
     // line, and the next-step box per job.
     mode: readStore('localStorage', LS_MODE) === 'all' ? 'all' : 'todo',
-    stage: { confirm: null, moving: null, msg: null, drafts: {}, saving: {}, nextMsg: {} }
+    stage: { confirm: null, moving: null, msg: null, drafts: {}, saving: {}, nextMsg: {} },
+    // Slice 4, Materials by supplier. jobs[jobId] holds that job's read and
+    // everything typed and not yet saved, so any repaint draws it back.
+    mat: {
+      open: readStore('localStorage', LS_ORDER) !== '0',
+      workOpen: readStore('localStorage', LS_WORKOUT) === '1',
+      sup: { status: 'idle', list: [] },
+      jobs: {}
+    }
   };
   var tokens = { base: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -606,11 +745,15 @@
 
   // To do keeps the rows the read marks dispatch_todo, and none at all when
   // the stage read failed: that shows the failed line, never an empty To do.
+  // To do is drawn only from an answer whose stage read worked and whose
+  // todo_total matches its To do rows.
+  function todoOk(from) { return from.stages === 'ok' && from.todo === 'ok'; }
+
   function listedRows() {
     var from = searching() ? state.found : state.base;
     var rows = from.rows;
     if (state.mode === 'todo') {
-      rows = from.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
+      rows = todoOk(from) ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
     }
     return filterByType(rows, state.type);
   }
@@ -620,7 +763,7 @@
   function listFailed() {
     var from = searching() ? state.found : state.base;
     if (from.status === 'error') return true;
-    return state.mode === 'todo' && from.status === 'ok' && from.stages !== 'ok';
+    return state.mode === 'todo' && from.status === 'ok' && !todoOk(from);
   }
 
   // ───────────────────────── reads ─────────────────────────
@@ -631,11 +774,11 @@
     return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1 }); }).then(function (resp) {
       if (token !== tokens.base) return;
       var got = rowsFromPipeline(resp);
-      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todoTotal: got.todoTotal };
+      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todo: got.todo, todoTotal: got.todoTotal };
       adoptSelection();
     }).catch(function () {
       if (token !== tokens.base) return;
-      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todoTotal: null };
+      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null };
       state.rowStale = true;
       paintList();
       paintWorkspace();
@@ -656,7 +799,7 @@
     if (current) state.row = current;
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
-    var todo = state.mode === 'todo' && state.base.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
+    var todo = state.mode === 'todo' && todoOk(state.base) ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
     var pick = byId(readStore('sessionStorage', SS_JOB)) || todo[0] || rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
@@ -664,17 +807,17 @@
   function runSearch() {
     var q = state.search.trim();
     var token = ++tokens.found;
-    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null }; paintList(); return; }
-    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null };
+    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null }; paintList(); return; }
+    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null, todo: null };
     paintList();
     Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, search: q }); }).then(function (resp) {
       if (token !== tokens.found) return;
       var got = rowsFromPipeline(resp);
-      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages };
+      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages, todo: got.todo };
       paintList();
     }).catch(function () {
       if (token !== tokens.found) return;
-      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null };
+      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null, todo: null };
       paintList();
     });
   }
@@ -737,6 +880,7 @@
     paintContext();
     loadDetail(row.id);
     loadNotes(row.id);
+    loadMat(row);
   }
 
   // The one write this module makes.
@@ -964,6 +1108,579 @@
     });
   }
 
+  // ── slice 4: Materials by supplier, its one read and six writes ──
+  // dispatch_materials is read once per job open, on Retry, and once after a
+  // "changed somewhere else" answer. Each write is sent once, on a person's
+  // edit or press; nothing here retries on its own.
+
+  function isMakesafe(row) { return typeKey(row) === 'makesafe'; }
+  function matEntry(jobId) { return (jobId && state.mat.jobs[jobId]) || null; }
+  function matLine(e, id) {
+    if (!e) return null;
+    for (var i = 0; i < e.lines.length; i++) if (e.lines[i].id === id) return e.lines[i];
+    return null;
+  }
+  function removeLine(e, id) { e.lines = e.lines.filter(function (l) { return l.id !== id; }); }
+  function maxPos(e) { return e.lines.reduce(function (m, l) { return Math.max(m, Number(l.position) || 0); }, 0); }
+  function onOrder(l) { return !matSettable(l.display_status); }
+
+  // What the server holds for a line, to tell an edit from a cell left as it was.
+  function lineSaved(l) {
+    var q = l.quantity;
+    return {
+      supplier_id: String(l.supplier_id), description: text(l.description),
+      quantity: typeof q === 'number' && isFinite(q) ? q : (q == null || q === '' ? null : Number(q)),
+      unit: text(l.unit) || null, status: l.status, pos: Number(l.position) || 0
+    };
+  }
+
+  // What the cells say now, as the save sends it.
+  function lineOut(l) {
+    return { id: l.id, supplier_id: l.supplier_id, description: text(l.description), quantity: matQty(l.quantity).value, unit: text(l.unit) || null, status: l.status };
+  }
+
+  function sameLine(a, b) {
+    return a.supplier_id === b.supplier_id && a.description === b.description && a.quantity === b.quantity && a.unit === b.unit && a.status === b.status;
+  }
+
+  function lineDirty(l) { return !l.saved || !matQty(l.quantity).ok || !sameLine(lineOut(l), l.saved); }
+
+  function lineFrom(l) {
+    return {
+      id: String(l.id), supplier_id: String(l.supplier_id), description: text(l.description), quantity: matQtyText(l.quantity), unit: text(l.unit),
+      status: l.status, display_status: text(l.display_status) || l.status, purchase_order_id: l.purchase_order_id || null, source: l.source,
+      position: Number(l.position) || 0, updated_at: l.updated_at, saved: lineSaved(l),
+      busy: false, again: false, failed: false, delFailed: false, msg: '', retry: false, want: null, gone: false
+    };
+  }
+
+  function newEntry(jobId) {
+    return {
+      jobId: jobId, status: 'loading', token: 0, rereading: false,
+      suppliers: [], lines: [], counts: null, canSuggest: false, orders: [], ordersOk: true,
+      w: {
+        loaded: false, text: '', textSaved: '', textStamp: null, textBusy: false, textAgain: false, textFailed: false, timer: null,
+        sketch: null, sketchSaved: null, sketchStamp: null, sketchBusy: false, sketchAgain: false, sketchFailed: false,
+        sketchMsg: '', sketchBroken: false, clearWanted: false
+      },
+      adding: null, addMsg: null, card: {}, busyCard: {}, notice: '', touched: false
+    };
+  }
+
+  // A fresh read over what the screen holds. A line typed and not yet saved
+  // keeps its text while the server's copy is the one it was typed over; a new
+  // line not yet saved is kept when it has text in it (an empty one only on a
+  // quiet re-read, so a job open drops it). Everything else is the server's.
+  function mergeMat(e, got, quiet) {
+    var mine = {};
+    e.lines.forEach(function (l) { mine[l.id] = l; });
+    // A line is only ever kept under a supplier still chosen for the job.
+    var chosen = {};
+    got.suppliers.forEach(function (s) { chosen[String(s.supplier_id)] = true; });
+    var seen = {};
+    var lines = got.lines.map(function (fresh) {
+      var id = String(fresh.id);
+      seen[id] = true;
+      var l = mine[id];
+      if (l && l.updated_at === fresh.updated_at && chosen[l.supplier_id] && (l.busy || l.gone || l.failed || l.delFailed || lineDirty(l))) return l;
+      return lineFrom(fresh);
+    });
+    e.lines.forEach(function (l) {
+      if (!seen[l.id] && !l.saved && chosen[l.supplier_id] && (l.busy || quiet || text(l.description))) lines.push(l);
+    });
+    e.lines = lines;
+    e.suppliers = got.suppliers;
+    e.counts = got.counts;
+    e.canSuggest = got.canSuggest;
+    e.orders = got.orders;
+    e.ordersOk = got.ordersOk;
+    var w = e.w;
+    var wo = typeof got.workings.working_out === 'string' ? got.workings.working_out : '';
+    var woStamp = got.workings.working_out_updated_at || null;
+    if (!(w.loaded && w.textStamp === woStamp && (w.textBusy || w.text !== w.textSaved))) w.text = wo;
+    w.textSaved = wo;
+    w.textStamp = woStamp;
+    var sk = typeof got.workings.sketch_png === 'string' && got.workings.sketch_png ? got.workings.sketch_png : null;
+    var skStamp = got.workings.sketch_updated_at || null;
+    if (!(w.loaded && w.sketchStamp === skStamp && (w.sketchBusy || w.sketch !== w.sketchSaved))) { w.sketch = sk; w.sketchBroken = false; }
+    w.sketchSaved = sk;
+    w.sketchStamp = skStamp;
+    w.loaded = true;
+  }
+
+  function loadMat(row) {
+    if (!row || !row.id || isMakesafe(row)) return;
+    ensureSuppliers();
+    readMat(row.id, false);
+  }
+
+  function readMat(jobId, quiet) {
+    var e = matEntry(jobId) || (state.mat.jobs[jobId] = newEntry(jobId));
+    var token = ++e.token;
+    if (!quiet || e.status !== 'ok') { e.status = 'loading'; e.notice = quiet ? e.notice : ''; }
+    if (state.jobId === jobId) { paintMat(); paintHead(); }
+    return Promise.resolve().then(function () { return global.opsFetch('dispatch_materials', { job_id: jobId }); }).then(function (resp) {
+      if (token !== e.token) return;
+      mergeMat(e, materialsFrom(resp), quiet);
+      e.status = 'ok';
+      if (state.jobId === jobId) { paintMat(); paintHead(); }
+    }).catch(function () {
+      if (token !== e.token) return;
+      e.status = 'error';
+      if (state.jobId === jobId) { paintMat(); paintHead(); }
+    });
+  }
+
+  // Another tab or person changed what a write was based on: say so and show
+  // the latest, by one quiet re-read.
+  function matChanged(jobId) {
+    var e = matEntry(jobId);
+    if (!e) return;
+    e.notice = 'This changed somewhere else. Showing the latest.';
+    if (state.jobId === jobId) paintMat();
+    if (e.rereading) return;
+    e.rereading = true;
+    readMat(jobId, true).then(function () { e.rereading = false; });
+  }
+
+  // list_suppliers: once a session, on the first job opened with the section,
+  // and again only on Retry. Every column of every active contact (285 rows).
+  function ensureSuppliers(force) {
+    if (!force && state.mat.sup.status !== 'idle') return;
+    var mine = state.mat.sup = { status: 'loading', list: [] };
+    paintMat();
+    Promise.resolve().then(function () { return global.opsFetch('list_suppliers'); }).then(function (resp) {
+      if (state.mat.sup !== mine) return;
+      state.mat.sup = { status: 'ok', list: suppliersFrom(resp) };
+      paintMat();
+    }).catch(function () {
+      if (state.mat.sup !== mine) return;
+      state.mat.sup = { status: 'error', list: [] };
+      paintMat();
+    });
+  }
+
+  // A write's counts redraw "items ready" on the header and the job's card,
+  // without a list re-read. A null counts (the server's after-write count read
+  // failed) keeps the figure already shown.
+  function applyCounts(jobId, counts) {
+    var e = matEntry(jobId);
+    if (!e || !isCounts(counts)) return;
+    e.counts = { total: counts.total, ready: counts.ready };
+    [state.base.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
+      rows.forEach(function (r) {
+        if (r && r.id === jobId) { r.materials_lines_total = counts.total; r.materials_lines_ready = counts.ready; }
+      });
+    });
+    if (state.jobId === jobId) paintHead();
+    paintCard(jobId);
+  }
+
+  function writeOk(resp) {
+    if (!resp || typeof resp !== 'object' || resp.success !== true) throw new Error('Unexpected answer');
+    return resp;
+  }
+
+  function addSupplier(jobId, supplierId) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok' || !supplierId || e.adding) return;
+    e.adding = supplierId;
+    e.addMsg = null;
+    e.notice = '';
+    paintMatIf(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_add_supplier', { job_id: jobId, supplier_id: supplierId });
+    }).then(writeOk).then(function (resp) {
+      if (!resp.supplier || !resp.supplier.supplier_id) throw new Error('Unexpected answer');
+      return resp;
+    }).then(function (resp) {
+      e.adding = null;
+      var s = resp.supplier;
+      if (!e.suppliers.some(function (x) { return String(x.supplier_id) === String(s.supplier_id); })) e.suppliers.push(s);
+      applyCounts(jobId, resp.counts);
+      paintMatIf(jobId);
+    }, function (err) {
+      e.adding = null;
+      e.addMsg = err && err.code === 'supplier_inactive'
+        ? { text: 'Supplier not added: that contact is no longer active.', id: null }
+        : { text: 'Supplier not added.', id: supplierId };
+      paintMatIf(jobId);
+    });
+  }
+
+  function removeSupplier(jobId, supplierId) {
+    var e = matEntry(jobId);
+    if (!e || e.busyCard[supplierId]) return;
+    e.busyCard[supplierId] = 'remove';
+    e.card[supplierId] = null;
+    e.notice = '';
+    paintMatIf(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_remove_supplier', { job_id: jobId, supplier_id: supplierId });
+    }).then(writeOk).then(function (resp) {
+      delete e.busyCard[supplierId];
+      e.suppliers = e.suppliers.filter(function (s) { return String(s.supplier_id) !== supplierId; });
+      applyCounts(jobId, resp.counts);
+      paintMatIf(jobId);
+    }, function (err) {
+      delete e.busyCard[supplierId];
+      if (err && err.code === 'supplier_has_lines') { matChanged(jobId); return; }
+      e.card[supplierId] = { text: 'Supplier not removed.', retry: 'remove' };
+      paintMatIf(jobId);
+    });
+  }
+
+  // The scope's suggested lines, under this supplier, on a press. The server
+  // reads the scope without its pricing, so no quote line or price comes over.
+  function suggestLines(jobId, supplierId) {
+    var e = matEntry(jobId);
+    if (!e || e.busyCard[supplierId]) return;
+    e.busyCard[supplierId] = 'suggest';
+    e.card[supplierId] = null;
+    e.notice = '';
+    paintMatIf(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_suggest', { job_id: jobId, supplier_id: supplierId });
+    }).then(writeOk).then(function (resp) {
+      if (!Array.isArray(resp.lines)) throw new Error('Unexpected answer');
+      return resp;
+    }).then(function (resp) {
+      delete e.busyCard[supplierId];
+      var added = resp.lines.filter(function (l) { return l && l.id; }).map(lineFrom);
+      added.forEach(function (l) { if (!matLine(e, l.id)) e.lines.push(l); });
+      if (added.length) { e.canSuggest = false; e.touched = true; }
+      else e.card[supplierId] = { text: 'The scope has nothing to suggest.', retry: null };
+      applyCounts(jobId, resp.counts);
+      paintMatIf(jobId);
+    }, function (err) {
+      delete e.busyCard[supplierId];
+      var code = err && err.code;
+      if (code === 'lines_exist') { matChanged(jobId); return; }
+      e.card[supplierId] = code === 'scope_unreadable'
+        ? { text: 'The scope could not be read, so no lines were added.', retry: null }
+        : { text: 'Lines not added.', retry: 'suggest' };
+      paintMatIf(jobId);
+    });
+  }
+
+  function addLine(jobId, supplierId) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    var l = {
+      id: newId(), supplier_id: supplierId, description: '', quantity: '', unit: '', status: 'not_reviewed', display_status: 'not_reviewed',
+      purchase_order_id: null, source: 'manual', position: maxPos(e) + 1, updated_at: null, saved: null,
+      busy: false, again: false, failed: false, delFailed: false, msg: '', retry: false, want: null, gone: false
+    };
+    e.lines.push(l);
+    e.notice = '';
+    paintMat();
+    var r = region('mat');
+    var cell = r && r.querySelector('[data-dpc-mat-line="' + l.id + '"][data-dpc-mat-cell="description"]');
+    if (cell) cell.focus();
+  }
+
+  // One save in flight per line: a second edit waits for the answer and is
+  // then sent with the latest values. Sent when a cell is left, or a box changed.
+  function saveLine(jobId, id) {
+    var e = matEntry(jobId);
+    var l = matLine(e, id);
+    if (!l || l.gone || onOrder(l)) return;
+    if (l.busy) { l.again = true; return; }
+    var q = matQty(l.quantity);
+    if (!q.ok) { l.msg = q.msg; l.retry = false; paintMatIf(jobId); return; }
+    if (!text(l.description)) {
+      // A new row is saved the first time its Item is left with text in it.
+      if (l.saved) { l.msg = 'Item cannot be empty.'; l.retry = false; paintMatIf(jobId); }
+      return;
+    }
+    var out = lineOut(l);
+    if (l.saved && sameLine(out, l.saved)) {
+      if (l.msg && !l.retry) { l.msg = ''; paintMatIf(jobId); }
+      return;
+    }
+    var hadMsg = !!l.msg;
+    l.msg = '';
+    l.retry = false;
+    l.busy = true;
+    l.failed = false;
+    e.touched = true;
+    e.notice = '';
+    var body = { job_id: jobId, line: out };
+    if (l.saved) body.expected_updated_at = l.updated_at;
+    var wasSuggest = e.canSuggest;
+    if (hadMsg) paintMatIf(jobId); else paintMatSave(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_save_line', body);
+    }).then(writeOk).then(function (resp) {
+      if (!resp.line || String(resp.line.id) !== id) throw new Error('Unexpected answer');
+      return resp;
+    }).then(function (resp) {
+      e.canSuggest = false;
+      applyCounts(jobId, resp.counts);
+      var cur = matLine(e, id);
+      if (!cur) { paintMatIf(jobId); return; }
+      var got = resp.line;
+      cur.busy = false;
+      // A cell that still holds what was sent takes the stored form of it.
+      if (text(cur.description) === out.description) cur.description = text(got.description);
+      var cq = matQty(cur.quantity);
+      if (cq.ok && cq.value === out.quantity) cur.quantity = matQtyText(got.quantity);
+      if ((text(cur.unit) || null) === out.unit) cur.unit = text(got.unit);
+      if (cur.status === out.status) cur.status = got.status;
+      if (cur.supplier_id === out.supplier_id) cur.supplier_id = String(got.supplier_id);
+      cur.saved = lineSaved(got);
+      cur.updated_at = got.updated_at;
+      cur.position = Number(got.position) || cur.position;
+      cur.display_status = text(got.display_status) || got.status;
+      cur.purchase_order_id = got.purchase_order_id || null;
+      cur.source = got.source;
+      var again = cur.again;
+      cur.again = false;
+      if (cur.gone) { sendDelete(jobId, id); return; }
+      if (again && lineDirty(cur)) saveLine(jobId, id);
+      if (wasSuggest || onOrder(cur)) paintMatIf(jobId); else paintMatSave(jobId);
+    }, function (err) {
+      var cur = matLine(e, id);
+      if (cur) { cur.busy = false; cur.again = false; }
+      var code = err && err.code;
+      if (code === 'line_changed' || code === 'line_on_order') {
+        var stored = err.body && err.body.line;
+        if (stored && stored.id) e.lines = e.lines.map(function (x) { return x.id === id ? lineFrom(stored) : x; });
+        else removeLine(e, id);
+      }
+      if (code === 'line_changed' || code === 'line_on_order' || code === 'supplier_not_on_job') { matChanged(jobId); return; }
+      if (!cur) return;
+      if (cur.gone) {
+        if (cur.saved) sendDelete(jobId, id); else { removeLine(e, id); paintMatIf(jobId); }
+        return;
+      }
+      cur.failed = true;
+      // A moved line goes back under its supplier and a status back to what
+      // is stored; Retry sends the change again. Typed text stays in its cell.
+      var want = {};
+      if (cur.saved && cur.supplier_id !== cur.saved.supplier_id) {
+        want.supplier_id = cur.supplier_id;
+        cur.supplier_id = cur.saved.supplier_id;
+        cur.position = cur.saved.pos;
+        cur.msg = 'Line not moved.';
+        cur.retry = true;
+      }
+      if (cur.saved && cur.status !== cur.saved.status) {
+        want.status = cur.status;
+        cur.status = cur.saved.status;
+        cur.display_status = cur.saved.status;
+      }
+      cur.want = (want.supplier_id || want.status) ? want : null;
+      paintMatIf(jobId);
+    });
+  }
+
+  function moveLine(jobId, id, supplierId) {
+    var e = matEntry(jobId);
+    var l = matLine(e, id);
+    if (!l || !supplierId || l.supplier_id === supplierId) return;
+    l.supplier_id = supplierId;
+    l.position = maxPos(e) + 1;
+    l.msg = '';
+    l.retry = false;
+    l.want = null;
+    saveLine(jobId, id);
+    paintMatIf(jobId);
+  }
+
+  function setStatus(jobId, id, status) {
+    var l = matLine(matEntry(jobId), id);
+    if (!l || !matSettable(status)) return;
+    l.status = status;
+    l.display_status = status;
+    l.want = null;
+    saveLine(jobId, id);
+    paintMatIf(jobId);
+  }
+
+  // The cross: the line goes at once, and is deleted once.
+  function deleteLine(jobId, id) {
+    var e = matEntry(jobId);
+    var l = matLine(e, id);
+    if (!l || onOrder(l)) return;
+    e.notice = '';
+    if (!l.saved && !l.busy) { removeLine(e, id); paintMatIf(jobId); return; }
+    l.gone = true;
+    l.msg = '';
+    l.retry = false;
+    l.failed = false;
+    l.delFailed = false;
+    paintMatIf(jobId);
+    if (!l.busy) sendDelete(jobId, id); // else sent once its save is answered
+  }
+
+  function sendDelete(jobId, id) {
+    var e = matEntry(jobId);
+    var l = matLine(e, id);
+    if (!l) return;
+    if (!l.saved) { removeLine(e, id); paintMatIf(jobId); return; }
+    l.busy = true;
+    e.touched = true;
+    paintMatSave(jobId);
+    var stamp = l.updated_at;
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_delete_line', { job_id: jobId, id: id, expected_updated_at: stamp });
+    }).then(writeOk).then(function (resp) {
+      removeLine(e, id);
+      applyCounts(jobId, resp.counts);
+      paintMatIf(jobId);
+    }, function (err) {
+      var cur = matLine(e, id);
+      if (cur) cur.busy = false;
+      var code = err && err.code;
+      if (code === 'line_changed' || code === 'line_on_order') {
+        var stored = err.body && err.body.line;
+        if (stored && stored.id) e.lines = e.lines.map(function (x) { return x.id === id ? lineFrom(stored) : x; });
+        else removeLine(e, id);
+        matChanged(jobId);
+        return;
+      }
+      if (!cur) return;
+      cur.gone = false;
+      cur.delFailed = true;
+      cur.msg = 'Line not removed.';
+      cur.retry = true;
+      paintMatIf(jobId);
+    });
+  }
+
+  function retryLine(jobId, id) {
+    var e = matEntry(jobId);
+    var l = matLine(e, id);
+    if (!l || l.busy) return;
+    l.msg = '';
+    l.retry = false;
+    if (l.delFailed) { l.delFailed = false; deleteLine(jobId, id); return; }
+    if (l.want) {
+      if (l.want.supplier_id) { l.supplier_id = l.want.supplier_id; l.position = maxPos(e) + 1; }
+      if (l.want.status) { l.status = l.want.status; l.display_status = l.want.status; }
+      l.want = null;
+    }
+    l.failed = false;
+    saveLine(jobId, id);
+    paintMatIf(jobId);
+  }
+
+  // The save line's Retry: every failed save once more, once each.
+  function retrySaves(jobId) {
+    var e = matEntry(jobId);
+    if (!e) return;
+    e.lines.filter(function (l) { return l.failed || l.delFailed; }).forEach(function (l) { retryLine(jobId, l.id); });
+    if (e.w.textFailed) { e.w.textFailed = false; saveText(jobId); }
+    if (e.w.sketchFailed) { e.w.sketchFailed = false; if (e.w.clearWanted) clearSketch(jobId); else saveSketch(jobId); }
+    paintMatIf(jobId);
+  }
+
+  // The working out pad: saved when typing stops, and when the pad is left.
+  function padInput(jobId, value) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.text = value;
+    clearTimeout(e.w.timer);
+    e.w.timer = setTimeout(function () { saveText(jobId); }, WORKOUT_SAVE_MS);
+  }
+
+  function saveText(jobId) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    var w = e.w;
+    clearTimeout(w.timer);
+    w.timer = null;
+    if (w.textBusy) { w.textAgain = true; return; }
+    if (w.text === w.textSaved) { if (w.textFailed) { w.textFailed = false; paintMatSave(jobId); } return; }
+    var sent = w.text;
+    w.textBusy = true;
+    w.textFailed = false;
+    e.touched = true;
+    paintMatSave(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, working_out: sent, expected_working_out_updated_at: w.textStamp });
+    }).then(writeOk).then(function (resp) {
+      w.textBusy = false;
+      w.textSaved = sent;
+      w.textStamp = (resp.workings && resp.workings.working_out_updated_at) || null;
+      var again = w.textAgain;
+      w.textAgain = false;
+      if (again && w.text !== w.textSaved) saveText(jobId); else paintMatSave(jobId);
+    }, function (err) {
+      w.textBusy = false;
+      w.textAgain = false;
+      if (err && err.code === 'workings_changed') { matChanged(jobId); return; }
+      w.textFailed = true;
+      paintMatSave(jobId);
+    });
+  }
+
+  // The sketch: saved after each stroke, as the canvas's own PNG.
+  function sketchDrawn(jobId, dataUrl) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.sketch = dataUrl;
+    e.w.sketchBroken = false;
+    e.w.sketchMsg = '';
+    e.w.clearWanted = false;
+    saveSketch(jobId);
+    paintSketchMsg(jobId);
+  }
+
+  function clearSketch(jobId) {
+    var e = matEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.sketch = null;
+    e.w.sketchBroken = false;
+    e.w.sketchMsg = '';
+    if (state.jobId === jobId) redrawSketch();
+    saveSketch(jobId);
+    paintSketchMsg(jobId);
+  }
+
+  function saveSketch(jobId) {
+    var e = matEntry(jobId);
+    if (!e) return;
+    var w = e.w;
+    if (w.sketchBusy) { w.sketchAgain = true; return; }
+    var sent = w.sketch;
+    if (sent === w.sketchSaved) { if (w.sketchFailed) { w.sketchFailed = false; paintMatSave(jobId); } w.clearWanted = false; return; }
+    if (sent && sent.length > MAT_SKETCH_MAX) {
+      w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
+      paintSketchMsg(jobId);
+      return;
+    }
+    w.sketchBusy = true;
+    w.sketchFailed = false;
+    e.touched = true;
+    paintMatSave(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, sketch_png: sent, expected_sketch_updated_at: w.sketchStamp });
+    }).then(writeOk).then(function (resp) {
+      w.sketchBusy = false;
+      w.sketchSaved = sent;
+      w.sketchStamp = (resp.workings && resp.workings.sketch_updated_at) || null;
+      w.clearWanted = false;
+      var again = w.sketchAgain;
+      w.sketchAgain = false;
+      if (again && w.sketch !== w.sketchSaved) saveSketch(jobId); else paintMatSave(jobId);
+    }, function (err) {
+      w.sketchBusy = false;
+      w.sketchAgain = false;
+      if (err && err.code === 'workings_changed') { matChanged(jobId); return; }
+      if (err && err.status === 400 && sent && /too large|at most/i.test(String(err.message))) {
+        w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
+      } else {
+        w.sketchFailed = true;
+        // A failed Clear brings the drawing back; Retry clears it again.
+        if (sent === null) { w.clearWanted = true; w.sketch = w.sketchSaved; if (state.jobId === jobId) redrawSketch(); }
+      }
+      paintMatSave(jobId);
+      paintSketchMsg(jobId);
+    });
+  }
+
   // ───────────────────────── render: sidebar ─────────────────────────
 
   function failLine(message, retry, tight) {
@@ -981,7 +1698,8 @@
     h += '<strong>' + esc(jobTitle(row)) + '</strong>';
     if (text(row.description)) h += '<span>' + esc(text(row.description)) + '</span>';
     h += stageLineHtml(s);
-    h += '<span class="dpc-muted">' + esc(installText(row)) + '</span>';
+    var ready = readyText(row.materials_lines_total, row.materials_lines_ready);
+    h += '<span class="dpc-muted">' + esc((ready ? ready + ' · ' : '') + installText(row)) + '</span>';
     return h + '</button>';
   }
 
@@ -1037,6 +1755,7 @@
     if (from.status === 'error') return failLine('Could not load jobs.', 'list');
     if (from.status !== 'ok') return '<div class="dpc-empty">' + (searching() ? 'Searching...' : 'Loading jobs...') + '</div>';
     if (from.stages !== 'ok') return failLine('Could not load Dispatch stages.', retry);
+    if (!todoOk(from)) return failLine('Could not load To do.', retry);
     if (listedRows().length) return '';
     if (searching()) return '<div class="dpc-empty">No To do jobs match.</div>';
     if (state.type === 'all') return '<div class="dpc-empty">Nothing in To do.</div>';
@@ -1050,7 +1769,7 @@
   // The two list buttons. To do's number is the read's todo_total, shown only
   // when the stage read worked.
   function modeHtml() {
-    var todo = state.base.status === 'ok' && state.base.stages === 'ok' ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
+    var todo = state.base.status === 'ok' && todoOk(state.base) ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
     var all = state.base.status === 'ok' ? ' <b>' + esc(state.base.total) + '</b>' : '';
     return '<button type="button" data-dpc-mode="todo" aria-pressed="' + (state.mode === 'todo') + '">To do' + todo + '</button>' +
       '<button type="button" data-dpc-mode="all" aria-pressed="' + (state.mode === 'all') + '">All jobs' + all + '</button>';
@@ -1109,7 +1828,7 @@
       var head = region('railhead');
       if (head) {
         var from = searching() ? state.found : state.base;
-        var failText = from.status !== 'error' ? 'Could not load Dispatch stages. Retry'
+        var failText = from.status !== 'error' ? (from.stages !== 'ok' ? 'Could not load Dispatch stages. Retry' : 'Could not load To do. Retry')
           : searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry';
         head.innerHTML = failed
           ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + (searching() ? 'search' : 'list') + '" aria-label="' + failText + '" title="' + failText + '">&#8635;</button>'
@@ -1165,8 +1884,11 @@
     h += '</div>';
     if (text(row.description)) h += '<p>' + esc(text(row.description)) + '</p>';
     h += '<div class="dpc-pills"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>';
-    h += '<span class="dpc-pill">' + esc(installText(row)) + '</span></div>';
-    return h + tapeHtml(row) + '</div>';
+    h += '<span class="dpc-pill">' + esc(installText(row)) + '</span>';
+    var mat = isMakesafe(row) ? null : matEntry(row.id);
+    var ready = mat && mat.status === 'ok' && mat.counts ? readyText(mat.counts.total, mat.counts.ready) : '';
+    if (ready) h += '<span class="dpc-pill">' + esc(ready) + '</span>';
+    return h + '</div>' + tapeHtml(row) + '</div>';
   }
 
   // The stage rail, the tape (approved still B). Drawn for every job but a
@@ -1530,6 +2252,320 @@
     if (had) { var t = el.querySelector('[data-dpc-reply]'); if (t && !t.disabled) t.focus(); }
   }
 
+  // ───────────────────────── render: Materials by supplier (slice 4) ─────────────────────────
+
+  var CHEV_SVG = '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function matFail(message, retry) {
+    return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(message) +
+      ' <button type="button" class="dpc-retry" data-dpc-mat-retry="' + esc(retry) + '">Retry</button></div>';
+  }
+
+  function addSupplierHtml(e) {
+    var s = state.mat.sup;
+    if (s.status === 'error') {
+      return '<div class="dpc-addsup-state dpc-mat-fail" role="alert">Could not load suppliers <button type="button" class="dpc-retry" data-dpc-mat-retry="suppliers">Retry</button></div>';
+    }
+    if (s.status !== 'ok') return '<select class="dpc-addsup" disabled aria-label="Add supplier"><option>Loading suppliers...</option></select>';
+    if (!s.list.some(function (x) { return x && x.id && x.is_active !== false; })) return '<div class="dpc-addsup-state">No supplier contacts on file.</div>';
+    var opts = supplierOptions(s.list, e.suppliers.map(function (x) { return String(x.supplier_id); }));
+    var h = '<select class="dpc-addsup" data-dpc-mat-addsup aria-label="Add supplier"' + (e.adding ? ' disabled' : '') + '>';
+    h += '<option value="">' + (e.adding ? 'Adding supplier...' : '+ Add supplier') + '</option>';
+    [['Material suppliers', opts.tagged], ['All supplier contacts', opts.rest]].forEach(function (g) {
+      if (!g[1].length) return;
+      h += '<optgroup label="' + esc(g[0]) + '">';
+      g[1].forEach(function (o) { h += '<option value="' + esc(o.id) + '">' + esc(o.label) + '</option>'; });
+      h += '</optgroup>';
+    });
+    return h + '</select>';
+  }
+
+  function supplierName(e, id) {
+    for (var i = 0; i < e.suppliers.length; i++) if (String(e.suppliers[i].supplier_id) === id) return text(e.suppliers[i].name) || 'Name not recorded';
+    return 'Supplier not recorded';
+  }
+
+  function lineHtml(e, l) {
+    var id = esc(l.id);
+    var h = '<div class="dpc-line-wrap" data-dpc-mat-row="' + id + '">';
+    if (onOrder(l)) {
+      // On an order (slice 5 stamps it): a plain label, no boxes and no cross.
+      var tone = (MAT_STATUS[l.display_status] || { tone: 'muted' }).tone;
+      h += '<div class="dpc-line dpc-line-ro"><span>' + esc(l.description) + '</span><span class="dpc-mono">' + esc(l.quantity) + '</span>';
+      h += '<span class="dpc-mono">' + esc(l.unit) + '</span><span>' + esc(supplierName(e, l.supplier_id)) + '</span>';
+      h += '<span><span class="dpc-status dpc-tone-' + tone + '">' + esc(matStatusLabel(l.display_status)) + '</span></span><span></span></div>';
+      return h + '</div>';
+    }
+    var status = (MAT_STATUS[l.status] && matSettable(l.status)) ? l.status : 'not_reviewed';
+    h += '<div class="dpc-line">';
+    h += '<input type="text" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="description" maxlength="300" value="' + esc(l.description) + '" aria-label="Item">';
+    h += '<input type="text" inputmode="decimal" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="quantity" value="' + esc(l.quantity) + '" aria-label="Qty"' + (matQty(l.quantity).ok ? '' : ' aria-invalid="true"') + '>';
+    h += '<input type="text" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="unit" maxlength="30" value="' + esc(l.unit) + '" aria-label="Unit">';
+    h += '<select data-dpc-mat-move="' + id + '" aria-label="Supplier">';
+    e.suppliers.forEach(function (s) {
+      var sid = String(s.supplier_id);
+      h += '<option value="' + esc(sid) + '"' + (sid === l.supplier_id ? ' selected' : '') + '>' + esc(text(s.name) || 'Name not recorded') + '</option>';
+    });
+    h += '</select>';
+    h += '<select class="dpc-status dpc-status-pick dpc-tone-' + MAT_STATUS[status].tone + '" data-dpc-mat-status="' + id + '" aria-label="Status">';
+    MAT_SETTABLE.forEach(function (k) { h += '<option value="' + k + '"' + (k === status ? ' selected' : '') + '>' + esc(MAT_STATUS[k].label) + '</option>'; });
+    h += '</select>';
+    h += '<button type="button" class="dpc-x" data-dpc-mat-del="' + id + '" aria-label="Remove line">&times;</button></div>';
+    if (l.msg) {
+      h += '<div class="dpc-line-msg dpc-mat-fail" role="alert">' + esc(l.msg) +
+        (l.retry ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="line:' + id + '">Retry</button>' : '') + '</div>';
+    }
+    return h + '</div>';
+  }
+
+  function suggestShown(e) {
+    return e.canSuggest && !e.lines.some(function (l) { return !!l.saved; });
+  }
+
+  function supCardHtml(e, s) {
+    var sid = String(s.supplier_id);
+    var name = text(s.name) || 'Name not recorded';
+    var hasLines = e.lines.some(function (l) { return l.supplier_id === sid; });
+    var lines = e.lines.filter(function (l) { return l.supplier_id === sid && !l.gone; })
+      .sort(function (a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+    var busy = e.busyCard[sid];
+    var h = '<div class="dpc-supcard" data-dpc-mat-card="' + esc(sid) + '"><div class="dpc-suphead"><span class="dpc-supdot" aria-hidden="true"></span><strong>' + esc(name) + '</strong>';
+    h += s.email ? '<span class="dpc-supmail">' + esc(s.email) + '</span>' : '<span class="dpc-status dpc-tone-muted">No email on file</span>';
+    if (s.active === false) h += '<span class="dpc-status dpc-tone-muted">Contact no longer active</span>';
+    h += '<span class="dpc-grow"></span>';
+    if (!hasLines) h += '<button type="button" class="dpc-x" data-dpc-mat-remove="' + esc(sid) + '" aria-label="Take ' + esc(name) + ' off this job"' + (busy ? ' disabled' : '') + '>&times;</button>';
+    h += '</div><div class="dpc-lines"><div class="dpc-line dpc-line-head"><span>Item</span><span>Qty</span><span>Unit</span><span>Supplier</span><span>Status</span><span></span></div>';
+    if (!lines.length) h += '<div class="dpc-line-empty">No lines yet. Move lines here or add one.</div>';
+    lines.forEach(function (l) { h += lineHtml(e, l); });
+    h += '</div>';
+    var msg = e.card[sid];
+    if (msg) {
+      h += '<div class="dpc-card-msg' + (msg.retry ? ' dpc-mat-fail' : '') + '" role="' + (msg.retry ? 'alert' : 'status') + '">' + esc(msg.text) +
+        (msg.retry ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="card:' + esc(sid) + '">Retry</button>' : '') + '</div>';
+    }
+    h += '<div class="dpc-card-foot"><button type="button" class="dpc-addline" data-dpc-mat-addline="' + esc(sid) + '">+ Add line</button>';
+    if (suggestShown(e)) {
+      h += '<button type="button" class="dpc-addline" data-dpc-mat-suggest="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>' +
+        (busy === 'suggest' ? 'Suggesting...' : 'Suggest lines from the scope') + '</button>';
+    }
+    return h + '</div></div>';
+  }
+
+  // The save line under the cards.
+  function matSaveHtml(e) {
+    var busy = e.w.textBusy || e.w.sketchBusy || e.lines.some(function (l) { return l.busy; });
+    var failed = e.w.textFailed || e.w.sketchFailed || e.lines.some(function (l) { return l.failed || l.delFailed; });
+    if (failed) return '<span class="dpc-mat-fail" role="alert">Not saved. <button type="button" class="dpc-retry" data-dpc-mat-retry="saves">Retry</button></span>';
+    if (busy) return '<span role="status">Saving...</span>';
+    if (e.touched) return '<span role="status">All changes saved</span>';
+    return '';
+  }
+
+  // The job's purchase orders, read only and never merged into a supplier
+  // card: an order names its supplier as typed text. No price is shown.
+  function ordersHtml(e) {
+    if (!e.ordersOk) return '<div class="dpc-orders">' + matFail("Could not load this job's orders.", 'orders') + '</div>';
+    if (!e.orders.length) return '';
+    var h = '<div class="dpc-orders"><h4 class="dpc-mat-h4">Orders on this job</h4>';
+    e.orders.forEach(function (o) {
+      h += '<div class="dpc-supcard dpc-ordercard"><div class="dpc-suphead"><strong>' + esc(text(o.supplier_name) || 'Supplier not recorded') + '</strong>';
+      h += '<span class="dpc-status dpc-tone-info">' + esc((text(o.po_number) || 'No order number') + ' · ' + orderStatusWord(o.status)) + '</span></div>';
+      h += '<div class="dpc-lines"><div class="dpc-line dpc-oline dpc-line-head"><span>Item</span><span>Qty</span><span>Unit</span></div>';
+      var lines = Array.isArray(o.lines) ? o.lines : [];
+      if (!lines.length) h += '<div class="dpc-line-empty">No lines on this order.</div>';
+      lines.forEach(function (l) {
+        l = l || {};
+        h += '<div class="dpc-line dpc-oline"><span>' + esc(text(l.description) || 'No item recorded') + '</span><span class="dpc-mono">' + esc(matQtyText(l.quantity)) + '</span><span class="dpc-mono">' + esc(text(l.unit)) + '</span></div>';
+      });
+      h += '</div><p class="dpc-order-note">Made outside this list. Read only.</p></div>';
+    });
+    return h + '</div>';
+  }
+
+  function sketchMsgHtml(e) {
+    if (e.w.sketchBroken) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">Could not show the saved sketch.</div>';
+    if (e.w.sketchMsg) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">' + esc(e.w.sketchMsg) + '</div>';
+    return '';
+  }
+
+  function workoutHtml(e) {
+    var h = '<details class="dpc-workout" data-dpc-mat-workout' + (state.mat.workOpen ? ' open' : '') + '><summary>Working out and sketch</summary>';
+    h += '<div class="dpc-scratch"><textarea class="dpc-textarea" data-dpc-mat-pad maxlength="20000" placeholder="42 m run / 2.4 m bays = 18 bays..." aria-label="Working out">' + esc(e.w.text) + '</textarea>';
+    h += '<div class="dpc-canvas-wrap"><canvas class="dpc-canvas" data-dpc-mat-canvas width="600" height="220" role="img" aria-label="Sketch pad"></canvas>';
+    h += '<button type="button" class="dpc-canvas-clear" data-dpc-mat-clear>Clear sketch</button></div></div>';
+    return h + '<div data-dpc-region="matsketch">' + sketchMsgHtml(e) + '</div></details>';
+  }
+
+  function matBodyHtml(e) {
+    if (!e || e.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading the materials...</div>';
+    if (e.status === 'error') return matFail('Could not load the materials.', 'read');
+    var h = '';
+    if (e.notice) h += '<div class="dpc-mat-notice" role="status">' + esc(e.notice) + '</div>';
+    if (e.addMsg) {
+      h += '<div class="dpc-mat-notice dpc-mat-fail" role="alert">' + esc(e.addMsg.text) +
+        (e.addMsg.id ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="add">Retry</button>' : '') + '</div>';
+    }
+    if (!e.suppliers.length) h += '<div class="dpc-empty dpc-empty-tight">No suppliers chosen for this job yet. Add one to start writing out the materials.</div>';
+    e.suppliers.forEach(function (s) { h += supCardHtml(e, s); });
+    h += '<div class="dpc-mat-save" data-dpc-region="matsave">' + matSaveHtml(e) + '</div>';
+    return h + ordersHtml(e) + workoutHtml(e);
+  }
+
+  // Drawn on every job except a make-safe one.
+  function matHtml() {
+    var row = state.row;
+    if (!row || isMakesafe(row)) return '';
+    var e = matEntry(row.id);
+    var open = state.mat.open;
+    var h = '<div class="dpc-sec dpc-mat' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="mat"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Order</span><h3>Materials by supplier</h3>';
+    if (open) h += '<p>Write out the materials and split them by supplier</p>';
+    h += '</div>';
+    if (open && e && e.status === 'ok') h += addSupplierHtml(e);
+    h += '<button type="button" class="dpc-chev" data-dpc-toggle="order" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Materials by supplier">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + matBodyHtml(e) + '</div>';
+    return h + '</div>';
+  }
+
+  // Where the keyboard was inside the section, to put it back after a repaint.
+  var MAT_FOCUS_KEYS = ['data-dpc-mat-line', 'data-dpc-mat-cell', 'data-dpc-mat-move', 'data-dpc-mat-status', 'data-dpc-mat-pad', 'data-dpc-mat-addsup',
+    'data-dpc-toggle', 'data-dpc-mat-addline', 'data-dpc-mat-suggest', 'data-dpc-mat-clear', 'data-dpc-mat-del', 'data-dpc-mat-retry'];
+  function matFocus(el) {
+    var a = document.activeElement;
+    if (!a || !el.contains(a)) return null;
+    var sel = MAT_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+      return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
+    }).join('');
+    if (!sel) return null;
+    var f = { sel: sel };
+    try { f.start = a.selectionStart; f.end = a.selectionEnd; } catch (x) { /* not a text box */ }
+    return f;
+  }
+
+  var painting = false;
+  function paintMat() {
+    var el = region('mat');
+    if (!el) return;
+    var f = matFocus(el);
+    painting = true;
+    try { el.outerHTML = matHtml(); } finally { painting = false; }
+    wireMat();
+    var now = f && region('mat') ? region('mat').querySelector(f.sel) : null;
+    if (!now) return;
+    now.focus({ preventScroll: true });
+    if (typeof f.start === 'number' && now.setSelectionRange) { try { now.setSelectionRange(f.start, f.end); } catch (x) { /* not a text box */ } }
+  }
+  function paintMatIf(jobId) { if (state.jobId === jobId) paintMat(); }
+
+  function paintMatSave(jobId) {
+    if (state.jobId !== jobId) return;
+    var el = region('matsave');
+    var e = matEntry(jobId);
+    if (el && e) el.innerHTML = matSaveHtml(e);
+  }
+
+  function paintSketchMsg(jobId) {
+    if (state.jobId !== jobId) return;
+    var el = region('matsketch');
+    var e = matEntry(jobId);
+    if (el && e) el.innerHTML = sketchMsgHtml(e);
+  }
+
+  // The open job's card, after a write changed its "items ready".
+  function paintCard(jobId) {
+    var list = region('list');
+    var row = rowById(jobId);
+    if (!list || !row || !state.leftOpen) return;
+    Array.prototype.forEach.call(list.querySelectorAll('.dpc-job[data-dpc-job]'), function (el) {
+      if (el.getAttribute('data-dpc-job') !== jobId) return;
+      var had = document.activeElement === el;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = cardHtml(row);
+      var card = tmp.firstChild;
+      el.parentNode.replaceChild(card, el);
+      if (had) card.focus({ preventScroll: true });
+    });
+  }
+
+  // The saved sketch, drawn back onto the pad after every paint of the section.
+  function redrawSketch() {
+    var e = matEntry(state.jobId);
+    var r = region('mat');
+    var c = r && r.querySelector('[data-dpc-mat-canvas]');
+    var ctx = c && c.getContext && c.getContext('2d');
+    if (!e || !ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    var src = e.w.sketch;
+    if (!src) return;
+    var img = new Image();
+    c.dpcLoading = src;
+    img.onload = function () {
+      if (c.dpcLoading === src) c.dpcLoading = null;
+      if (!c.isConnected) return;
+      if (e.w.sketch === src) { ctx.drawImage(img, 0, 0); return; }
+      // A stroke landed before the saved picture had drawn: put the picture
+      // under it and save the two together, so the stroke never wipes it.
+      if (c.dpcDrawnOver !== src) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+      sketchDrawn(e.jobId, c.toDataURL('image/png'));
+    };
+    img.onerror = function () {
+      if (c.dpcLoading === src) c.dpcLoading = null;
+      if (e.w.sketch !== src) return;
+      // Nothing is saved over it until a stroke is drawn.
+      e.w.sketchBroken = true;
+      paintSketchMsg(e.jobId);
+    };
+    img.src = src;
+  }
+
+  // A mouse, a finger or a pen draws; the page does not scroll while drawing.
+  function wireMat() {
+    var r = region('mat');
+    var c = r && r.querySelector('[data-dpc-mat-canvas]');
+    var ctx = c && c.getContext && c.getContext('2d');
+    if (!ctx) return;
+    var jobId = state.jobId;
+    redrawSketch();
+    var drawing = false;
+    var at = function (ev) {
+      var b = c.getBoundingClientRect();
+      return [(ev.clientX - b.left) * c.width / (b.width || 1), (ev.clientY - b.top) * c.height / (b.height || 1)];
+    };
+    c.addEventListener('pointerdown', function (ev) {
+      if (ev.button > 0) return;
+      drawing = true;
+      if (c.dpcLoading) c.dpcDrawnOver = c.dpcLoading;
+      try { c.setPointerCapture(ev.pointerId); } catch (x) { /* already released */ }
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#293C46';
+      var p = at(ev);
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(p[0] + 0.01, p[1]);
+      ctx.stroke();
+      ev.preventDefault();
+    });
+    c.addEventListener('pointermove', function (ev) {
+      if (!drawing) return;
+      var p = at(ev);
+      ctx.lineTo(p[0], p[1]);
+      ctx.stroke();
+      ev.preventDefault();
+    });
+    var end = function () {
+      if (!drawing) return;
+      drawing = false;
+      sketchDrawn(jobId, c.toDataURL('image/png'));
+    };
+    c.addEventListener('pointerup', end);
+    c.addEventListener('pointercancel', end);
+  }
+
   function workspaceHtml() {
     var h = '<section class="dpc-workspace" data-dpc-region="workspace" aria-label="Job">';
     if (state.base.status === 'error' && state.rowStale) {
@@ -1539,7 +2575,7 @@
     } else if (!state.row) {
       h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
     } else {
-      h += headHtml(state.row) + sectionHtml();
+      h += headHtml(state.row) + sectionHtml() + matHtml();
     }
     return h + '</section>';
   }
@@ -1547,6 +2583,7 @@
   function paintWorkspace() {
     var w = region('workspace');
     if (w) w.outerHTML = workspaceHtml();
+    wireMat();
   }
   function paintHead() { var el = region('head'); if (el) keepNextFocus(function () { el.outerHTML = headHtml(state.row); }); }
   function paintCouncil() { var el = region('council'); if (el) el.innerHTML = councilHtml(); }
@@ -1566,6 +2603,7 @@
     var h = '<div class="dpc"><div class="dpc-header"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>';
     h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div></div>';
     r.innerHTML = h;
+    wireMat();
     paintList();
   }
 
@@ -1586,10 +2624,12 @@
   function onClick(e) {
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-jobpage],' +
-      '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save]') : null;
+      '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
+      '[data-dpc-mat-retry],[data-dpc-mat-addline],[data-dpc-mat-suggest],[data-dpc-mat-remove],[data-dpc-mat-del],[data-dpc-mat-clear]') : null;
     if (!t || t.disabled) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
+    if (onMatClick(t)) return;
     if (t.hasAttribute('data-dpc-job')) {
       if (t.getAttribute('data-dpc-job') !== state.jobId) state.stage.confirm = null;
       selectJob(rowById(t.getAttribute('data-dpc-job')));
@@ -1718,6 +2758,82 @@
     return true;
   }
 
+  // Materials by supplier's controls. True when the press was one of them.
+  function onMatClick(t) {
+    var jobId = state.jobId;
+    if (t.getAttribute('data-dpc-toggle') === 'order') {
+      state.mat.open = !state.mat.open;
+      writeStore('localStorage', LS_ORDER, state.mat.open ? '1' : '0');
+      paintMat();
+      refocus('[data-dpc-toggle="order"]');
+    } else if (t.hasAttribute('data-dpc-mat-retry')) {
+      var what = t.getAttribute('data-dpc-mat-retry');
+      var e = matEntry(jobId);
+      if (what === 'suppliers') ensureSuppliers(true);
+      else if (!jobId) return true;
+      else if (what === 'read') readMat(jobId, false);
+      else if (what === 'orders') readMat(jobId, true);
+      else if (what === 'saves') retrySaves(jobId);
+      else if (what === 'add' && e && e.addMsg && e.addMsg.id) addSupplier(jobId, e.addMsg.id);
+      else if (what.indexOf('line:') === 0) retryLine(jobId, what.slice(5));
+      else if (what.indexOf('card:') === 0 && e) {
+        var sid = what.slice(5);
+        var msg = e.card[sid];
+        if (msg && msg.retry === 'remove') removeSupplier(jobId, sid);
+        else if (msg && msg.retry === 'suggest') suggestLines(jobId, sid);
+      }
+    } else if (t.hasAttribute('data-dpc-mat-addline')) {
+      addLine(jobId, t.getAttribute('data-dpc-mat-addline'));
+    } else if (t.hasAttribute('data-dpc-mat-suggest')) {
+      suggestLines(jobId, t.getAttribute('data-dpc-mat-suggest'));
+    } else if (t.hasAttribute('data-dpc-mat-remove')) {
+      removeSupplier(jobId, t.getAttribute('data-dpc-mat-remove'));
+    } else if (t.hasAttribute('data-dpc-mat-del')) {
+      deleteLine(jobId, t.getAttribute('data-dpc-mat-del'));
+    } else if (t.hasAttribute('data-dpc-mat-clear')) {
+      clearSketch(jobId);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  // Choice boxes: Add supplier, a line's supplier and its status.
+  function onChange(e) {
+    var t = e.target;
+    if (!t || !t.hasAttribute || !state.jobId) return;
+    if (t.hasAttribute('data-dpc-mat-addsup')) {
+      var id = t.value;
+      t.value = '';
+      if (id) addSupplier(state.jobId, id);
+    } else if (t.hasAttribute('data-dpc-mat-move')) {
+      moveLine(state.jobId, t.getAttribute('data-dpc-mat-move'), t.value);
+    } else if (t.hasAttribute('data-dpc-mat-status')) {
+      setStatus(state.jobId, t.getAttribute('data-dpc-mat-status'), t.value);
+    }
+  }
+
+  // A cell or the pad is saved when it is left. A repaint that takes the
+  // focused cell away is not the person leaving it.
+  function onFocusOut(e) {
+    var t = e.target;
+    if (painting || !t || !t.hasAttribute || !state.jobId) return;
+    var jobId = state.jobId;
+    if (t.hasAttribute('data-dpc-mat-cell')) {
+      var id = t.getAttribute('data-dpc-mat-line');
+      setTimeout(function () { saveLine(jobId, id); }, 0);
+    } else if (t.hasAttribute('data-dpc-mat-pad')) {
+      saveText(jobId);
+    }
+  }
+
+  function onToggle(e) {
+    var t = e.target;
+    if (!t || !t.hasAttribute || !t.hasAttribute('data-dpc-mat-workout') || state.mat.workOpen === t.open) return;
+    state.mat.workOpen = t.open;
+    writeStore('localStorage', LS_WORKOUT, t.open ? '1' : '0');
+  }
+
   function onInput(e) {
     var t = e.target;
     if (!t || !t.hasAttribute) return;
@@ -1752,6 +2868,13 @@
       }
       return;
     }
+    if (t.hasAttribute('data-dpc-mat-cell') && state.jobId) {
+      var matRow = matLine(matEntry(state.jobId), t.getAttribute('data-dpc-mat-line'));
+      var field = t.getAttribute('data-dpc-mat-cell');
+      if (matRow && (field === 'description' || field === 'quantity' || field === 'unit')) matRow[field] = t.value;
+      return;
+    }
+    if (t.hasAttribute('data-dpc-mat-pad') && state.jobId) { padInput(state.jobId, t.value); return; }
     if (t.hasAttribute('data-dpc-note') && state.jobId) {
       state.drafts[state.jobId] = t.value;
       var el = region('composer');
@@ -1782,6 +2905,9 @@
       loadFonts();
       r.addEventListener('click', onClick);
       r.addEventListener('input', onInput);
+      r.addEventListener('change', onChange);
+      r.addEventListener('focusout', onFocusOut);
+      r.addEventListener('toggle', onToggle, true);
       wired = true;
     }
     if (!r.firstChild) render();

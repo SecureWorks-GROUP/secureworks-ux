@@ -18920,10 +18920,12 @@ function renderMaterialsRecon() {
     return;
   }
   // Keep what the operator typed in a job search box across repaints.
+  var focusQ = null;
   body.querySelectorAll('[data-mrq-q]').forEach(function(inp) {
     var qid = inp.getAttribute('data-mrq-q');
     if (!_matRecon.pick[qid]) _matRecon.pick[qid] = {};
     _matRecon.pick[qid].query = inp.value;
+    if (document.activeElement === inp) focusQ = { id: qid, start: inp.selectionStart, end: inp.selectionEnd };
   });
   var c = _mrqCensus(), lb = c.openLowerBound ? 'at least ' : '', slb = c.statsLowerBound ? 'at least ' : '';
   var cnt = document.getElementById('matReconOpenCount');
@@ -18955,7 +18957,9 @@ function renderMaterialsRecon() {
     return;
   }
   if (!rows.length) {
-    body.innerHTML = '<div class="mrq-muted" style="padding:20px;text-align:center;">No open bill matches that search.</div>';
+    body.innerHTML = '<div class="mrq-muted" style="padding:20px;text-align:center;">'
+      + (_matRecon.listFull ? 'No match among the ' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + ' newest open bills loaded. An older open bill may still match.' : 'No open bill matches that search.')
+      + '</div>';
     return;
   }
   var html = '<div class="data-table-wrap" style="overflow-x:auto;"><table class="mrq-table"><thead><tr>'
@@ -18981,6 +18985,13 @@ function renderMaterialsRecon() {
     html += '<div style="text-align:center;margin:12px 0;"><button class="btn btn-secondary btn-sm" data-mrq-act="more">Show ' + Math.min(MAT_RECON_PAGE, rows.length - _matRecon.shown) + ' more of ' + (rows.length - _matRecon.shown) + '</button></div>';
   }
   body.innerHTML = html;
+  if (focusQ) {
+    var again = body.querySelector('[data-mrq-q="' + CSS.escape(focusQ.id) + '"]');
+    if (again) {
+      again.focus();
+      try { again.setSelectionRange(focusQ.start, focusQ.end); } catch (e) {}
+    }
+  }
 }
 
 function _mrqDetailHtml(r) {
@@ -19221,7 +19232,10 @@ function _mrqNotJob(id) {
       var act = el.getAttribute('data-mrq-act'), id = el.getAttribute('data-mrq-id');
       if (el.tagName === 'A') ev.preventDefault();
       if (act === 'toggle') {
-        if (_matRecon.openId) delete _matRecon.notjobArmed[_matRecon.openId];
+        if (_matRecon.openId) {
+          delete _matRecon.notjobArmed[_matRecon.openId];
+          if (_matRecon.pick[_matRecon.openId]) _matRecon.pick[_matRecon.openId].armed = 0;
+        }
         _matRecon.openId = _matRecon.openId === id ? null : id;
         if (_matRecon.openId && !_matRecon.lines[id]) _mrqLoadLines(id); else renderMaterialsRecon();
       } else if (act === 'more') { _matRecon.shown += MAT_RECON_PAGE; renderMaterialsRecon(); }

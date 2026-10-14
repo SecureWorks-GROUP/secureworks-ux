@@ -140,7 +140,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(list.map((f) => f.faded)).toEqual([false, false, false, false, false, false, true, true, true]);
     const [current, draft, scope, att1, att2, photos, v2, v1, deleted] = list;
     expect(current.name).toBe('Quote Q-9003 \u00b7 v3');
-    expect(current.meta).toBe('$7,065.85 \u00b7 sent 8 Oct 6:56am \u00b7 opened 15 times');
+    // The quote carries no value: the card says so and never borrows the job price.
+    expect(current.meta).toBe('value not recorded \u00b7 sent 8 Oct 6:56am \u00b7 opened 15 times');
     expect(current.pill).toEqual({ cls: 'acc', words: 'Accepted 8 Oct' });
     expect(draft.name).toBe('Deposit invoice INV-9002');
     expect(draft.pill).toEqual({ cls: 'warn', words: 'Draft, cannot be paid' });
@@ -251,6 +252,38 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(JSON.stringify(conv.items)).not.toContain('MUST NEVER SHOW');
     const email = conv.items.find((x) => x.type === 'msg' && x.m.channel === 'email').m;
     expect(email.text).toBe('Subject: Re: Quote SWF-990101\nThank you for sending the revised quote, which all looks good.');
+  });
+
+  test('held rows: marked in the conversation (also a CRM copy), never the last word, one row per held call', () => {
+    const at = '2026-10-01T02:15:40.993+00:00';
+    const story = { held_messages: { count: 3, items: [
+      { id: 'h-text', at, channel: 'sms', kind: 'client.sms_out', direction: 'outbound', text: 'Deposit for the other fencing project', job_certain: false },
+      { id: 'h-log', at: '2026-10-05T07:08:22.213+00:00', channel: 'call', kind: 'client.call_logged', direction: 'inbound', text: '[Call, inbound. Provider status: completed. Duration: 210 sec]', job_certain: false },
+      { id: 'h-tr', at: '2026-10-05T07:08:22.213+00:00', channel: 'call', kind: 'call.transcript_completed', direction: 'inbound', text: null, text_withheld: 'call_transcript', job_certain: false },
+    ] } };
+    const msgs = [
+      { id: 'ghl:copy', at: '2026-10-01T02:15:40.993Z', channel: 'sms', direction: 'outbound', party: 'us', text: 'Deposit for the other fencing project' },
+      { id: 'bev:flagged', at: '2026-10-02T02:00:00Z', channel: 'sms', direction: 'inbound', party: 'customer', text: 'Held words', job_certain: false, label: 'Held message, job not certain' },
+      { id: 'bev:placed', at: '2026-09-30T02:00:00Z', channel: 'sms', direction: 'inbound', party: 'customer', text: 'When will the crew be back?' },
+      { id: 'bev:thumb', at: '2026-10-03T02:00:00Z', channel: 'sms', direction: 'inbound', party: 'customer', text: '\u{1F44D}' },
+      { id: 'bev:held-call', at: '2026-10-05T07:08:22.213+00:00', channel: 'call', direction: 'inbound', call_seconds: 210, job_certain: false },
+      { id: 'ghl:call-copy', at: '2026-10-05T07:08:22.213Z', channel: 'call', direction: 'inbound' },
+    ];
+    const conv = C.conversation(msgs, 'all', NOW, story);
+    const held = conv.items.filter((x) => x.type === 'msg' && x.m.held).map((x) => x.m.id);
+    expect(held).toEqual(['ghl:copy', 'bev:flagged', 'bev:held-call']);
+    expect(conv.counts.held).toBe(3);
+    expect(conv.items.filter((x) => x.type === 'msg' && x.m.channel === 'call').map((x) => [x.m.secs, x.m.otherIds])).toEqual([[210, ['ghl:call-copy']]]);
+    const ex = C.customerExchange({ ...story, last_exchange: { customer_said: { at: msgs[3].at, channel: 'sms', text: '\u{1F44D}' }, we_told_customer: { at, channel: 'sms', text: 'Deposit for the other fencing project', job_certain: false } } }, msgs);
+    expect(ex.customer.text).toBe('When will the crew be back?');
+    expect(ex.customer.thenNoWordsAt).toBe(msgs[3].at);
+    expect(ex.us).toBeNull();
+    expect(C.customerExchange({ last_exchange: { customer_said: { at, channel: 'sms', text: '\u{1F44D}' } } }, []).customer).toMatchObject({ text: '', noWords: true });
+    expect(C.customerExchange(story, msgs).us).toBeNull();
+    const list = C.heldList(story.held_messages);
+    expect(list.items.length).toBe(2);
+    expect(list.count).toBe(2);
+    expect(list.items[1].secs).toBe(210);
   });
 
   test('the written story: tolerant of its shape, cleaned, null when unusable', () => {

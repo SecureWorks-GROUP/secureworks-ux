@@ -701,7 +701,6 @@ var JobOverviewV2Core = (function () {
     var job = (detail && detail.job) || {};
     var fx = obj(overview && overview.files);
     var live = [], faded = [];
-    var value = jobValue(detail, overview);
 
     var qs = quoteRows(detail, overview);
     var recordMode = !(fx && Array.isArray(fx.quotes));
@@ -714,9 +713,10 @@ var JobOverviewV2Core = (function () {
       var isCurrent = !old && !currentSeen;
       if (!old) currentSeen = true;
       var name = (q.type === 'permit_quote' ? 'Permit quote' : 'Quote') + (q.number ? ' ' + q.number : '') + (q.version ? DOT + 'v' + q.version : '');
-      var v = q.value != null ? q.value : (isCurrent ? value : null);
+      // A quote card shows only the value recorded on that quote, never today's job price.
       var meta = [];
-      if (v != null) meta.push(money(v));
+      if (q.value != null) meta.push(money(q.value));
+      else if (isCurrent) meta.push('value not recorded');
       meta.push(q.sentAt ? 'sent ' + shortWhen(q.sentAt, now) : (q.sent ? 'sent' : 'not sent'));
       if (q.views != null) meta.push(q.views === 0 ? 'not opened yet' : 'opened ' + times(q.views));
       var pill;
@@ -1017,32 +1017,54 @@ var JobOverviewV2Core = (function () {
     }
     var at = m.at || m.event_at || m.occurred_at || m.created_at || null;
     var secs = firstNum(m.call_seconds, m.duration_seconds, m.duration);
+    var raw = str(m.text || m.body || m.message || '');
+    var text = ch === 'call' ? '' : clean(raw);
     return {
       id: m.id != null ? str(m.id) : (m.event_id != null ? str(m.event_id) : (m.business_event_id != null ? str(m.business_event_id) : null)),
       i: i, at: at, ms: toMs(at), channel: ch, direction: dir,
       who: clean(m.who || m.sender_name || m.from_name || ''),
       // A call never shows words: no raw transcript, ever.
-      text: ch === 'call' ? '' : clean(m.text || m.body || m.message || ''),
+      text: text,
+      // Only an emoji or symbol, which the screen never prints.
+      noWords: ch !== 'call' && !text && !!raw.trim(),
       kind: kind, eventType: et, secs: secs,
       transcript: kind === 'transcript' || /transcript/.test(et),
+      held: heldFlag(m),
       pending: m.pending === true
     };
   }
+  // A message whose job is not certain may belong to another job. It is marked wherever it shows
+  // and never feeds the last word.
+  function heldFlag(m) {
+    return !!(m && (m.job_certain === false || m.held === true || m.unplaced === true || lower(m.certainty) === 'job_not_certain'));
+  }
+  function bareId(v) { return str(v).replace(/^[a-z]+:/i, ''); }
+  // The card's held list names rows by id; the same text can reach messages[] as another copy
+  // (the CRM cache), so a held row is also matched on its exact time, channel and direction.
+  function heldIndex(story) {
+    var held = obj(story && story.held_messages);
+    var idx = { ids: {}, at: {} };
+    arr(held && held.items).forEach(function (x) {
+      if (!obj(x)) return;
+      if (x.id != null) idx.ids[bareId(x.id)] = true;
+      var n = normMessage(x, 0);
+      if (isFinite(n.ms)) idx.at[n.ms + '|' + n.channel + '|' + n.direction] = true;
+    });
+    return idx;
+  }
+  function isHeld(x, idx) {
+    if (!obj(x)) return false;
+    if (heldFlag(x)) return true;
+    if (!idx) return false;
+    if (x.id != null && idx.ids[bareId(x.id)]) return true;
+    var n = normMessage(x, 0);
+    return isFinite(n.ms) && !!idx.at[n.ms + '|' + n.channel + '|' + n.direction];
+  }
   function customerExchange(story, list) {
     var le = obj(story && story.last_exchange);
-    function words(x) {
-      if (!obj(x) || x.job_certain === false || x.held === true) return null;
-      var n = normMessage(x, 0);
-      if (x.text_withheld === 'call_transcript' || n.channel === 'call') {
-        return { text: 'Call on record. Transcript words are not shown.', at: n.at };
-      }
-      return n.text ? n : null;
-    }
-    // Null entries in the canonical exchange are meaningful. Do not replace them
-    // with a more recent supplier message, or with unplaced contact history.
-    if (le) return { customer: words(le.customer_said), us: words(le.we_told_customer) };
+    var idx = heldIndex(story);
     var known = arr(list).filter(function (x) {
-      if (!x || x.job_certain === false || x.held === true) return false;
+      if (!x || isHeld(x, idx)) return false;
       if (x.customer_party === false || lower(x.audience) === 'other_party' || lower(x.party) === 'other') return false;
       var role = lower(x.counterpart_role);
       if (role && role !== 'customer' && role !== 'client') return false;
@@ -1050,18 +1072,47 @@ var JobOverviewV2Core = (function () {
         lower(x.audience) === 'customer' || (lower(x.direction) === 'inbound' && lower(x.party) === 'customer');
     }).map(normMessage).filter(function (n) { return n.text && (n.channel === 'sms' || n.channel === 'email'); });
     known.sort(function (a, b) { return a.ms - b.ms; });
-    return { customer: known.filter(function (n) { return n.direction === 'inbound'; }).slice(-1)[0] || null,
-      us: known.filter(function (n) { return n.direction === 'outbound'; }).slice(-1)[0] || null };
+    function newest(dir, beforeMs) {
+      return known.filter(function (n) { return n.direction === dir && (!isFinite(beforeMs) || n.ms <= beforeMs); }).slice(-1)[0] || null;
+    }
+    function words(x, dir) {
+      if (!obj(x) || isHeld(x, idx)) return null;
+      var n = normMessage(x, 0);
+      if (x.text_withheld === 'call_transcript' || n.channel === 'call') {
+        return { text: 'Call on record. Transcript words are not shown.', at: n.at };
+      }
+      if (n.text) return n;
+      if (!n.noWords) return null;
+      // An emoji-only reply: show the last words before it, and say the reply had none.
+      var prior = newest(dir, n.ms);
+      if (prior) { prior = Object.assign({}, prior); prior.thenNoWordsAt = n.at; return prior; }
+      return { text: '', noWords: true, at: n.at };
+    }
+    // Null entries in the canonical exchange are meaningful. Do not replace them
+    // with a more recent supplier message, or with unplaced contact history.
+    if (le) return { customer: words(le.customer_said, 'inbound'), us: words(le.we_told_customer, 'outbound') };
+    return { customer: newest('inbound'), us: newest('outbound') };
   }
   function isMachine(n) {
     if (MACHINE_TYPES.indexOf(n.eventType) >= 0 || MACHINE_TYPES.indexOf(n.kind) >= 0) return true;
     if (n.channel === 'call') return false;
     return !n.text;
   }
-  // One row per call: a call log and its transcript row merge, keeping the duration.
+  // One row per call: a call log and its transcript row merge, keeping the duration. Two copies
+  // of one message (the business record and the CRM copy, same time to the second) are one row.
   function mergeCalls(list) {
     var out = [];
     list.forEach(function (n) {
+      for (var j = out.length - 1; j >= 0 && n.ms - out[j].ms < 1000; j--) {
+        var t = out[j];
+        if (t.channel === n.channel && t.direction === n.direction && (n.channel === 'call' || t.text === n.text)) {
+          if (n.secs != null && (t.secs == null || n.secs > t.secs)) t.secs = n.secs;
+          if (!t.id) t.id = n.id;
+          if (n.id) t.otherIds.push(n.id);
+          if (n.held) t.held = true;
+          return;
+        }
+      }
       if (n.channel === 'call') {
         for (var k = out.length - 1; k >= 0; k--) {
           var c = out[k];
@@ -1071,6 +1122,7 @@ var JobOverviewV2Core = (function () {
             if (!c.direction) c.direction = n.direction;
             if (!c.id) c.id = n.id;
             if (n.id) c.otherIds.push(n.id);
+            if (n.held) c.held = true;
             c.merged = true;
             return;
           }
@@ -1083,15 +1135,22 @@ var JobOverviewV2Core = (function () {
   }
   // Oldest first (newest at the bottom), a day line wherever the Perth day changes,
   // machine rows dropped, calls merged, then the filter: all, sms, call or email.
-  function conversation(list, filter, now) {
+  // Held rows (job not certain) stay in place but carry held: true for their own mark.
+  function conversation(list, filter, now, story) {
     var f = lower(filter) || 'all';
-    var msgs = arr(list).map(normMessage).filter(function (n) { return isFinite(n.ms) && !isMachine(n); });
+    var idx = heldIndex(story);
+    var msgs = arr(list).map(function (x, i) {
+      var n = normMessage(x, i);
+      n.held = isHeld(x, idx);
+      return n;
+    }).filter(function (n) { return isFinite(n.ms) && !isMachine(n); });
     msgs.sort(function (a, b) { return (a.ms - b.ms) || (a.i - b.i); });
     msgs = mergeCalls(msgs);
-    var counts = { sms: 0, call: 0, email: 0, other: 0 };
+    var counts = { sms: 0, call: 0, email: 0, other: 0, held: 0 };
     var ids = {};
     msgs.forEach(function (n) {
       counts[counts[n.channel] != null ? n.channel : 'other']++;
+      if (n.held) counts.held++;
       if (n.id) ids[n.id] = true;
       n.otherIds.forEach(function (x) { ids[x] = true; });
     });
@@ -1103,6 +1162,36 @@ var JobOverviewV2Core = (function () {
       items.push({ type: 'msg', m: n });
     });
     return { items: items, total: msgs.length, shown: shown.length, counts: counts, ids: ids };
+  }
+  // The card's held list carries a call twice (its call log and its transcript row): one row per
+  // call, keeping a producer summary and the logged duration. The total drops by the same count.
+  function heldList(held) {
+    held = obj(held) || {};
+    var out = [], dupes = 0;
+    arr(held.items).filter(function (x) { return obj(x); }).forEach(function (x) {
+      var n = normMessage(x, 0);
+      var call = n.channel === 'call' || /call|transcript/.test(lower(x.kind) + ' ' + lower(x.channel));
+      var kinds = lower(x.kind) + ' ' + lower(x.event_type);
+      var log = /call_logged/.test(kinds);
+      var secs = log ? firstNum(x.call_seconds, (/Duration:\s*(\d+)\s*sec/i.exec(str(x.text)) || [])[1]) : firstNum(x.call_seconds);
+      var row = { x: x, call: call, ms: n.ms, dir: n.direction, transcript: /transcript/.test(kinds), secs: secs, summary: call ? clean(x.summary) : '' };
+      if (call && isFinite(n.ms)) {
+        var twin = out.filter(function (r) {
+          return r.call && !r.pair && r.transcript !== row.transcript && Math.abs(r.ms - row.ms) < 60000 && (!r.dir || !row.dir || r.dir === row.dir);
+        })[0];
+        if (twin) {
+          twin.pair = true;
+          if (row.secs != null && twin.secs == null) twin.secs = row.secs;
+          if (!twin.summary && row.summary) twin.summary = row.summary;
+          if (row.x.cut) twin.cut = true;
+          dupes++;
+          return;
+        }
+      }
+      out.push(row);
+    });
+    var total = Math.max(out.length, (Number(held.count) || 0) - dupes);
+    return { items: out, count: total };
   }
   function callWords(secs) {
     var s = num(secs);
@@ -1153,7 +1242,7 @@ var JobOverviewV2Core = (function () {
     storyText: storyText, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
     invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
-    timeline: timeline, recordTimeline: recordTimeline, conversation: conversation,
+    timeline: timeline, recordTimeline: recordTimeline, conversation: conversation, heldList: heldList,
     callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange
   };
 })();
@@ -1279,7 +1368,7 @@ var JobOverviewV2 = (function () {
       });
     });
     u.sent.forEach(function (s) { list.push({ at: new Date(s.ms).toISOString(), channel: 'sms', direction: 'outbound', who: 'You', text: s.text, pending: true }); });
-    m.conv = C.conversation(list, m.filter, now);
+    m.conv = C.conversation(list, m.filter, now, story);
     var exchange = C.customerExchange(story, list);
     m.lastCustomer = exchange.customer;
     m.lastUs = exchange.us;
@@ -1479,26 +1568,30 @@ var JobOverviewV2 = (function () {
   }
   function lastWordHtml(m) {
     function row(label, n) {
-      return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(n ? C.cut(n.text, 160) : 'No customer-specific message words on this job record.') + '</p></div>';
+      var words = !n ? 'No customer-specific message words on this job record.' :
+        (n.text ? C.cut(n.text, 160) : 'A reply with no words (an emoji only), ' + C.stamp(n.at, m.now) + '.');
+      var then = n && n.text && n.thenNoWordsAt ? '<p class="ov2-im">Then a reply with no words (an emoji only), ' + esc(C.stamp(n.thenNoWordsAt, m.now)) + '.</p>' : '';
+      return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(words) + '</p>' + then + '</div>';
     }
     return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told the customer', m.lastUs) + '</div>';
   }
   function heldMessagesHtml(m) {
     var held = C.obj(m.story && m.story.held_messages);
     if (!held) return '';
-    var items = C.arr(held.items).filter(function (x) { return C.obj(x); });
-    var count = Math.max(items.length, Number(held.count) || 0);
+    var list = C.heldList(held);
+    var items = list.items, count = list.count;
     var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Held messages, job not certain"><h3>Held messages, job not certain</h3>' +
       '<p>These messages may belong to this job or another job. They are not settled facts or open items for this job.</p>' +
       '<p>' + esc(items.length + ' of ' + count + ' held messages shown.') + '</p>';
     if (held.why) h += '<p>' + esc(C.clean(held.why)) + '</p>';
     if (!items.length) h += '<p>Held message content is unavailable in this read.</p>';
-    items.forEach(function (x) {
-      var call = /call|transcript/.test(C.lower(x.kind) + ' ' + C.lower(x.channel));
+    items.forEach(function (r) {
+      var x = r.x, call = r.call;
       // Held calls obey the same no-transcript rule as the conversation. A safe
       // sourced summary may be supplied by the producer; raw text is never one.
-      var words = C.clean(call ? x.summary : x.text);
+      var words = call ? r.summary : C.clean(x.text);
       var meta = [x.at ? C.stamp(x.at, m.now) : 'Date not recorded', call ? 'Call' : C.clean(x.channel),
+        call && r.secs != null ? C.callWords(r.secs) : '',
         C.clean(x.from), x.ours ? 'From us' : C.clean(x.from_role)].filter(Boolean).join(DOT);
       h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Held, job not certain</strong>' +
         '<div class="ov2-im">' + esc(meta) + '</div>' +
@@ -1506,7 +1599,7 @@ var JobOverviewV2 = (function () {
         '<p class="ov2-held-words">' + esc(words || (call ? 'Call summary unavailable. Transcript words are not shown; commitments in this call may still need review.' : 'Message words unavailable.')) + '</p>' +
         (x.held_because ? '<p>Held because ' + esc(C.clean(x.held_because)) + '.</p>' : '') +
         (C.arr(x.other_jobs).length ? '<p>Other possible jobs: ' + esc(x.other_jobs.map(C.clean).join(', ')) + '.</p>' : '') +
-        (x.cut ? '<p>Only part of this source was returned.</p>' : '') + '</article>';
+        (x.cut || r.cut ? '<p>Only part of this source was returned.</p>' : '') + '</article>';
     });
     return h + '</section>';
   }
@@ -1618,7 +1711,7 @@ var JobOverviewV2 = (function () {
 
   function convBodyHtml(m) {
     var c = m.conv, f = m.filter;
-    var hint = c.total ? C.plural(c.total, 'message') : '';
+    var hint = c.total ? C.plural(c.total, 'message') + (c.counts.held ? DOT + c.counts.held + ' may belong to another job' : '') : '';
     if (m.convSource === 'record') hint = (hint ? hint + DOT : '') + 'latest from the job record';
     var h = '<div class="ov2-ch"><span class="ov2-lbl">Conversation</span><span class="ov2-hint">' + esc(hint) + '</span></div>' +
       '<div class="ov2-seg" role="group" aria-label="Show">' + [['all', 'All'], ['sms', 'Texts'], ['call', 'Calls'], ['email', 'Email']].map(function (p) {
@@ -1637,17 +1730,21 @@ var JobOverviewV2 = (function () {
     if (w === 'staff' || w === 'us' || w === 'ours' || w === 'team' || w === 'office') return 'Us';
     return C.firstName(n.who) || fallback;
   }
+  // A held row keeps its place in the thread with its own mark: it may belong to another job.
+  var HELD_TAG = '<span class="ov2-btag">Job not certain: may belong to another job</span>';
   function bubbleHtml(m, n) {
-    var idAttr = n.id ? ' data-ov2-msg="' + esc(n.id) + '"' : '';
+    var idAttr = (n.id ? ' data-ov2-msg="' + esc(n.id) + '"' : '') + (n.held ? ' data-ov2-held-msg="1"' : '');
+    var held = n.held ? ' held' : '';
+    var tag = n.held ? HELD_TAG : '';
     var t = C.timeWords(n.at);
     if (n.channel === 'call') {
       var who = n.direction === 'inbound' ? 'Call from ' + whoName(n, m.first, m) : 'Call to ' + m.first;
-      return '<div class="ov2-b sys call"' + idAttr + '>' + esc([who, C.callWords(n.secs), t].filter(Boolean).join(DOT)) + '</div>';
+      return '<div class="ov2-b sys call' + held + '"' + idAttr + '>' + tag + esc([who, C.callWords(n.secs), t].filter(Boolean).join(DOT)) + '</div>';
     }
-    if (n.channel !== 'sms' && n.channel !== 'email') return '<div class="ov2-b sys"' + idAttr + '>' + esc([C.cut(n.text, 160), t].filter(Boolean).join(DOT)) + '</div>';
+    if (n.channel !== 'sms' && n.channel !== 'email') return '<div class="ov2-b sys' + held + '"' + idAttr + '>' + tag + esc([C.cut(n.text, 160), t].filter(Boolean).join(DOT)) + '</div>';
     var inbound = n.direction === 'inbound';
     var meta = [whoName(n, inbound ? m.first : 'Us', m), n.channel === 'sms' ? 'text' : 'email', t].filter(Boolean).join(DOT) + (n.pending ? DOT + 'sent just now' : '');
-    return '<div class="ov2-b ' + (inbound ? 'in' : 'out') + (n.pending ? ' pending' : '') + '"' + idAttr + '><small>' + esc(meta) + '</small>' + esc(n.text) + '</div>';
+    return '<div class="ov2-b ' + (inbound ? 'in' : 'out') + (n.pending ? ' pending' : '') + held + '"' + idAttr + '>' + tag + '<small>' + esc(meta) + '</small>' + esc(n.text) + '</div>';
   }
   function composeHtml(m) {
     if (!m.job.ghl_contact_id) {
@@ -2153,6 +2250,9 @@ var JobOverviewV2 = (function () {
     '.ov2-b.pending{opacity:.75}',
     '.ov2-b.sys{align-self:center;max-width:100%;border:0;background:transparent;color:var(--sw-mid,#4C6A7C);font-size:11px;padding:1px 4px;text-align:center}',
     '.ov2-b.flash{box-shadow:0 0 0 3px var(--sw-orange-light,#FADDD2)}',
+    '.ov2-b.held{border:1px dashed #B9770E;background:#FFF8EC;color:var(--sw-dark,#293C46)}',
+    '.ov2-b.sys.held{padding:4px 8px}',
+    '.ov2-btag{display:block;font-size:10.5px;font-weight:600;color:#8A5A0B;margin-bottom:2px;white-space:normal}',
     '.ov2-compose{margin-top:10px;border-top:1px solid var(--sw-light,#EDF1F4);padding-top:10px}',
     '.ov2-compose textarea{display:block;width:100%;min-height:58px;border:1px solid var(--sw-border,#D4DEE4);border-radius:var(--sw-radius-sm,3px);padding:7px 9px;font-size:12.5px;line-height:1.45;background:#fff;resize:vertical}',
     '.ov2-compose textarea:focus{outline:none;border-color:var(--sw-orange,#F15A29)}',

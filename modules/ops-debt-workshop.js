@@ -355,6 +355,19 @@ var DebtWorkshopCore = (function () {
       return who + lab + ' ' + state;
     }).join(' · ');
   }
+  // A message the system has not filed on any job yet (backend: unplaced, this job one of the
+  // jobs it could belong to, from the payer's own contact). Shown like any other, with a quiet label.
+  function unplacedWords(m) {
+    return m && m.unplaced === true ? 'not yet filed on a job' : '';
+  }
+  // "GHL: Vincent" when drafts greet the payer by their GoHighLevel first name and it differs
+  // from the Xero name shown (Xero "Tuan Tran", GoHighLevel "Vincent Tran"). Empty otherwise.
+  function ghlNameHint(J) {
+    var p = J && J.payer_contact, row = (J && J.row) || {};
+    if (!p || p.greeting_name_source !== 'ghl' || !p.greeting_name) return '';
+    var shown = firstName(row.payer_name || p.name);
+    return shown.toLowerCase() === String(p.greeting_name).toLowerCase() ? '' : 'GHL: ' + String(p.greeting_name);
+  }
   // How a message names the other person it is with, on the whole job's thread.
   function partyWords(m) {
     if (!m || m.is_payer !== false || !m.party_name) return '';
@@ -541,6 +554,7 @@ var DebtWorkshopCore = (function () {
     storyLines: storyLines, moneyRows: moneyRows, fileKind: fileKind, isReplyStep: isReplyStep, isPaused: isPaused,
     draftAmount: draftAmount, statementPossible: statementPossible,
     firstName: firstName, payerOf: payerOf, shareSummary: shareSummary, partyWords: partyWords,
+    unplacedWords: unplacedWords, ghlNameHint: ghlNameHint,
   };
 })();
 // </debt-workshop-core>
@@ -739,6 +753,9 @@ function dwCss() {
     '.dw-shares{font-size:12.5px;color:var(--dw-mid);margin-top:5px}',
     '#viewDebt .dw-convt{font-size:12px;margin-top:6px;display:inline-block}',
     '.dw-msg.other{opacity:.72}.dw-msg.in.other{background:#F6F7F8}.dw-msg.out.other{background:#FBF4F1}',
+    // A message not yet filed on a job, and the payer's GoHighLevel first name when it differs from Xero's
+    '.dw-msg .dw-unpl{display:block;font-size:10px;color:var(--dw-midl);margin-top:4px;font-style:italic;white-space:normal}',
+    '.dw-strip h2 small.dw-ghlname{font-weight:400;color:var(--dw-midl)}',
     // W2: agent notices, the suggestion, the move card, the link card
     '.dw-notice{margin-top:12px;border:1px solid #EBD9BC;background:#FFF9EF;border-radius:10px;padding:11px 14px;font-size:13px;line-height:1.45;color:#4F3A16}',
     '.dw-notice .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}',
@@ -1171,7 +1188,8 @@ function dwJobHtml() {
   var paused = C.isPaused(row, today) ? '<div class="dw-paused">Follow-ups paused until ' + dwEsc(C.dateWords(row.paused_until)) + ', a promise to pay.</div>' : '';
   var shareLine = C.shareSummary(job.shares, C.payerOf(J).label);
   var shares = shareLine ? '<div class="dw-shares" id="dwShares">' + dwEsc(shareLine) + '</div>' : '';
-  var strip = '<div class="dw-strip" id="dwStrip"><div><h2>' + dwPayerHtml(row) + ' ' + dwBadgeHtml(tk) + ' ' + pill + '</h2><div class="sub">' + sub + '</div>' + shares + paused + '</div>' +
+  var ghlHint = C.ghlNameHint(J), ghlName = ghlHint ? ' <small class="dw-ghlname" id="dwGhlName">(' + dwEsc(ghlHint) + ')</small>' : '';
+  var strip = '<div class="dw-strip" id="dwStrip"><div><h2>' + dwPayerHtml(row) + ghlName + ' ' + dwBadgeHtml(tk) + ' ' + pill + '</h2><div class="sub">' + sub + '</div>' + shares + paused + '</div>' +
     '<div class="dw-owing"><b id="dwOwing">' + dwEsc(C.money(row.amount_due)) + '</b><span>owing</span></div></div>';
   var nodes = Array.isArray(J.ladder) && J.ladder.length ? C.ladder(J.ladder, row.invoice_date) : [];
   var ladder = nodes.length ? '<div class="dw-ladder" id="dwLadder">' + nodes.map(function (n, i) {
@@ -1268,10 +1286,12 @@ function dwMiddleHtml(J) {
 function dwMsgHtml(m) {
   var C = DebtWorkshopCore, id = String(m.id || ''), time = C.perthTime(m.occurred_at || m.at), body = String(m.body || m.preview || '');
   var author = m.author && !DW_UUID.test(String(m.author)) ? String(m.author) : '';
+  // Not filed on a job yet (the payer's own message, this job one it could belong to): a quiet label.
+  var unpl = C.unplacedWords(m), unplTag = unpl ? '<span class="dw-unpl">' + dwEsc(unpl) + '</span>' : '';
   if (m.channel === 'call') {
     var open = !!DW.open[id], tr = body.trim();
     return '<div class="dw-msg call" data-msg="' + dwEsc(id) + '"><b>' + dwEsc(C.callTitle(m)) + '</b>' + (time ? ' <span class="meta" style="display:inline">' + dwEsc(time) + '</span>' : '') +
-      (tr ? '<div><button type="button" class="dw-link" data-dw="transcript" data-k="' + dwEsc(id) + '" aria-expanded="' + open + '">' + (open ? 'Hide transcript' : 'Show transcript') + '</button></div>' + (open ? '<div class="tr">' + dwEsc(tr) + '</div>' : '') : '<span class="meta">No transcript</span>') + '</div>';
+      (tr ? '<div><button type="button" class="dw-link" data-dw="transcript" data-k="' + dwEsc(id) + '" aria-expanded="' + open + '">' + (open ? 'Hide transcript' : 'Show transcript') + '</button></div>' + (open ? '<div class="tr">' + dwEsc(tr) + '</div>' : '') : '<span class="meta">No transcript</span>') + unplTag + '</div>';
   }
   if (m.channel === 'note') return '<div class="dw-msg note" data-msg="' + dwEsc(id) + '"><span class="meta">Staff note' + (author ? ' · ' + dwEsc(author) : '') + (time ? ' · ' + dwEsc(time) : '') + '</span>' + dwEsc(body) + '</div>';
   var out = m.direction === 'outbound';
@@ -1281,7 +1301,7 @@ function dwMsgHtml(m) {
   var long = body.length > 600 && !DW.open[id];
   return '<div class="dw-msg ' + (out ? 'out' : 'in') + (m.is_payer === false ? ' other' : '') + '" data-msg="' + dwEsc(id) + '"><span class="meta">' + dwEsc(who + ' · ' + C.channelWord(m.channel) + (time ? ' · ' + time : '')) + '</span>' +
     (m.subject ? '<span class="subj">' + dwEsc(m.subject) + '</span>' : '') + dwEsc(long ? body.slice(0, 600).replace(/\s+\S*$/, '') + '...' : body) +
-    (body.length > 600 ? '<br><button type="button" class="dw-link" data-dw="more" data-k="' + dwEsc(id) + '">' + (long ? 'Show all' : 'Show less') + '</button>' : '') + '</div>';
+    (body.length > 600 ? '<br><button type="button" class="dw-link" data-dw="more" data-k="' + dwEsc(id) + '">' + (long ? 'Show all' : 'Show less') + '</button>' : '') + unplTag + '</div>';
 }
 // The payer's Link contact card: candidates are searched by the payer's own phone and email.
 function dwLinkCardHtml(J, s) {

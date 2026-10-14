@@ -391,6 +391,22 @@ test('W2: a shared fence is the neighbour\'s own: their phone, the shares, no bo
   await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.xero_invoice_id, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', fixture.ids.riley, fixture.ids.rileyContact]]);
 });
 
+test('W2: a message not yet filed on a job shows normally with a quiet label; the GHL first name is hinted', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  const J = Object.values(fixture.jobs).find((j) => j.row && j.row.payer_name === 'Casey Morgan');
+  // Drafts greet Casey by the GoHighLevel first name, which differs from Xero's.
+  Object.assign(J.payer_contact, { greeting_name: 'Cass', greeting_name_source: 'ghl', first_name: 'Cass', ghl_name: 'Cass Morgan' });
+  await openDebt(page, { fixture });
+  await openJob(page, 'Casey Morgan', 'Escalating');
+  const held = page.locator('#dwThread .dw-msg[data-msg="bev:u1"]');
+  await expect(held).toContainText('So sorry to bother you');
+  await expect(held.locator('.dw-unpl')).toHaveText('not yet filed on a job');
+  // Only that message carries the label; the others read as before.
+  await expect(page.locator('#dwThread .dw-unpl')).toHaveCount(1);
+  await expect(page.locator('#dwThread .dw-msg').last()).toContainText('gate still drags');
+  await expect(page.locator('#dwGhlName')).toHaveText('(GHL: Cass)');
+});
+
 test('W2: a linked neighbour is texted from here, at their own contact', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
   const J = fixture.jobs[fixture.ids.riley];

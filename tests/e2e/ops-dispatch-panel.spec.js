@@ -83,7 +83,7 @@ const CHAT = (n) => ({ contactId: 'contactA0000001', conversationId: 'conv-1', m
 const EMAILS = {
   messages: [
     { id: 'bev:1', channel: 'email', direction: 'inbound', source_system: 'business_events', occurred_at: '2026-10-05T02:00:00Z', author: 'Client Person', subject: 'Re: install day', preview: 'Thanks, see you then.', customer_party: true },
-    { id: 'ghl:1', channel: 'email', direction: 'outbound', source_system: 'ghl_cache', occurred_at: '2026-10-04T02:00:00Z', subject: 'Chat copy', preview: 'already in chat' },
+    { id: 'ghl:1', channel: 'email', direction: 'outbound', source_system: 'ghl_cache', occurred_at: '2026-10-04T02:00:00Z', subject: 'Booking details', preview: 'Sent from client messaging.', customer_party: true },
     { id: 'ghl:2', channel: 'sms', direction: 'outbound', source_system: 'ghl_cache', occurred_at: '2026-10-04T01:00:00Z', preview: 'a text' },
     { id: 'note:1', channel: 'note', direction: 'internal', source_system: 'job_events', occurred_at: '2026-10-03T02:00:00Z', preview: 'a note' },
     { id: 'email_event:1', channel: 'email', direction: 'outbound', source_system: 'email_events', occurred_at: '2026-10-02T02:00:00Z', subject: 'Your quote Q-900501', preview: 'Subject: Your quote Q-900501\nSent by our system, email type: quote.', customer_party: true },
@@ -93,7 +93,7 @@ const EMAILS = {
   summary: { count: 7, channels: { email: 5, sms: 1, note: 1 } },
 };
 
-const FOOT = 'Email sent by the system, email filed from the inbox, and mailbox email the context system has placed on this job. Mailbox email not yet placed on a job is not listed.';
+const FOOT = 'Email sent by the system, GoHighLevel (client messaging) email, email filed from the inbox, and mailbox email the context system has placed on this job. Mailbox email not yet placed on a job is not listed.';
 
 // Boots Ops on Dispatch with ops-api and ghl-proxy stubbed. `ops[action]` and
 // `ghl[action]` return a JSON body, or { status, body }.
@@ -272,6 +272,34 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   expect(of('get_invoice_pdf')[0].url.searchParams.get('xero_invoice_id')).toBe('xero-dep');
   await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
   await expect(invoices.last().locator('small')).toHaveText('Paid');
+});
+
+test('Dispatch panel Sources: a second press while the invoice PDF loads makes no second read', async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { panel, of } = await boot(page, {
+    ops: {
+      get_invoice_pdf: async () => {
+        await held;
+        return { success: true, pdf_base64: Buffer.from('%PDF-1.4 e2e').toString('base64'), content_type: 'application/pdf' };
+      },
+    },
+  });
+  const invoice = panel.locator('[data-dpc-invoice]').last();
+  await expect(invoice.locator('small')).toHaveText('Paid');
+  await invoice.click();
+  await expect(invoice.locator('small')).toHaveText('Loading...');
+  await invoice.click();
+  await expect.poll(() => of('get_invoice_pdf').length).toBe(1);
+  release();
+  await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
+  await expect(invoice.locator('small')).toHaveText('Paid');
+  await page.waitForTimeout(300);
+  expect(of('get_invoice_pdf').length).toBe(1);
+  // Once it has loaded, a fresh press reads it again.
+  await invoice.click();
+  await expect.poll(() => of('get_invoice_pdf').length).toBe(2);
+  await expect(invoice.locator('small')).toHaveText('Paid');
 });
 
 test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', async ({ page }) => {
@@ -505,14 +533,14 @@ test('Dispatch panel chat: a failed send keeps the text and is never retried on 
 
 // ── Messages: email history ──────────────────────────────────────────────────
 
-test('Dispatch panel email: email rows of get_job_conversation at limit 200, chat copies left out', async ({ page }) => {
+test('Dispatch panel email: every email row of get_job_conversation at limit 200, GoHighLevel email included', async ({ page }) => {
   const { root, panel, of } = await boot(page);
   await tab(root, 'messages');
   await panel.locator('[data-dpc-msg="email"]').click();
   const rows = panel.locator('.dpc-source');
-  await expect(rows.locator('strong')).toHaveText(['Re: install day', 'Your quote Q-900501', 'Order confirmation', 'Order for job']);
+  await expect(rows.locator('strong')).toHaveText(['Re: install day', 'Booking details', 'Your quote Q-900501', 'Order confirmation', 'Order for job']);
   await expect(rows.locator('.dpc-muted')).toHaveText([
-    /^Client Person, \w{3} 5\/10$/, /^SecureWorks to client, \w{3} 2\/10$/, /^Sender not recorded, \w{3} 1\/10$/, /^SecureWorks, not to the client, \w{3} 30\/9$/,
+    /^Client Person, \w{3} 5\/10$/, /^SecureWorks to client, \w{3} 4\/10$/, /^SecureWorks to client, \w{3} 2\/10$/, /^Sender not recorded, \w{3} 1\/10$/, /^SecureWorks, not to the client, \w{3} 30\/9$/,
   ]);
   await expect(rows.nth(0).locator('.dpc-preview')).toHaveText('Thanks, see you then.');
   await expect(panel.locator('.dpc-foot-line')).toHaveText(FOOT);
@@ -523,8 +551,25 @@ test('Dispatch panel email: email rows of get_job_conversation at limit 200, cha
   // Kept for the job.
   await panel.locator('[data-dpc-msg="client"]').click();
   await panel.locator('[data-dpc-msg="email"]').click();
-  await expect(rows).toHaveCount(4);
+  await expect(rows).toHaveCount(5);
   expect(of('get_job_conversation').length).toBe(1);
+});
+
+test('Dispatch panel email: an older GoHighLevel email outside the latest 30 chat messages shows in Email history', async ({ page }) => {
+  const older = { id: 'ghl:old', channel: 'email', direction: 'outbound', source_system: 'ghl_cache', occurred_at: '2026-08-10T02:00:00Z', subject: 'Your fence quote', preview: 'Quote attached, sent from client messaging.', customer_party: true };
+  const { root, panel } = await boot(page, {
+    ghl: { get_conversation: () => CHAT(30) },
+    ops: { get_job_conversation: () => ({ messages: [older], summary: { count: 1 } }) },
+  });
+  await tab(root, 'messages');
+  await expect(panel.locator('.dpc-bubble')).toHaveCount(30);
+  await expect(panel).not.toContainText('Your fence quote');
+  await panel.locator('[data-dpc-msg="email"]').click();
+  const rows = panel.locator('.dpc-source');
+  await expect(rows.locator('strong')).toHaveText(['Your fence quote']);
+  await expect(rows.locator('.dpc-muted')).toHaveText([/^SecureWorks to client, \w{3} 10\/8$/]);
+  await expect(rows.locator('.dpc-preview')).toHaveText('Quote attached, sent from client messaging.');
+  await expect(panel.locator('.dpc-foot-line')).toHaveText(FOOT);
 });
 
 test('Dispatch panel email: a full read of 200 says so; empty and failed reads say so with the foot line', async ({ page }) => {
@@ -534,7 +579,7 @@ test('Dispatch panel email: a full read of 200 says so; empty and failed reads s
   await panel.locator('[data-dpc-msg="email"]').click();
   await expect(panel.locator('.dpc-chat-cap')).toHaveText('Showing the latest email only.');
 
-  answer = { messages: [EMAILS.messages[1], EMAILS.messages[3]], summary: { count: 2 } };
+  answer = { messages: [EMAILS.messages[2], EMAILS.messages[3]], summary: { count: 2 } };
   await openJob(root, 'SWP-900502');
   await expect(panel.locator('.dpc-empty')).toHaveText('No email on this job yet.');
   await expect(panel.locator('.dpc-foot-line')).toHaveText(FOOT);
@@ -560,7 +605,7 @@ test('Dispatch panel: every call it makes is one of job_story, get_conversation,
   await tab(root, 'messages');
   await expect(panel.locator('.dpc-bubble')).toHaveCount(3);
   await panel.locator('[data-dpc-msg="email"]').click();
-  await expect(panel.locator('.dpc-source')).toHaveCount(4);
+  await expect(panel.locator('.dpc-source')).toHaveCount(5);
   await tab(root, 'sources');
   await panel.locator('[data-dpc-invoice]').first().click();
   await root.locator('[data-dpc-right]').click();

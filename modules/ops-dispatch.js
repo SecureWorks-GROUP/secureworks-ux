@@ -15,7 +15,17 @@
  * work_type, and one that does not know job_notes answers Unknown action:
  * both are failed reads.
  *
- * Guard: tests/e2e/ops-tab-set.spec.js.
+ * Slice 2 adds the right panel (Sources, Context story, Messages), which
+ * collapses to a floating tab. It reuses slice 1's one job_detail result for
+ * Sources and reads, each only when its tab is first shown for a job and kept
+ * for the session: ops-api job_story (timeline only), ghl-proxy
+ * get_conversation (a live GoHighLevel read, never polled) and ops-api
+ * get_job_conversation (limit 200, email rows only). get_invoice_pdf is called
+ * only when an invoice is pressed. Its one write is ghl-proxy send_sms, from
+ * +61489267771, when a person presses Send; it never resends on its own.
+ *
+ * Guards: tests/e2e/ops-tab-set.spec.js (slice 1) and
+ * tests/e2e/ops-dispatch-panel.spec.js (slice 2).
  * Contract: secureworks-backend docs/dispatch-slice-1-read-contract.md.
  */
 (function (global) {
@@ -34,6 +44,17 @@
   var LS_LEFT = 'sw_dispatch_left';
   var LS_SCOPE = 'sw_dispatch_scope_open';
   var SS_JOB = 'sw_dispatch_job';
+  var LS_RIGHT = 'sw_dispatch_right';
+  var LS_TAB = 'sw_dispatch_tab';
+  var TABS = [
+    { key: 'sources', label: 'Sources' },
+    { key: 'story', label: 'Context story' },
+    { key: 'messages', label: 'Messages' }
+  ];
+  // Company rule: every ops text to a client goes from SecureWorks Group Admin.
+  var SMS_FROM = '+61489267771';
+  var EMAIL_LIMIT = 200; // the most get_job_conversation returns
+  var CHAT_LIMIT = 30; // get_conversation returns the latest 30
   var FIRST_CHUNK = 60;
   var NEXT_CHUNK = 150;
   var SEARCH_DEBOUNCE_MS = 300;
@@ -329,7 +350,113 @@
     return words + (step && status !== 'complete' ? ', step ' + step : '');
   }
 
+  // ── slice 2: the right panel's rules ──
+
+  function dayText(p, yearNow) { return p ? DOW[p.dow] + ' ' + dayMonth(p, yearNow) : ''; }
+
+  function newestFirst(list, key) {
+    return list.slice().sort(function (a, b) { return (Date.parse(b[key]) || 0) - (Date.parse(a[key]) || 0); });
+  }
+
+  // Quotes the client was sent or signed, newest first. A chip opens its stored
+  // PDF only: the client's share page (send-quote/view) records a client view
+  // when it is opened, so it is never offered here.
+  function sourceQuotes(documents, yearNow) {
+    var quotes = documents.filter(function (d) { return d && d.type === 'quote' && (d.sent_to_client === true || !!d.accepted_at); });
+    quotes = quotes.slice().sort(function (a, b) {
+      var d = (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+      return d || ((Number(b.version) || 0) - (Number(a.version) || 0));
+    });
+    return quotes.map(function (d) {
+      var name = 'Quote' + (plain(d.quote_number) ? ' ' + plain(d.quote_number) : '') + (plain(d.version) ? ' v' + plain(d.version) : '');
+      var detail;
+      if (d.accepted_at) detail = 'Sent and accepted' + (parseStamp(d.accepted_at) ? ' ' + dayMonth(parseStamp(d.accepted_at), yearNow) : '');
+      else if (d.superseded_at) detail = 'Superseded';
+      else detail = 'Sent' + (parseStamp(d.sent_at) ? ' ' + dayMonth(parseStamp(d.sent_at), yearNow) : '');
+      return { name: name, detail: detail, url: safeUrl(d.pdf_url) || safeUrl(d.storage_url) };
+    });
+  }
+
+  var INVOICE_STATUS = { PAID: 'Paid', AUTHORISED: 'Sent, not paid yet', DRAFT: 'Draft, not issued', SUBMITTED: 'Awaiting approval' };
+
+  // This job's client invoices only. job_detail falls back to invoices matched
+  // on the client's name when none is linked to the job; those are not this
+  // job's, and neither are supplier bills (ACCPAY) or voided and deleted ones.
+  function sourceInvoices(invoices, jobId) {
+    var mine = invoices.filter(function (inv) {
+      if (!inv || !jobId || inv.job_id !== jobId) return false;
+      if (text(inv.invoice_type).toUpperCase() !== 'ACCREC') return false;
+      var st = text(inv.status).toUpperCase();
+      return st !== 'VOIDED' && st !== 'DELETED';
+    });
+    return newestFirst(mine, 'invoice_date').map(function (inv) {
+      var num = plain(inv.invoice_number) || 'Invoice';
+      var st = text(inv.status).toUpperCase();
+      return {
+        name: (text(inv.reference).indexOf('DEP') >= 0 ? 'Deposit invoice ' : '') + num,
+        detail: INVOICE_STATUS[st] || (st ? st.charAt(0) + st.slice(1).toLowerCase() : 'Status not recorded'),
+        xeroId: text(inv.xero_invoice_id)
+      };
+    });
+  }
+
+  var STORY_LABELS = {
+    first_contact: 'First contact', job_created: 'Job created', site_visit: 'Site visit', quote: 'Quote', status: 'Status',
+    invoice: 'Invoice', payment: 'Payment', booking: 'Booking', booking_change: 'Booking change', system_email: 'System email',
+    purchase_order: 'Purchase order', supplier_bill: 'Supplier bill', supplier_payment: 'Supplier payment', attendance: 'Attendance',
+    note: 'Note', document: 'Document', makesafe: 'Make-safe'
+  };
+
+  // A kind the table does not name is still drawn, never dropped.
+  function storyLabel(kind) {
+    var k = text(kind);
+    if (Object.prototype.hasOwnProperty.call(STORY_LABELS, k)) return STORY_LABELS[k];
+    var words = k.replace(/_/g, ' ').trim();
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Event';
+  }
+
+  // job_story's timeline, in the order returned. Throws on any other answer so
+  // the tab shows the failed-read line, never the empty one.
+  function storyLines(resp) {
+    if (!resp || typeof resp !== 'object' || resp.version !== 'job-story-v1' || !Array.isArray(resp.timeline)) {
+      throw new Error('Unexpected story answer');
+    }
+    return resp.timeline;
+  }
+
+  // get_conversation answers messages: [] beside its error, so the error is
+  // tested first and a rate-limited or failed read is never "no messages".
+  function chatMessages(httpOk, data) {
+    if (!httpOk || !data || typeof data !== 'object' || data.error || data.rate_limited || !Array.isArray(data.messages)) {
+      throw new Error('Chat read failed');
+    }
+    return data.messages.filter(function (m) { return m && typeof m === 'object'; });
+  }
+
+  function isCall(m) { return text(m && m.type).toUpperCase().indexOf('CALL') >= 0; }
+
+  // Email rows of get_job_conversation. Rows from the stored chat copy are
+  // already in Client chat, so they are left out here.
+  function emailRows(resp) {
+    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.messages)) throw new Error('Unexpected email answer');
+    return {
+      rows: resp.messages.filter(function (m) { return m && m.channel === 'email' && m.source_system !== 'ghl_cache'; }),
+      capped: !!(resp.summary && resp.summary.count === EMAIL_LIMIT)
+    };
+  }
+
+  function emailWho(m) {
+    if (m.direction === 'outbound') return m.customer_party === false ? 'SecureWorks, not to the client' : 'SecureWorks to client';
+    if (m.direction === 'internal') return 'Internal, staff only';
+    return text(m.author) || 'Sender not recorded';
+  }
+
   // ───────────────────────── state ─────────────────────────
+
+  function tabKey(v) {
+    for (var i = 0; i < TABS.length; i++) if (TABS[i].key === v) return v;
+    return 'sources';
+  }
 
   function readStore(store, key) { try { return global[store].getItem(key); } catch (e) { return null; } }
   function writeStore(store, key, value) { try { global[store].setItem(key, value); } catch (e) { /* private mode */ } }
@@ -348,7 +475,17 @@
     notes: { jobId: null, status: 'idle', items: [] },
     drafts: {},
     saving: {},
-    noteMsg: {}
+    noteMsg: {},
+    rightOpen: readStore('localStorage', LS_RIGHT) !== '0',
+    tab: tabKey(readStore('localStorage', LS_TAB)),
+    msg: 'client',
+    // Panel reads, each kept per job for the session: { status, ... }.
+    story: {},
+    chat: {},
+    email: {},
+    replies: {},
+    sending: {},
+    replyMsg: {}
   };
   var tokens = { base: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -378,6 +515,7 @@
       state.rowStale = true;
       paintList();
       paintWorkspace();
+      paintContext();
     });
   }
 
@@ -395,7 +533,7 @@
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
     var pick = byId(readStore('sessionStorage', SS_JOB)) || rows[0] || null;
-    if (pick) selectJob(pick); else paintWorkspace();
+    if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
 
   function runSearch() {
@@ -421,15 +559,19 @@
   function loadDetail(jobId) {
     state.detail = { jobId: jobId, status: 'loading', data: null };
     paintScope();
+    paintPanel();
     Promise.resolve().then(function () { return global.opsFetch('job_detail', { jobId: jobId }); }).then(function (data) {
       if (state.detail.jobId !== jobId) return;
       if (!data || typeof data !== 'object' || !data.job || typeof data.job !== 'object') throw new Error('Unexpected job answer');
       state.detail = { jobId: jobId, status: 'ok', data: data };
       paintScope();
+      paintPanel();
+      ensureTabData();
     }).catch(function () {
       if (state.detail.jobId !== jobId) return;
       state.detail = { jobId: jobId, status: 'error', data: null };
       paintScope();
+      paintPanel();
     });
   }
 
@@ -461,12 +603,13 @@
     writeStore('sessionStorage', SS_JOB, row.id);
     markSelected();
     if (same && state.detail.jobId === row.id) { // already open: no second read
-      if (stale) paintWorkspace();
+      if (stale) { paintWorkspace(); paintContext(); }
       return;
     }
     state.detail = { jobId: row.id, status: 'loading', data: null };
     state.notes = { jobId: row.id, status: 'loading', items: [] };
     paintWorkspace();
+    paintContext();
     loadDetail(row.id);
     loadNotes(row.id);
   }
@@ -490,6 +633,116 @@
       state.saving[jobId] = false;
       state.noteMsg[jobId] = { ok: false, text: 'Note not saved. Your text is still here.' };
       if (state.jobId === jobId) paintComposer();
+    });
+  }
+
+  // ── slice 2 reads: each runs when its tab is first shown for a job ──
+
+  // The open job's client contact, from slice 1's one job_detail result.
+  function contactOf(jobId) {
+    var d = state.detail;
+    if (d.jobId !== jobId || d.status !== 'ok') return null;
+    return text(d.data.job.ghl_contact_id);
+  }
+
+  // job_story writes nothing: a GET of read-only SQL functions.
+  function loadStory(jobId) {
+    var entry = { status: 'loading', lines: [] };
+    state.story[jobId] = entry;
+    paintPanel();
+    Promise.resolve().then(function () { return global.opsFetch('job_story', { job_id: jobId }); }).then(function (resp) {
+      if (state.story[jobId] !== entry) return;
+      state.story[jobId] = { status: 'ok', lines: storyLines(resp) };
+      paintPanel();
+    }).catch(function (e) {
+      if (state.story[jobId] !== entry) return;
+      state.story[jobId] = { status: 'error', forbidden: !!(e && e.status === 403), lines: [] };
+      paintPanel();
+    });
+  }
+
+  // A live GoHighLevel read (provider calls, rate-limited): once per job, again
+  // on Retry and once after a send. Never polled.
+  function loadChat(jobId, contactId) {
+    var entry = { status: 'loading', contactId: contactId, messages: [] };
+    state.chat[jobId] = entry;
+    paintChat();
+    Promise.resolve().then(function () { return global.opsAuthHeaders(); }).then(function (headers) {
+      return global.fetch(global.SUPABASE_URL + '/functions/v1/ghl-proxy?action=get_conversation&contactId=' + encodeURIComponent(contactId), { headers: headers, cache: 'no-store' });
+    }).then(function (resp) {
+      return resp.json().catch(function () { return null; }).then(function (data) { return chatMessages(resp.ok, data); });
+    }).then(function (messages) {
+      if (state.chat[jobId] !== entry) return;
+      state.chat[jobId] = { status: 'ok', contactId: contactId, messages: messages };
+      paintChat();
+    }).catch(function () {
+      if (state.chat[jobId] !== entry) return;
+      state.chat[jobId] = { status: 'error', contactId: contactId, messages: [] };
+      paintChat();
+    });
+  }
+
+  // get_job_conversation reads four stores and writes nothing.
+  function loadEmail(jobId) {
+    var entry = { status: 'loading', rows: [] };
+    state.email[jobId] = entry;
+    paintPanel();
+    Promise.resolve().then(function () { return global.opsPost('get_job_conversation', { job_id: jobId, limit: EMAIL_LIMIT }); }).then(function (resp) {
+      if (state.email[jobId] !== entry) return;
+      var got = emailRows(resp);
+      state.email[jobId] = { status: 'ok', rows: got.rows, capped: got.capped };
+      paintPanel();
+    }).catch(function () {
+      if (state.email[jobId] !== entry) return;
+      state.email[jobId] = { status: 'error', rows: [] };
+      paintPanel();
+    });
+  }
+
+  // What the open tab needs and has not read yet for this job.
+  function ensureTabData() {
+    var jobId = state.jobId;
+    if (!state.rightOpen || !jobId || !state.row || (state.base.status === 'error' && state.rowStale)) return;
+    if (state.tab === 'story' && !state.story[jobId]) loadStory(jobId);
+    if (state.tab !== 'messages') return;
+    if (state.msg === 'email') { if (!state.email[jobId]) loadEmail(jobId); return; }
+    var contactId = contactOf(jobId);
+    if (contactId && !(state.chat[jobId] && state.chat[jobId].contactId === contactId)) loadChat(jobId, contactId);
+  }
+
+  // The one write the panel makes: a text to the client, on a person's press.
+  function sendReply() {
+    var jobId = state.jobId;
+    var contactId = contactOf(jobId);
+    var body = (state.replies[jobId] || '').trim();
+    if (!jobId || !contactId || !body || state.sending[jobId]) return;
+    state.sending[jobId] = true;
+    state.replyMsg[jobId] = null;
+    paintReply();
+    Promise.resolve().then(function () { return global.opsAuthHeaders({ 'Content-Type': 'application/json' }); }).then(function (headers) {
+      return global.fetch(global.SUPABASE_URL + '/functions/v1/ghl-proxy?action=send_sms', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ contactId: contactId, message: body, jobId: jobId, fromNumber: SMS_FROM })
+      });
+    }).then(function (resp) {
+      return resp.json().catch(function () { return null; }).then(function (data) {
+        if (!resp.ok || !data || data.success !== true) throw new Error('Send failed');
+      });
+    }).then(function () {
+      state.sending[jobId] = false;
+      state.replies[jobId] = '';
+      state.replyMsg[jobId] = { ok: true, text: 'Message sent.' };
+      try { global.sessionStorage.removeItem('sw_convo_' + contactId); } catch (e) { /* private mode */ }
+      if (state.jobId === jobId) paintReply();
+      // Once, to show the sent message. A tab showing something else re-reads
+      // when Client chat is next shown.
+      delete state.chat[jobId];
+      if (state.jobId === jobId) ensureTabData();
+    }, function () {
+      state.sending[jobId] = false;
+      state.replyMsg[jobId] = { ok: false, text: 'Message not sent. Your text is still here.' };
+      if (state.jobId === jobId) paintReply();
     });
   }
 
@@ -764,6 +1017,199 @@
     return h + '</div>';
   }
 
+  // ───────────────────────── render: the right panel ─────────────────────────
+
+  function docChip(name, detail, attrs, tag) {
+    tag = tag || 'button';
+    return '<' + tag + ' class="dpc-doc" ' + attrs + (tag === 'button' ? ' type="button"' : '') + '><span class="dpc-doc-ico" aria-hidden="true">PDF</span>' +
+      '<span class="dpc-grow"><strong>' + esc(name) + '</strong><small>' + esc(detail) + '</small></span></' + tag + '>';
+  }
+
+  function sourcesHtml() {
+    var d = state.detail;
+    var jobId = state.jobId;
+    var h = '<h4 class="dpc-h4">Quotes sent to client</h4>';
+    if (d.status === 'error') {
+      return h + failLine('Could not load documents.', 'detail', true) + '<h4 class="dpc-h4">Invoices</h4>' + failLine('Could not load documents.', 'detail', true);
+    }
+    if (d.status !== 'ok' || d.jobId !== jobId) {
+      return h + '<div class="dpc-empty dpc-empty-tight">Loading documents...</div><h4 class="dpc-h4">Invoices</h4><div class="dpc-empty dpc-empty-tight">Loading documents...</div>';
+    }
+    var docs = d.data.documents;
+    if (!Array.isArray(docs)) h += failLine('Could not load documents.', 'detail', true);
+    else {
+      var quotes = sourceQuotes(docs);
+      if (!quotes.length) h += '<div class="dpc-empty dpc-empty-tight">No quote sent to the client yet.</div>';
+      quotes.forEach(function (q) {
+        // No stored PDF: listed, not pressable (desk ruling, 14 Oct).
+        h += q.url
+          ? docChip(q.name, q.detail, 'href="' + esc(q.url) + '" target="_blank" rel="noopener"', 'a')
+          : docChip(q.name, q.detail + ' · No PDF stored', 'data-dpc-nopdf', 'div');
+      });
+    }
+    h += '<h4 class="dpc-h4">Invoices</h4>';
+    var invoices = d.data.invoices;
+    if (!Array.isArray(invoices)) return h + failLine('Could not load documents.', 'detail', true);
+    var mine = sourceInvoices(invoices, jobId);
+    if (!mine.length) h += '<div class="dpc-empty dpc-empty-tight">No invoice on this job yet.</div>';
+    mine.forEach(function (inv) {
+      h += docChip(inv.name, inv.detail, 'data-dpc-invoice="' + esc(inv.xeroId) + '"');
+    });
+    return h;
+  }
+
+  function storyHtml() {
+    var h = '<p class="dpc-sub">The whole job in one line of events, from the context system.</p>';
+    var st = state.story[state.jobId];
+    if (!st || st.status === 'loading') h += '<div class="dpc-empty dpc-empty-tight">Reading the story.</div>';
+    else if (st.status === 'error') {
+      h += st.forbidden
+        ? '<div class="dpc-empty dpc-empty-tight" role="alert">The story needs a company sign-in.</div>'
+        : failLine('Could not read the story.', 'story', true);
+    } else if (!st.lines.length) h += '<div class="dpc-empty dpc-empty-tight">No story for this job yet.</div>';
+    else {
+      h += '<ol class="dpc-story">';
+      st.lines.forEach(function (line) {
+        line = line || {};
+        var when = dayText(parseDay(line.date));
+        h += '<li><strong>' + esc(storyLabel(line.kind)) + '</strong><span>' + esc(text(line.what)) + '</span>' + (when ? '<small>' + esc(when) + '</small>' : '') + '</li>';
+      });
+      h += '</ol>';
+    }
+    // The job page, opened the way the Jobs tab opens a job. Overview v2 is
+    // neither asked for nor switched on: each person sees the Overview they have.
+    var num = text(state.row && state.row.job_number);
+    if (num) h += '<p class="dpc-joblink"><a href="#job/' + esc(encodeURIComponent(num)) + '" data-dpc-jobpage>Open job page</a></p>';
+    return h;
+  }
+
+  function chatHtml() {
+    var jobId = state.jobId;
+    var d = state.detail;
+    if (d.status === 'error') return failLine('Could not load the chat.', 'detail', true);
+    if (d.status !== 'ok' || d.jobId !== jobId) return '<div class="dpc-empty dpc-empty-tight">Reading the chat.</div>';
+    if (!contactOf(jobId)) return '<div class="dpc-empty dpc-empty-tight">No client contact is linked to this job, so there is no chat.</div>';
+    var c = state.chat[jobId];
+    if (!c || c.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Reading the chat.</div>';
+    if (c.status === 'error') return failLine('Could not load the chat.', 'chat', true);
+    if (!c.messages.length) return '<div class="dpc-empty dpc-empty-tight">No messages with this client yet.</div>';
+    var h = '<div class="dpc-chat">';
+    if (c.messages.length === CHAT_LIMIT) h += '<p class="dpc-chat-cap">Showing the latest 30 messages.</p>';
+    c.messages.forEach(function (m) {
+      var when = stampText(m.timestamp);
+      var out = m.direction === 'outbound';
+      if (isCall(m)) {
+        h += '<p class="dpc-call">Call, ' + (out ? 'outbound' : 'inbound') + (when ? ', ' + esc(when) : '') + '</p>';
+        return;
+      }
+      h += '<div class="dpc-bubble ' + (out ? 'us' : 'them') + '">' + esc(text(m.body)) +
+        '<small>' + (out ? 'SecureWorks' : 'Client') + (when ? ', ' + esc(when) : '') + '</small></div>';
+    });
+    return h + '</div>';
+  }
+
+  function replyHtml() {
+    var jobId = state.jobId;
+    if (!contactOf(jobId)) return '';
+    var sending = !!state.sending[jobId];
+    var draft = state.replies[jobId] || '';
+    var msg = state.replyMsg[jobId];
+    var h = '<div class="dpc-compose"><textarea class="dpc-reply" data-dpc-reply placeholder="Reply to client..." aria-label="Reply to client by text"' + (sending ? ' disabled' : '') + '>' + esc(draft) + '</textarea>';
+    h += '<button type="button" class="dpc-primary" data-dpc-send' + (sending || !draft.trim() ? ' disabled' : '') + '>' + (sending ? 'Sending...' : 'Send') + '</button></div>';
+    if (msg) h += '<div class="dpc-note-msg' + (msg.ok ? '' : ' dpc-note-msg-fail') + '" role="' + (msg.ok ? 'status' : 'alert') + '">' + esc(msg.text) + '</div>';
+    return h;
+  }
+
+  function emailHtml() {
+    var e = state.email[state.jobId];
+    var h = '';
+    if (!e || e.status === 'loading') h += '<div class="dpc-empty dpc-empty-tight">Reading email.</div>';
+    else if (e.status === 'error') h += failLine('Could not load email.', 'email', true);
+    else if (!e.rows.length) h += '<div class="dpc-empty dpc-empty-tight">No email on this job yet.</div>';
+    else {
+      if (e.capped) h += '<p class="dpc-chat-cap">Showing the latest email only.</p>';
+      e.rows.forEach(function (m) {
+        var when = dayText(parseStamp(m.occurred_at));
+        h += '<div class="dpc-source"><strong>' + esc(text(m.subject) || 'No subject') + '</strong>';
+        h += '<p class="dpc-muted">' + esc(emailWho(m)) + (when ? ', ' + esc(when) : '') + '</p>';
+        if (text(m.preview)) h += '<p class="dpc-preview">' + esc(text(m.preview)) + '</p>';
+        h += '</div>';
+      });
+    }
+    // get_job_conversation lists system email, inbox filings and the mailbox
+    // email the context system has placed on the job (business_events).
+    return h + '<p class="dpc-foot-line">Email sent by the system, email filed from the inbox, and mailbox email the context system has placed on this job. Mailbox email not yet placed on a job is not listed.</p>';
+  }
+
+  function messagesHtml() {
+    var h = '<div class="dpc-seg" role="group" aria-label="Message type">';
+    h += '<button type="button" data-dpc-msg="client" aria-pressed="' + (state.msg === 'client') + '">Client chat (GHL)</button>';
+    h += '<button type="button" data-dpc-msg="email" aria-pressed="' + (state.msg === 'email') + '">Email history</button></div>';
+    if (state.msg === 'email') return h + emailHtml();
+    return h + '<div data-dpc-region="chat">' + chatHtml() + '</div><div data-dpc-region="reply">' + replyHtml() + '</div>';
+  }
+
+  function panelHtml() {
+    if (state.base.status === 'error' && state.rowStale) return failLine('Could not load this job.', 'list', true);
+    if (!state.row) return '<div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div>';
+    if (state.tab === 'story') return storyHtml();
+    if (state.tab === 'messages') return messagesHtml();
+    return sourcesHtml();
+  }
+
+  function contextHtml() {
+    if (!state.rightOpen) {
+      var f = '<aside class="dpc-float" data-dpc-region="context" aria-label="Job context, collapsed">';
+      TABS.forEach(function (t) { f += '<button type="button" data-dpc-opentab="' + t.key + '">' + esc(t.label) + '</button>'; });
+      return f + '</aside>';
+    }
+    var h = '<aside class="dpc-panel dpc-context" data-dpc-region="context" aria-label="Job context"><div class="dpc-tabs" role="tablist">';
+    TABS.forEach(function (t) {
+      h += '<button type="button" role="tab" id="dpc-tab-' + t.key + '" data-dpc-tab="' + t.key + '" aria-selected="' + (state.tab === t.key) + '" aria-controls="dpc-tabpanel">' + esc(t.label) + '</button>';
+    });
+    h += '<button type="button" class="dpc-side-btn dpc-side-btn-light" data-dpc-right aria-label="Collapse job context" title="Collapse">&raquo;</button></div>';
+    h += '<div class="dpc-pad" role="tabpanel" id="dpc-tabpanel" aria-labelledby="dpc-tab-' + state.tab + '" data-dpc-region="panel">' + panelHtml() + '</div>';
+    return h + '</aside>';
+  }
+
+  // The whole panel (job, tab or open state changed), then any read it needs.
+  function paintContext() {
+    var el = region('context');
+    if (!el) return;
+    el.outerHTML = contextHtml();
+    var layout = root().querySelector('.dpc-layout');
+    if (layout) layout.classList.toggle('dpc-right-closed', !state.rightOpen);
+    ensureTabData();
+  }
+
+  // The open tab's body, when a read lands. On Client chat only the chat is
+  // redrawn, so the reply box keeps its text and the keyboard focus.
+  function paintPanel() {
+    var el = region('panel');
+    if (!el) return;
+    var reply = region('reply');
+    if (reply && state.tab === 'messages' && state.msg === 'client') {
+      paintChat();
+      if (!reply.querySelector('[data-dpc-reply]') && contactOf(state.jobId)) paintReply();
+      return;
+    }
+    el.innerHTML = panelHtml();
+  }
+
+  function paintChat() {
+    var el = region('chat');
+    if (!el) return;
+    el.innerHTML = chatHtml();
+  }
+
+  function paintReply() {
+    var el = region('reply');
+    if (!el) return;
+    var had = el.contains(document.activeElement) && document.activeElement.hasAttribute('data-dpc-reply');
+    el.innerHTML = replyHtml();
+    if (had) { var t = el.querySelector('[data-dpc-reply]'); if (t && !t.disabled) t.focus(); }
+  }
+
   function workspaceHtml() {
     var h = '<section class="dpc-workspace" data-dpc-region="workspace" aria-label="Job">';
     if (state.base.status === 'error' && state.rowStale) {
@@ -798,7 +1244,7 @@
     var r = root();
     if (!r) return;
     var h = '<div class="dpc"><div class="dpc-header"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>';
-    h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + '">' + queueHtml() + workspaceHtml() + '</div></div>';
+    h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div></div>';
     r.innerHTML = h;
     paintList();
   }
@@ -818,8 +1264,10 @@
   }
 
   function onClick(e) {
-    var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-reset],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save]') : null;
+    var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-reset],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
+      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-jobpage]') : null;
     if (!t || t.disabled) return;
+    if (onPanelClick(t, e)) return;
     if (t.hasAttribute('data-dpc-job')) { selectJob(rowById(t.getAttribute('data-dpc-job'))); }
     else if (t.hasAttribute('data-dpc-type')) { state.type = t.getAttribute('data-dpc-type'); paintList(); }
     else if (t.hasAttribute('data-dpc-reset')) {
@@ -848,12 +1296,61 @@
       else if (what === 'search') runSearch();
       else if (what === 'detail' && state.jobId) loadDetail(state.jobId);
       else if (what === 'notes' && state.jobId) loadNotes(state.jobId);
+      else if (what === 'story' && state.jobId) loadStory(state.jobId);
+      else if (what === 'email' && state.jobId) loadEmail(state.jobId);
+      else if (what === 'chat' && state.jobId && contactOf(state.jobId)) loadChat(state.jobId, contactOf(state.jobId));
     }
     else if (t.hasAttribute('data-dpc-photo')) {
       var url = photoUrls[+t.getAttribute('data-dpc-photo')];
       if (url) global.openOpsLightbox(url);
     }
     else if (t.hasAttribute('data-dpc-save')) { saveNote(); }
+  }
+
+  function setTab(key) {
+    state.tab = tabKey(key);
+    writeStore('localStorage', LS_TAB, state.tab);
+  }
+
+  // The panel's controls. True when the press was one of them.
+  function onPanelClick(t, e) {
+    if (t.hasAttribute('data-dpc-tab')) {
+      setTab(t.getAttribute('data-dpc-tab'));
+      paintContext();
+      refocus('[data-dpc-tab="' + state.tab + '"]');
+    } else if (t.hasAttribute('data-dpc-right')) {
+      state.rightOpen = false;
+      writeStore('localStorage', LS_RIGHT, '0');
+      paintContext();
+      refocus('[data-dpc-opentab="' + state.tab + '"]');
+    } else if (t.hasAttribute('data-dpc-opentab')) {
+      setTab(t.getAttribute('data-dpc-opentab'));
+      state.rightOpen = true;
+      writeStore('localStorage', LS_RIGHT, '1');
+      paintContext();
+      refocus('[data-dpc-tab="' + state.tab + '"]');
+    } else if (t.hasAttribute('data-dpc-msg')) {
+      state.msg = t.getAttribute('data-dpc-msg') === 'email' ? 'email' : 'client';
+      var panel = region('panel');
+      if (panel) panel.innerHTML = panelHtml();
+      ensureTabData();
+      refocus('[data-dpc-msg="' + state.msg + '"]');
+    } else if (t.hasAttribute('data-dpc-invoice')) {
+      var xeroId = t.getAttribute('data-dpc-invoice');
+      if (xeroId) global.openInvoicePdfFromXero(xeroId, t.querySelector('small'));
+      else global.showToast('Could not load invoice PDF', 'error');
+    } else if (t.hasAttribute('data-dpc-send')) {
+      sendReply();
+    } else if (t.hasAttribute('data-dpc-jobpage')) {
+      // A plain press opens the job as the Jobs tab does, which puts
+      // #job/<job number> in the address; a new-tab press keeps the link.
+      if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || typeof global.openJobDetail !== 'function' || !state.jobId) return true;
+      e.preventDefault();
+      global.openJobDetail(state.jobId);
+    } else {
+      return false;
+    }
+    return true;
   }
 
   function onInput(e) {
@@ -864,6 +1361,18 @@
       clearTimeout(searchTimer);
       if (!searching()) { runSearch(); return; }
       searchTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
+      return;
+    }
+    if (t.hasAttribute('data-dpc-reply') && state.jobId) {
+      state.replies[state.jobId] = t.value;
+      var box = region('reply');
+      var send = box && box.querySelector('[data-dpc-send]');
+      if (send) send.disabled = !t.value.trim() || !!state.sending[state.jobId];
+      if (state.replyMsg[state.jobId]) {
+        state.replyMsg[state.jobId] = null;
+        var line = box && box.querySelector('.dpc-note-msg');
+        if (line) line.remove();
+      }
       return;
     }
     if (t.hasAttribute('data-dpc-note') && state.jobId) {

@@ -6321,6 +6321,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-job-work-order.js?v=2'}
 ]);
 </script>
+<!-- Paid close-out tags and Get Review ladder (docs/job-closeout-screens.md): off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-closeout.js?v=1'}]);
+</script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -17038,6 +17042,8 @@ function renderKanbanCard(j, status) {
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
+  // <job-closeout-tags> fencing and patio close-out tags while ?closeout=preview is on
+  if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
   // Repair cards only: say so when the persisted board stage and the job's own
@@ -21853,6 +21859,8 @@ function renderOverviewView(data) {
     html += '<span style="font-size:13px;flex:1;">' + a.icon + ' ' + a.message + '</span>';
     html += '<span style="font-size:11px;color:var(--sw-mid);">&#8594;</span></div>';
   });
+  // <job-closeout-tags> the same close-out tags on the job page while ?closeout=preview is on
+  if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
   var nextStatuses = getNextStatuses(j.status, j.type);
   nextStatuses.forEach(function(s) {
     var color = s === 'cancelled' ? 'var(--sw-red)' : 'var(--sw-dark)';
@@ -24852,6 +24860,11 @@ function closeQuickView() {
 }
 
 function getNextStatuses(current, jobType) {
+  // <job-closeout-ladder> fencing and patio follow the board's tail, invoiced ->
+  // get_review -> archived, while ?closeout=preview is on (modules/ops-job-closeout.js).
+  // Null means "not mine": every other job, and every job with the preview off.
+  var closeoutNext = window.JobCloseoutOps ? JobCloseoutOps.nextStatuses(current, jobType) : null;
+  if (closeoutNext) return closeoutNext;
   // A repair job's BOARD COLUMN has one authority: the Repairs kanban, writing
   // jobs.metadata.repair_stage through update_repair_stage. These buttons write
   // jobs.status, which is a different thing — the money and lifecycle spine.

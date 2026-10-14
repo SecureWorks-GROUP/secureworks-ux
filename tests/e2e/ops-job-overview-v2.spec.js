@@ -441,8 +441,14 @@ test('B1: held messages stay readable and explicitly uncertain, outside job fact
     { id: 'held-summary', at, channel: 'call', kind: 'call.transcript_completed', from: 'Morgan Vale', text: 'RAW PRIVATE TRANSCRIPT', summary: 'Sam promised to send the formal quote.', held_because: 'the job is not certain', other_jobs: [], job_certain: false },
     { id: 'held-call', at, channel: 'call', kind: 'transcript', text: 'RAW PRIVATE TRANSCRIPT', job_certain: false },
   ] };
+  // The backend also puts held rows into messages[], marked job_certain: false.
+  ov.messages.push({ id: 'held-in-conv', at, channel: 'sms', direction: 'outbound', party: 'us', who: 'Us', text: 'Deposit for the other fencing project.', job_certain: false, label: 'Held message, job not certain' });
   await boot(page, { overviewData: ov });
   await openJob(page);
+  const heldBubble = page.locator('#ov2Conv [data-ov2-msg="held-in-conv"]');
+  await expect(heldBubble).toHaveClass(/held/);
+  await expect(heldBubble).toContainText('Job not certain: may belong to another job');
+  await expect(page.locator('.ov2-story-last')).not.toContainText('other fencing project');
   const held = page.locator('#ov2Held');
   await expect(held).toContainText('3 of 28 held messages shown');
   await expect(held).toContainText('Held, job not certain');

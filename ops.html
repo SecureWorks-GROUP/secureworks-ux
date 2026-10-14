@@ -18772,18 +18772,21 @@ async function loadMaterials() {
 //   assign-to-job        → materials_recon_assign { queue_id, job_id }
 //   mark-not-job-related → materials_recon_not_job_related { queue_id }
 // accept/assign land a high_manual materials fact; not-job-related writes none.
+// "Not job related", and Place on a job whose Xero Project is unconfirmed, take
+// two presses: the first arms, the second posts, and a press inside
+// MAT_RECON_ARM_GAP_MS of arming is ignored so a double-click cannot file.
+// A failed queue read shows the error and no counts: never "Queue clear", 0
+// bills or $0.00 (_matRecon.loadErr).
 // The queue's stats come from one unranged read over every row ever queued,
 // which the API's 1,000-row cap can cut short; once stats.total_rows reaches
 // 1,000 the counts that rely on them are labelled "at least" (see _mrqCensus).
-// Depends on the U3 migration (job_materials_facts + materials_reconciliation_queue)
-// AND the ops-api materials_recon_* actions; until both ship, the panel shows a
-// wiring note instead of failing loudly.
 // ════════════════════════════════════════════════════════════
 var MAT_RECON_QUEUE_LIMIT = 1000;
 var MAT_RECON_STATS_CAP = 1000;
 var MAT_RECON_PAGE = 100;
+var MAT_RECON_ARM_GAP_MS = 700;
 var MAT_RECON_UNCONFIRMED = 'Xero Projects not confirmed for this job: check Xero before placing';
-var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0 };
+var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {} };
 
 var MAT_RECON_REASON_LABELS = {
   no_ref_no_po:            'No reference, no matching PO',
@@ -18793,9 +18796,6 @@ var MAT_RECON_REASON_LABELS = {
   ambiguous_po:           'Ambiguous PO match'
 };
 
-function _mrqEsc(v) {
-  return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 function _mrqEx(r) { return Number(r && r.sub_total != null ? r.sub_total : 0) || 0; }
 function _mrqErrText(e) { return (e && e.message) ? e.message : 'unknown error'; }
 function _mrqSumEx(rows) { return rows.reduce(function(t, r) { return t + _mrqEx(r); }, 0); }
@@ -18871,20 +18871,18 @@ async function loadMaterialsRecon() {
     _matRecon.rows = rows;
     _matRecon.stats = (data && data.stats) || null;
     _matRecon.listFull = all.length >= MAT_RECON_QUEUE_LIMIT;
+    _matRecon.loaded = true;
+    _matRecon.loadErr = null;
     _matRecon.shown = MAT_RECON_PAGE;
     if (_matRecon.openId && !_mrqRow(_matRecon.openId)) _matRecon.openId = null;
     renderMaterialsRecon();
   } catch (e) {
     if (seq !== _matRecon.seq) return;
     console.error('loadMaterialsRecon error:', e);
-    _matRecon.rows = []; _matRecon.stats = null;
-    document.getElementById('matReconSummary').textContent = '';
-    document.getElementById('matReconCapNote').style.display = 'none';
-    var cnt = document.getElementById('matReconOpenCount');
-    if (cnt) cnt.textContent = '—';
-    body.innerHTML = '<div class="mrq-muted" style="padding:18px;text-align:center;">'
-      + 'Reconciliation queue unavailable: ' + _mrqEsc(_mrqErrText(e))
-      + '<br>Backend actions <code>materials_recon_*</code> + the U3 migration may not be applied yet (M2 gate).</div>';
+    _matRecon.rows = []; _matRecon.stats = null; _matRecon.openId = null;
+    _matRecon.loaded = false;
+    _matRecon.loadErr = _mrqErrText(e);
+    renderMaterialsRecon();
   }
 }
 
@@ -18906,6 +18904,21 @@ function _mrqVisibleRows() {
 function renderMaterialsRecon() {
   var body = document.getElementById('matReconBody');
   if (!body) return;
+  if (!_matRecon.loaded) {
+    // No good read yet (or the last one failed): no counts, never "clear".
+    var cnt0 = document.getElementById('matReconOpenCount');
+    if (cnt0) cnt0.textContent = '—';
+    var sum0 = document.getElementById('matReconSummary');
+    if (sum0) sum0.textContent = _matRecon.loadErr ? 'Open bills not known: the queue could not be read' : '';
+    var cap0 = document.getElementById('matReconCapNote');
+    if (cap0) cap0.style.display = 'none';
+    body.innerHTML = _matRecon.loadErr
+      ? '<div class="mrq-err" data-mrq-load-err style="padding:18px;text-align:center;">Could not read the bill queue: ' + escapeAttr(_matRecon.loadErr)
+        + '. The open bills are not known, so nothing here means the queue is clear.'
+        + '<div style="margin-top:8px;"><button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()">Try again</button></div></div>'
+      : '<div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div>';
+    return;
+  }
   // Keep what the operator typed in a job search box across repaints.
   body.querySelectorAll('[data-mrq-q]').forEach(function(inp) {
     var qid = inp.getAttribute('data-mrq-q');
@@ -18933,7 +18946,7 @@ function renderMaterialsRecon() {
   if (done) {
     done.style.display = _matRecon.done.length ? '' : 'none';
     done.innerHTML = _matRecon.done.length ? '<div class="mrq-sec-title" style="margin-bottom:4px;">Done this session</div>'
-      + _matRecon.done.map(function(d) { return '<div data-mrq-done>' + _mrqEsc(d) + '</div>'; }).join('') : '';
+      + _matRecon.done.map(function(d) { return '<div data-mrq-done>' + escapeAttr(d) + '</div>'; }).join('') : '';
   }
 
   var rows = _mrqVisibleRows();
@@ -18951,17 +18964,17 @@ function renderMaterialsRecon() {
   rows.slice(0, _matRecon.shown).forEach(function(r) {
     var isOpen = _matRecon.openId === r.id;
     var L = _matRecon.lines[r.id];
-    var bu = L && L.invoice ? _mrqEsc(_mrqBusinessUnits(L.invoice).join(', ') || 'None on the lines')
+    var bu = L && L.invoice ? escapeAttr(_mrqBusinessUnits(L.invoice).join(', ') || 'None on the lines')
       : (L && L.error ? 'Could not read' : '<span class="mrq-muted">Open to read</span>');
-    html += '<tr class="mrq-row' + (isOpen ? ' open' : '') + '" data-mrq-row="' + _mrqEsc(r.id) + '" data-mrq-act="toggle" data-mrq-id="' + _mrqEsc(r.id) + '">'
-      + '<td>' + _mrqEsc(r.contact_name || '(unknown supplier)') + '</td>'
-      + '<td style="white-space:nowrap;">' + _mrqEsc(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '—') + '</td>'
-      + '<td>' + _mrqEsc(r.invoice_number || '—') + '</td>'
+    html += '<tr class="mrq-row' + (isOpen ? ' open' : '') + '" data-mrq-row="' + escapeAttr(r.id) + '" data-mrq-act="toggle" data-mrq-id="' + escapeAttr(r.id) + '">'
+      + '<td>' + escapeAttr(r.contact_name || '(unknown supplier)') + '</td>'
+      + '<td style="white-space:nowrap;">' + escapeAttr(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '—') + '</td>'
+      + '<td>' + escapeAttr(r.invoice_number || '—') + '</td>'
       + '<td class="num">' + fmt$(_mrqEx(r)) + '</td>'
       + '<td data-mrq-bu>' + bu + '</td>'
-      + '<td>' + (r.suggested_job_number ? _mrqEsc(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
+      + '<td>' + (r.suggested_job_number ? escapeAttr(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
       + '</tr>';
-    if (isOpen) html += '<tr class="mrq-detail" data-mrq-detail="' + _mrqEsc(r.id) + '"><td colspan="6">' + _mrqDetailHtml(r) + '</td></tr>';
+    if (isOpen) html += '<tr class="mrq-detail" data-mrq-detail="' + escapeAttr(r.id) + '"><td colspan="6">' + _mrqDetailHtml(r) + '</td></tr>';
   });
   html += '</tbody></table></div>';
   if (rows.length > _matRecon.shown) {
@@ -18977,16 +18990,16 @@ function _mrqDetailHtml(r) {
   if (L.loading) {
     h += '<div class="mrq-muted">Reading the bill from Xero…</div>';
   } else if (L.error) {
-    h += '<div class="mrq-err">Could not read the bill\'s lines: ' + _mrqEsc(L.error) + '</div>'
-      + '<button class="btn btn-secondary btn-sm" style="margin-top:6px;" data-mrq-act="lines" data-mrq-id="' + _mrqEsc(id) + '">Try again</button>';
+    h += '<div class="mrq-err">Could not read the bill\'s lines: ' + escapeAttr(L.error) + '</div>'
+      + '<button class="btn btn-secondary btn-sm" style="margin-top:6px;" data-mrq-act="lines" data-mrq-id="' + escapeAttr(id) + '">Try again</button>';
   } else if (L.invoice) {
     var inv = L.invoice, items = inv.line_items || [];
     h += '<table class="mrq-lines"><thead><tr><th>Description</th><th>Account</th><th>Business Unit</th><th class="num">Amount</th></tr></thead><tbody>';
     if (!items.length) h += '<tr><td colspan="4" class="mrq-muted">No lines on this bill.</td></tr>';
     items.forEach(function(li) {
       var amt = li.line_amount != null ? li.line_amount : (Number(li.quantity || 0) * Number(li.unit_amount || 0));
-      h += '<tr data-mrq-line><td>' + _mrqEsc(li.description || '—') + '</td><td>' + _mrqEsc(li.account_code || '—') + '</td>'
-        + '<td>' + _mrqEsc(_mrqLineTracking(li) || '—') + '</td><td class="num">' + fmt$(amt) + '</td></tr>';
+      h += '<tr data-mrq-line><td>' + escapeAttr(li.description || '—') + '</td><td>' + escapeAttr(li.account_code || '—') + '</td>'
+        + '<td>' + escapeAttr(_mrqLineTracking(li) || '—') + '</td><td class="num">' + fmt$(amt) + '</td></tr>';
     });
     h += '</tbody></table>';
     var facts = [];
@@ -18995,63 +19008,65 @@ function _mrqDetailHtml(r) {
     if (String(inv.status || '').toUpperCase() === 'PAID') facts.push('Paid in Xero');
     else if (Number(inv.amount_due) > 0) facts.push(fmt$(inv.amount_due) + ' still owed');
     if (inv.line_amount_types) facts.push('Lines are ' + String(inv.line_amount_types).toLowerCase().replace('exclusive', 'ex GST').replace('inclusive', 'inc GST'));
-    if (facts.length) h += '<div class="mrq-facts">' + _mrqEsc(facts.join(' · ')) + '</div>';
+    if (facts.length) h += '<div class="mrq-facts">' + escapeAttr(facts.join(' · ')) + '</div>';
   }
   h += '<div class="mrq-facts">Bill total ' + fmt$(_mrqEx(r)) + ' ex GST' + (r.total != null ? ' (' + fmt$(r.total) + ' inc GST)' : '') + '.</div>';
   h += '</div><div>';
 
   h += '<div class="mrq-sec-title">Place it on a job</div>';
   if (r.suggested_job_id && !(p.job && p.job.id === r.suggested_job_id)) {
-    h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + _mrqEsc(r.suggested_job_number || 'a job') + '</b>'
-      + (r.suggestion_reason ? ' <span class="mrq-muted">(' + _mrqEsc(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
-      + ' <button class="btn btn-secondary btn-sm" data-mrq-act="usesuggest" data-mrq-id="' + _mrqEsc(id) + '">Use it</button></div>';
+    h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + escapeAttr(r.suggested_job_number || 'a job') + '</b>'
+      + (r.suggestion_reason ? ' <span class="mrq-muted">(' + escapeAttr(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
+      + ' <button class="btn btn-secondary btn-sm" data-mrq-act="usesuggest" data-mrq-id="' + escapeAttr(id) + '">Use it</button></div>';
   }
-  h += '<div class="mrq-find"><input class="form-input" data-mrq-q="' + _mrqEsc(id) + '" placeholder="Job #, client or address" value="' + _mrqEsc(p.query || '') + '">'
-    + '<button class="btn btn-secondary btn-sm" data-mrq-act="find" data-mrq-id="' + _mrqEsc(id) + '">Find</button></div>';
+  h += '<div class="mrq-find"><input class="form-input" data-mrq-q="' + escapeAttr(id) + '" placeholder="Job #, client or address" value="' + escapeAttr(p.query || '') + '">'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="find" data-mrq-id="' + escapeAttr(id) + '">Find</button></div>';
   if (p.searching) h += '<div class="mrq-muted" style="margin-top:6px;">Searching…</div>';
-  else if (p.searchHint) h += '<div class="mrq-muted" style="margin-top:6px;">' + _mrqEsc(p.searchHint) + '</div>';
-  else if (p.searchErr) h += '<div class="mrq-err">Search failed: ' + _mrqEsc(p.searchErr) + '</div>';
+  else if (p.searchHint) h += '<div class="mrq-muted" style="margin-top:6px;">' + escapeAttr(p.searchHint) + '</div>';
+  else if (p.searchErr) h += '<div class="mrq-err">Search failed: ' + escapeAttr(p.searchErr) + '</div>';
   else if (p.results && !p.job) {
     if (!p.results.length) h += '<div class="mrq-muted" style="margin-top:6px;">No job matches that.</div>';
     else {
       h += '<div class="mrq-results">';
       p.results.forEach(function(j) {
-        h += '<button class="mrq-pickbtn" data-mrq-act="pick" data-mrq-id="' + _mrqEsc(id) + '" data-mrq-job="' + _mrqEsc(j.id) + '">'
-          + '<b>' + _mrqEsc(j.job_number || 'No number') + '</b> ' + _mrqEsc(j.client_name || '')
-          + ' <span class="mrq-muted">' + _mrqEsc([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
+        h += '<button class="mrq-pickbtn" data-mrq-act="pick" data-mrq-id="' + escapeAttr(id) + '" data-mrq-job="' + escapeAttr(j.id) + '">'
+          + '<b>' + escapeAttr(j.job_number || 'No number') + '</b> ' + escapeAttr(j.client_name || '')
+          + ' <span class="mrq-muted">' + escapeAttr([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
       });
       h += '</div>';
     }
   }
-  var jobLabel = p.job ? _mrqEsc(p.job.job_number || 'this job') : '';
+  var jobLabel = p.job ? escapeAttr(p.job.job_number || 'this job') : '';
   if (p.job) {
     var j = p.job;
     h += '<div class="mrq-job" data-mrq-picked>'
-      + '<div><b>' + _mrqEsc(j.job_number || 'No number') + '</b> ' + _mrqEsc(j.client_name || '')
-      + ' <a href="#" data-mrq-act="unpick" data-mrq-id="' + _mrqEsc(id) + '" style="font-size:11px;margin-left:6px;">change</a></div>'
-      + '<div class="mrq-muted">' + _mrqEsc([j.site_address || j.site_suburb, j.type, j.status].filter(Boolean).join(' · ')) + '</div>';
+      + '<div><b>' + escapeAttr(j.job_number || 'No number') + '</b> ' + escapeAttr(j.client_name || '')
+      + ' <a href="#" data-mrq-act="unpick" data-mrq-id="' + escapeAttr(id) + '" style="font-size:11px;margin-left:6px;">change</a></div>'
+      + '<div class="mrq-muted">' + escapeAttr([j.site_address || j.site_suburb, j.type, j.status].filter(Boolean).join(' · ')) + '</div>';
     if (p.projectLoading) {
       h += '<div class="mrq-proj calm">Checking Xero Projects for this job…</div>';
     } else if (p.project === 'costed') {
-      h += '<div class="mrq-proj warn" data-mrq-project="costed"><b>Already costed in Xero Projects</b>: ' + _mrqEsc(p.projectInfo.project_name || 'project')
+      h += '<div class="mrq-proj warn" data-mrq-project="costed"><b>Already costed in Xero Projects</b>: ' + escapeAttr(p.projectInfo.project_name || 'project')
         + ', ' + fmt$(p.projectInfo.total_expenses) + ' of expenses. If the bookkeeper already put this bill in that project, placing it here counts it twice.</div>'
-        + '<label class="mrq-ack"><input type="checkbox" data-mrq-ack="' + _mrqEsc(id) + '"' + (p.ack ? ' checked' : '') + '>'
+        + '<label class="mrq-ack"><input type="checkbox" data-mrq-ack="' + escapeAttr(id) + '"' + (p.ack ? ' checked' : '') + '>'
         + '<span>I have checked this bill is not in that job\'s Xero Project</span></label>';
     } else if (p.project === 'empty') {
-      h += '<div class="mrq-proj calm" data-mrq-project="empty">Xero Project ' + _mrqEsc(p.projectInfo.project_name || '') + ' has no expenses yet.</div>';
+      h += '<div class="mrq-proj calm" data-mrq-project="empty">Xero Project ' + escapeAttr(p.projectInfo.project_name || '') + ' has no expenses yet.</div>';
     } else {
-      h += '<div class="mrq-proj warn" data-mrq-project="unconfirmed">' + _mrqEsc(MAT_RECON_UNCONFIRMED) + '</div>';
+      h += '<div class="mrq-proj warn" data-mrq-project="unconfirmed">' + escapeAttr(MAT_RECON_UNCONFIRMED) + '</div>';
     }
     h += '</div>';
   }
   var placeText = !p.job ? 'Place on a job'
     : (p.project === 'unconfirmed' && p.armed ? 'Confirm: place on ' + jobLabel + ' without Xero Projects' : 'Place on ' + jobLabel);
   h += '<div class="mrq-actions">'
-    + '<button class="btn btn-primary btn-sm" data-mrq-act="place" data-mrq-id="' + _mrqEsc(id) + '"' + (_mrqCanPress(id) ? '' : ' disabled') + '>' + placeText + '</button>'
-    + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + _mrqEsc(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>Not job related</button>'
+    + '<button class="btn btn-primary btn-sm" data-mrq-act="place" data-mrq-id="' + escapeAttr(id) + '"' + (_mrqCanPress(id) ? '' : ' disabled') + '>' + placeText + '</button>'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + escapeAttr(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>'
+    + (_matRecon.notjobArmed[id] ? 'Confirm: not job related' : 'Not job related') + '</button>'
     + '</div>';
+  if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. No cost goes on any job.</div>';
   if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
-  if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + _mrqEsc(_matRecon.err[id]) + '</div>';
+  if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>';
   h += '</div></div>';
   return h;
 }
@@ -19063,7 +19078,10 @@ async function _mrqLoadLines(id) {
   renderMaterialsRecon();
   try {
     var res = await opsFetch('get_xero_invoice', { xero_invoice_id: r.xero_invoice_id });
-    _matRecon.lines[id] = { invoice: (res && (res.invoice || res.bill)) || { line_items: [] } };
+    var inv = res && res.invoice;
+    _matRecon.lines[id] = (inv && typeof inv === 'object' && Array.isArray(inv.line_items))
+      ? { invoice: inv }
+      : { error: inv ? 'the bill came back without its lines' : 'no bill came back from Xero' };
   } catch (e) {
     _matRecon.lines[id] = { error: _mrqErrText(e) };
   }
@@ -19093,7 +19111,8 @@ async function _mrqFind(id) {
 // xero_project from job_detail (slim) for the double-count hint.
 async function _mrqPick(id, jobId, known) {
   var prev = _matRecon.pick[id] || {};
-  var p = _matRecon.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false, armed: false };
+  var p = _matRecon.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false, armed: 0 };
+  delete _matRecon.notjobArmed[id];
   delete _matRecon.err[id];
   renderMaterialsRecon();
   var info = null;
@@ -19146,7 +19165,7 @@ async function _matReconAction(id, action, body, doneLabel, statsDelta, failPref
   }
   _matRecon.done.unshift(doneLabel);
   if (_matRecon.openId === id) _matRecon.openId = null;
-  delete _matRecon.pick[id]; delete _matRecon.busy[id]; delete _matRecon.err[id];
+  delete _matRecon.pick[id]; delete _matRecon.busy[id]; delete _matRecon.err[id]; delete _matRecon.notjobArmed[id];
   renderMaterialsRecon();
 }
 
@@ -19154,12 +19173,19 @@ function _mrqBillLabel(r) {
   return fmt$(_mrqEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '');
 }
 
+// A second press counts only once MAT_RECON_ARM_GAP_MS has passed since the
+// first armed it, so the two clicks of a double-click never file.
+function _mrqArmSettled(armedAt) { return armedAt && (Date.now() - armedAt) >= MAT_RECON_ARM_GAP_MS; }
+
 // Place: one press for a costed-and-ticked or empty project; an unconfirmed
 // project arms on the first press and posts on the second.
 function _mrqPlace(id) {
   var r = _mrqRow(id), p = _matRecon.pick[id];
   if (!r || !_mrqCanPress(id)) return;
-  if (p.project === 'unconfirmed' && !p.armed) { p.armed = true; renderMaterialsRecon(); return; }
+  if (p.project === 'unconfirmed') {
+    if (!p.armed) { p.armed = Date.now(); delete _matRecon.notjobArmed[id]; renderMaterialsRecon(); return; }
+    if (!_mrqArmSettled(p.armed)) return;
+  }
   var body = (r.suggested_job_id && p.job.id === r.suggested_job_id)
     ? { queue_id: r.id, use_suggestion: true }
     : { queue_id: r.id, job_id: p.job.id };
@@ -19167,9 +19193,18 @@ function _mrqPlace(id) {
     _mrqBillLabel(r) + ' placed on ' + (p.job.job_number || 'the job'), { assigned: 1 }, 'Not placed: ');
 }
 
+// Not job related: the first press arms, the second files.
 function _mrqNotJob(id) {
   var r = _mrqRow(id);
-  if (!r) return;
+  if (!r || _matRecon.busy[id]) return;
+  var armedAt = _matRecon.notjobArmed[id];
+  if (!armedAt) {
+    _matRecon.notjobArmed[id] = Date.now();
+    if (_matRecon.pick[id]) _matRecon.pick[id].armed = 0;
+    renderMaterialsRecon();
+    return;
+  }
+  if (!_mrqArmSettled(armedAt)) return;
   _matReconAction(id, 'materials_recon_not_job_related', { queue_id: r.id },
     _mrqBillLabel(r) + ' marked not job related', { not_job_related: 1 }, 'Not saved: ');
 }
@@ -19186,6 +19221,7 @@ function _mrqNotJob(id) {
       var act = el.getAttribute('data-mrq-act'), id = el.getAttribute('data-mrq-id');
       if (el.tagName === 'A') ev.preventDefault();
       if (act === 'toggle') {
+        if (_matRecon.openId) delete _matRecon.notjobArmed[_matRecon.openId];
         _matRecon.openId = _matRecon.openId === id ? null : id;
         if (_matRecon.openId && !_matRecon.lines[id]) _mrqLoadLines(id); else renderMaterialsRecon();
       } else if (act === 'more') { _matRecon.shown += MAT_RECON_PAGE; renderMaterialsRecon(); }

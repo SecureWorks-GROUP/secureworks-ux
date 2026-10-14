@@ -10,7 +10,10 @@
 //    local Xero cache) and shows each line's Business Unit.
 //  - Place posts materials_recon_assign { queue_id, job_id } for a searched job, or
 //    { queue_id, use_suggestion: true } for the queue's own suggestion; Not job related posts
-//    materials_recon_not_job_related { queue_id }. No confirm() dialog is ever raised.
+//    materials_recon_not_job_related { queue_id } on its second press. No confirm() dialog is ever
+//    raised. A second press inside the arming window (a double-click) files nothing.
+//  - A failed queue read shows the error, never "Queue clear", 0 bills or $0.00, even after a search.
+//  - A get_xero_invoice answer with no `invoice` says the lines could not be read.
 //  - A job already costed in Xero Projects keeps Place shut until the operator ticks the bill is not
 //    in it. A null xero_project, or a failed job_detail read, says Xero Projects is not confirmed
 //    and Place needs a second confirming press; a project with zero expenses places in one press.
@@ -85,7 +88,10 @@ function buildFixture() {
   };
 }
 
-async function openMaterials(page, { fixture = buildFixture(), refuse = {} } = {}) {
+// The panel ignores a second press inside 700 ms of arming (MAT_RECON_ARM_GAP_MS).
+const ARM_GAP_MS = 800;
+
+async function openMaterials(page, { fixture = buildFixture(), refuse = {}, expectRows = true } = {}) {
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
   await page.evaluate(({ fixture, refuse }) => {
@@ -97,7 +103,7 @@ async function openMaterials(page, { fixture = buildFixture(), refuse = {} } = {
     const fail = (msg, status) => { const e = new Error(msg); e.status = status || 500; return Promise.reject(e); };
     window.opsFetch = (action, params) => {
       window.__mrqFetches.push({ action, params: params || {} });
-      if (action === 'materials_recon_queue') return copy(fixture.queue);
+      if (action === 'materials_recon_queue') return refuse.materials_recon_queue ? fail(refuse.materials_recon_queue) : copy(fixture.queue);
       if (action === 'get_xero_invoice') {
         const inv = fixture.invoices[params.xero_invoice_id];
         return inv ? copy(inv) : fail('Xero invoice not found', 404);
@@ -120,7 +126,7 @@ async function openMaterials(page, { fixture = buildFixture(), refuse = {} } = {
     showView('financials');
     showSubTab('billrecon');
   }, { fixture, refuse });
-  await expect(page.locator('#matReconPanel tr[data-mrq-row]').first()).toBeVisible();
+  if (expectRows) await expect(page.locator('#matReconPanel tr[data-mrq-row]').first()).toBeVisible();
 }
 
 function row(page, id) { return page.locator('tr[data-mrq-row="' + id + '"]'); }
@@ -206,6 +212,43 @@ test('opening a bill reads its lines with get_xero_invoice and shows each line a
   await expect(detail(page, 'q-small').locator('[data-mrq-act="notjob"]')).toBeEnabled();
 });
 
+test('a get_xero_invoice answer with no invoice says the lines could not be read, never an empty bill', async ({ page }) => {
+  const fixture = buildFixture();
+  fixture.invoices['xinv-q-mid'] = { ok: true, bill: { line_items: [] } };
+  await openMaterials(page, { fixture });
+  await row(page, 'q-mid').click();
+  await expect(detail(page, 'q-mid')).toContainText("Could not read the bill's lines: no bill came back from Xero");
+  await expect(detail(page, 'q-mid')).not.toContainText('No lines on this bill');
+});
+
+test('a failed queue read shows the error, never "Queue clear" or $0.00, even after a search', async ({ page }) => {
+  await openMaterials(page, { refuse: { materials_recon_queue: 'ops-api timed out' }, expectRows: false });
+  const body = page.locator('#matReconBody');
+  await expect(body.locator('[data-mrq-load-err]')).toContainText('Could not read the bill queue: ops-api timed out');
+  await page.locator('#matReconSearch').fill('steel');
+  for (const el of [body, page.locator('#matReconSummary'), page.locator('#matReconOpenCount')]) {
+    await expect(el).not.toContainText('Queue clear');
+    await expect(el).not.toContainText('$0.00');
+    await expect(el).not.toContainText('0 open bills');
+  }
+  await expect(page.locator('#matReconOpenCount')).toHaveText('—');
+  await expect(body.locator('[data-mrq-load-err]')).toBeVisible();
+});
+
+test('a double-click on Not job related, or on an unconfirmed Place, files nothing', async ({ page }) => {
+  await openMaterials(page);
+  await row(page, 'q-small').click();
+  const notjob = detail(page, 'q-small').locator('[data-mrq-act="notjob"]');
+  await notjob.dblclick();
+  await expect(notjob).toHaveText('Confirm: not job related');
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'Harper', 'job-plain');
+  const place = d.locator('[data-mrq-act="place"]');
+  await place.dblclick();
+  await expect(place).toHaveText('Confirm: place on SWF-25010 without Xero Projects');
+  expect(await posts(page)).toEqual([]);
+});
+
 test('a job with a zero-expense Xero Project places in one press with { queue_id, job_id }', async ({ page }) => {
   await openMaterials(page);
   await row(page, 'q-big').click();
@@ -233,6 +276,7 @@ test('a null Xero Project is "not confirmed", never "no project", and Place need
   await place.click();
   await expect(place).toHaveText('Confirm: place on SWF-25010 without Xero Projects');
   expect(await posts(page)).toEqual([]);
+  await page.waitForTimeout(ARM_GAP_MS);
   await place.click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-plain' } }]);
   await expect(row(page, 'q-big')).toHaveCount(0);
@@ -247,6 +291,7 @@ test('a failed job_detail read behaves like a null project', async ({ page }) =>
   await place.click();
   expect(await posts(page)).toEqual([]);
   await expect(place).toHaveText('Confirm: place on SWP-26050 without Xero Projects');
+  await page.waitForTimeout(ARM_GAP_MS);
   await place.click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
 });
@@ -281,10 +326,15 @@ test("taking the queue's suggestion posts use_suggestion so the audit reads acce
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-mid', use_suggestion: true } }]);
 });
 
-test('Not job related posts materials_recon_not_job_related with the queue id only', async ({ page }) => {
+test('Not job related takes two presses, then posts materials_recon_not_job_related with the queue id only', async ({ page }) => {
   await openMaterials(page);
   await row(page, 'q-small').click();
-  await detail(page, 'q-small').locator('[data-mrq-act="notjob"]').click();
+  const notjob = detail(page, 'q-small').locator('[data-mrq-act="notjob"]');
+  await notjob.click();
+  await expect(notjob).toHaveText('Confirm: not job related');
+  expect(await posts(page)).toEqual([]);
+  await page.waitForTimeout(ARM_GAP_MS);
+  await notjob.click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_not_job_related', body: { queue_id: 'q-small' } }]);
   await expect(row(page, 'q-small')).toHaveCount(0);
   await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST on no job · 4 placed · 3 not job related');

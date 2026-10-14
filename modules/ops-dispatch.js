@@ -224,9 +224,12 @@
     // every row, so no card, list or rail can draw a stage the read did not give.
     var stages = resp.dispatch_stages === 'ok' && typeof resp.todo_total === 'number' &&
       rows.every(function (r) { return typeof r.dispatch_todo === 'boolean' && stageOf(r) !== null; }) ? 'ok' : 'failed';
+    // A todo_total that does not match the To do rows fails To do only: the
+    // stage fields stay on the rows, and All jobs, the cards and the rail draw.
+    var todo = 'failed';
     if (stages === 'ok') {
-      var todo = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
-      if (todo !== resp.todo_total) throw new Error('To do count does not match the To do rows');
+      var marked = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
+      todo = marked === resp.todo_total ? 'ok' : 'failed';
     } else {
       rows.forEach(function (r) {
         Object.keys(r).forEach(function (k) { if (k.indexOf('dispatch_') === 0) delete r[k]; });
@@ -237,7 +240,8 @@
       total: typeof resp.total === 'number' ? resp.total : rows.length,
       degraded: resp.degraded === true,
       stages: stages,
-      todoTotal: stages === 'ok' ? resp.todo_total : null
+      todo: todo,
+      todoTotal: todo === 'ok' ? resp.todo_total : null
     };
   }
 
@@ -697,8 +701,8 @@
     search: '',
     leftOpen: readStore('localStorage', LS_LEFT) !== '0',
     scopeOpen: readStore('localStorage', LS_SCOPE) !== '0',
-    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todoTotal: null },
-    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null },
+    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null },
+    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null },
     jobId: null,
     row: null,
     rowStale: false,
@@ -742,11 +746,15 @@
 
   // To do keeps the rows the read marks dispatch_todo, and none at all when
   // the stage read failed: that shows the failed line, never an empty To do.
+  // To do is drawn only from an answer whose stage read worked and whose
+  // todo_total matches its To do rows.
+  function todoOk(from) { return from.stages === 'ok' && from.todo === 'ok'; }
+
   function listedRows() {
     var from = searching() ? state.found : state.base;
     var rows = from.rows;
     if (state.mode === 'todo') {
-      rows = from.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
+      rows = todoOk(from) ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
     }
     return filterByType(rows, state.type);
   }
@@ -756,7 +764,7 @@
   function listFailed() {
     var from = searching() ? state.found : state.base;
     if (from.status === 'error') return true;
-    return state.mode === 'todo' && from.status === 'ok' && from.stages !== 'ok';
+    return state.mode === 'todo' && from.status === 'ok' && !todoOk(from);
   }
 
   // ───────────────────────── reads ─────────────────────────
@@ -767,11 +775,11 @@
     return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1 }); }).then(function (resp) {
       if (token !== tokens.base) return;
       var got = rowsFromPipeline(resp);
-      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todoTotal: got.todoTotal };
+      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todo: got.todo, todoTotal: got.todoTotal };
       adoptSelection();
     }).catch(function () {
       if (token !== tokens.base) return;
-      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todoTotal: null };
+      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null };
       state.rowStale = true;
       paintList();
       paintWorkspace();
@@ -792,7 +800,7 @@
     if (current) state.row = current;
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
-    var todo = state.mode === 'todo' && state.base.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
+    var todo = state.mode === 'todo' && todoOk(state.base) ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
     var pick = byId(readStore('sessionStorage', SS_JOB)) || todo[0] || rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
@@ -800,17 +808,17 @@
   function runSearch() {
     var q = state.search.trim();
     var token = ++tokens.found;
-    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null }; paintList(); return; }
-    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null };
+    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null }; paintList(); return; }
+    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null, todo: null };
     paintList();
     Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, search: q }); }).then(function (resp) {
       if (token !== tokens.found) return;
       var got = rowsFromPipeline(resp);
-      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages };
+      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages, todo: got.todo };
       paintList();
     }).catch(function () {
       if (token !== tokens.found) return;
-      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null };
+      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null, todo: null };
       paintList();
     });
   }
@@ -1748,6 +1756,7 @@
     if (from.status === 'error') return failLine('Could not load jobs.', 'list');
     if (from.status !== 'ok') return '<div class="dpc-empty">' + (searching() ? 'Searching...' : 'Loading jobs...') + '</div>';
     if (from.stages !== 'ok') return failLine('Could not load Dispatch stages.', retry);
+    if (!todoOk(from)) return failLine('Could not load To do.', retry);
     if (listedRows().length) return '';
     if (searching()) return '<div class="dpc-empty">No To do jobs match.</div>';
     if (state.type === 'all') return '<div class="dpc-empty">Nothing in To do.</div>';
@@ -1761,7 +1770,7 @@
   // The two list buttons. To do's number is the read's todo_total, shown only
   // when the stage read worked.
   function modeHtml() {
-    var todo = state.base.status === 'ok' && state.base.stages === 'ok' ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
+    var todo = state.base.status === 'ok' && todoOk(state.base) ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
     var all = state.base.status === 'ok' ? ' <b>' + esc(state.base.total) + '</b>' : '';
     return '<button type="button" data-dpc-mode="todo" aria-pressed="' + (state.mode === 'todo') + '">To do' + todo + '</button>' +
       '<button type="button" data-dpc-mode="all" aria-pressed="' + (state.mode === 'all') + '">All jobs' + all + '</button>';
@@ -1820,7 +1829,7 @@
       var head = region('railhead');
       if (head) {
         var from = searching() ? state.found : state.base;
-        var failText = from.status !== 'error' ? 'Could not load Dispatch stages. Retry'
+        var failText = from.status !== 'error' ? (from.stages !== 'ok' ? 'Could not load Dispatch stages. Retry' : 'Could not load To do. Retry')
           : searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry';
         head.innerHTML = failed
           ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + (searching() ? 'search' : 'list') + '" aria-label="' + failText + '" title="' + failText + '">&#8635;</button>'

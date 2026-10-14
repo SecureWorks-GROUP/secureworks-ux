@@ -1543,7 +1543,7 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(root.locator('.dpc-job', { hasText: 'SWF-920002' }).locator('.dpc-next')).toHaveCount(0);
   });
 
-  test('a failed stage read, or an answer without the stage fields, fails To do and the rail but All jobs still lists', async ({ page }) => {
+  test('a failed stage read, or an answer without the stage fields, fails To do and the rail but All jobs still lists; a wrong To do count fails To do only', async ({ page }) => {
     let shape = 'failed';
     const strip = (jobs) => jobs.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('dispatch_'))));
     const { root, tape } = await bootRail(page, {
@@ -1574,11 +1574,25 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(root.locator('.dpc-job')).toHaveCount(8);
     await expect(tape.locator('.dpc-tape-meta strong')).toBeVisible();
 
-    // A To do count that does not match its rows is a failed list read: no numbers.
+    // A To do count that does not match its rows fails To do only: no To do
+    // number and no To do rows, while All jobs still lists every job, and the
+    // cards and the rail still draw their stage.
     shape = 'mismatch';
     await page.reload();
-    await expect(list.locator('[role="alert"]')).toHaveText('Could not load jobs. Retry');
-    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs']);
+    await expect(list.locator('[role="alert"]')).toHaveText('Could not load To do. Retry');
+    await expect(root.locator('.dpc-job')).toHaveCount(0);
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs 16']);
+    await expect(tape.locator('.dpc-tape-meta strong')).toBeVisible();
+    await root.locator('[data-dpc-mode="all"]').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(16);
+    await expect(list.locator('[role="alert"]')).toHaveCount(0);
+    await expect(root.locator('.dpc-job .dpc-stage').first()).toBeVisible();
+    await root.locator('[data-dpc-mode="todo"]').click();
+    await expect(list.locator('[role="alert"]')).toHaveText('Could not load To do. Retry');
+    shape = 'ok';
+    await list.locator('[data-dpc-retry="list"]').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(8);
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do 8', 'All jobs 16']);
   });
 
   test('a failed list read shows the error and no number on either button', async ({ page }) => {
@@ -2391,7 +2405,9 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
     expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
     expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
-    const src = require('node:fs').readFileSync(path.resolve(__dirname, '..', '..', 'modules', 'ops-dispatch.js'), 'utf8');
+    // The code, not its comments (the header names what the module never calls).
+    const src = require('node:fs').readFileSync(path.resolve(__dirname, '..', '..', 'modules', 'ops-dispatch.js'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const name of ['create_po', 'update_po', 'delete_po', 'push_po_to_xero', 'email_po', 'send-po-email', 'update_supplier_email', 'get_ops_upload_url', 'update_job_status', 'update_job_field', 'sync_suppliers', 'upsert_ops_note']) {
       expect(src).not.toContain(name);
     }

@@ -63,7 +63,8 @@ writes on a person's edit or press, which touch only Dispatch's own tables (no
 order, message or job status). The rail's stage is Dispatch's own
 record (`job_dispatch_state`), never the job status: it never calls
 `update_job_status`. A stage read that failed fails To do and the rail, never an
-empty To do. A quote with no stored PDF is never opened
+empty To do; a `todo_total` that does not match the To do rows fails To do only,
+and All jobs keeps listing. A quote with no stored PDF is never opened
 through `send-quote/view`, which records a client view. A failed read never
 renders as empty, and a later slice is not drawn until it is real. Below
 it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the

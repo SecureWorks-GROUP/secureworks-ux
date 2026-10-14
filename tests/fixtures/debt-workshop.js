@@ -127,6 +127,8 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
       { id: 'ghl:m3', channel: 'sms', direction: 'outbound', occurred_at: at(-9, '09:00'), author: 'Shaun', body: 'Hi Casey,\n\nHope you\'re well! Just checking the final invoice for Example Street came through OK.\n\nCheers,\nShaun' },
       { id: 'ghl:m4', channel: 'call', direction: 'outbound', occurred_at: at(-5, '12:31'), author: 'Shaun', body: 'Voicemail greeting. No message left.', call_duration: 31, call_status: 'no_answer' },
       { id: 'ghl:m5', channel: 'sms', direction: 'outbound', occurred_at: at(-5, '12:35'), author: 'Shaun', body: 'Hi Casey,\n\nI tried giving you a call today about the final invoice for the fence at Example Street. There\'s $1,420.37 still outstanding.\n\nCheers,\nShaun' },
+      // Held on no job by the backend (Casey has another job it could be on), from Casey's own contact.
+      { id: 'bev:u1', channel: 'sms', direction: 'outbound', occurred_at: at(-4, '09:15'), author: 'Shaun', body: 'Hi Casey,\n\nSo sorry to bother you, just a quick reminder about the final invoice.\n\nCheers,\nShaun', unplaced: true, candidate_job_count: 2 },
       { id: 'inbox:e1', channel: 'email', direction: 'inbound', occurred_at: at(-4, '18:20'), author: 'Casey Morgan', subject: 'Re: Final invoice', body: 'Got it. The gate still drags a little when it rains, can someone take a look when they are passing?' },
     ] },
     notes: [

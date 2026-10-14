@@ -180,6 +180,20 @@ check('shared fence line: the payer\'s share first, paid or owing, nothing for a
   assert.strictEqual(C.partyWords({ is_payer: false, party_name: 'Taylor Brooks' }), 'Taylor Brooks');
   assert.strictEqual(C.partyWords({ is_payer: true, party_name: 'Riley Shaw' }), '', 'the payer\'s own messages need no name');
 });
+check('a message not yet filed on a job gets a quiet label, every other message none', () => {
+  assert.strictEqual(C.unplacedWords({ id: 'bev:u1', unplaced: true }), 'not yet filed on a job');
+  assert.strictEqual(C.unplacedWords({ id: 'bev:p1' }), '');
+  assert.strictEqual(C.unplacedWords({ id: 'bev:p2', unplaced: 'true' }), '', 'only a real true counts');
+  assert.strictEqual(C.unplacedWords(null), '');
+});
+check('the GoHighLevel first name is hinted only when drafts use it and it differs from Xero', () => {
+  const J = (p) => ({ row: { payer_name: 'Tuan Tran' }, payer_contact: Object.assign({ name: 'Tuan Tran' }, p) });
+  assert.strictEqual(C.ghlNameHint(J({ greeting_name: 'Vincent', greeting_name_source: 'ghl' })), 'GHL: Vincent');
+  assert.strictEqual(C.ghlNameHint(J({ greeting_name: 'Tuan', greeting_name_source: 'ghl' })), '', 'same name, no hint');
+  assert.strictEqual(C.ghlNameHint(J({ greeting_name: 'Tuan', greeting_name_source: 'xero' })), '');
+  assert.strictEqual(C.ghlNameHint(J({})), '', 'an older backend without the fields');
+  assert.strictEqual(C.ghlNameHint({}), '');
+});
 check('refusals: known codes in plain words, otherwise the backend reason, never a bare code', () => {
   const e = new Error('part_paid'); e.status = 409;
   assert.strictEqual(C.refusalText(e), C.REFUSALS.part_paid);

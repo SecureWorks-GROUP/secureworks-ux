@@ -1167,16 +1167,17 @@
   function mergeMat(e, got, quiet) {
     var mine = {};
     e.lines.forEach(function (l) { mine[l.id] = l; });
+    // A line is only ever kept under a supplier still chosen for the job.
+    var chosen = {};
+    got.suppliers.forEach(function (s) { chosen[String(s.supplier_id)] = true; });
     var seen = {};
     var lines = got.lines.map(function (fresh) {
       var id = String(fresh.id);
       seen[id] = true;
       var l = mine[id];
-      if (l && l.updated_at === fresh.updated_at && (l.busy || l.gone || l.failed || l.delFailed || lineDirty(l))) return l;
+      if (l && l.updated_at === fresh.updated_at && chosen[l.supplier_id] && (l.busy || l.gone || l.failed || l.delFailed || lineDirty(l))) return l;
       return lineFrom(fresh);
     });
-    var chosen = {};
-    got.suppliers.forEach(function (s) { chosen[String(s.supplier_id)] = true; });
     e.lines.forEach(function (l) {
       if (!seen[l.id] && !l.saved && chosen[l.supplier_id] && (l.busy || quiet || text(l.description))) lines.push(l);
     });

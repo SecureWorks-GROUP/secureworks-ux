@@ -198,21 +198,21 @@ carries no start time (a business line keeps its time) and no readiness dot
 (readiness stays in the tooltip and popup). TWO states
 only (Captain ruling 2026-10-13): placeholder, and client locked in
 (`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
-one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
-repair, family-first through `calDivisionOf`; anything else, such as general or
-miscellaneous, sits with patios); the symbol still tells a make safe from a
-repair. The v3 Type filter and deliveries read that same `calV3Unit`, never
-`calDivisionOf`, so a job cannot vanish under the filter it is coloured for;
+one of four types via `calV3Symbol` (patio / fencing / repair / make safe,
+family-first through `calDivisionOf`; anything else, such as general or
+miscellaneous, sits with patios). The v3 Type filter and deliveries read that
+same `calV3Symbol`, so a job cannot vanish under the filter it is coloured for;
 the flag-off sidebar Divisions rule is unchanged. A business line is decided in
 ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
 job-less label row, plus org events. Business lines take the TOP lanes of the
 week and jobs start under them; an org event stretches across its days instead
 of the corner badge, and a meeting on a job is its own purple line, never merged
-into the job's line. The Show / Type focus row (`_calFocus`, `setCalFocus`,
-stored at `sw_cal_focus`) works in BOTH views. Show sets the in-memory
+into the job's line. The Show / Type row is tick boxes, all ticked to start
+(`_calPick`, `setCalPick`, stored at `sw_cal_pick`; Insurance ticks Repairs and
+Make Safes together; search `// <calendar-tick-filters>`) and works in BOTH views. Show sets the in-memory
 `_calEventFilters`; a calendar row is let through only by `calEventShown`
 (business lines follow the business filters, only jobs follow Jobs). Type is
-read off `_calFocus` by
+read off `_calPick` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair

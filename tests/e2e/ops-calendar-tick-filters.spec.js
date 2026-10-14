@@ -1,6 +1,5 @@
-// Ops Dash calendar: the tick-box Show / Type row (preview).
-// Off unless ?calfilters=preview (remembered in localStorage.sw_cal_filters_preview);
-// ?calfilters=live turns it off. Search <calendar-tick-filters> in ops.html.
+// Ops Dash calendar: the tick-box Show / Type row.
+// Search <calendar-tick-filters> in ops.html.
 //
 // What this guards:
 //  - Show and Type are tick boxes, several at once, every one ticked to start
@@ -8,7 +7,7 @@
 //  - Insurance is the umbrella over Repairs and Make Safes, which are separate
 //    options with their own colour; Insurance ticks or unticks both
 //  - deliveries and the Crew view follow the same ticks
-//  - with the switch off, the live single-choice row is untouched
+//  - ticks are remembered across a reload
 //
 // Static-fixture spec, same pattern as ops-calendar-v3.spec.js: seeds
 // window._calEvents (no network), dates pinned through window._calDate.
@@ -85,17 +84,17 @@ function snapshot(page) {
       crewDels: [...cal.querySelectorAll('.cal-delivery-block')].map((d) => d.getAttribute('data-po-id')).sort(),
       crewBlocks: [...new Set([...cal.querySelectorAll('.cal-job-block')].map((b) => (b.getAttribute('title') || '').split(' — ')[0]))].sort(),
       empty: (document.getElementById('calV3Empty') || {}).textContent || '',
-      storedFocus: localStorage.getItem('sw_cal_focus'),
+      storedPick: localStorage.getItem('sw_cal_pick'),
     };
   });
 }
 const tick = (page, kind, key) => page.locator('#calFocus [data-pick-' + kind + '="' + key + '"] input').click();
 const ALL_JOBS = ['j1', 'j2', 'j3', 'j4', 'j5'];
 
-test.describe('preview on', () => {
+test.describe('tick-box Show / Type row', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/ops.html?calfilters=preview');
+    await page.goto('/ops.html');
     await page.waitForFunction(() => typeof window.renderScheduleView === 'function' && typeof window.setCalPick === 'function');
     await revealOpsStaticFixture(page);
     await seedAndRender(page);
@@ -204,10 +203,10 @@ test.describe('preview on', () => {
     expect(s.crewDels).toEqual([]);
   });
 
-  test('ticks are remembered apart from the live row, and ?calfilters=live turns the preview off', async ({ page }) => {
+  test('ticks are remembered across a reload', async ({ page }) => {
     await tick(page, 'type', 'makesafe');
     let s = await snapshot(page);
-    expect(s.storedFocus).toBeNull();
+    expect(JSON.parse(s.storedPick).type.makesafe).toBe(false);
 
     await page.goto('/ops.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof window.setCalPick === 'function');
@@ -215,27 +214,5 @@ test.describe('preview on', () => {
     await seedAndRender(page);
     s = await snapshot(page);
     expect(s.jobs).toEqual(['j1', 'j2', 'j4', 'j5']);
-
-    await page.goto('/ops.html?calfilters=live', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => typeof window.setCalPick === 'function');
-    await revealOpsStaticFixture(page);
-    await seedAndRender(page);
-    s = await snapshot(page);
-    expect(s.ticks).toEqual([]);
-    expect(s.liveButtons).toBe(8);
-    expect(s.jobs).toEqual(ALL_JOBS);
-    expect(await page.evaluate(() => localStorage.getItem('sw_cal_filters_preview'))).toBeNull();
   });
-});
-
-test('without the switch the live single-choice row is unchanged', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/ops.html');
-  await page.waitForFunction(() => typeof window.renderScheduleView === 'function' && typeof window.setCalFocus === 'function');
-  await revealOpsStaticFixture(page);
-  await seedAndRender(page);
-  const s = await snapshot(page);
-  expect(s.ticks).toEqual([]);
-  expect(s.liveButtons).toBe(8);
-  expect(s.units).toEqual({ j1: 'v3u-patio', j2: 'v3u-fencing', j3: 'v3u-insurance', j4: 'v3u-insurance', j5: 'v3u-insurance' });
 });

@@ -59,7 +59,6 @@ test.beforeEach(async ({ page }) => {
     window._calLeaveByDate = {};
     window._calAvailability = {};
     window._calReadiness = {};
-    window._calFocus = { show: 'everything', type: 'all' };
     window.applyCalFocus();
     window.renderCalendar();
 

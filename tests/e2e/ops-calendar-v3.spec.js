@@ -7,7 +7,7 @@
 //  - two states only: placeholder and client locked in
 //  - business lines (meetings, company days) drawn like job lines, in purple,
 //    always above the jobs, and stretched across the days they cover
-//  - the Show / Type focus row, and that "Insurance" is a view filter over
+//  - the Show / Type tick boxes, and that "Insurance" is a view filter over
 //    make safes AND repairs without touching the stored divisions
 //  - deliveries in the day from every live order, with an honest empty state
 //  - the kill switch giving the old calendar back, and the first-open landing
@@ -86,7 +86,7 @@ async function seedAndRender(page, opts = {}) {
     window._calLeaveByDate = { '2026-08-05': ['Ivy'] };
     window._calAvailability = {};
     window._calReadiness = { j1: { status: 'ready', score: 100, blockers: [], warnings: [], completeness: [] } };
-    window._calFocus = { show: 'everything', type: 'all' };
+    ['show', 'type'].forEach((k) => Object.keys(window._calPick[k]).forEach((o) => { window._calPick[k][o] = true; }));
     window.applyCalFocus();
     window.renderCalendar();
   }, { EVENTS, ORG_EVENTS, DELIVERIES, CREW, opts });
@@ -145,13 +145,19 @@ async function openedLine(page, label, time) {
   await page.locator('.cal-schedule-bar.v3-biz', { hasText: label }).filter({ hasText: time }).click();
   return page.evaluate(() => window._calPopupAssignment && window._calPopupAssignment.assignment_id);
 }
+// Tick only one Show or Type option (Everything / All tick them all back).
+const pick = (page, kind, key) => page.evaluate(([k, v]) => {
+  if (v === 'everything' || v === 'all') return window.setCalPick(k, 'all', true);
+  window.setCalPick(k, 'all', false);
+  window.setCalPick(k, v, true);
+}, [kind, key]);
 const bizBars = (s) => s.bars.filter((b) => b.biz);
 const bar = (s, job) => s.bars.find((b) => b.job === job);
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/ops.html');
-  await page.waitForFunction(() => typeof window.renderScheduleView === 'function' && typeof window.setCalFocus === 'function');
+  await page.waitForFunction(() => typeof window.renderScheduleView === 'function' && typeof window.setCalPick === 'function');
   await revealOpsStaticFixture(page);
   await seedAndRender(page);
 });
@@ -162,8 +168,8 @@ test('v3 is on by default: new chrome, sidebar hidden, focus row drawn', async (
   expect(s.v3).toBe(true);
   expect(s.sidebar).toBe('none');
   expect(s.grid).toContain('v3');
-  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'All', 'Patios', 'Fencing', 'Insurance']);
-  expect(s.focus.filter((f) => f.on).map((f) => f.text)).toEqual(['Everything', 'All']);
+  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+  expect(s.focus.every((f) => f.on)).toBe(true);
 });
 
 test('a job line carries type square, client, job number, staff circles and the lock', async ({ page }) => {
@@ -192,16 +198,16 @@ test('a job line carries type square, client, job number, staff circles and the 
   expect(eli.crew).toEqual([]);
 });
 
-test('two states only, and three colours with insurance covering make safes and repairs', async ({ page }) => {
+test('two states only, and make safes and repairs each have their own colour', async ({ page }) => {
   const s = await snapshot(page);
   const unit = (b) => b.classes.find((k) => k.indexOf('v3u-') === 0);
   expect(unit(bar(s, 'j1'))).toBe('v3u-patio');
   expect(unit(bar(s, 'j2'))).toBe('v3u-fencing');
-  expect(unit(bar(s, 'j3'))).toBe('v3u-insurance');
-  expect(unit(bar(s, 'j4'))).toBe('v3u-insurance');
-  // same colour, different symbol: warning triangle for a make safe, hammer for a repair
+  expect(unit(bar(s, 'j3'))).toBe('v3u-makesafe');
+  expect(unit(bar(s, 'j4'))).toBe('v3u-repair');
+  // warning triangle for a make safe, hammer for a repair, and a colour each
   expect(bar(s, 'j3').icon).not.toBe(bar(s, 'j4').icon);
-  expect(bar(s, 'j3').bg).toBe(bar(s, 'j4').bg);
+  expect(bar(s, 'j3').bg).not.toBe(bar(s, 'j4').bg);
   // every job line is exactly one of the two states
   for (const b of jobBars(s)) {
     expect(b.classes.filter((k) => k === 'v3s-locked' || k === 'v3s-placeholder')).toHaveLength(1);
@@ -235,37 +241,37 @@ test('business lines are drawn like job lines, sit above every job, and stretch 
 });
 
 test('Show focuses on labour, business or materials, and Everything brings it back', async ({ page }) => {
-  await page.evaluate(() => window.setCalFocus('show', 'labour'));
+  await pick(page, 'show', 'labour');
   let s = await snapshot(page);
   expect(jobBars(s)).toHaveLength(5);
   expect(bizBars(s)).toHaveLength(0);
   expect(s.cells.flatMap((c) => c.dels)).toHaveLength(0);
   expect(s.cells.some((c) => c.leave)).toBe(false);
 
-  await page.evaluate(() => window.setCalFocus('show', 'business'));
+  await pick(page, 'show', 'business');
   s = await snapshot(page);
   expect(jobBars(s)).toHaveLength(0);
   expect(bizBars(s)).toHaveLength(3);
   // leave stays visible with business (nothing today's page shows is removed)
   expect(s.cells.find((c) => c.date === '2026-08-05').leave).toContain('Ivy');
 
-  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  await pick(page, 'show', 'materials');
   s = await snapshot(page);
   expect(s.bars).toHaveLength(0);
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-1', 'po-2']);
   expect(s.empty).toBe('');
 
-  await page.locator('#calFocus [data-focus-show="everything"]').click();
+  await pick(page, 'show', 'everything');
   s = await snapshot(page);
   expect(jobBars(s)).toHaveLength(5);
   expect(bizBars(s)).toHaveLength(3);
   expect(s.cells.flatMap((c) => c.dels)).toHaveLength(2);
-  expect(s.focus.filter((f) => f.on).map((f) => f.text)).toEqual(['Everything', 'All']);
+  expect(s.focus.every((f) => f.on)).toBe(true);
 });
 
 test('Materials with nothing booked says so instead of showing an empty grid', async ({ page }) => {
   await seedAndRender(page, { noDeliveries: true });
-  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  await pick(page, 'show', 'materials');
   let s = await snapshot(page);
   expect(s.empty).toBe('No deliveries booked');
   expect(s.bars).toHaveLength(0);
@@ -274,7 +280,7 @@ test('Materials with nothing booked says so instead of showing an empty grid', a
   await seedAndRender(page, { noDeliveries: true, pos: [
     { id: 'po-far', po_number: 'PO-9090', supplier_name: 'Example Steel Co', delivery_date: '2026-09-21', job_id: 'j1', status: 'sent' },
   ] });
-  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  await pick(page, 'show', 'materials');
   s = await snapshot(page);
   expect(s.cells.flatMap((c) => c.dels)).toHaveLength(0);
   expect(s.empty).toBe('No deliveries booked');
@@ -284,12 +290,12 @@ test('a typed job-less row is a business line: shown under Business, hidden unde
   const withLabel = EVENTS.concat([ev({ job_id: null, assignment_id: 'l1', assignment_type: 'install', label: 'Yard clean-up',
     scheduled_date: '2026-08-07', scheduled_end: '2026-08-07', user_id: 'u3', crew_name: 'Ivy' })]);
   await seedAndRender(page, { events: withLabel });
-  await page.evaluate(() => window.setCalFocus('show', 'business'));
+  await pick(page, 'show', 'business');
   let s = await snapshot(page);
   expect(bizBars(s).map((b) => b.label)).toContain('Yard clean-up');
   expect(jobBars(s)).toHaveLength(0);
 
-  await page.evaluate(() => window.setCalFocus('show', 'labour'));
+  await pick(page, 'show', 'labour');
   s = await snapshot(page);
   expect(s.bars.map((b) => b.label)).not.toContain('Yard clean-up');
   expect(jobBars(s)).toHaveLength(5);
@@ -303,30 +309,30 @@ test('a job outside the three named types sits with Patios for colour, filter an
   let s = await snapshot(page);
   expect(bar(s, 'j7').classes).toContain('v3u-patio');
 
-  await page.locator('#calFocus [data-focus-type="patio"]').click();
+  await pick(page, 'type', 'patio');
   s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job).sort()).toEqual(['j1', 'j5', 'j7']);
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-1', 'po-7']);
 
-  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  await pick(page, 'type', 'fencing');
   s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job)).toEqual(['j2']);
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id)).toEqual(['po-2']);
 });
 
 test('Type filters by colour group, and Insurance is a view over make safes and repairs only', async ({ page }) => {
-  await page.locator('#calFocus [data-focus-type="patio"]').click();
+  await pick(page, 'type', 'patio');
   let s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job).sort()).toEqual(['j1', 'j5']);
   expect(bizBars(s)).toHaveLength(3);                       // business is not a type
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id)).toEqual(['po-1']);
 
-  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  await pick(page, 'type', 'fencing');
   s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job)).toEqual(['j2']);
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id)).toEqual(['po-2']);
 
-  await page.locator('#calFocus [data-focus-type="insurance"]').click();
+  await pick(page, 'type', 'insurance');
   s = await snapshot(page);
   expect(jobBars(s).map((b) => b.job).sort()).toEqual(['j3', 'j4']);
   // a view filter: the sidebar's divisions underneath are left exactly as they were
@@ -335,7 +341,7 @@ test('Type filters by colour group, and Insurance is a view over make safes and 
   expect(s.storedDivs).toBeNull();
   expect(s.storedEvt).toBeNull();
 
-  await page.locator('#calFocus [data-focus-type="all"]').click();
+  await pick(page, 'type', 'all');
   s = await snapshot(page);
   expect(jobBars(s)).toHaveLength(5);
   expect(s.divs).toEqual(['all']);
@@ -389,7 +395,7 @@ test('a delivery whose job is not in view still has its colour, job number and a
   expect(fri.dels[0].l2).toBe('9 Sample Rd, Testville');
   expect(fri.dels[0].unit).toBe('v3u-fencing');
 
-  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  await pick(page, 'type', 'fencing');
   s = await snapshot(page);
   expect(s.cells.flatMap((c) => c.dels).map((d) => d.id).sort()).toEqual(['po-2', 'po-5']);
 });
@@ -402,17 +408,17 @@ test('the Crew view honours Type: other jobs are dropped, no crew row is dimmed,
   let s = await snapshot(page);
   expect(s.crewBlocks).toEqual(['Alice Adams', 'Bob Baker', 'Cara Chen', 'Dana Diaz', 'Eli Evans'].concat(meetings));
 
-  await page.locator('#calFocus [data-focus-type="insurance"]').click();
+  await pick(page, 'type', 'insurance');
   s = await snapshot(page);
   expect(s.crewBlocks).toEqual(['Cara Chen', 'Dana Diaz'].concat(meetings));
   expect(s.dimmed).toBe(0);
 
-  await page.locator('#calFocus [data-focus-type="patio"]').click();
+  await pick(page, 'type', 'patio');
   s = await snapshot(page);
   expect(s.crewBlocks).toEqual(['Alice Adams', 'Eli Evans'].concat(meetings));
   expect(s.dimmed).toBe(0);
 
-  await page.locator('#calFocus [data-focus-type="all"]').click();
+  await pick(page, 'type', 'all');
   s = await snapshot(page);
   expect(s.crewBlocks).toHaveLength(7);
 });
@@ -504,7 +510,7 @@ test('the new chrome is in place before the calendar feed answers, and stays whe
     await expect(page.locator('#viewCalendar')).toHaveClass(/cal-v3/);
     // the old sidebar and its live tick boxes are never on screen with v3 on
     await expect(page.locator('#viewCalendar .cal-sidebar').first()).toBeHidden();
-    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(8);
+    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(10);
   };
   await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
   await expect.poll(() => calendarReads, { message: 'the calendar feed was never read' }).toBeGreaterThan(0);
@@ -540,20 +546,20 @@ test('a meeting linked to a job is a business line of its own, never part of the
   expect(Math.abs(alice.r.w - (mon.w + tue.w))).toBeLessThan(2);
   expect(alice.crew.sort()).toEqual(['RL', 'SR']);
 
-  await page.evaluate(() => window.setCalFocus('show', 'business'));
+  await pick(page, 'show', 'business');
   s = await snapshot(page);
   expect(bizBars(s).map((b) => b.label)).toContain(LABEL);
   expect(jobBars(s)).toHaveLength(0);
 
   for (const show of ['labour', 'materials']) {
-    await page.evaluate((v) => window.setCalFocus('show', v), show);
+    await pick(page, 'show', show);
     s = await snapshot(page);
     expect(s.bars.map((b) => b.label), 'Show = ' + show).not.toContain(LABEL);
   }
 
   // a business line is not a type
-  await page.evaluate(() => window.setCalFocus('show', 'everything'));
-  await page.locator('#calFocus [data-focus-type="fencing"]').click();
+  await pick(page, 'show', 'everything');
+  await pick(page, 'type', 'fencing');
   s = await snapshot(page);
   expect(bizBars(s).map((b) => b.label)).toContain(LABEL);
   expect(jobBars(s).map((b) => b.job)).toEqual(['j2']);
@@ -598,19 +604,19 @@ test('the Crew view honours Show: deliveries only under Everything and Materials
   expect(s.crewDels.sort()).toEqual(['po-1', 'po-2']);
 
   for (const show of ['labour', 'business']) {
-    await page.evaluate((v) => window.setCalFocus('show', v), show);
+    await pick(page, 'show', show);
     s = await snapshot(page);
     expect(s.crewDels, 'Show = ' + show).toEqual([]);
     expect(s.empty).toBe('');
   }
 
-  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  await pick(page, 'show', 'materials');
   s = await snapshot(page);
   expect(s.crewDels.sort()).toEqual(['po-1', 'po-2']);
   expect(s.empty).toBe('');
 
   await seedAndRender(page, { view: 'crew', noDeliveries: true });
-  await page.evaluate(() => window.setCalFocus('show', 'materials'));
+  await pick(page, 'show', 'materials');
   s = await snapshot(page);
   expect(s.crewDels).toEqual([]);
   expect(s.empty).toBe('No deliveries booked');

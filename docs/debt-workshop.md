@@ -2,7 +2,7 @@
 
 Ops > **Debt** (`#viewDebt`). Module: `modules/ops-debt-workshop.js`, loaded at the end of `ops.html` through `__swOpsStampAssets`. Build contract: secureworks-wiki `coding/capabilities/debt-follow-up/debt-workshop-spec.md` (section 9 is this screen; sections 3, 4 and 8 give the data, the categories and the action shapes). The approved look is the local Lavish plan `debt-collection-fresh/.lavish/debt-workshop-build-plan.html`, sections 4 and 5. Where the two disagree, the contract wins.
 
-The old Clear Debt screens (`ops-clear-debt-desk.js`, `ops-clear-debt-v2.js`) are untouched. A separate stage 6 PR removes them.
+This is the only debt screen. The old Clear Debt screens (Financials > Clear Debt, `ops-clear-debt-desk.js`, `ops-clear-debt-v2.js`, `ops-clear-debt.js`) were removed in stage 6. The Today tab's Overdue Invoices card opens this tab.
 
 ## When the tab shows
 

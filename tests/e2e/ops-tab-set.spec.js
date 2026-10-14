@@ -113,7 +113,7 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
   });
   await page.locator('.header-nav button[data-view="financials"]').click();
   const subTabs = page.locator('#viewFinancials .sub-tab');
-  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills', 'Clear Debt']);
+  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills']);
   await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
   await expect(page.locator('#subPos')).toHaveClass(/active/);
   // Supplier Price Updates lost its Materials home; it now lives here with its actions.

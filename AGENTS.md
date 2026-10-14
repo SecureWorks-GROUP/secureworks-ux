@@ -667,7 +667,7 @@ sentinels. Send stays disabled while `settings.sending_on` is false; owner-only
 controls follow `settings.viewer_is_owner`; refusals are shown in words, never as codes.
 Keep the module free of long dashes and emojis. Guards: `npm run test:debt-workshop`
 (in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
-Do not touch the old Clear Debt modules from here; stage 6 removes them in its own PR.
+This is the only debt screen: the old Clear Debt screens (Financials > Clear Debt) were removed in stage 6.
 
 ## Trade App job cards (`trade.html`)
 

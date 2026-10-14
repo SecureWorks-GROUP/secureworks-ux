@@ -194,10 +194,12 @@ var JobOverviewV2Core = (function () {
   var DASHES = '\\u2012\\u2013\\u2014\\u2015\\u2E3A\\u2E3B';
   var RANGE_RE = new RegExp('(\\d)[ \\t]*[' + DASHES + ']+[ \\t]*(\\$?\\d)', 'g');
   var DASH_RE = new RegExp('[ \\t]*[' + DASHES + ']+[ \\t]*', 'g');
+  var EMOJI_RE = new RegExp('(?:[0-9#*]\\uFE0F?\\u20E3)|[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\p{Emoji_Modifier}\\uFE0F\\u200D]', 'gu');
   function clean(v) {
     if (v == null) return '';
     var s = String(v).replace(/\r\n?/g, '\n');
     s = s.replace(RANGE_RE, '$1 to $2').replace(DASH_RE, ', ');
+    s = s.replace(EMOJI_RE, '');
     s = s.replace(/[ \t]*,(?:[ \t]*,)+/g, ',').replace(/[ \t]+,/g, ',');
     s = s.replace(/[ \t]{2,}/g, ' ').replace(/^[\s,]+/, '').replace(/[\s,]+$/, '');
     return s;
@@ -323,10 +325,29 @@ var JobOverviewV2Core = (function () {
   function rewriteWords(res) {
     var r = obj(res) || {};
     var s = lower(r.state || r.result || r.outcome || r.status || '');
+    if (r.ok === false || r.requested === false) return clean(r.reason || r.error || 'The rewrite was not asked for.');
+    if (s === 'off') return 'Rewriting is not switched on yet.';
+    if (!s) return 'The rewrite could not be confirmed. Refresh before trying again.';
     if (/already|open|pending|exists|in_progress/.test(s)) return 'A rewrite was already asked for; it is on its way.';
     if (/recent|fresh|rate|too_soon|up_to_date|nothing/.test(s)) return 'It was rewritten in the last 10 minutes and nothing new has happened since.';
-    if (r.ok === false || r.requested === false) return clean(r.reason || r.error || 'The rewrite was not asked for.');
+    if (s && s !== 'queued') return 'The rewrite could not be confirmed. Refresh before trying again.';
     return '';
+  }
+  function rewriteAccepted(res) {
+    var r = obj(res) || {};
+    if (r.ok === false || r.requested === false) return false;
+    return ['queued', 'already_open', 'recent'].indexOf(lower(r.state || r.result || r.outcome || r.status)) >= 0;
+  }
+
+  function sourceFailures(overview) {
+    var sources = obj(overview && overview.sources) || {};
+    var labels = { job: 'customer details', story: 'job story', notes: 'AI notes', messages: 'conversation',
+      quotes: 'quotes', quote_views: 'quote views', invoices: 'invoices', attachments: 'attachments',
+      media: 'photos', scope: 'scope', story_text: 'written story' };
+    return Object.keys(labels).filter(function (key) {
+      var s = obj(sources[key]);
+      return s && (s.ok === false || s.state === 'failed' || s.state === 'not_deployed');
+    }).map(function (key) { return labels[key]; });
   }
 
   // ── People and whose move ──
@@ -460,7 +481,7 @@ var JobOverviewV2Core = (function () {
       invoiceDate: r.invoice_date || r.date || dates.invoice || dates.invoice_date || null,
       paidOn: r.fully_paid_on || r.paid_on || dates.paid || dates.fully_paid_on || null,
       createdAt: r.created_at || dates.created || null,
-      byName: !!(jobId && jid && jid !== str(jobId)),
+      byName: !!(jobId && jid !== str(jobId)),
       raw: r
     };
   }
@@ -475,7 +496,10 @@ var JobOverviewV2Core = (function () {
     return src.map(function (r) {
       // job_overview owns the amount and status; job_detail still carries the Xero link id.
       var match = fx && records.filter(function (d) { return d && r && r.id && String(d.id) === String(r.id); })[0];
-      return invoiceRow(match ? Object.assign({}, match, r, { xero_invoice_id: r.xero_invoice_id || match.xero_invoice_id }) : r, job.id);
+      var row = match ? Object.assign({}, match, r, { xero_invoice_id: r.xero_invoice_id || match.xero_invoice_id }) : r;
+      // The overview read selects by job_id. A fallback detail row with no link
+      // may have been matched by customer name and cannot speak for this job.
+      return invoiceRow(fx && Array.isArray(fx.invoices) ? Object.assign({}, row, { job_id: job.id }) : row, job.id);
     }).filter(function (i) { return !/ACCPAY|BILL/.test(i.type); });
   }
   function jobValue(detail, overview) {
@@ -509,8 +533,8 @@ var JobOverviewV2Core = (function () {
     } else {
       invs.forEach(function (i) {
         if (i.byName) { out.nameOnly++; return; }
-        if (i.status === 'DRAFT') { out.drafts.push({ id: i.id, number: i.number, total: i.total, xeroId: i.xeroId }); return; }
-        if (i.status === 'VOIDED' || i.status === 'DELETED') return;
+        if (i.status === 'DRAFT' || i.status === 'SUBMITTED') { out.drafts.push({ id: i.id, number: i.number, total: i.total, xeroId: i.xeroId }); return; }
+        if (i.status !== 'AUTHORISED' && i.status !== 'PAID') return;
         out.invoiced += i.total;
         out.paid += i.paid;
       });
@@ -534,6 +558,10 @@ var JobOverviewV2Core = (function () {
         out.splits.push({ who: nm ? nm + ' (neighbour)' : 'Neighbour' + (nbs.length > 1 ? ' ' + (i + 1) : ''), amount: a });
       });
       if (out.splits.length < 2) out.splits = [];
+      if (out.splits.length && out.value != null) {
+        var splitTotal = out.splits.reduce(function (sum, sp) { return sum + sp.amount; }, 0);
+        if (Math.abs(splitTotal - out.value) > 0.02) out.splitWarning = 'Recorded shares total ' + money(splitTotal) + ', which differs from the job value. Check the scope split.';
+      }
     }
     return out;
   }
@@ -566,8 +594,9 @@ var JobOverviewV2Core = (function () {
   function quoteRows(detail, overview) {
     var fx = obj(overview && overview.files);
     var docs = arr(detail && detail.documents).filter(Boolean);
-    if (fx && Array.isArray(fx.quotes)) {
-      return fx.quotes.map(function (raw) {
+    var rows = fx && (Array.isArray(fx.quotes) ? fx.quotes : (obj(fx.quotes) && Array.isArray(fx.quotes.documents) ? fx.quotes.documents : null));
+    if (rows) {
+      return rows.map(function (raw) {
         var q = normQuote(raw);
         q.doc = docs.filter(function (d) { return q.id && str(d.id) === q.id; })[0] ||
           docs.filter(function (d) { return q.number && clean(d.quote_number) === q.number && num(d.version) === q.version; })[0] || null;
@@ -580,6 +609,16 @@ var JobOverviewV2Core = (function () {
       q.fromRecord = true;
       return q;
     });
+  }
+  function quotedValue(detail, overview) {
+    var fx = obj(overview && overview.files);
+    var envelope = obj(fx && fx.quotes);
+    if (envelope && Object.prototype.hasOwnProperty.call(envelope, 'headline')) {
+      return firstNum(envelope.headline && envelope.headline.value_inc_gst);
+    }
+    var current = quoteRows(detail, overview).filter(function (q) { return !q.superseded; })
+      .sort(function (a, b) { return toMs(b.sentAt || b.createdAt) - toMs(a.sentAt || a.createdAt); })[0];
+    return current ? current.value : null;
   }
   function scopeMeta(job, sj, now) {
     if (!sj) return '';
@@ -602,7 +641,7 @@ var JobOverviewV2Core = (function () {
     a = obj(a) || {};
     var at = a.at || a.date || a.event_at || a.occurred_at || a.created_at || a.received_at || null;
     return {
-      name: clean(a.file_name || a.name || a.filename || 'Attachment'),
+      name: clean(a.file_name || a.name || a.filename || 'Attachment'), source: lower(a.source),
       at: at, ms: toMs(at),
       pages: firstNum(a.page_count, a.pages),
       contentType: lower(a.content_type || a.mime || '')
@@ -675,7 +714,8 @@ var JobOverviewV2Core = (function () {
       var d = i.invoiceDate || i.createdAt;
       if (d) meta.push(shortDate(d, now));
       var pill;
-      if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft, cannot be paid' };
+      if (i.status === 'SUBMITTED') pill = { cls: 'warn', words: 'Awaiting approval, cannot be paid' };
+      else if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft, cannot be paid' };
       else if (i.status === 'DELETED') pill = { cls: 'sup', words: 'Deleted in Xero' };
       else if (i.status === 'VOIDED') pill = { cls: 'sup', words: 'Voided in Xero' };
       else if (i.status === 'PAID') pill = { cls: 'acc', words: 'Paid' + (i.paidOn ? ' ' + shortDate(i.paidOn, now) : '') };
@@ -712,11 +752,12 @@ var JobOverviewV2Core = (function () {
     order.sort(function (x, y) { return (byName[y].a.ms - byName[x].a.ms) || 0; });
     order.forEach(function (k) {
       var a = byName[k].a, n = byName[k].count;
-      var meta = [a.at ? 'emailed ' + shortWhen(a.at, now) : 'emailed'];
+      var how = a.source === 'upload' ? 'uploaded' : 'emailed';
+      var meta = [a.at ? how + ' ' + shortWhen(a.at, now) : how];
       if (n > 1) meta.push(n + ' versions');
       if (a.pages) meta.push(plural(a.pages, 'page'));
       live.push({ key: 'att:' + k, kind: 'attachment', icon: attIcon(a), name: attName(a), meta: meta.join(DOT),
-        pill: { cls: 'info', words: 'Email attachment' }, faded: false, open: null });
+        pill: { cls: 'info', words: a.source === 'upload' ? 'Uploaded document' : 'Email attachment' }, faded: false, open: null });
     });
 
     var media = arr(detail && detail.media).filter(function (mm) {
@@ -767,7 +808,8 @@ var JobOverviewV2Core = (function () {
     var rows = [];
     arr(story && story.timeline).forEach(function (t, i) {
       if (!t) return;
-      var raw = t.at || t.date;
+      // Xero invoice/payment facts carry calendar dates, not an observed time.
+      var raw = lower(t.source_table) === 'xero_invoices' && /^\d{4}-\d{2}-\d{2}$/.test(str(t.date)) ? t.date : (t.at || t.date);
       var ms = toMs(raw);
       if (!isFinite(ms)) return;
       rows.push({ i: i, ms: ms, raw: raw, kind: lower(t.kind), what: clean(t.what), state: lower(t.state), amount: num(t.amount), src: lower(t.source_table), sid: str(t.source_id) });
@@ -1056,9 +1098,9 @@ var JobOverviewV2Core = (function () {
     shortWhen: shortWhen, shortDate: shortDate, longDate: longDate, perthDayKey: perthDayKey,
     clean: clean, cut: cut, firstSentence: firstSentence, headlineFrom: headlineFrom, firstName: firstName, money: money,
     humanStatus: humanStatus, hasBanned: hasBanned, flagOn: flagOn, isNotDeployed: isNotDeployed,
-    storyText: storyText, paragraphs: paragraphs, rewriteWords: rewriteWords,
+    storyText: storyText, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
-    invoices: invoices, moneySummary: moneySummary, quoteRows: quoteRows, files: files,
+    invoices: invoices, moneySummary: moneySummary, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation,
     callWords: callWords, messagesFromDetail: messagesFromDetail
   };
@@ -1158,10 +1200,10 @@ var JobOverviewV2 = (function () {
       state: !e ? 'loading' : (ov ? 'ok' : e.status) };
     m.first = C.firstName(C.customerName(job, story)) || 'the customer';
     m.money = C.moneySummary(detail, ov);
-    var currentQuote = C.quoteRows(detail, ov).filter(function (q) { return !q.superseded && q.value != null; })
-      .sort(function (a, b) { return C.toMs(b.sentAt || b.createdAt) - C.toMs(a.sentAt || a.createdAt); })[0];
-    m.quoted = currentQuote ? currentQuote.value : null;
+    m.quoted = C.quotedValue(detail, ov);
     m.text = C.storyText(ov && ov.story_text);
+    m.failures = C.sourceFailures(ov);
+    m.refreshFailed = !!(e && e.refreshFailed);
     m.wm = story && C.obj(story.now) ? C.whoseMove(story.now.whose_move, job, story) : null;
     m.items = C.openItems(story, job, ov && ov.notes, now);
     var labels = g('STATUS_LABELS') || {};
@@ -1216,12 +1258,19 @@ var JobOverviewV2 = (function () {
   function pageHtml(m) {
     return '<div class="ov2" id="ov2Root" data-job="' + esc(m.k) + '">' +
       (api.isStaffViewer() ? '<div class="ov2-switch"><button type="button" class="ov2-linkbtn" id="ov2Toggle" data-ov2-act="classic">Back to classic</button></div>' : '') +
-      custHtml(m) + filesHtml(m) +
+      readNoticeHtml(m) + custHtml(m) + filesHtml(m) +
       '<div class="ov2-cols">' + timelineHtml(m) + storyHtml(m) +
       '<section class="ov2-card ov2-col ov2-convcol" id="ov2ConvCol" aria-label="Conversation"><div id="ov2ConvBody">' + convBodyHtml(m) + '</div>' + composeHtml(m) + '</section>' +
       '</div></div>';
   }
 
+  function readNoticeHtml(m) {
+    var lines = [];
+    if (m.refreshFailed) lines.push('Refresh failed. Showing the previous read.');
+    if (m.failures.length) lines.push('Could not read: ' + m.failures.join(', ') + '. The sections below may show only the job record.');
+    return lines.length ? '<div class="ov2-state" id="ov2ReadNotice" role="status">' + esc(lines.join(' ')) +
+      ' <button type="button" class="ov2-linkbtn" data-ov2-act="retry">Try again</button></div>' : '';
+  }
   function custHtml(m) {
     var j = m.job;
     var name = C.clean(j.client_name) || 'Unknown client';
@@ -1268,6 +1317,7 @@ var JobOverviewV2 = (function () {
     if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', not issued</div>';
     else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', not issued') + '</div>';
     if (s.nameOnly) h += '<div class="ov2-mrow">' + esc(C.plural(s.nameOnly, 'Xero invoice') + ' matched by name only, not counted') + '</div>';
+    if (s.splitWarning) h += '<div class="ov2-mrow ov2-warnt" id="ov2SplitWarning">' + esc(s.splitWarning) + '</div>';
     var chips = s.splits.map(function (sp) { return '<span class="ov2-chip">' + esc(sp.who + ' ' + C.money(sp.amount)) + '</span>'; }).join('');
     if (m.wm) chips += '<span class="ov2-chip' + (m.wm.key === 'us' ? ' us' : '') + '" id="ov2Whose">' + esc(m.wm.words) + '</span>';
     if (chips) h += '<div class="ov2-who">' + chips + '</div>';
@@ -1394,7 +1444,7 @@ var JobOverviewV2 = (function () {
         '<button type="button" class="ov2-btn" data-ov2-act="retry">Try again</button></div>';
     } else {
       h = '<div class="ov2-state" id="ov2StoryState" data-state="partial"><p class="ov2-state-t">The story could not be built for this job right now.</p>' +
-        '<p>The files and conversation on this page are still current.</p><button type="button" class="ov2-btn" data-ov2-act="retry">Try again</button></div>';
+        '<p>The other sections may show only the job record.</p><button type="button" class="ov2-btn" data-ov2-act="retry">Try again</button></div>';
     }
     var move = moveHtml(m);
     return h + (move ? '<div class="ov2-next ov2-quiet">' + move + '</div>' : '');
@@ -1463,7 +1513,9 @@ var JobOverviewV2 = (function () {
     }
     parts.push(C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
     var h = '<div class="ov2-stamp" id="ov2Stamp"><p>' + esc(parts.join('. ') + '.') + '</p>';
-    if (u.asked && u.asked.ok) {
+    if (t && t.writer_on === false) {
+      h += '<p id="ov2WriterOff">Written stories and rewriting are not switched on yet.</p>';
+    } else if (u.asked && u.asked.ok) {
       h += '<p class="ov2-asked" id="ov2Asked">' + esc('Asked at ' + C.timeWords(u.asked.at) + '.' + (u.asked.words ? ' ' + u.asked.words : '')) + '</p>';
     } else if (t && t.request_open) {
       h += '<p class="ov2-asked" id="ov2Asked">A rewrite has been asked for.</p>';
@@ -1483,7 +1535,7 @@ var JobOverviewV2 = (function () {
         return '<button type="button" data-ov2-act="filter" data-ov2-f="' + p[0] + '" aria-pressed="' + (f === p[0]) + '"' + (f === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
       }).join('') + '</div><div class="ov2-conv" id="ov2Conv">';
     if (!c.items.length) {
-      h += '<div class="ov2-empty">' + esc(c.total ? 'Nothing here for this filter.' : (m.state === 'loading' ? 'Loading the conversation.' : 'No texts, calls or emails on record yet.')) + '</div>';
+      h += '<div class="ov2-empty">' + esc(c.total ? 'Nothing here for this filter.' : (m.failures.indexOf('conversation') >= 0 ? 'Conversation could not be read. Try again.' : (m.state === 'loading' ? 'Loading the conversation.' : 'No texts, calls or emails on record yet.'))) + '</div>';
     }
     c.items.forEach(function (x) { h += x.type === 'day' ? '<div class="ov2-day">' + esc(x.label) + '</div>' : bubbleHtml(m, x.m); });
     return h + '</div>';
@@ -1571,6 +1623,9 @@ var JobOverviewV2 = (function () {
       if (!stillShowing(k)) return;
       var m = model(g('_currentJobData'));
       captureScroll(m.u);
+      var notice = document.getElementById('ov2ReadNotice');
+      if (notice) notice.remove();
+      document.getElementById('ov2Root').insertAdjacentHTML('afterbegin', readNoticeHtml(m));
       if (!document.getElementById('jdClientNameInput')) swap('ov2Cust', custHtml(m));
       swap('ov2Files', filesHtml(m));
       swap('ov2Timeline', timelineHtml(m));
@@ -1639,10 +1694,12 @@ var JobOverviewV2 = (function () {
   function rewrite(k) {
     var u = ui(k), post = fn('opsPost');
     var btn = document.getElementById('ov2Rewrite');
-    if (!post || (btn && btn.disabled)) return;
+    var entry = cache[k];
+    var textState = C.storyText(entry && entry.data && entry.data.story_text);
+    if (!post || (btn && btn.disabled) || (textState && textState.writer_on === false)) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Asking...'; }
     Promise.resolve().then(function () { return post('request_job_story', { jobId: k }); }).then(function (res) {
-      u.asked = { at: Date.now(), ok: true, words: C.rewriteWords(res) };
+      u.asked = { at: Date.now(), ok: C.rewriteAccepted(res), words: C.rewriteWords(res) };
     }, function (err) {
       u.asked = { at: Date.now(), ok: false, words: C.isNotDeployed(err) ? 'Rewriting is not switched on yet.' : 'Could not ask for a rewrite: ' + C.clean((err && err.message) || 'unknown error') + '.' };
     }).then(function () {

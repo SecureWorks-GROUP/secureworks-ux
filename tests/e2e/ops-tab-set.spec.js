@@ -202,6 +202,30 @@ const D_NOTES = {
   ] },
 };
 
+// Slice 1's section, now that slice 4 draws a second one under it.
+const SCOPE_SEC = '.dpc-sec:not(.dpc-mat)';
+const SCOPE_TOGGLE = '[data-dpc-toggle=""]';
+
+// ── Slice 4 fixtures: made-up supplier contacts, lines and orders ──
+const SID = (n) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const LID = (n) => `1e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const SUP = (n, name, over) => Object.assign({ id: SID(n), org_id: 'org-e2e', name, email: null, phone: null, is_active: true, categories: [], xero_contact_id: null }, over);
+// Tagged (material suppliers): Acacia Steel and Banksia Roofing. Coastal Fixings is
+// entered twice, once in Xero; the second differs only by case, spaces and a full stop.
+const D_SUPPLIER_ROWS = [
+  SUP(1, 'Acacia Steel', { email: 'orders@acacia.example', categories: ['steel'], xero_contact_id: 'xc-1' }),
+  SUP(2, 'Banksia Roofing', { categories: ['roofing'], xero_contact_id: 'xc-2' }),
+  SUP(3, 'Coastal Fixings', { email: 'sales@coastal.example', xero_contact_id: 'xc-3' }),
+  SUP(4, 'coastal  fixings.', { xero_contact_id: null }),
+  SUP(5, 'Dune Timber', { xero_contact_id: 'xc-5' }),
+  SUP(6, 'Emu Concrete', { email: 'yard@emu.example', xero_contact_id: 'xc-6' }),
+];
+const D_SUPPLIERS = () => ({ suppliers: D_SUPPLIER_ROWS.map((r) => Object.assign({}, r)) });
+const MAT = (over) => Object.assign({
+  job_id: 'job-f1', job_number: 'SWF-900101', work_type: 'fencing', suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
+  workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
+}, over);
+
 const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
   id: 'job-n' + i, job_number: 'SWF-' + (910000 + i), type: i % 3 ? 'fencing' : 'patio', site_suburb: 'Suburb ' + i,
   description: i % 2 ? 'A deliberately long one line description to wrap on a narrow phone screen ' + i : null,
@@ -219,6 +243,9 @@ async function bootDispatch(page, api = {}, { viewport = null, open = true, mode
     job_detail: (url) => D_DETAIL[url.searchParams.get('jobId')] || { status: 404, body: { error: 'Job not found' } },
     job_notes: (url) => D_NOTES[url.searchParams.get('jobId')] || { job_id: url.searchParams.get('jobId'), total: 0, notes: [] },
     list_pos: () => ({ purchase_orders: [] }),
+    // Slice 4: an empty Materials by supplier section and the supplier contacts.
+    dispatch_materials: (url) => MAT({ job_id: url.searchParams.get('job_id') }),
+    list_suppliers: () => D_SUPPLIERS(),
   }, api);
   if (viewport) await page.setViewportSize(viewport);
   if (mode) {
@@ -273,10 +300,11 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
-  for (const later of ['.dpc-banner', '.dpc-supcard', '.dpc-mail', '.dpc-deliv']) {
+  // Materials by supplier (slice 4) is drawn under Scope and notes: its own tests below.
+  for (const later of ['.dpc-banner', '.dpc-mail', '.dpc-deliv']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec')).toHaveCount(1);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier']);
   await expect(root).not.toContainText(/items ready|crew/i);
 });
 
@@ -429,7 +457,7 @@ test('Dispatch: the header prints the price, GST label, install day and work typ
 
 test('Dispatch: Scope and notes shows the scope facts, scope photos, quote, scoper and council lines', async ({ page }) => {
   const { root } = await bootDispatch(page);
-  const sec = root.locator('.dpc-sec');
+  const sec = root.locator(SCOPE_SEC);
   await expect(sec.locator('.dpc-eyebrow')).toHaveText('Before ordering');
   await expect(sec.locator('h3')).toHaveText('Scope and notes');
   await expect(sec.locator('.dpc-sec-head p')).toHaveText('From the scope tool, plus notes saved on the job');
@@ -519,7 +547,7 @@ test('Dispatch: a scope picture the office attached as an image counts as a scop
       return D_DETAIL[id];
     },
   });
-  const sec = root.locator('.dpc-sec');
+  const sec = root.locator(SCOPE_SEC);
   const photos = sec.locator('.dpc-photo');
   await expect(photos).toHaveCount(1);
   await expect(photos.first().locator('span')).toHaveText('Office picture');
@@ -594,8 +622,8 @@ test('Dispatch: the fence tool note fields are one list, read by the Jobs tab an
     window.fenceScopingNoteFields = (s) => listed(s).concat([{ key: 'access', label: 'Access notes', text: 'Gate code is at the office' }]);
   });
   expect(await page.evaluate((s) => renderFenceScopingNotes(s), scope)).toContain(block('Access notes', 'Gate code is at the office'));
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await expect(lines).toHaveCount(5);
   await expect(lines.last()).toHaveText('Scoper notes (access): Gate code is at the office');
 });
@@ -626,7 +654,7 @@ test('Dispatch: saved notes show every note, an author only when there is one, a
   await expect(failed).toContainText('Could not load notes.');
   await expect(root.locator('[data-dpc-region="notes"]')).not.toContainText('No notes saved');
   // The scope and the note box still work when only the notes read failed.
-  await expect(root.locator('.dpc-sec')).toContainText('No scope saved on this job.');
+  await expect(root.locator(SCOPE_SEC)).toContainText('No scope saved on this job.');
   await expect(root.locator('[data-dpc-note]')).toBeEnabled();
   notesDown = false;
   const before = of('job_detail').length;
@@ -768,7 +796,7 @@ test('Dispatch: an empty list, a degraded read and a failed job read each say so
   await expect(root.locator('.dpc-photo')).toHaveCount(6);
 });
 
-test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail once per job open', async ({ page }) => {
+test('Dispatch: reads only pipeline, job_detail, job_notes and the materials reads, and job_detail once per job open', async ({ page }) => {
   let notesDown = false;
   const { root, calls, of } = await bootDispatch(page, {
     job_notes: (url) => {
@@ -789,8 +817,8 @@ test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail on
   await root.locator('.dpc-job', { hasText: 'SWF-900101' }).click();
   await root.locator('[data-dpc-type="fencing"]').click();
   await root.locator('[data-dpc-type="all"]').click();
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await root.locator('[data-dpc-side]').click();
   await root.locator('[data-dpc-side]').click();
   await expect(root.locator('.dpc-job')).toHaveCount(5);
@@ -822,7 +850,9 @@ test('Dispatch: reads only pipeline, job_detail and job_notes, and job_detail on
   // The failed read, its retry, and the re-read after the save.
   await expect.poll(() => calls.slice(mark).filter((c) => c.action === 'job_notes').length).toBe(3);
   const since = calls.slice(mark);
-  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'job_detail', 'job_notes', 'pipeline']);
+  // Slice 4: dispatch_materials once per job open; list_suppliers was read once, before.
+  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_materials', 'job_detail', 'job_notes', 'pipeline']);
+  expect(of('list_suppliers')).toHaveLength(1);
   expect(since.filter((c) => c.method !== 'GET').map((c) => c.action)).toEqual(['add_note']);
   expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1', 'job-p2']);
 });
@@ -985,8 +1015,8 @@ test('Dispatch: a job found by search opens while the job list itself failed to 
   // It stays open once the search is cleared and the section is folded and unfolded.
   await box.fill('');
   await expect(root.locator('.dpc-job-list [role="alert"]')).toContainText('Could not load jobs.');
-  await root.locator('[data-dpc-toggle]').click();
-  await root.locator('[data-dpc-toggle]').click();
+  await root.locator(SCOPE_TOGGLE).click();
+  await root.locator(SCOPE_TOGGLE).click();
   await expectOpen();
   down = false;
   await root.locator('.dpc-job-list [data-dpc-retry="list"]').click();
@@ -1024,12 +1054,12 @@ test('Dispatch: the sidebar collapses to a strip and the section folds, and both
   await strip.nth(2).click();
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900202 · High Wycombe');
 
-  await root.locator('[data-dpc-toggle]').click();
-  await expect(root.locator('.dpc-sec')).toHaveClass(/dpc-collapsed/);
-  await expect(root.locator('.dpc-sec-body')).toHaveCount(0);
-  await expect(root.locator('.dpc-sec-head p')).toHaveCount(0);
-  await expect(root.locator('.dpc-sec h3')).toHaveText('Scope and notes');
-  await expect(root.locator('[data-dpc-toggle]')).toHaveAttribute('aria-expanded', 'false');
+  await root.locator(SCOPE_TOGGLE).click();
+  await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-body')).toHaveCount(0);
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-head p')).toHaveCount(0);
+  await expect(root.locator(SCOPE_SEC + ' h3')).toHaveText('Scope and notes');
+  await expect(root.locator(SCOPE_TOGGLE)).toHaveAttribute('aria-expanded', 'false');
 
   // A reload keeps the strip, the folded section and the open job.
   await page.reload();
@@ -1037,13 +1067,13 @@ test('Dispatch: the sidebar collapses to a strip and the section folds, and both
   await expect(root.locator('.dpc-layout')).toHaveClass(/dpc-left-closed/);
   await expect(root.locator('.dpc-rail-job[aria-pressed="true"]')).toHaveText('900202');
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900202 · High Wycombe');
-  await expect(root.locator('.dpc-sec')).toHaveClass(/dpc-collapsed/);
+  await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
 
   await root.getByRole('button', { name: 'Open accepted work' }).click();
   await expect.poll(sidebarWidth).toBe(264);
   await expect(root.locator('.dpc-job[aria-pressed="true"] strong')).toHaveText('SWP-900202 · High Wycombe');
-  await root.locator('[data-dpc-toggle]').click();
-  await expect(root.locator('.dpc-sec-body')).toHaveCount(1);
+  await root.locator(SCOPE_TOGGLE).click();
+  await expect(root.locator(SCOPE_SEC + ' .dpc-sec-body')).toHaveCount(1);
 });
 
 test('Dispatch: a long list is drawn whole, and the phone layout has no sideways scroll', async ({ page }) => {
@@ -1514,7 +1544,7 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(root.locator('.dpc-job', { hasText: 'SWF-920002' }).locator('.dpc-next')).toHaveCount(0);
   });
 
-  test('a failed stage read, or an answer without the stage fields, fails To do and the rail but All jobs still lists', async ({ page }) => {
+  test('a failed stage read, or an answer without the stage fields, fails To do and the rail but All jobs still lists; a wrong To do count fails To do only', async ({ page }) => {
     let shape = 'failed';
     const strip = (jobs) => jobs.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !k.startsWith('dispatch_'))));
     const { root, tape } = await bootRail(page, {
@@ -1545,11 +1575,25 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(root.locator('.dpc-job')).toHaveCount(8);
     await expect(tape.locator('.dpc-tape-meta strong')).toBeVisible();
 
-    // A To do count that does not match its rows is a failed list read: no numbers.
+    // A To do count that does not match its rows fails To do only: no To do
+    // number and no To do rows, while All jobs still lists every job, and the
+    // cards and the rail still draw their stage.
     shape = 'mismatch';
     await page.reload();
-    await expect(list.locator('[role="alert"]')).toHaveText('Could not load jobs. Retry');
-    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs']);
+    await expect(list.locator('[role="alert"]')).toHaveText('Could not load To do. Retry');
+    await expect(root.locator('.dpc-job')).toHaveCount(0);
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do', 'All jobs 16']);
+    await expect(tape.locator('.dpc-tape-meta strong')).toBeVisible();
+    await root.locator('[data-dpc-mode="all"]').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(16);
+    await expect(list.locator('[role="alert"]')).toHaveCount(0);
+    await expect(root.locator('.dpc-job .dpc-stage').first()).toBeVisible();
+    await root.locator('[data-dpc-mode="todo"]').click();
+    await expect(list.locator('[role="alert"]')).toHaveText('Could not load To do. Retry');
+    shape = 'ok';
+    await list.locator('[data-dpc-retry="list"]').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(8);
+    await expect(root.locator('[data-dpc-mode]')).toHaveText(['To do 8', 'All jobs 16']);
   });
 
   test('a failed list read shows the error and no number on either button', async ({ page }) => {
@@ -1602,5 +1646,784 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await tape.locator('[data-dpc-stage="supplier_confirmed"]').click();
     await expect(tape.locator('.dpc-tape-confirm')).toContainText('Move SWF-920001 from Accepted to Supplier confirmed?');
     await expect(root.locator('.dpc-tape-confirm [data-dpc-stage-go]')).toBeVisible();
+  });
+});
+
+// ── Dispatch slice 4: Materials by supplier ──────────────────────────────────
+// Every read and write is stubbed (no live data). The fake below answers the
+// seven actions as secureworks-backend docs/dispatch-slice-4-contract.md says.
+// Supplier names are made up.
+
+const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MAT_WRITES = ['dispatch_materials_add_supplier', 'dispatch_materials_remove_supplier', 'dispatch_materials_save_line',
+  'dispatch_materials_delete_line', 'dispatch_materials_suggest', 'dispatch_materials_save_workings'];
+const WORK_TYPES = { 'job-f1': 'fencing', 'job-p1': 'patio', 'job-p2': 'patio', 'job-r1': 'repair', 'job-i1': 'insurance' };
+
+function fakeMaterials(seed = {}) {
+  let tick = 0;
+  const stamp = () => new Date(Date.UTC(2026, 9, 14, 2, 0, 0, tick++)).toISOString();
+  const store = {};
+  // fail[action] is a queue of forced answers, one used per call.
+  const fail = {};
+  const job = (id) => store[id] || (store[id] = Object.assign({
+    work_type: WORK_TYPES[id] || 'fencing', suppliers: [], lines: [], suggest: [], orders: [], orders_status: 'ok',
+    workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null },
+  }, JSON.parse(JSON.stringify(seed[id] || {}))));
+  const counts = (j) => ({ total: j.lines.length, ready: j.lines.filter((l) => !l.purchase_order_id && l.status === 'in_stock').length });
+  const project = (l) => Object.assign({}, l, { display_status: l.purchase_order_id ? 'on_po' : l.status });
+  const refuse = (status, code, extra) => ({ status, body: Object.assign({ error: code, code }, extra || {}) });
+  const forced = (action) => (fail[action] && fail[action].length ? fail[action].shift() : null);
+  const lastPos = (j) => j.lines.reduce((m, l) => Math.max(m, l.position), 0);
+  const onJob = (j, sid) => j.suppliers.some((s) => s.supplier_id === sid);
+  const api = {
+    list_suppliers: () => forced('list_suppliers') || D_SUPPLIERS(),
+    dispatch_materials: (url) => {
+      const f = forced('dispatch_materials');
+      if (f) return f;
+      const id = url.searchParams.get('job_id');
+      const j = job(id);
+      return Object.assign({
+        job_id: id, job_number: 'E2E', work_type: j.work_type, suppliers: j.suppliers.map((s) => Object.assign({}, s)),
+        lines: j.lines.slice().sort((a, b) => a.position - b.position).map(project), counts: counts(j),
+        can_suggest: j.work_type === 'patio' && j.lines.length === 0, workings: Object.assign({}, j.workings),
+      }, j.orders_status === 'ok' ? { orders: j.orders, orders_status: 'ok' } : { orders_status: 'failed' });
+    },
+    dispatch_materials_add_supplier: (url, b) => {
+      const f = forced('dispatch_materials_add_supplier');
+      if (f) return f;
+      const j = job(b.job_id);
+      const row = D_SUPPLIER_ROWS.find((r) => r.id === b.supplier_id);
+      if (!row) return refuse(404, 'supplier_not_found');
+      const have = j.suppliers.find((s) => s.supplier_id === b.supplier_id);
+      if (have) return { success: true, unchanged: true, supplier: have, counts: counts(j) };
+      const s = { supplier_id: row.id, name: row.name, email: row.email, active: true, position: j.suppliers.length + 1, added_at: stamp() };
+      j.suppliers.push(s);
+      return { success: true, supplier: s, counts: counts(j) };
+    },
+    dispatch_materials_remove_supplier: (url, b) => {
+      const f = forced('dispatch_materials_remove_supplier');
+      if (f) return f;
+      const j = job(b.job_id);
+      if (j.lines.some((l) => l.supplier_id === b.supplier_id)) return refuse(409, 'supplier_has_lines');
+      j.suppliers = j.suppliers.filter((s) => s.supplier_id !== b.supplier_id);
+      return { success: true, counts: counts(j) };
+    },
+    dispatch_materials_save_line: (url, b) => {
+      const f = forced('dispatch_materials_save_line');
+      if (f) return f;
+      const j = job(b.job_id);
+      const l = b.line || {};
+      if (!UUID_RE.test(l.id) || typeof l.description !== 'string' || !l.description.trim() || l.description.trim().length > 300) return refuse(400, 'invalid_request');
+      if (l.quantity !== null && (typeof l.quantity !== 'number' || l.quantity < 0)) return refuse(400, 'invalid_request');
+      if (!['not_reviewed', 'to_order', 'in_stock'].includes(l.status)) return refuse(400, 'invalid_request');
+      if (!onJob(j, l.supplier_id)) return refuse(409, 'supplier_not_on_job');
+      const stored = j.lines.find((x) => x.id === l.id);
+      const unit = typeof l.unit === 'string' && l.unit.trim() ? l.unit.trim() : null;
+      if (!stored) {
+        if (j.lines.length >= 500) return refuse(409, 'too_many_lines');
+        const row = { id: l.id, supplier_id: l.supplier_id, description: l.description.trim(), quantity: l.quantity, unit, status: l.status, purchase_order_id: null, source: 'manual', position: lastPos(j) + 1, updated_at: stamp() };
+        j.lines.push(row);
+        return { success: true, line: project(row), counts: counts(j) };
+      }
+      if (b.expected_updated_at === undefined) return { success: true, unchanged: true, line: project(stored), counts: counts(j) };
+      if (stored.purchase_order_id) return refuse(409, 'line_on_order', { line: project(stored) });
+      if (stored.updated_at !== b.expected_updated_at) return refuse(409, 'line_changed', { line: project(stored) });
+      const moved = stored.supplier_id !== l.supplier_id;
+      Object.assign(stored, { supplier_id: l.supplier_id, description: l.description.trim(), quantity: l.quantity, unit, status: l.status, updated_at: stamp() });
+      if (moved) stored.position = lastPos(j) + 1;
+      return { success: true, line: project(stored), counts: counts(j) };
+    },
+    dispatch_materials_delete_line: (url, b) => {
+      const f = forced('dispatch_materials_delete_line');
+      if (f) return f;
+      const j = job(b.job_id);
+      const stored = j.lines.find((x) => x.id === b.id);
+      if (!stored) return { success: true, unchanged: true, counts: counts(j) };
+      if (stored.updated_at !== b.expected_updated_at) return refuse(409, 'line_changed', { line: project(stored) });
+      j.lines = j.lines.filter((x) => x.id !== b.id);
+      return { success: true, counts: counts(j) };
+    },
+    dispatch_materials_suggest: (url, b) => {
+      const f = forced('dispatch_materials_suggest');
+      if (f) return f;
+      const j = job(b.job_id);
+      if (j.work_type !== 'patio') return refuse(409, 'no_suggestion_for_work_type');
+      if (j.lines.length) return refuse(409, 'lines_exist');
+      if (!onJob(j, b.supplier_id)) return refuse(409, 'supplier_not_on_job');
+      const rows = j.suggest.map((it, i) => ({ id: LID(900 + i), supplier_id: b.supplier_id, description: it[0], quantity: it[1], unit: null, status: 'not_reviewed', purchase_order_id: null, source: 'scope', position: i + 1, updated_at: stamp() }));
+      j.lines.push(...rows);
+      return { success: true, added: rows.length, lines: rows.map(project), counts: counts(j) };
+    },
+    dispatch_materials_save_workings: (url, b) => {
+      const f = forced('dispatch_materials_save_workings');
+      if (f) return f;
+      const j = job(b.job_id);
+      const w = j.workings;
+      const field = 'working_out' in b ? 'working_out' : 'sketch_png';
+      const stampKey = field === 'working_out' ? 'working_out_updated_at' : 'sketch_updated_at';
+      const expected = b[field === 'working_out' ? 'expected_working_out_updated_at' : 'expected_sketch_updated_at'] || null;
+      if (expected !== w[stampKey]) return refuse(409, 'workings_changed', { field, [field]: w[field], [stampKey]: w[stampKey] });
+      if (field === 'sketch_png' && b.sketch_png !== null && !/^data:image\/png;base64,/.test(b.sketch_png)) return refuse(400, 'invalid_request');
+      w[field] = b[field] === '' ? null : b[field];
+      w[stampKey] = stamp();
+      return { success: true, workings: { working_out_updated_at: w.working_out_updated_at, sketch_updated_at: w.sketch_updated_at }, counts: counts(j) };
+    },
+  };
+  return { api, store, fail, job };
+}
+
+const MLINE = (n, supplier, description, over) => Object.assign({
+  id: LID(n), supplier_id: SID(supplier), description, quantity: null, unit: null, status: 'not_reviewed', purchase_order_id: null,
+  source: 'manual', position: n, updated_at: `2026-10-13T0${n % 10}:00:00.000Z`,
+}, over);
+const MSUP = (n, over) => {
+  const row = D_SUPPLIER_ROWS.find((r) => r.id === SID(n));
+  return Object.assign({ supplier_id: row.id, name: row.name, email: row.email, active: true, position: n, added_at: '2026-10-13T00:00:00.000Z' }, over);
+};
+
+async function bootMaterials(page, seed = {}, opts = {}) {
+  const fake = fakeMaterials(seed);
+  const booted = await bootDispatch(page, Object.assign({}, fake.api, opts.api || {}), opts);
+  const mat = booted.root.locator('.dpc-mat');
+  const writes = () => booted.calls.filter((c) => c.method === 'POST' && MAT_WRITES.includes(c.action));
+  return Object.assign(booted, { fake, mat, writes });
+}
+
+const card = (mat, name) => mat.locator('.dpc-supcard:not(.dpc-ordercard)', { has: mat.page().locator('.dpc-suphead strong', { hasText: name }) });
+const lineRow = (mat, n) => mat.locator(`[data-dpc-mat-row="${LID(n)}"]`);
+const cell = (mat, n, field) => mat.locator(`[data-dpc-mat-line="${LID(n)}"][data-dpc-mat-cell="${field}"]`);
+const openJob = async (root, number) => {
+  await root.locator('.dpc-job', { hasText: number }).click();
+  await expect(root.locator('.dpc-jobhead h2')).toContainText(number);
+};
+
+test.describe('Dispatch slice 4: Materials by supplier', () => {
+  test('the section is drawn under Scope and notes on every job but a make-safe one', async ({ page }) => {
+    const { root, mat, of } = await bootMaterials(page);
+    for (const number of ['SWF-900101', 'SWP-900201', 'SWP-900202', 'SWF-900301', 'SWI-900101']) {
+      await openJob(root, number);
+      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier']);
+      await expect(mat.locator('.dpc-eyebrow')).toHaveText('Order');
+      await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials and split them by supplier');
+      await expect(mat.locator('.dpc-sec-body')).toContainText('No suppliers chosen for this job yet. Add one to start writing out the materials.');
+    }
+    expect(of('dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1', 'job-p1', 'job-p2', 'job-r1', 'job-i1']);
+  });
+
+  test('a make-safe job reached by search shows no Materials by supplier and reads none', async ({ page }) => {
+    const { root: root2, of: of2 } = await bootMaterials(page, {}, {
+      api: { pipeline: (url) => (url.searchParams.get('search') ? D_FOUND([D_JOBS.m1]) : D_LIST()) },
+    });
+    await root2.locator('[data-dpc-search]').fill('SWMS');
+    await root2.locator('.dpc-job', { hasText: 'SWMS-900901' }).click();
+    await expect(root2.locator('.dpc-jobhead h2')).toHaveText('SWMS-900901 · Dalyellup');
+    await expect(root2.locator('.dpc-mat')).toHaveCount(0);
+    await expect(root2.locator('.dpc-sec')).toHaveCount(1);
+    expect(of2('dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1']);
+  });
+
+  test('the round arrow folds the section to its label and title, independent of Scope and notes, and is remembered', async ({ page }) => {
+    const { root, mat } = await bootMaterials(page);
+    await expect(mat.locator('[data-dpc-mat-addsup]')).toBeVisible();
+    await mat.locator('[data-dpc-toggle="order"]').click();
+    await expect(mat).toHaveClass(/dpc-collapsed/);
+    await expect(mat.locator('.dpc-sec-body, .dpc-sec-head p, [data-dpc-mat-addsup]')).toHaveCount(0);
+    await expect(mat.locator('h3')).toHaveText('Materials by supplier');
+    await expect(mat.locator('.dpc-eyebrow')).toHaveText('Order');
+    await expect(mat.locator('[data-dpc-toggle="order"]')).toHaveAttribute('aria-expanded', 'false');
+    await expect(root.locator(SCOPE_SEC)).not.toHaveClass(/dpc-collapsed/);
+    await root.locator(SCOPE_TOGGLE).click();
+    await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
+    await expect(mat).toHaveClass(/dpc-collapsed/);
+    await page.reload();
+    await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
+    await expect(root.locator('.dpc-mat')).toHaveClass(/dpc-collapsed/);
+    await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
+    await root.locator('[data-dpc-toggle="order"]').click();
+    await expect(root.locator('.dpc-mat')).not.toHaveClass(/dpc-collapsed/);
+    await expect(root.locator(SCOPE_SEC)).toHaveClass(/dpc-collapsed/);
+  });
+
+  test('a failed materials read says so with Retry, never an empty section, and an ops-api without the action is a failed read', async ({ page }) => {
+    const { mat, fake, of } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } }, { open: false });
+    // Before slice 4's back end is live ops-api answers Unknown action; then a 500; then an answer without the arrays.
+    fake.fail.dispatch_materials = [
+      { status: 400, body: { error: 'Unknown action: dispatch_materials' } },
+      { status: 500, body: { error: 'materials_read_failed', code: 'materials_read_failed' } },
+      { job_id: 'job-f1' },
+    ];
+    await page.locator('.header-nav button[data-view="dispatch"]').click();
+    for (let i = 0; i < 3; i++) {
+      await expect(mat.locator('[role="alert"]')).toHaveText('Could not load the materials. Retry');
+      await expect(mat).not.toContainText('No suppliers chosen');
+      await expect(mat.locator('[data-dpc-mat-addsup], .dpc-supcard, .dpc-workout')).toHaveCount(0);
+      await expect(page.locator('.dpc-jobhead')).not.toContainText('items ready');
+      await mat.locator('[data-dpc-mat-retry="read"]').click();
+    }
+    await expect(card(mat, 'Acacia Steel')).toHaveCount(1);
+    expect(of('dispatch_materials')).toHaveLength(4);
+  });
+
+  test('Add supplier lists every active contact not on the job, material suppliers first, and tells same-name rows apart', async ({ page }) => {
+    const { mat, of } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(5)] } });
+    const pick = mat.locator('[data-dpc-mat-addsup]');
+    await expect(pick.locator('optgroup')).toHaveCount(2);
+    const groups = await pick.evaluate((el) => Array.from(el.querySelectorAll('optgroup')).map((g) => [g.label, Array.from(g.querySelectorAll('option')).map((o) => o.textContent)]));
+    expect(groups).toEqual([
+      ['Material suppliers', ['Acacia Steel · orders@acacia.example', 'Banksia Roofing · no email on file']],
+      ['All supplier contacts', ['Coastal Fixings · sales@coastal.example · in Xero', 'coastal  fixings. · no email on file · not in Xero', 'Emu Concrete · yard@emu.example']],
+    ]);
+    await expect(pick.locator('option').first()).toHaveText('+ Add supplier');
+    // Dune Timber is on the job already, so it is left out. Read once.
+    expect(of('list_suppliers')).toHaveLength(1);
+  });
+
+  test('choosing a contact with no email adds its card once and blocks nothing; a failed add says so and Retry adds it', async ({ page }) => {
+    const { mat, fake, writes } = await bootMaterials(page);
+    fake.fail.dispatch_materials_add_supplier = [{ status: 500, body: { error: 'materials_write_failed', code: 'materials_write_failed' } }];
+    await mat.locator('[data-dpc-mat-addsup]').selectOption(SID(2));
+    await expect(mat.locator('[role="alert"]')).toHaveText('Supplier not added. Retry');
+    await expect(mat.locator('.dpc-supcard')).toHaveCount(0);
+    await mat.locator('[data-dpc-mat-retry="add"]').click();
+    await expect(card(mat, 'Banksia Roofing')).toHaveCount(1);
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-suphead')).toContainText('No email on file');
+    await expect(mat.locator('[data-dpc-mat-addsup]')).toHaveValue('');
+    await expect(mat.locator('[data-dpc-mat-addsup] option').first()).toHaveText('+ Add supplier');
+    await expect(mat.locator('[data-dpc-mat-addsup] option', { hasText: 'Banksia' })).toHaveCount(0);
+    // A contact with an email shows it; the new card goes last.
+    await mat.locator('[data-dpc-mat-addsup]').selectOption(SID(1));
+    await expect(mat.locator('.dpc-supcard .dpc-suphead strong')).toHaveText(['Banksia Roofing', 'Acacia Steel']);
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-supmail')).toHaveText('orders@acacia.example');
+    expect(writes().map((c) => [c.action, c.body.job_id, c.body.supplier_id])).toEqual([
+      ['dispatch_materials_add_supplier', 'job-f1', SID(2)],
+      ['dispatch_materials_add_supplier', 'job-f1', SID(2)],
+      ['dispatch_materials_add_supplier', 'job-f1', SID(1)],
+    ]);
+    // No email blocks nothing: a line can be written under it.
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-addline]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('[data-dpc-mat-cell="description"]')).toBeFocused();
+  });
+
+  test('the supplier list is read once a session, across job opens', async ({ page }) => {
+    const { root, mat, of } = await bootMaterials(page);
+    await expect(mat.locator('[data-dpc-mat-addsup]')).toBeVisible();
+    await openJob(root, 'SWP-900201');
+    await openJob(root, 'SWF-900101');
+    await expect(mat.locator('[data-dpc-mat-addsup]')).toBeVisible();
+    expect(of('list_suppliers')).toHaveLength(1);
+  });
+
+  test('a failed supplier list says so with Retry, never an empty list', async ({ page }) => {
+    let down = true;
+    const { mat } = await bootMaterials(page, {}, { api: { list_suppliers: () => (down ? { status: 500, body: { error: 'e2e failure' } } : D_SUPPLIERS()) } });
+    await expect(mat.locator('.dpc-addsup-state')).toHaveText('Could not load suppliers Retry');
+    await expect(mat.locator('[data-dpc-mat-addsup]')).toHaveCount(0);
+    down = false;
+    await mat.locator('[data-dpc-mat-retry="suppliers"]').click();
+    await expect(mat.locator('[data-dpc-mat-addsup] option')).toHaveCount(7);
+  });
+
+  test('no active supplier contact at all reads as such', async ({ page }) => {
+    const { mat } = await bootMaterials(page, {}, { api: { list_suppliers: () => ({ suppliers: [] }) } });
+    await expect(mat.locator('.dpc-addsup-state')).toHaveText('No supplier contacts on file.');
+  });
+
+  test('a card with no lines has a cross that takes the supplier off; a card with a line has none', async ({ page }) => {
+    const { mat, fake, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1), MSUP(3)], lines: [MLINE(1, 1, 'Steel posts 65x65')] } });
+    await expect(card(mat, 'Acacia Steel').locator('[data-dpc-mat-remove]')).toHaveCount(0);
+    await expect(card(mat, 'Coastal Fixings').locator('[data-dpc-mat-remove]')).toHaveCount(1);
+    await expect(card(mat, 'Coastal Fixings')).toContainText('No lines yet. Move lines here or add one.');
+    fake.fail.dispatch_materials_remove_supplier = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];
+    await card(mat, 'Coastal Fixings').locator('[data-dpc-mat-remove]').click();
+    await expect(card(mat, 'Coastal Fixings').locator('[role="alert"]')).toHaveText('Supplier not removed. Retry');
+    await card(mat, 'Coastal Fixings').locator('[data-dpc-mat-retry]').click();
+    await expect(card(mat, 'Coastal Fixings')).toHaveCount(0);
+    expect(writes().map((c) => [c.action, c.body.supplier_id])).toEqual([
+      ['dispatch_materials_remove_supplier', SID(3)], ['dispatch_materials_remove_supplier', SID(3)],
+    ]);
+  });
+
+  test('leaving a changed cell sends one save of the whole line; an unchanged cell and typing send nothing', async ({ page }) => {
+    const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts 65x65', { quantity: 18, unit: 'posts' })] } });
+    const item = cell(mat, 1, 'description');
+    await expect(item).toHaveValue('Steel posts 65x65');
+    await expect(cell(mat, 1, 'quantity')).toHaveValue('18');
+    await item.click();
+    await cell(mat, 1, 'quantity').click();
+    await cell(mat, 1, 'unit').click();
+    await item.click();
+    expect(writes()).toEqual([]);
+    await cell(mat, 1, 'quantity').fill('20');
+    await page.waitForTimeout(150);
+    expect(writes()).toEqual([]);
+    await cell(mat, 1, 'unit').click();
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    const stampAfterFirst = fake.store['job-f1'].lines[0].updated_at;
+    expect(writes().map((c) => c.body)).toEqual([{
+      job_id: 'job-f1', operator_email: expect.anything(),
+      line: { id: LID(1), supplier_id: SID(1), description: 'Steel posts 65x65', quantity: 20, unit: 'posts', status: 'not_reviewed' },
+      expected_updated_at: MLINE(1, 1, '').updated_at,
+    }]);
+    // The next edit names the stamp the save came back with.
+    await cell(mat, 1, 'unit').fill('lengths');
+    await item.click();
+    await expect.poll(() => writes().length).toBe(2);
+    expect(writes()[1].body.expected_updated_at).toBe(stampAfterFirst);
+    expect(fake.store['job-f1'].lines[0]).toMatchObject({ quantity: 20, unit: 'lengths' });
+  });
+
+  test('+ Add line sends nothing; its first save carries a new id and no stamp; an empty row is never saved', async ({ page }) => {
+    const { root, mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } });
+    await card(mat, 'Acacia Steel').locator('[data-dpc-mat-addline]').click();
+    await card(mat, 'Acacia Steel').locator('[data-dpc-mat-addline]').click();
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap')).toHaveCount(2);
+    expect(writes()).toEqual([]);
+    const rows = card(mat, 'Acacia Steel').locator('.dpc-line-wrap');
+    await rows.nth(0).locator('[data-dpc-mat-cell="description"]').fill('Colorbond sheets 2.4m');
+    await rows.nth(0).locator('[data-dpc-mat-cell="quantity"]').fill('36');
+    await expect.poll(() => writes().length).toBe(1);
+    const first = writes()[0].body;
+    expect(first.line.id).toMatch(UUID_RE);
+    expect(first).not.toHaveProperty('expected_updated_at');
+    expect(first.line).toEqual({ id: first.line.id, supplier_id: SID(1), description: 'Colorbond sheets 2.4m', quantity: null, unit: null, status: 'not_reviewed' });
+    await rows.nth(0).locator('[data-dpc-mat-cell="unit"]').click();
+    await expect.poll(() => writes().length).toBe(2);
+    expect(writes()[1].body.line).toMatchObject({ id: first.line.id, quantity: 36 });
+    expect(writes()[1].body.expected_updated_at).toEqual(expect.any(String));
+    // The empty second row is never saved and is gone on the next open.
+    await openJob(root, 'SWP-900201');
+    await openJob(root, 'SWF-900101');
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap')).toHaveCount(1);
+    await expect(card(mat, 'Acacia Steel').locator('[data-dpc-mat-cell="description"]')).toHaveValue('Colorbond sheets 2.4m');
+    expect(writes()).toHaveLength(2);
+  });
+
+  test('the supplier box moves a line under the other supplier in one save; a failed move goes back', async ({ page }) => {
+    const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1), MSUP(6)], lines: [MLINE(1, 1, 'Steel posts'), MLINE(2, 1, 'Rapid set concrete', { quantity: 18, unit: 'bags' })] } });
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap')).toHaveCount(2);
+    await lineRow(mat, 2).locator('[data-dpc-mat-move]').selectOption(SID(6));
+    await expect(card(mat, 'Emu Concrete').locator('.dpc-line-wrap')).toHaveCount(1);
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap')).toHaveCount(1);
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    expect(writes().map((c) => [c.action, c.body.line.id, c.body.line.supplier_id])).toEqual([['dispatch_materials_save_line', LID(2), SID(6)]]);
+    // Emu Concrete's card had no cross while the line moved in; Acacia keeps its line.
+    await expect(card(mat, 'Emu Concrete').locator('[data-dpc-mat-remove]')).toHaveCount(0);
+    fake.fail.dispatch_materials_save_line = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];
+    await lineRow(mat, 1).locator('[data-dpc-mat-move]').selectOption(SID(6));
+    await expect(lineRow(mat, 1).locator('[role="alert"]')).toHaveText('Line not moved. Retry');
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap')).toHaveCount(1);
+    await expect(lineRow(mat, 1).locator('[data-dpc-mat-move]')).toHaveValue(SID(1));
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('Not saved. Retry');
+    expect(writes()).toHaveLength(2);
+    await lineRow(mat, 1).locator('[data-dpc-mat-retry]').click();
+    await expect(card(mat, 'Emu Concrete').locator('.dpc-line-wrap')).toHaveCount(2);
+    await expect(card(mat, 'Acacia Steel')).toContainText('No lines yet. Move lines here or add one.');
+    expect(writes().map((c) => c.body.line.supplier_id)).toEqual([SID(6), SID(6), SID(6)]);
+  });
+
+  test('the status box offers exactly three choices, and nothing lets a person choose On PO or Delivered', async ({ page }) => {
+    const { root, mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] } });
+    const box = lineRow(mat, 1).locator('[data-dpc-mat-status]');
+    await expect(box.locator('option')).toHaveText(['Not reviewed', 'To order', 'In stock']);
+    await expect(root.locator('option', { hasText: /On PO|Delivered/ })).toHaveCount(0);
+    await expect(root.locator('select option[value="on_po"], select option[value="delivered"]')).toHaveCount(0);
+    await box.selectOption('to_order');
+    await expect(lineRow(mat, 1).locator('[data-dpc-mat-status]')).toHaveClass(/dpc-tone-warn/);
+    await expect.poll(() => writes().length).toBe(1);
+    expect(writes()[0].body.line.status).toBe('to_order');
+  });
+
+  test('a Qty that is not a number says so and sends nothing', async ({ page }) => {
+    const { mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] } });
+    await cell(mat, 1, 'quantity').fill('abc');
+    await cell(mat, 1, 'unit').click();
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveText('Qty must be a number.');
+    await expect(cell(mat, 1, 'quantity')).toHaveAttribute('aria-invalid', 'true');
+    await page.waitForTimeout(150);
+    expect(writes()).toEqual([]);
+    await cell(mat, 1, 'quantity').fill('2.5');
+    await cell(mat, 1, 'unit').click();
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveCount(0);
+    await expect.poll(() => writes().length).toBe(1);
+    expect(writes()[0].body.line.quantity).toBe(2.5);
+  });
+
+  test('Tab out of a cell that repaints the section keeps the cursor in the next cell', async ({ page }) => {
+    const { mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] } });
+    // A bad Qty: Tab shows the message and the cursor lands on Unit.
+    await cell(mat, 1, 'quantity').fill('abc');
+    await page.keyboard.press('Tab');
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveText('Qty must be a number.');
+    await expect(cell(mat, 1, 'unit')).toBeFocused();
+    // Fixing it clears the message (a repaint) and Tab still lands on Unit.
+    await cell(mat, 1, 'quantity').fill('4');
+    await page.keyboard.press('Tab');
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveCount(0);
+    await expect.poll(() => writes().length).toBe(1);
+    await expect(cell(mat, 1, 'unit')).toBeFocused();
+    await page.keyboard.type('posts');
+    await expect(cell(mat, 1, 'unit')).toHaveValue('posts');
+  });
+
+  test('the cross removes a line at once with one delete; a failed delete brings it back', async ({ page }) => {
+    const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts'), MLINE(2, 1, 'Rails')] } });
+    fake.fail.dispatch_materials_delete_line = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];
+    await lineRow(mat, 1).locator('[data-dpc-mat-del]').click();
+    await expect(lineRow(mat, 1).locator('[role="alert"]')).toHaveText('Line not removed. Retry');
+    await expect(cell(mat, 1, 'description')).toHaveValue('Steel posts');
+    expect(writes().map((c) => [c.action, c.body.id, c.body.expected_updated_at])).toEqual([['dispatch_materials_delete_line', LID(1), MLINE(1, 1, '').updated_at]]);
+    await lineRow(mat, 1).locator('[data-dpc-mat-retry]').click();
+    await expect(lineRow(mat, 1)).toHaveCount(0);
+    await lineRow(mat, 2).locator('[data-dpc-mat-del]').click();
+    await expect(lineRow(mat, 2)).toHaveCount(0);
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    expect(writes().map((c) => c.action)).toEqual(Array(3).fill('dispatch_materials_delete_line'));
+    expect(fake.store['job-f1'].lines).toEqual([]);
+    await expect(card(mat, 'Acacia Steel').locator('[data-dpc-mat-remove]')).toHaveCount(1);
+  });
+
+  test('a failed save keeps the text and waits for Retry; a line changed elsewhere shows the latest and re-reads once', async ({ page }) => {
+    const { mat, writes, fake, of } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts'), MLINE(2, 1, 'Rails')] } });
+    fake.fail.dispatch_materials_save_line = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];
+    await cell(mat, 1, 'description').fill('Steel posts 65x65 2.4m');
+    await cell(mat, 1, 'quantity').click();
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('Not saved. Retry');
+    await expect(cell(mat, 1, 'description')).toHaveValue('Steel posts 65x65 2.4m');
+    await page.waitForTimeout(400);
+    expect(writes()).toHaveLength(1);
+    await mat.locator('[data-dpc-region="matsave"] [data-dpc-mat-retry="saves"]').click();
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    expect(writes()).toHaveLength(2);
+    expect(fake.store['job-f1'].lines[0].description).toBe('Steel posts 65x65 2.4m');
+
+    // Someone else changed line 2: the save is refused with the stored line.
+    const reads = of('dispatch_materials').length;
+    fake.store['job-f1'].lines[1].description = 'Rails 3.0m';
+    fake.store['job-f1'].lines[1].updated_at = '2026-10-14T05:00:00.000Z';
+    await cell(mat, 2, 'quantity').fill('12');
+    await cell(mat, 2, 'unit').click();
+    await expect(mat.locator('.dpc-mat-notice')).toHaveText('This changed somewhere else. Showing the latest.');
+    await expect(cell(mat, 2, 'description')).toHaveValue('Rails 3.0m');
+    await expect(cell(mat, 2, 'quantity')).toHaveValue('');
+    await expect.poll(() => of('dispatch_materials').length).toBe(reads + 1);
+    await page.waitForTimeout(300);
+    expect(of('dispatch_materials').length).toBe(reads + 1);
+    expect(writes()).toHaveLength(3);
+  });
+
+  test('a line on an order is a plain label with no boxes and no cross', async ({ page }) => {
+    const { mat } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts', { quantity: 18, unit: 'posts', purchase_order_id: 'po-1' }), MLINE(2, 1, 'Rails')] } });
+    const row = lineRow(mat, 1);
+    await expect(row.locator('input, select, button')).toHaveCount(0);
+    await expect(row.locator('.dpc-status')).toHaveText('On PO');
+    await expect(row.locator('.dpc-status')).toHaveClass(/dpc-tone-info/);
+    await expect(row).toContainText('Steel posts');
+    await expect(row).toContainText('18');
+    await expect(row).toContainText('Acacia Steel');
+    await expect(lineRow(mat, 2).locator('input')).toHaveCount(3);
+    // The card has a line, so no cross; the header counts it but not as ready.
+    await expect(card(mat, 'Acacia Steel').locator('[data-dpc-mat-remove]')).toHaveCount(0);
+    await expect(page.locator('.dpc-jobhead .dpc-pill').last()).toHaveText('0 of 2 items ready');
+  });
+
+  test('text typed and not yet saved survives another control repainting the workspace', async ({ page }) => {
+    const { root, mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] } });
+    await card(mat, 'Acacia Steel').locator('[data-dpc-mat-addline]').click();
+    const fresh = card(mat, 'Acacia Steel').locator('.dpc-line-wrap').nth(1).locator('[data-dpc-mat-cell="description"]');
+    await fresh.pressSequentially('Gate hinges');
+    await root.locator(SCOPE_TOGGLE).click();
+    await root.locator(SCOPE_TOGGLE).click();
+    await expect(card(mat, 'Acacia Steel').locator('.dpc-line-wrap').nth(1).locator('[data-dpc-mat-cell="description"]')).toHaveValue('Gate hinges');
+    // Leaving the cell to press the arrow was leaving it: it saved once.
+    await expect.poll(() => writes().length).toBe(1);
+    await cell(mat, 1, 'quantity').fill('7');
+    await mat.locator('.dpc-workout summary').click();
+    await mat.locator('[data-dpc-mat-pad]').fill('7 posts at 2.4m');
+    await root.locator(SCOPE_TOGGLE).click();
+    await expect(cell(mat, 1, 'quantity')).toHaveValue('7');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('7 posts at 2.4m');
+  });
+
+  test('Suggest lines from the scope shows on a patio job with no lines, sends one suggest, and goes once there is a line', async ({ page }) => {
+    const suggest = [['SolarSpan 75mm, 4.2m projection x 8 panels', 8], ['90x90 posts', 3], ['100x50, 7.7m', 1], ['Concrete footings (400x400x500mm)', 3]];
+    const { root, mat, writes, calls } = await bootMaterials(page, {
+      'job-f1': { suppliers: [MSUP(1)] },
+      'job-p1': { suppliers: [MSUP(1), MSUP(2)], suggest },
+      'job-p2': { suppliers: [MSUP(2)] },
+    });
+    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(0);
+    await openJob(root, 'SWP-900201');
+    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(2);
+    await expect(mat.locator('[data-dpc-mat-suggest]').first()).toHaveText('Suggest lines from the scope');
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-line-wrap')).toHaveCount(4);
+    expect(await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-cell="description"]').evaluateAll((els) => els.map((e) => e.value))).toEqual(suggest.map((x) => x[0]));
+    expect(await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-cell="quantity"]').evaluateAll((els) => els.map((e) => e.value))).toEqual(['8', '3', '1', '3']);
+    await expect(card(mat, 'Banksia Roofing').locator('[data-dpc-mat-status]').first()).toHaveValue('not_reviewed');
+    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(0);
+    expect(writes().map((c) => [c.action, c.body.job_id, c.body.supplier_id])).toEqual([['dispatch_materials_suggest', 'job-p1', SID(2)]]);
+    await expect(page.locator('.dpc-jobhead .dpc-pill').last()).toHaveText('0 of 4 items ready');
+    // Nothing to suggest says so.
+    await openJob(root, 'SWP-900202');
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('The scope has nothing to suggest.');
+    expect(calls.some((c) => /scope_to_po/.test(c.action))).toBe(false);
+  });
+
+  test('a job saved with a line has no Suggest button', async ({ page }) => {
+    const { root, mat } = await bootMaterials(page, { 'job-p1': { suppliers: [MSUP(2)], lines: [MLINE(1, 2, 'Trimdek sheets')] } });
+    await openJob(root, 'SWP-900201');
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-line-wrap')).toHaveCount(1);
+    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(0);
+  });
+
+  test('Orders on this job are read-only cards, never merged into a supplier card, with no price', async ({ page }) => {
+    const orders = [
+      { id: 'po-a', po_number: 'PO-900001', supplier_name: 'Coastal Fixings', status: 'sent', created_at: '2026-09-01T00:00:00Z',
+        lines: [{ description: 'Sheets 2.4m', quantity: 21, unit: 'sheets' }, { description: 'Posts', quantity: '8', unit: null }, { description: 'Rails', quantity: 16, unit: 'lengths' }] },
+      { id: 'po-b', po_number: 'PO-900002', supplier_name: 'Unlisted Metals', status: 'awaiting_invoice', created_at: '2026-09-02T00:00:00Z', lines: [] },
+    ];
+    const { root, mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(3)], orders }, 'job-p1': { orders_status: 'failed', suppliers: [MSUP(1)] } });
+    await expect(mat.locator('.dpc-mat-h4')).toHaveText('Orders on this job');
+    const cards = mat.locator('.dpc-ordercard');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0).locator('.dpc-suphead strong')).toHaveText('Coastal Fixings');
+    await expect(cards.nth(0).locator('.dpc-status')).toHaveText('PO-900001 · Sent');
+    await expect(cards.nth(1).locator('.dpc-status')).toHaveText('PO-900002 · Awaiting invoice');
+    await expect(cards.nth(0).locator('.dpc-oline:not(.dpc-line-head)')).toHaveText(['Sheets 2.4m21sheets', 'Posts8', 'Rails16lengths']);
+    await expect(cards.nth(1)).toContainText('No lines on this order.');
+    await expect(cards.locator('.dpc-order-note')).toHaveText(['Made outside this list. Read only.', 'Made outside this list. Read only.']);
+    await expect(cards.locator('input, select, button, [data-dpc-mat-addline]')).toHaveCount(0);
+    // A supplier card of the same name stays its own card, and no price shows anywhere.
+    await expect(card(mat, 'Coastal Fixings')).toHaveCount(1);
+    await expect(mat.locator('.dpc-supcard')).toHaveCount(3);
+    await expect(mat).not.toContainText('$');
+    // A failed orders read says so; the supplier cards still show. No orders: no heading.
+    await openJob(root, 'SWP-900201');
+    await expect(mat.locator('.dpc-orders [role="alert"]')).toHaveText("Could not load this job's orders. Retry");
+    await expect(card(mat, 'Acacia Steel')).toHaveCount(1);
+    await openJob(root, 'SWP-900202');
+    await expect(mat.locator('.dpc-mat-h4, .dpc-orders')).toHaveCount(0);
+    expect(writes()).toEqual([]);
+  });
+
+  test('working out: the line opens on its own and is remembered; the pad, a stroke and Clear each save once', async ({ page }) => {
+    const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } }, { viewport: { width: 1440, height: 900 } });
+    const workout = mat.locator('.dpc-workout');
+    await expect(workout).not.toHaveAttribute('open', '');
+    await workout.locator('summary').click();
+    await expect(workout).toHaveAttribute('open', '');
+    await page.reload();
+    await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
+    await expect(mat.locator('.dpc-workout')).toHaveAttribute('open', '');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveAttribute('placeholder', '42 m run / 2.4 m bays = 18 bays...');
+
+    await mat.locator('[data-dpc-mat-pad]').fill('42 m run / 2.4 m bays = 18 bays');
+    await mat.locator('[data-dpc-mat-pad]').blur();
+    await expect.poll(() => writes().length).toBe(1);
+    expect(writes()[0].body).toEqual({ job_id: 'job-f1', working_out: '42 m run / 2.4 m bays = 18 bays', expected_working_out_updated_at: null, operator_email: expect.anything() });
+
+    const box = await mat.locator('[data-dpc-mat-canvas]').boundingBox();
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 120, box.y + 80, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => writes().length).toBe(2);
+    expect(writes()[1].body.sketch_png).toMatch(/^data:image\/png;base64,/);
+    expect(writes()[1].body.expected_sketch_updated_at).toBeNull();
+    expect(writes()[1].body).not.toHaveProperty('working_out');
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+
+    await mat.locator('[data-dpc-mat-clear]').click();
+    await expect.poll(() => writes().length).toBe(3);
+    expect(writes()[2].body.sketch_png).toBeNull();
+    expect(writes()[2].body.expected_sketch_updated_at).toEqual(expect.any(String));
+    expect(fake.store['job-f1'].workings.sketch_png).toBeNull();
+    expect(fake.store['job-f1'].workings.working_out).toBe('42 m run / 2.4 m bays = 18 bays');
+    const blank = await mat.locator('[data-dpc-mat-canvas]').evaluate((c) => !c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v) => v));
+    expect(blank).toBe(true);
+  });
+
+  test('the pad also saves when typing stops; a failed save keeps the text and Retry sends it once', async ({ page }) => {
+    const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } });
+    await mat.locator('.dpc-workout summary').click();
+    fake.fail.dispatch_materials_save_workings = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];
+    await mat.locator('[data-dpc-mat-pad]').pressSequentially('18 bays x 2 rails');
+    await expect.poll(() => writes().length, { timeout: 5000 }).toBe(1);
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('Not saved. Retry');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('18 bays x 2 rails');
+    await page.waitForTimeout(1500);
+    expect(writes()).toHaveLength(1);
+    await mat.locator('[data-dpc-mat-retry="saves"]').click();
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    expect(writes()).toHaveLength(2);
+    expect(fake.store['job-f1'].workings.working_out).toBe('18 bays x 2 rails');
+  });
+
+  test('a pad changed elsewhere shows the latest and re-reads once', async ({ page }) => {
+    const { mat, writes, fake, of } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } });
+    await mat.locator('.dpc-workout summary').click();
+    fake.job('job-f1').workings.working_out = 'Typed in another tab';
+    fake.job('job-f1').workings.working_out_updated_at = '2026-10-14T06:00:00.000Z';
+    const reads = of('dispatch_materials').length;
+    await mat.locator('[data-dpc-mat-pad]').fill('Mine');
+    await mat.locator('[data-dpc-mat-pad]').blur();
+    await expect(mat.locator('.dpc-mat-notice')).toHaveText('This changed somewhere else. Showing the latest.');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('Typed in another tab');
+    expect(of('dispatch_materials').length).toBe(reads + 1);
+    expect(writes()).toHaveLength(1);
+  });
+
+  test('reopening a job shows its saved pad and sketch; switching jobs shows the other job\'s', async ({ page }) => {
+    const { root, mat } = await bootMaterials(page, {
+      'job-f1': { suppliers: [MSUP(1)], workings: { working_out: 'Fence sums', working_out_updated_at: '2026-10-13T00:00:00Z', sketch_png: PNG_1PX, sketch_updated_at: '2026-10-13T00:00:00Z' } },
+      'job-p1': { suppliers: [MSUP(2)], workings: { working_out: 'Patio sums', working_out_updated_at: '2026-10-13T00:00:00Z', sketch_png: 'data:image/png;base64,AAAA', sketch_updated_at: '2026-10-13T00:00:00Z' } },
+    });
+    await mat.locator('.dpc-workout summary').click();
+    const inked = () => mat.locator('[data-dpc-mat-canvas]').evaluate((c) => c.getContext('2d').getImageData(0, 0, 1, 1).data[3] > 0);
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('Fence sums');
+    await expect.poll(inked).toBe(true);
+    await openJob(root, 'SWP-900201');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('Patio sums');
+    // A saved sketch that will not draw says so, and the pad stays blank.
+    await expect(mat.locator('[data-dpc-region="matsketch"]')).toHaveText('Could not show the saved sketch.');
+    expect(await inked()).toBe(false);
+    await openJob(root, 'SWF-900101');
+    await expect(mat.locator('[data-dpc-mat-pad]')).toHaveValue('Fence sums');
+    await expect.poll(inked).toBe(true);
+    await expect(mat.locator('[data-dpc-region="matsketch"]')).toHaveText('');
+  });
+
+  test('a drawing over the size limit is not sent and says so; a heavy real drawing stays under it', async ({ page }) => {
+    const { mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } });
+    await mat.locator('.dpc-workout summary').click();
+    // A heavy drawing: a dense scribble over the whole pad, measured as the PNG it saves.
+    const size = await mat.locator('[data-dpc-mat-canvas]').evaluate((c) => {
+      const ctx = c.getContext('2d');
+      ctx.lineWidth = 2; ctx.strokeStyle = '#293C46';
+      for (let i = 0; i < 400; i++) { ctx.beginPath(); ctx.moveTo((i * 37) % 600, (i * 53) % 220); ctx.lineTo((i * 91) % 600, (i * 17) % 220); ctx.stroke(); }
+      const out = c.toDataURL('image/png').length;
+      ctx.clearRect(0, 0, c.width, c.height);
+      return out;
+    });
+    expect(size).toBeLessThan(400000);
+    await page.evaluate(() => {
+      HTMLCanvasElement.prototype.toDataURL = function () { return 'data:image/png;base64,' + 'A'.repeat(400001); };
+    });
+    const box = await mat.locator('[data-dpc-mat-canvas]').boundingBox();
+    await page.mouse.move(box.x + 10, box.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 60, box.y + 40, { steps: 4 });
+    await page.mouse.up();
+    await expect(mat.locator('[data-dpc-region="matsketch"]')).toHaveText('Sketch not saved: too large. Clear it and draw again.');
+    expect(writes()).toEqual([]);
+  });
+
+  test('the sketch draws with a finger at phone width and the page does not scroll while drawing', async ({ page }) => {
+    const { mat, writes, root } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts', { quantity: 18, unit: 'posts' })] } }, { viewport: { width: 390, height: 844 } });
+    await mat.locator('.dpc-workout summary').click();
+    const canvas = mat.locator('[data-dpc-mat-canvas]');
+    await canvas.scrollIntoViewIfNeeded();
+    const box = await canvas.boundingBox();
+    const before = await page.evaluate(() => window.scrollY);
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    await touch('touchStart', box.x + 30, box.y + 30);
+    for (let i = 1; i <= 8; i++) await touch('touchMove', box.x + 30 + i * 10, box.y + 30 + i * 12);
+    await touch('touchEnd');
+    await expect.poll(() => writes().length).toBe(1);
+    expect(writes()[0].body.sketch_png).toMatch(/^data:image\/png;base64,/);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    // No sideways scroll at 390 with a line, a card and the pad drawn.
+    const past = await page.evaluate(() => Array.from(document.querySelectorAll('#viewDispatch .dpc-mat *')).filter((el) => {
+      const b = el.getBoundingClientRect();
+      return b.width > 0 && (b.right > window.innerWidth + 0.5 || b.left < -0.5);
+    }).map((el) => el.className || el.tagName));
+    expect(past).toEqual([]);
+    await expect(root.locator('.dpc-line-head').first()).toBeHidden();
+  });
+
+  test('items ready: the header pill and the card read x of y from the counts, never 0 of 0', async ({ page }) => {
+    const lines = [MLINE(1, 1, 'A', { status: 'in_stock' }), MLINE(2, 1, 'B', { status: 'in_stock' }), MLINE(3, 1, 'C', { status: 'to_order' }), MLINE(4, 1, 'D'), MLINE(5, 1, 'E')];
+    const listed = () => {
+      const list = D_LIST();
+      list.dispatch_materials = 'ok';
+      Object.values(list.columns).flat().forEach((r) => { r.materials_lines_total = r.id === 'job-f1' ? 5 : 0; r.materials_lines_ready = r.id === 'job-f1' ? 2 : 0; });
+      return list;
+    };
+    const { root, mat, of } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines } }, { api: { pipeline: (url) => (url.searchParams.get('search') ? D_FOUND([]) : listed()) } });
+    const pills = root.locator('.dpc-jobhead .dpc-pill');
+    await expect(pills).toHaveText([`Install ${dowOf(PERTH_YEAR, 10, 20)} 20/10`, '2 of 5 items ready']);
+    const f1 = root.locator('.dpc-job', { hasText: 'SWF-900101' });
+    await expect(f1.locator('.dpc-muted')).toHaveText(`2 of 5 items ready · Install ${dowOf(PERTH_YEAR, 10, 20)} 20/10`);
+    await expect(root.locator('.dpc-job', { hasText: 'SWP-900201' }).locator('.dpc-muted')).toHaveText(`Last booked 14/9/${PERTH_YEAR - 1}`);
+    await expect(page.locator('#viewDispatch')).not.toContainText('0 of 0');
+    // Marking a line In stock moves both, with no list re-read.
+    const listReads = of('pipeline').length;
+    await lineRow(mat, 3).locator('[data-dpc-mat-status]').selectOption('in_stock');
+    await expect(pills.last()).toHaveText('3 of 5 items ready');
+    await expect(f1.locator('.dpc-muted')).toHaveText(`3 of 5 items ready · Install ${dowOf(PERTH_YEAR, 10, 20)} 20/10`);
+    expect(of('pipeline').length).toBe(listReads);
+    // A job with no line shows neither.
+    await openJob(root, 'SWP-900201');
+    await expect(pills).toHaveCount(1);
+    await expect(page.locator('#viewDispatch')).not.toContainText('0 of 0');
+  });
+
+  for (const shape of ['failed', 'missing']) {
+    test(`a list whose materials read ${shape === 'failed' ? 'failed' : 'lacks the two fields'} draws the install text alone and still lists`, async ({ page }) => {
+      const list = () => {
+        const out = D_LIST();
+        if (shape === 'failed') {
+          out.dispatch_materials = 'failed';
+          Object.values(out.columns).flat().forEach((r) => { r.materials_lines_total = 4; r.materials_lines_ready = 1; });
+        }
+        return out;
+      };
+      const { root } = await bootMaterials(page, {}, { api: { pipeline: (url) => (url.searchParams.get('search') ? D_FOUND([]) : list()) } });
+      await expect(root.locator('.dpc-job')).toHaveCount(5);
+      await expect(root.locator('.dpc-job').first().locator('.dpc-muted')).toHaveText(`Install ${dowOf(PERTH_YEAR, 10, 20)} 20/10`);
+      await expect(root.locator('.dpc-job-list')).not.toContainText('items ready');
+    });
+  }
+
+  test('during a whole edit the module makes only the allowed calls, and names no order, send or status action', async ({ page }) => {
+    const booted = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] }, 'job-p1': { suggest: [['Posts', 4]] } });
+    const { root, mat } = booted;
+    await expect(cell(mat, 1, 'description')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    // The page's own start-up reads (alerts, the order board) are not Dispatch's.
+    const before = booted.calls.length;
+    const dispatchOpen = booted.calls.filter((c) => ['pipeline', 'job_detail', 'job_notes', 'list_suppliers', 'dispatch_materials'].includes(c.action));
+    expect([...new Set(dispatchOpen.map((c) => c.action))].sort()).toEqual(['dispatch_materials', 'job_detail', 'job_notes', 'list_suppliers', 'pipeline']);
+    await mat.locator('[data-dpc-mat-addsup]').selectOption(SID(6));
+    await card(mat, 'Emu Concrete').locator('[data-dpc-mat-addline]').click();
+    await card(mat, 'Emu Concrete').locator('[data-dpc-mat-cell="description"]').fill('Concrete bags');
+    await cell(mat, 1, 'quantity').fill('4');
+    await lineRow(mat, 1).locator('[data-dpc-mat-status]').selectOption('in_stock');
+    await lineRow(mat, 1).locator('[data-dpc-mat-move]').selectOption(SID(6));
+    await mat.locator('.dpc-workout summary').click();
+    await mat.locator('[data-dpc-mat-pad]').fill('sums');
+    await mat.locator('[data-dpc-mat-pad]').blur();
+    await openJob(root, 'SWP-900201');
+    await mat.locator('[data-dpc-mat-addsup]').selectOption(SID(2));
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-line-wrap')).toHaveCount(1);
+    await root.locator('[data-dpc-search]').fill('Gwelup');
+    await page.waitForLoadState('networkidle');
+    const calls = booted.calls.slice(before);
+    const allowed = ['pipeline', 'job_detail', 'job_notes', 'dispatch_materials', ...MAT_WRITES];
+    const seen = [...new Set(calls.map((c) => c.action))];
+    expect(seen.filter((a) => !allowed.includes(a))).toEqual([]);
+    expect(calls.filter((c) => c.method === 'POST').every((c) => MAT_WRITES.includes(c.action))).toBe(true);
+    expect(calls.filter((c) => c.action === 'job_detail').map((c) => c.jobId)).toEqual(['job-p1']);
+    expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
+    expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
+    expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
+    // Nothing from slice 5 or later is drawn, not even disabled.
+    await openJob(root, 'SWF-900101');
+    await expect(mat).not.toContainText(/Create PO|Update PO|Not ordered|coming soon|Deliveries/i);
+    await expect(root.locator('.dpc-mail, .dpc-deliv')).toHaveCount(0);
   });
 });

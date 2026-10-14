@@ -2048,6 +2048,23 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(writes()[0].body.line.quantity).toBe(2.5);
   });
 
+  test('Tab out of a cell that repaints the section keeps the cursor in the next cell', async ({ page }) => {
+    const { mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts')] } });
+    // A bad Qty: Tab shows the message and the cursor lands on Unit.
+    await cell(mat, 1, 'quantity').fill('abc');
+    await page.keyboard.press('Tab');
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveText('Qty must be a number.');
+    await expect(cell(mat, 1, 'unit')).toBeFocused();
+    // Fixing it clears the message (a repaint) and Tab still lands on Unit.
+    await cell(mat, 1, 'quantity').fill('4');
+    await page.keyboard.press('Tab');
+    await expect(lineRow(mat, 1).locator('.dpc-line-msg')).toHaveCount(0);
+    await expect.poll(() => writes().length).toBe(1);
+    await expect(cell(mat, 1, 'unit')).toBeFocused();
+    await page.keyboard.type('posts');
+    await expect(cell(mat, 1, 'unit')).toHaveValue('posts');
+  });
+
   test('the cross removes a line at once with one delete; a failed delete brings it back', async ({ page }) => {
     const { mat, writes, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts'), MLINE(2, 1, 'Rails')] } });
     fake.fail.dispatch_materials_delete_line = [{ status: 500, body: { error: 'x', code: 'materials_write_failed' } }];

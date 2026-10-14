@@ -45,13 +45,33 @@ send every route into a hidden view to Jobs; Finance Health and Job P&L only
 lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
-inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
-concept on sample data in `modules/ops-dispatch-concept.js` with no network
-call; do not wire it to live data without a Captain ruling. Below the concept,
-`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slice 1
+of the approved design: job list, job header, Scope and notes). It reads
+`pipeline&dispatch=1`, `job_detail` (once per job open) and `job_notes`, and its
+only write is `add_note`, always `visibility: 'internal_only'`; a failed read
+never renders as empty, and a later slice is not drawn until it is real. Below
+it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.
+
+EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
+an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
+`confirmed` / `delivered` share the Sent / Confirmed / Delivered columns of the
+older `submitted` / `authorised` / `billed`, and any status the page does not
+know lands in a visible Other column. Cancelled orders stay off the board and
+the Calendar row on purpose (`poBoardColumnOf` answers `''` for them). Never
+match a column on the raw status again; that hid 6 of 22 orders. Every other
+read of an order's status in `ops.html` goes through the same function (the
+Financials > Purchase Orders chips, the job's material ordering cards, its
+"Delivery tomorrow" alert, the awaiting-invoice alerts), and every status badge
+is `poStatusBadge`. The stage gate module's "materials ordered" gate takes it as
+`options.po_column_of`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
+is built from `list_pos`, because the `calendar` feed's own `deliveries` carries
+only draft / submitted / authorised orders; it repaints every time that read
+lands, and a failed read falls back to the feed's fresh rows.
+Guard: `tests/e2e/ops-po-all-statuses.spec.js`.
 
 ## Ops Dash calendar drag (`ops.html`)
 
@@ -135,7 +155,9 @@ as "(cancelled|completed visit still holds that date)". Guard:
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 `data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`
-persisted at `localStorage.sw_cal_divs`) is a flat list of independently
+persisted at `localStorage.sw_cal_divs`) is on screen and applied only with
+calendar v3 OFF (v3 is default on, hides the sidebar and filters through its
+own Show / Type row; see the next section). It is a flat list of independently
 toggleable job-type buckets, not a hierarchy — Repair (Captain ruling
 2026-09-16) is its own division alongside Patios/Fencing/Make Safes, never
 folded under Make Safes. Which bucket an event belongs to is decided in ONE
@@ -155,6 +177,61 @@ which `renderScheduleView`'s division filter compares against with
 `f === calDivisionOf(ev)` — the only place that actually drops non-matching
 events; the Crew swimlane view only dims. Guard:
 `tests/e2e/ops-calendar-repair-division.spec.js`.
+
+## Ops Dash calendar v3 look (`ops.html`)
+
+The job-based (Schedule) view's signed-off design is behind
+`window.__SW_CAL_V3_ENABLED`, DEFAULT ON. ONE off switch:
+`localStorage.sw_cal_v3='0'`, or `?calv3=0` for one page load; there is no
+force-on spelling. It is a LOOK, not a second calendar: v3 adds
+classes and markup inside the same `renderScheduleView` bars and cells, so drag,
+resize, the popup and every write path are shared. Flag off must stay
+byte-identical (checked against the default branch when this shipped), so every
+v3 branch sits behind the one `v3` variable and its CSS is scoped to
+`#viewCalendar.cal-v3`; do not style a calendar class outside that scope. A
+bar's `left`/`width` stay plain percentages that match the day columns
+(weighted when v3 narrows weekend columns with nothing booked on them), with no
+`calc()` and no pixel offsets, so the overlap and resize guards keep measuring
+the real box; v3 insets the line with transparent side borders instead.
+Line format: type square, client, job number, staff circles, lock; a job line
+carries no start time (a business line keeps its time) and no readiness dot
+(readiness stays in the tooltip and popup). TWO states
+only (Captain ruling 2026-10-13): placeholder, and client locked in
+(`confirmation_status === 'confirmed'`); trade acceptance is not drawn. Colour is
+one of three groups via `calV3Unit` (patio / fencing / insurance = make safe +
+repair, family-first through `calDivisionOf`; anything else, such as general or
+miscellaneous, sits with patios); the symbol still tells a make safe from a
+repair. The v3 Type filter and deliveries read that same `calV3Unit`, never
+`calDivisionOf`, so a job cannot vanish under the filter it is coloured for;
+the flag-off sidebar Divisions rule is unchanged. A business line is decided in
+ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
+job-less label row, plus org events. Business lines take the TOP lanes of the
+week and jobs start under them; an org event stretches across its days instead
+of the corner badge, and a meeting on a job is its own purple line, never merged
+into the job's line. The Show / Type focus row (`_calFocus`, `setCalFocus`,
+stored at `sw_cal_focus`) works in BOTH views. Show sets the in-memory
+`_calEventFilters`; a calendar row is let through only by `calEventShown`
+(business lines follow the business filters, only jobs follow Jobs). Type is
+read off `_calFocus` by
+`calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
+with v3 on) and never filters a business line. Neither writes the sidebar's
+storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
+stays its own division (ruling 2026-09-16). Leave, holidays and reminders show under
+Everything and Business. Deliveries are read-only and come from
+`calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
+order, see `// <calendar-delivery-row>`) passed through the Show and Type
+focus; both views use it, and Materials with none in view says "No deliveries
+booked". A delivery takes its colour, job number and address from the job's
+event in view, else from the order's own `job_type`, `job_number` and
+`delivery_address`. Staff circles are first + surname initial from `full_name`
+when the feed sends it, else from a raw user name of two or more words; a
+one-word name shows ONE letter, never two letters that read as initials
+(`list_users` sends no `full_name` today).
+`sw_cal_v3_intro` lands a first-time browser on Schedule + Month ONCE; a spec
+that picks its own view must set it to `'1'` first or its choice is overwritten.
+Search `// <calendar-v3>`. Guard: `tests/e2e/ops-calendar-v3.spec.js`; the
+sidebar Divisions guard (`ops-calendar-repair-division.spec.js`) runs with v3
+off because the sidebar only exists there.
 
 ## Ops Insurance Repairs board (`ops.html`)
 
@@ -651,8 +728,10 @@ for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 The fence-designer scoping tool writes every internal note into
 `jobs.scope_json.job` (`siteNotes`, `checklist.finalNotes`, `removal.notes`,
 `supplierNotes`) — `job_detail`/`trade_job_detail` already deliver that blob to
-both apps. `renderFenceScopingNotes(scope_json)` (`ops.html`, next to
-`renderScopeSummary`) is the ONE reader for all four fields; it is called from
+both apps. `fenceScopingNoteFields(scope_json)` (`ops.html`, next to
+`renderScopeSummary`) is the ONE list of those four fields: add a field there,
+never in a caller. Dispatch's scoper lines (`modules/ops-dispatch.js`) read it,
+and so does `renderFenceScopingNotes(scope_json)`, which is called from
 the job detail drawer's Overview tab (default tab, does not go through
 `renderScopeSummary`), the pinned read-only header of the Notes rail
 (`buildNotesHTML` — distinct from the deletable two-way `job_events` notes
@@ -737,20 +816,76 @@ trade request never reads as approved. The form never shows or uses a share
 link, and never queues a refused or unsent request offline. Search
 `// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
 
-## Trade hourly rate: office only (`trade.html`)
+## Trade invoice rate: a box once ops-api honours it (`trade.html`)
 
-Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes
-no `set_trade_rate` call; Profile and assigned job cards show the office rate
-read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
-or extra line keeps a typed rate, because ops-api flags that client-entered rate
-for office verification and never saves it as the trade's rate. A missing rate
-points the trade to the office, never to Profile. A restored session draft
-cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
-clears it on every builder paint, even when hours data is missing or has no
-positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
-on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
-next trade before that user's `my_hours` lands. Guard:
-`tests/e2e/trade-rate-office-only.spec.js`.
+The app never shows a rate the server will not pay (Captain 2026-10-13), and
+today's ops-api bills its own rate on an assigned job whatever the browser
+posts. So the rate box on an assigned hours card (`[data-cardrate]`) is DORMANT
+until `my_hours` answers `trade_rate_editable: true` (`_assignedRateEditable`);
+absent or false, the read-only office rate of 2026-09-23 stands. No usual rate
+on file is the contact-the-office wording and block in both states. A rate the
+trade types lives in `typed_rate` on the card, and `c.rate` / `rate_source`
+come only from `_pinAssignedCardRates`, so a typed rate in a draft bills
+nothing until the capability is on. `trade.html` makes no `set_trade_rate`
+call and Profile stays read-only. `_hoursData` and `_tradeRate` clear in
+`resetInvoiceSession` and on the `onLogin` owner-change path so one trade's
+rate cannot show on the next trade's card before that user's `my_hours` lands.
+Both states, the on-card wording, the description of work box and the back end
+contract: `trade-app.md` → "Rate and description". Guard:
+`tests/e2e/trade-invoice-rate-box.spec.js` (fixture option `tradeRateEditable`;
+off, its invoice stub refuses a typed assigned rate).
+
+## Trade time entry: date, start and finish (`trade.html`, `ops.html`)
+
+Trades say when they worked when they invoice (Captain ruling 2026-10-12). Every
+line that bills a trade's time carries `work_date`, `start_time`, `finish_time`
+and optional `break_minutes`; hours are worked out and NEVER typed, so do not
+add an hours input back to an invoice card, an extras row or the job-view hours
+row. ops-api recomputes the hours and refuses a time line without the fields
+(`time_entry_required`). One line is one job on one day: a second day is its
+own Extras row. The date worked cannot be after today (Perth), or more than a year
+before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
+onto a line: no default date or start, no device memory, no prefill from the
+schedule or clock on and off. A card, an Extras row and the job-view row open
+blank; a card shows hours on record only as a reminder. The job-view row
+records times against the job and never promises the week or the invoice.
+Lines that are not time carry none of the fields. Search
+`// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
+`// <trade-time-entry-ops>` in `ops.html` (ops shows the times beside the hours
+only when a line carries them). The full contract, the list of every place a
+trade enters time and the defaults live in `trade-app.md` → "Pay tab: when the
+time was worked". Specs fill the date and times through `tests/helpers/invoice-time.js`, and
+a spec that enters times on the fixture week's jobs needs
+`test.use({ appWeekDay: 6 })` or it fails early in the week.
+Guards: `scripts/test-trade-time-entry.js`,
+`tests/e2e/trade-invoice-time-entry.spec.js`,
+`tests/e2e/ops-trade-invoice-times.spec.js`.
+
+## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
+
+A trade who hires a ute from us has a weekly amount taken off what he is paid
+(Captain 2026-10-13). ops-api owns the rule and the money; both apps show only
+what the reads send: `recurring_deduction` `{label, amount}`,
+`payable_before_deduction`, the reduced `trade_payable`, and
+`recurring_deduction_week` before submit. The paid figure is ALWAYS
+`trade_payable`; never work it out in the browser, and a deduction without it
+reads unavailable. The Work Order Invoice screen is NOT built for it yet,
+although the server applies it to a weekly Work Order Invoice: add it there
+before any per-metre trade is given a rule. `my_hours` works its outcome out
+from clocked hours and a draft save from the typed extras alone, so before
+submit only the label and amount are shown; the not-taken reason is shown
+only from the submit response. My money period cards keep every figure as it
+was; a period holding deduction invoices only gains one line naming the total
+taken off. ops-api names the GST figure `gst`, never `gst_amount`, and
+`_invoicePersistedMoney` reads `gst` ONLY for an invoice carrying a deduction:
+a GST-on invoice with none still reads unavailable as on main (known gap, its
+own task; see `trade-app.md`). With none of the fields every
+screen, the PDF and the Trade Bills table stay exactly as they were, which
+`tests/e2e/trade-invoice-recurring-deduction.spec.js` holds to the pre-change
+markup; a change to the invoice money summary updates those strings on purpose.
+Search `// <trade-recurring-deduction>` (`MyMoneyCore.deductionOf` /
+`deductionWeekOf`) and `// <trade-recurring-deduction-ops>`. Contract, screens
+and wording: `trade-app.md` → "Pay tab: a weekly deduction".
 
 ## Trade own work: Today, History, Calendar default (`trade.html`)
 

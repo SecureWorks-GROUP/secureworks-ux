@@ -116,6 +116,13 @@ async function measure(page, { view, range }) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // These rules are the calendar's look with the v3 design switched off: the
+  // --sw-border cell rules, the 0.5 out-of-month dim and the 90px row. v3 draws
+  // its own grid (see ops-calendar-v3.spec.js), and calling the renderers
+  // directly, as this spec does, never applies v3's scoped styles.
+  await page.addInitScript(() => {
+    try { localStorage.setItem('sw_cal_v3', '0'); } catch (e) { /* storage unavailable */ }
+  });
   await page.goto('/ops.html');
   await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
   await revealOpsStaticFixture(page);

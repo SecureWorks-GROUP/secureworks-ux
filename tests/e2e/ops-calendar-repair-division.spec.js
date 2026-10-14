@@ -102,6 +102,13 @@ function clickDiv(page, div) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // This spec guards the sidebar Divisions tick boxes, which belong to the
+  // calendar as it is with the v3 design switched off (v3 hides the sidebar and
+  // filters through its own Show / Type row — see ops-calendar-v3.spec.js). The
+  // sidebar path stays live behind the kill switch, so it stays tested here.
+  await page.addInitScript(() => {
+    try { localStorage.setItem('sw_cal_v3', '0'); } catch (e) { /* storage unavailable */ }
+  });
   await page.goto('/ops.html');
   await page.waitForFunction(() => typeof window.toggleCalDivision === 'function');
   await revealOpsStaticFixture(page);

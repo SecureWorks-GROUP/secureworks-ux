@@ -13,9 +13,11 @@
 // the shared feed stub fails the test on an unapproved ops-api write.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 
 test.use({
   persona: 'installer',
+  appWeekDay: 6,
   viewport: { width: 390, height: 844 },
   hasTouch: true,
   isMobile: true
@@ -26,6 +28,7 @@ async function openBuilder(page) {
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
+  await fillCardTime(page.locator('.jc-card').filter({ hasText: 'SWF-26767' }), 8);
   await expect(page.locator('[data-invoice-money-summary]')).toContainText('Earned$400.00');
 }
 
@@ -79,12 +82,12 @@ test.describe('total moves between the Earned box and the Submit tap', () => {
   test('nothing is sent; the form redraws with the new total and says so', async ({ appPage: page, feedRequests }) => {
     await openBuilder(page);
     const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-    await expect(card.locator('[data-cardhours]')).toHaveValue('8');
+    await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
 
-    // The screen says 9 hours but the app state still says 8: an iPhone tap
-    // that never fired the input event. The old code posted whatever the
-    // sync produced while the trade was looking at $400.00.
-    await card.locator('[data-cardhours]').evaluate((el) => { el.value = '9'; });
+    // The screen says a 16:00 finish (9 hours) but the app state still says
+    // 15:00 (8): an iPhone tap that never fired the input event. The old code
+    // posted whatever the sync produced while the trade was looking at $400.00.
+    await card.locator('[data-cardfinish]').evaluate((el) => { el.value = '16:00'; });
     await expect(page.locator('[data-invoice-money-summary]')).toContainText('Earned$400.00');
 
     await page.locator('#invSubmitBtn').click();

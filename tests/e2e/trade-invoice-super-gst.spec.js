@@ -1,13 +1,20 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { fillCardTime } = require('../helpers/invoice-time');
 
 test.use({
   persona: 'installer',
   feedScenario: 'trade-invoice-super-gst',
+  appWeekDay: 6,
   viewport: { width: 390, height: 844 },
   hasTouch: true,
   isMobile: true
 });
+
+// The job-centric card bills only the times the trade types: an 8 hour day.
+async function enterDayWorked(page) {
+  await fillCardTime(page.locator('.jc-card').filter({ hasText: 'SWF-26767' }), 8);
+}
 
 async function installPdfRecorder(page) {
   await page.evaluate(() => {
@@ -36,6 +43,7 @@ test('shows the 12/6/6 super split and submits the saved GST choice', async ({ a
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
+  await enterDayWorked(page);
 
   const money = page.locator('[data-invoice-money-summary]');
   await expect(money).toContainText('Earned$400.00');
@@ -122,7 +130,8 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   await page.getByRole('button', { name: 'Continue' }).click();
 
   const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-  await expect(card.locator('[data-cardhours]')).toBeVisible();
+  await enterDayWorked(page);
+  await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
   await expect(card.getByRole('button', { name: '+ Add amount' })).toBeVisible();
   await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
   await expect(page.locator('#btnAddInvLump')).toBeVisible();
@@ -170,6 +179,7 @@ test.describe('submitted response has incomplete authoritative money', () => {
     await page.locator('[data-view="hours"]').click();
     await page.getByRole('button', { name: /Weekly Invoice/ }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
+    if (!legacy) await enterDayWorked(page);
   }
 
   async function expectUnavailableWithoutPdf(page, feedRequests) {
@@ -204,6 +214,7 @@ test.describe('submitted response has complete money but no persisted lines', ()
       await page.locator('[data-view="hours"]').click();
       await page.getByRole('button', { name: /Weekly Invoice/ }).click();
       await page.getByRole('button', { name: 'Continue' }).click();
+      if (!legacy) await enterDayWorked(page);
 
       await page.locator('#invSubmitBtn').click();
       // One invoice per week: the submit confirm must be ticked deliberately.
@@ -228,6 +239,7 @@ test.describe('submitted response has incomplete persisted lines', () => {
       await page.locator('[data-view="hours"]').click();
       await page.getByRole('button', { name: /Weekly Invoice/ }).click();
       await page.getByRole('button', { name: 'Continue' }).click();
+      if (!legacy) await enterDayWorked(page);
 
       await page.locator('#invSubmitBtn').click();
       // One invoice per week: the submit confirm must be ticked deliberately.
@@ -252,6 +264,7 @@ test.describe('unknown submit response', () => {
       await page.locator('[data-view="hours"]').click();
       await page.getByRole('button', { name: /Weekly Invoice/ }).click();
       await page.getByRole('button', { name: 'Continue' }).click();
+      if (!legacy) await enterDayWorked(page);
 
       await page.locator('#invSubmitBtn').click();
       // One invoice per week: the submit confirm must be ticked deliberately.
@@ -276,6 +289,7 @@ test.describe('durably saved invoice with failed Xero push', () => {
       await page.locator('[data-view="hours"]').click();
       await page.getByRole('button', { name: /Weekly Invoice/ }).click();
       await page.getByRole('button', { name: 'Continue' }).click();
+      if (!legacy) await enterDayWorked(page);
 
       await page.locator('#invSubmitBtn').click();
       // One invoice per week: the submit confirm must be ticked deliberately.

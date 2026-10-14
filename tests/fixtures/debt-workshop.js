@@ -72,7 +72,17 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
   };
 
   const findRow = (n) => rows.find((r) => r.xero_invoice_id === uuid(9000 + n));
-  const job = (r, o = {}) => Object.assign({
+  // debt_ws_job. A single-payer job's payer is the job's client (payer_contact mirrors the job);
+  // a shared fence's neighbour gets their own payer_contact (see Riley below).
+  const job = (r, o = {}) => {
+    const out = jobBase(r, o);
+    if (!out.payer_contact) {
+      out.payer_contact = { name: r.payer_name, phone: out.job.client_phone, email: null, ghl_contact_id: out.job.ghl_contact_id, contact_row_id: null, label: 'main', is_primary: true, resolved_by: 'single_payer_job' };
+    }
+    if (!('send_block' in out)) out.send_block = out.payer_contact.ghl_contact_id ? null : { code: 'payer_not_linked', message: 'Link ' + r.payer_name.split(' ')[0] + '\'s GoHighLevel contact first' };
+    return out;
+  };
+  const jobBase = (r, o = {}) => Object.assign({
     ok: true, version: 'debt-ws/v1', row: r,
     job: { id: r.job_id, job_number: r.job_number, type: r.job_type, status: r.category === 'rectification' ? 'rectification' : 'complete', client_name: r.neighbour_of || r.payer_name, client_phone: '0400 000 0' + String(r.invoice_number).slice(-2), site_address: (Number(String(r.invoice_number).slice(-1)) + 10) + ' Example Street', site_suburb: 'Sampleton', ghl_contact_id: r.ghl_linked ? ghlId(9000 + Number(String(r.invoice_number).slice(-2))) : null },
     story: { version: 'job-story-v1', now: { line: 'Complete. The final invoice went out ' + r.invoice_date + ' and nothing has been paid on it yet.', blockers: [] }, timeline: [], money: { job_value: { amount: r.amount_due * 3 } } },
@@ -117,6 +127,8 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
       { id: 'ghl:m3', channel: 'sms', direction: 'outbound', occurred_at: at(-9, '09:00'), author: 'Shaun', body: 'Hi Casey,\n\nHope you\'re well! Just checking the final invoice for Example Street came through OK.\n\nCheers,\nShaun' },
       { id: 'ghl:m4', channel: 'call', direction: 'outbound', occurred_at: at(-5, '12:31'), author: 'Shaun', body: 'Voicemail greeting. No message left.', call_duration: 31, call_status: 'no_answer' },
       { id: 'ghl:m5', channel: 'sms', direction: 'outbound', occurred_at: at(-5, '12:35'), author: 'Shaun', body: 'Hi Casey,\n\nI tried giving you a call today about the final invoice for the fence at Example Street. There\'s $1,420.37 still outstanding.\n\nCheers,\nShaun' },
+      // Held on no job by the backend (Casey has another job it could be on), from Casey's own contact.
+      { id: 'bev:u1', channel: 'sms', direction: 'outbound', occurred_at: at(-4, '09:15'), author: 'Shaun', body: 'Hi Casey,\n\nSo sorry to bother you, just a quick reminder about the final invoice.\n\nCheers,\nShaun', unplaced: true, candidate_job_count: 2 },
       { id: 'inbox:e1', channel: 'email', direction: 'inbound', occurred_at: at(-4, '18:20'), author: 'Casey Morgan', subject: 'Re: Final invoice', body: 'Got it. The gate still drags a little when it rains, can someone take a look when they are passing?' },
     ] },
     notes: [
@@ -162,6 +174,39 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     ladder: [{ step: 'd1', label: 'Day 1 text', day: 1, date: d(-1), status: 'due' }, { step: 'd3', label: 'Day 3 text', day: 3, date: d(1), status: 'upcoming' }],
     suggestion: { id: null, step: 'd1', kind: 'draft', channel: 'sms', amount: 1351.63, text: 'Hi Avery,\n\nHope you\'re well! Hope you\'re enjoying the new fence at Example Street.\n\nCheers,\nShaun', why: 'Day 1 of the final invoice.', source: 'template', proposed_category: null },
   });
+  // A shared fence (the SWF-26624 shape): Riley Shaw owes share B; the job is Taylor Brooks's
+  // (share A, paid, linked in GoHighLevel). Riley has their own phone, email and contact row but
+  // no GoHighLevel contact yet, so there is no conversation with Riley and nothing to text. The
+  // job's thread is all Taylor's.
+  const riley = findRow(4);
+  const taylorGhl = ghlId(9004);
+  const rileyPayer = { name: 'Riley Shaw', phone: '0400 000 404', email: 'riley@example.test', ghl_contact_id: null, contact_row_id: uuid(804), label: 'B', is_primary: false, resolved_by: 'xero_contact' };
+  riley.ghl_linked = false;
+  riley.payer_contact = rileyPayer;
+  const taylorThread = [
+    { id: 'bev:t1', channel: 'sms', direction: 'outbound', occurred_at: at(-12, '09:00'), author: 'Shaun', body: 'Hi Taylor,\n\nJust spoke to Riley again about their half.\n\nCheers,\nShaun', contact_id: taylorGhl, is_payer: false, party_name: 'Taylor Brooks' },
+    { id: 'bev:t2', channel: 'sms', direction: 'inbound', occurred_at: at(-10, '14:20'), author: 'Taylor Brooks', body: 'No problem, I have paid my half now.', contact_id: taylorGhl, is_payer: false, party_name: 'Taylor Brooks' },
+    { id: 'note:t3', channel: 'note', direction: 'internal', occurred_at: at(-9, '08:00'), author: 'Shaun', body: 'Neighbour still to pay share B.', is_payer: false, party_name: null },
+  ];
+  const rileyJob = (conversation) => job(riley, {
+    job: { id: riley.job_id, job_number: riley.job_number, type: 'fencing', status: 'final_payment', client_name: 'Taylor Brooks', client_phone: '0400 000 004', site_address: '14 Example Street', site_suburb: 'Sampleton', ghl_contact_id: taylorGhl,
+      shares: [{ label: 'A', payer_name: 'Taylor Brooks', is_primary: true, owing: 0, paid: true, invoice_count: 2 }, { label: 'B', payer_name: 'Riley Shaw', is_primary: false, owing: 1025.06, paid: false, invoice_count: 2 }] },
+    payer_contact: rileyPayer,
+    invoices: [
+      { xero_invoice_id: uuid(8041), number: 'INV-8041', reference: 'SWF-90004-A-FINBAL', kind: 'final', total: 1025.06, amount_due: 0, status: 'PAID', date: d(-20) },
+      { xero_invoice_id: riley.xero_invoice_id, number: riley.invoice_number, reference: riley.reference, kind: 'final', total: 1025.06, amount_due: 1025.06, status: 'AUTHORISED', date: riley.invoice_date },
+    ],
+    conversation,
+    contact: { ghl_contact_id: null, linkable: true, payer_name: 'Riley Shaw', candidates: [
+      { id: ghlId(404), name: 'Riley Shaw', phone: '0400 000 404', email: 'riley@example.test', match: 'phone' },
+    ] },
+    send_block: { code: 'payer_not_linked', message: 'Link Riley\'s GoHighLevel contact first: there is no contact to text' },
+    suggestion: { id: null, step: 'd12', kind: 'draft', channel: 'sms', amount: 1025.06, text: 'Hi Riley,\n\nJust following up on your half of the fence at Example Street. There\'s $1,025.06 still outstanding.\n\nCheers,\nShaun', why: 'Day 12 of the final invoice.', source: 'template', proposed_category: null },
+  });
+  jobs[riley.xero_invoice_id] = rileyJob({ messages: [], mode: 'payer', all_job_messages_count: taylorThread.length, payer_messages_count: 0, reason: 'payer_not_linked' });
+  // debt_ws_job?conversation=all for the same invoice: the whole job's thread, marked by party.
+  const jobsAll = {};
+  jobsAll[riley.xero_invoice_id] = rileyJob({ messages: taylorThread, mode: 'all', all_job_messages_count: taylorThread.length, payer_messages_count: 0, reason: 'payer_not_linked' });
   // Every other row opens a plain job.
   rows.forEach((r) => { if (!jobs[r.xero_invoice_id]) jobs[r.xero_invoice_id] = job(r); });
 
@@ -181,9 +226,10 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     [uuid(621)]: { ok: true, document: { id: uuid(621), file_name: 'Quote QT-9003.pdf' }, file_name: 'Quote QT-9003.pdf', content: { base64: PDF_B64, mime_type: 'application/pdf' } },
     [uuid(622)]: { ok: true, document: { id: uuid(622), file_name: 'Completion photo.png' }, file_name: 'Completion photo.png', content: { base64: PNG_B64, mime_type: 'image/png' } },
   };
-  return { overview, jobs, janList, statements, documents, invoicePdf: { success: true, pdf_base64: PDF_B64, filename: 'invoice.pdf' }, ids: {
+  return { overview, jobs, jobsAll, janList, statements, documents, invoicePdf: { success: true, pdf_base64: PDF_B64, filename: 'invoice.pdf' }, ids: {
     avery: avery.xero_invoice_id, casey: casey.xero_invoice_id, sasha: sasha.xero_invoice_id, riley: uuid(9004), harbour: uuid(701), coastline: uuid(702), drew: uuid(9007),
     jamie: uuid(9008), caseySuggestion: uuid(601), caseyFlag: uuid(611), sashaSuggestion: uuid(605), averyContact: ghlId(1), harbourInvoice: uuid(9301),
+    rileyContact: ghlId(404), taylorContact: taylorGhl,
   } };
 }
 

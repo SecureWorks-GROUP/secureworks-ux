@@ -2,6 +2,12 @@
 // hours after a report is done (portal, make-safe, or roof report).
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { perthDate } = require('../helpers/feed-stub');
+const { dayText } = require('../helpers/invoice-time');
+
+// The date worked the specs type: today (Perth), never a fixed day that ages
+// past the oldest date the app accepts.
+const WORKED = perthDate();
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
@@ -68,6 +74,15 @@ function wire(page, state) {
   });
 }
 
+// Trades say when they worked; the hours are worked out, never typed.
+async function logTimes(hours, date, start, finish, breakMinutes) {
+  await hours.locator('#rrHoursDate').fill(date);
+  await hours.locator('#rrHoursStart').fill(start);
+  await hours.locator('#rrHoursFinish').fill(finish);
+  if (breakMinutes != null) await hours.locator('#rrHoursBreak').fill(String(breakMinutes));
+  await hours.locator('#rrHoursSave').click();
+}
+
 async function openReport(page, persona) {
   await signIn(page, persona);
   await page.evaluate((jobId) => window.openJobReport(jobId, 'asn-1'), JOB);
@@ -128,18 +143,36 @@ test.describe('Trade app: roof report in the app + one-tap hours', () => {
     await expect(content.locator('#rrOption')).toContainText('Roof report submitted');
     await expect(content.locator('#rrOption [data-rr-pdf]')).toHaveAttribute('href', 'https://files.example.test/roof.pdf');
 
-    // One tap: 2 hrs on the week.
+    // Date, start and finish, recorded against the job. The date opens blank
+    // even though the job was scheduled, and each missing piece is refused in
+    // plain words. Nothing on the row promises the invoice.
     const hours = content.locator('#rrHours');
     await expect(hours).toBeVisible();
-    await hours.locator('[data-rr-hour="2"]').click();
+    await expect(hours).toContainText('They are recorded against this job. Your Weekly Invoice will still ask for the times you worked.');
+    await expect(hours).not.toContainText("this week's invoice");
+    await expect(hours.locator('#rrHoursSave')).toHaveText('Save times');
+    await expect(hours.locator('#rrHoursDate')).toHaveValue('');
+    await hours.locator('#rrHoursStart').fill('07:00');
+    await hours.locator('#rrHoursSave').click();
+    await expect(hours.locator('#rrHoursErr')).toHaveText('Add the date you worked.');
+    await hours.locator('#rrHoursDate').fill(WORKED);
+    await hours.locator('#rrHoursSave').click();
+    await expect(hours.locator('#rrHoursErr')).toHaveText('Add your finish time.');
+    expect(state.log.filter((e) => e[0] === 'hours')).toHaveLength(0);
+    await logTimes(hours, WORKED, '07:00', '09:30', 30);
     await expect.poll(() => state.log.filter((e) => e[0] === 'hours').length).toBe(1);
-    expect(state.log.find((e) => e[0] === 'hours')[1]).toMatchObject({ job_id: JOB, hours: 2 });
+    expect(state.log.find((e) => e[0] === 'hours')[1]).toEqual({
+      job_id: JOB, hours: 2,
+      work_date: WORKED, start_time: '07:00', finish_time: '09:30', break_minutes: 30,
+      source: 'job_view'
+    });
     await expect(content.locator('#rrHours')).toHaveAttribute('data-rr-hours-current', '2');
-    await expect(content.locator('#rrHours')).toContainText('2 hrs on your week (w/e Sun 13 Sep)');
-    await expect(content.locator('#rrHours [data-rr-hour="2"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#toast')).toHaveText('2 hrs recorded against this job (w/e Sun 13 Sep). Your Weekly Invoice will still ask for the times you worked.');
+    await expect(content.locator('#rrHours')).toContainText(`2 hrs recorded against this job (w/e Sun 13 Sep). ${dayText(WORKED)}, 07:00 to 09:30, 30 min break. Change the times and save to change it. Your Weekly Invoice will still ask for the times you worked.`);
+    await expect(content.locator('#rrHoursFinish')).toHaveValue('09:30');
   });
 
-  test('a roof-report job done on the builder portal: mark done, then the hours row appears and logs 2 hrs', async ({ appPage: page }) => {
+  test('a roof-report job done on the builder portal: mark done, then the hours row appears and logs 2 hrs from the times', async ({ appPage: page }) => {
     const state = { log: [], draft: null, hours: null, portalDone: false };
     state.detail = () => detail({ family: 'roof_report', hours: state.hours, details: state.portalDone ? { portal_verified_at: '2026-09-08T02:00:00Z', portal_verified_cycle: 1 } : {} });
     await wire(page, state);
@@ -160,13 +193,13 @@ test.describe('Trade app: roof report in the app + one-tap hours', () => {
     const hours = content.locator('#rrHours');
     await expect(hours).toBeVisible();
     await expect(hours).toContainText('Hours for this report');
-    await hours.locator('[data-rr-hour="2"]').click();
+    await logTimes(hours, WORKED, '13:00', '15:00');
     await expect.poll(() => state.log.filter((e) => e[0] === 'hours').length).toBe(1);
-    expect(state.log.find((e) => e[0] === 'hours')[1]).toMatchObject({ job_id: JOB, hours: 2 });
-    await expect(content.locator('#rrHours')).toContainText('2 hrs on your week');
+    expect(state.log.find((e) => e[0] === 'hours')[1]).toMatchObject({ job_id: JOB, hours: 2, work_date: WORKED, start_time: '13:00', finish_time: '15:00', break_minutes: 0 });
+    await expect(content.locator('#rrHours')).toContainText('2 hrs recorded against this job');
   });
 
-  test('a submitted make-safe report shows the hours row with the hours already logged, plus a custom amount', async ({ appPage: page }) => {
+  test('a submitted make-safe report shows the hours row with the hours already logged, and takes new times', async ({ appPage: page }) => {
     const state = { log: [], draft: { status: 'draft', fields_json: { storeys: 'Double Storey' } }, hours: 3 };
     state.detail = () => detail({ hours: state.hours, asnStatus: 'complete', report: { status: 'submitted', submitted_at: '2026-09-08T01:00:00Z', checklist_json: { work_done: 'Tarped the roof', labour_hours: 3 } } });
     await wire(page, state);
@@ -175,15 +208,24 @@ test.describe('Trade app: roof report in the app + one-tap hours', () => {
     const content = page.locator('#makesafeReportDirectContent');
     await expect(content).toContainText('Report Submitted');
     await expect(content.locator('#rrHours')).toHaveAttribute('data-rr-hours-current', '3');
-    await expect(content.locator('#rrHours [data-rr-hour="3"]')).toHaveClass(/\bon\b/);
+    // Hours already on record: the row says so and still opens blank.
+    await expect(content.locator('#rrHours')).toContainText('3 hrs recorded against this job. Save new times to change it. Your Weekly Invoice will still ask for the times you worked.');
+    await expect(content.locator('#rrHoursDate')).toHaveValue('');
     await expect(content.locator('#rrOption [data-rr-open]')).toHaveText('Continue roof report');
 
-    await content.locator('#rrHours [data-rr-hour="other"]').click();
-    await content.locator('#rrHoursInput').fill('2.5');
-    await content.locator('#rrHours [data-rr-hour-add]').click();
+    // A finish before the start is refused; a shift past midnight is two lines.
+    const hours = content.locator('#rrHours');
+    await hours.locator('#rrHoursDate').fill(WORKED);
+    await hours.locator('#rrHoursStart').fill('22:00');
+    await hours.locator('#rrHoursFinish').fill('02:00');
+    await expect(hours.locator('#rrHoursErr')).toContainText('Finish time must be after start time');
+    await hours.locator('#rrHoursSave').click();
+    expect(state.log.filter((e) => e[0] === 'hours')).toHaveLength(0);
+
+    await logTimes(hours, WORKED, '07:00', '09:30');
     await expect.poll(() => state.log.filter((e) => e[0] === 'hours').length).toBe(1);
     expect(state.log.find((e) => e[0] === 'hours')[1].hours).toBe(2.5);
     await expect(content.locator('#rrHours')).toHaveAttribute('data-rr-hours-current', '2.5');
-    await expect(content.locator('#rrHours [data-rr-hour="other"]')).toHaveText('2.5 hrs');
+    await expect(content.locator('#rrHoursCalc')).toHaveText('2.5 hrs');
   });
 });

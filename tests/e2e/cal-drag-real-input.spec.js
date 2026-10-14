@@ -99,6 +99,9 @@ async function bootCalendar(page, opts = {}) {
   });
   await page.addInitScript((dragLs) => {
     try {
+      // Calendar v3 lands a first-time browser on the job-based Month once
+      // (sw_cal_v3_intro). These specs pick their own view, so mark it seen.
+      localStorage.setItem('sw_cal_v3_intro', '1');
       localStorage.setItem('sw_ops_tab', 'calendar');
       localStorage.setItem('sw_cal_range', '2w');
       localStorage.setItem('sw_cal_view_mode', 'crew');
@@ -198,6 +201,26 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     expect(move.body.duration_days).toBe(3);
     // Crew never changes from the Schedule view.
     expect(move.body.crew_name).toBe('Hugo');
+  });
+
+  test('move: drop a job bar on the narrow Saturday column → the write lands on Saturday', async ({ page }) => {
+    const { writes } = await bootCalendar(page);
+    await toSchedule(page);
+    // Calendar v3 narrows the weekend columns while nothing is booked on them.
+    // The narrow column must still be a real drop target for a real pointer.
+    const fri = page.locator('.cal-schedule-cell[data-date="' + D.FRI + '"]');
+    const sat = page.locator('.cal-schedule-cell[data-date="' + D.SAT + '"]');
+    expect((await sat.boundingBox()).width, 'Saturday starts out narrow').toBeLessThan((await fri.boundingBox()).width * 0.4);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-2"]').first();
+    await realDrag(page, bar, sat);
+    await expect
+      .poll(() => writes.filter((w) => w.action === 'update_assignment').length, { message: 'a real bar drag onto the narrow Saturday must produce an update_assignment write' })
+      .toBeGreaterThan(0);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move.body.assignmentId).toBe('a-bob');
+    expect(move.body.scheduled_date).toBe(D.SAT);
+    expect(move.body.scheduled_end).toBe(D.SAT);
+    expect(move.body.crew_name).toBe('Liam');
   });
 
   test('resize: right edge handle of the Friday bar onto Monday → Fri + Mon', async ({ page }) => {
@@ -310,6 +333,9 @@ test.describe('Captain ruling cp1-askuser-2 — Perth timezone', () => {
     await expect.poll(() => writes.length).toBeGreaterThan(0);
     expect(writes[0].scheduledDate).toBe(D.MON);
     expect(writes[0].scheduledEnd).toBe(D.MON);
+    // The first create closes the modal when its response lands; reopening
+    // before that lets the late close shut the second form.
+    await expect(page.locator('#calSchedModal')).not.toHaveClass(/open/);
     // 3-day create: flag off counts CALENDAR days — Mon..Wed.
     await page.evaluate((date) => openScheduleModal('j-new', '', date), D.MON);
     await page.selectOption('#schedCrew', 'u-hugo');

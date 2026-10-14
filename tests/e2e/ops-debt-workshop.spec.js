@@ -60,7 +60,7 @@ async function openDebt(page, { fixture = buildDebtWorkshopFixture(), drop = [],
       const p = params || {};
       const found = {
         debt_ws_overview: fixture.overview,
-        debt_ws_job: fixture.jobs[p.xero_invoice_id],
+        debt_ws_job: p.conversation === 'all' && fixture.jobsAll && fixture.jobsAll[p.xero_invoice_id] ? fixture.jobsAll[p.xero_invoice_id] : fixture.jobs[p.xero_invoice_id],
         debt_ws_jan_list: fixture.janList,
         debt_ws_statement_preview: fixture.statements[p.company_key],
         debt_ws_document: fixture.documents[p.document_id],
@@ -354,9 +354,77 @@ test('W2: no GHL contact shows Link contact with candidates', async ({ page }) =
   await openJob(page, 'Avery Lin');
   await expect(page.locator('#dwLinkCard .dw-cand')).toHaveCount(2);
   await expect(page.locator('#dwSend')).toBeDisabled();
-  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link a contact first');
+  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link Avery\'s contact first');
   await page.locator('#dwLinkCard .dw-cand', { hasText: 'phone matches' }).locator('[data-dw="link"]').click();
-  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', fixture.ids.averyContact]]);
+  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.ghl_contact_id, p.body.xero_invoice_id])).toEqual([['debt_ws_link_contact', fixture.ids.averyContact, fixture.ids.avery]]);
+});
+
+test('W2: a shared fence is the neighbour\'s own: their phone, the shares, no borrowed conversation, link them', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
+  await openDebt(page, { fixture });
+  await openJob(page, 'Riley Shaw', 'Escalating');
+  await expect(page.locator('#dwStrip h2')).toContainText('(neighbour of Taylor Brooks)');
+  await expect(page.locator('#dwShares')).toHaveText('Shared fence: Riley (B) owes $1,025.06 · Taylor (A) paid');
+  // The neighbour's own phone, never the job's (Taylor's).
+  await expect(page.locator('#dwPayerPhone')).toHaveText('0400 000 404');
+  await expect(page.locator('#dwMiddle')).not.toContainText('0400 000 004');
+  // Not linked: no conversation with Riley, and never Taylor's thread in its place.
+  await expect(page.locator('#dwThread')).toHaveCount(0);
+  await expect(page.locator('#dwThreadEmpty')).toHaveText('No conversation with Riley yet. Link Riley\'s GoHighLevel contact to see it and text them.');
+  await expect(page.locator('#dwMiddle')).not.toContainText('I have paid my half');
+  // Send is off until Riley is linked, and says so.
+  await expect(page.locator('#dwSend')).toBeDisabled();
+  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link Riley\'s contact first');
+  await expect(page.locator('#dwLinkCard')).toContainText('Riley has no GoHighLevel contact linked');
+  await shot(page, '06-shared-fence.png', '#dwJob');
+  // The whole job's thread on request, other people's messages named.
+  await page.locator('#dwConvToggle').click();
+  await expect(page.locator('#dwThread .dw-msg')).toHaveCount(3);
+  await expect(page.locator('#dwThread .dw-msg.other').first()).toContainText('Shaun to Taylor Brooks');
+  await expect(page.locator('#dwThread')).toContainText('Taylor Brooks · text');
+  await expect.poll(async () => page.evaluate(() => window.__dwFetches.filter((f) => f.action === 'debt_ws_job').map((f) => (f.params || {}).conversation || 'payer'))).toEqual(['payer', 'all']);
+  await expect(page.locator('#dwConvToggle')).toHaveText('Show only Riley\'s messages');
+  await page.locator('#dwConvToggle').click();
+  await expect(page.locator('#dwThreadEmpty')).toBeVisible();
+  // Link: the invoice decides whose contact this is (Riley's own row, never the job).
+  await page.locator('#dwLinkCard [data-dw="link"]').click();
+  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.xero_invoice_id, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', fixture.ids.riley, fixture.ids.rileyContact]]);
+});
+
+test('W2: a message not yet filed on a job shows normally with a quiet label; the GHL first name is hinted', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  const J = Object.values(fixture.jobs).find((j) => j.row && j.row.payer_name === 'Casey Morgan');
+  // Drafts greet Casey by the GoHighLevel first name, which differs from Xero's.
+  Object.assign(J.payer_contact, { greeting_name: 'Cass', greeting_name_source: 'ghl', first_name: 'Cass', ghl_name: 'Cass Morgan' });
+  await openDebt(page, { fixture });
+  await openJob(page, 'Casey Morgan', 'Escalating');
+  const held = page.locator('#dwThread .dw-msg[data-msg="bev:u1"]');
+  await expect(held).toContainText('So sorry to bother you');
+  await expect(held.locator('.dw-unpl')).toHaveText('not yet filed on a job');
+  // Only that message carries the label; the others read as before.
+  await expect(page.locator('#dwThread .dw-unpl')).toHaveCount(1);
+  await expect(page.locator('#dwThread .dw-msg').last()).toContainText('gate still drags');
+  await expect(page.locator('#dwGhlName')).toHaveText('(GHL: Cass)');
+});
+
+test('W2: a linked neighbour is texted from here, at their own contact', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
+  const J = fixture.jobs[fixture.ids.riley];
+  J.payer_contact.ghl_contact_id = fixture.ids.rileyContact;
+  J.contact.ghl_contact_id = fixture.ids.rileyContact;
+  J.send_block = null;
+  J.conversation = { messages: [{ id: 'bev:r1', channel: 'sms', direction: 'inbound', occurred_at: fixture.overview.read_at, author: 'Riley Shaw', body: 'Will pay next week.', is_payer: true, party_name: 'Riley Shaw' }], mode: 'payer', all_job_messages_count: 4, payer_messages_count: 1, reason: null };
+  await openDebt(page, { fixture, posts: { debt_ws_decide: { resolve: { ok: true, sent: true } } } });
+  await openJob(page, 'Riley Shaw', 'Escalating');
+  await expect(page.locator('#dwThread .dw-msg')).toHaveCount(1);
+  await expect(page.locator('#dwThread')).toContainText('Will pay next week.');
+  await expect(page.locator('#dwLinkCard')).toHaveCount(0);
+  await expect(page.locator('#dwSuggestion .dw-gate')).toHaveCount(0);
+  await expect(page.locator('#dwSend')).toBeEnabled();
+  await page.locator('#dwSend').click();
+  // The send names Riley's invoice only; the backend texts Riley's own contact and checks it is on the job.
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send').map((p) => p.body.xero_invoice_id)).toEqual([fixture.ids.riley]);
+  await expect(page.locator('#dwConvToggle')).toHaveText('Show the whole job\'s conversation (4 messages)');
 });
 
 test('W2: documents and invoices open in a modal', async ({ page }) => {

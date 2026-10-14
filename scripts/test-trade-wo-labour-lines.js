@@ -181,12 +181,25 @@ function woCard(overrides) {
   assert(noAlloc.error && noAlloc.error.indexOf('WO allocated') !== -1, 'missing WO amount still blocks')
 }
 
+// Hours are never typed: an hours card says when it was worked and the hours
+// are (finish - start) - break. `worked(n)` is an n-hour day from 07:00.
+function worked(hours) {
+  const finish = 7 * 60 + Math.round(hours * 60)
+  const pad = (n) => (n < 10 ? '0' : '') + n
+  return {
+    work_date: '2026-07-14',
+    start_time: '07:00',
+    finish_time: pad(Math.floor(finish / 60)) + ':' + pad(finish % 60),
+    break_minutes: 0,
+  }
+}
+
 function hoursCard(overrides) {
   return Object.assign({
     _idx: 0,
     included: true,
     assignment_id: 'a1',
-    hours: 8,
+    ...worked(8),
     rate: 40,
     job_id: 'j-hours',
     job_number: 'SWF-HOURS',
@@ -220,7 +233,8 @@ function hoursCard(overrides) {
 
 {
   const built = context._buildJobCentricPayload([hoursCard({
-    hours: null,
+    start_time: '',
+    finish_time: '',
     wo_lump_lines: [{ description: 'Site allowance', amount: 50, line_kind: 'lump_sum' }],
   })])
   assert(!built.error, 'lumps-only hours card builds without hours: ' + built.error)
@@ -240,7 +254,7 @@ function hoursCard(overrides) {
 {
   const built = context._buildJobCentricPayload([hoursCard({
     assignment_id: null,
-    hours: 2,
+    ...worked(2),
     rate: 50,
     description: 'Extra visit',
     manually_added: true,
@@ -383,7 +397,7 @@ function hoursCard(overrides) {
     wo_block_reason: 'This work order has already been invoiced.',
     wo_hours_ack: false,
     wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
-    hours: 2,
+    ...worked(2),
     rate: 55,
     assignment_id: null,
     manually_added: true,
@@ -403,7 +417,7 @@ function hoursCard(overrides) {
     wo_hours_ack: true,
     wo_mode: false,
     wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
-    hours: 2,
+    ...worked(2),
     rate: 55,
     assignment_id: null,
     manually_added: true,
@@ -424,7 +438,7 @@ function hoursCard(overrides) {
     wo_hours_ack: true,
     wo_mode: true,
     wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
-    hours: 2,
+    ...worked(2),
     rate: 55,
     assignment_id: null,
     manually_added: true,

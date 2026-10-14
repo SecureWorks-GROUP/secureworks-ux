@@ -58,14 +58,25 @@ const PERSONAS = {
 const test = base.extend({
   persona: ['installer', { option: true }],
   feedScenario: ['normal', { option: true }],
+  // Days after this Perth week's Monday that the app's clock starts on; null
+  // is the real clock. A date worked cannot be after today, so a spec that
+  // enters times on the week's jobs runs the app at the end of that week (6).
+  appWeekDay: [null, { option: true }],
+  // True once ops-api honours a rate a trade types on an assigned job and says
+  // so on my_hours (trade_rate_editable). Off, the stub stands in for today's
+  // ops-api, which bills its own rate whatever the browser posts.
+  tradeRateEditable: [false, { option: true }],
   feedRequests: async ({}, use) => {
     const requests = [];
     await use(requests);
   },
 
-  appPage: async ({ page, persona, feedScenario, feedRequests }, use) => {
+  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay, tradeRateEditable }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
+    if (appWeekDay != null) {
+      await page.clock.install({ time: new Date(addIsoDays(perthWeekMonday(), appWeekDay) + 'T12:00:00+08:00') });
+    }
 
     const guard = await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
 
@@ -130,6 +141,7 @@ const test = base.extend({
       { id: 'e2e-admin-job-complete-fence', job_number: 'SWF-26168', type: 'fencing', status: 'complete', client_name: 'Complete Fence Client', site_suburb: 'South Perth' },
       { id: 'e2e-admin-job-claim-makesafe', job_number: 'SWMS-261290', type: 'makesafe', status: 'complete', client_name: 'Claim Ref Client', site_suburb: 'Morley', external_ref: 'MLB-40398' }
     ];
+    const withTradeRateCapability = (hours) => (tradeRateEditable ? { ...hours, trade_rate_editable: true } : hours);
     const labourExplainerHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -139,6 +151,11 @@ const test = base.extend({
           job_id: 'e2e-wo-holder-job',
           scheduled_date: addIsoDays(weekStart, 1),
           hours_worked: 8,
+          // Clocked on and off that day. The invoice card never copies these:
+          // the trade types the times they worked.
+          clocked_on_at: addIsoDays(weekStart, 1) + 'T07:00:00+08:00',
+          clocked_off_at: addIsoDays(weekStart, 1) + 'T15:00:00+08:00',
+          break_minutes: 0,
           jobs: {
             id: 'e2e-wo-holder-job',
             job_number: 'SWF-26767',
@@ -153,6 +170,118 @@ const test = base.extend({
       total_hours: 8,
       already_submitted: false
     };
+    // Weekly deduction (Captain, 2026-10-13): a trade who hires a ute from us
+    // has an amount taken off what he is paid. Shapes follow
+    // secureworks-backend docs/trade-recurring-deductions-2026-10-13.md:
+    // `recurring_deduction_week` before submit, then `recurring_deduction`,
+    // `payable_before_deduction` and the reduced `trade_payable`.
+    const DEDUCTION_SCENARIOS = ['trade-invoice-recurring-deduction', 'trade-invoice-recurring-deduction-not-taken'];
+    const deductionTaken = feedScenario === 'trade-invoice-recurring-deduction';
+    const deductionRule = { id: 'e2e-ute-hire-rule', label: 'Ute hire', amount: deductionTaken ? 100 : 500 };
+    const deductionWeek = {
+      label: deductionRule.label,
+      amount: deductionRule.amount,
+      week_start: weekStart,
+      applied: deductionTaken,
+      outcome: deductionTaken ? 'applied' : 'payable_below_deduction',
+      note: deductionTaken ? null : 'Ute hire $500.00 was not taken: this invoice pays $376.00, which is less than the deduction. The office has been told.'
+    };
+    // 8 hours at $50: the contract's own worked example, GST off or on.
+    const deductionInvoiceMoney = (gstOn) => {
+      const gst = gstOn ? 40 : 0;
+      return {
+        gross_earned: 400,
+        super_rate: 0.12,
+        super_amount: 48,
+        net_pay: 376,
+        amount_payable: 376,
+        worker_withhold: 24,
+        company_contribution: 24,
+        gst_on: gstOn,
+        gst,
+        total_inc: 400 + gst,
+        ...(deductionTaken
+          ? {
+            trade_payable: 276 + gst,
+            payable_before_deduction: 376 + gst,
+            recurring_deduction: { ...deductionRule },
+            recurring_deduction_id: deductionRule.id,
+            recurring_deduction_label: deductionRule.label,
+            recurring_deduction_amount: deductionRule.amount,
+            recurring_deduction_note: null
+          }
+          : { trade_payable: 376 + gst, recurring_deduction_note: deductionWeek.note })
+      };
+    };
+    const deductionInvoiceLines = [{
+      id: 'persisted-line-ute',
+      line_date: addIsoDays(weekStart, 1),
+      job_number: 'SWF-26767',
+      description: 'Persisted labour',
+      division: 'Fencing',
+      line_type: 'labour',
+      total_hours: 8,
+      hourly_rate: 50,
+      line_total_ex: 400
+    }];
+    // Last week's invoice, already in Xero, carrying the same deduction.
+    const deductionPriorInvoice = {
+      id: 'invoice-ute-last-week',
+      invoice_number: 'SW-INV-UTE-PREV',
+      status: 'pushed_to_xero',
+      xero_bill_id: 'xero-ute-prev',
+      week_start: addIsoDays(weekStart, -7),
+      week_end: addIsoDays(weekStart, -1),
+      week_ending: addIsoDays(weekStart, -1),
+      ...deductionInvoiceMoney(false)
+    };
+    // A draft saved for LAST week and opened this week. The rule took $100
+    // that week and takes $200 from this one, so my_hours answers by week.
+    const deductionDraftScenario = feedScenario === 'trade-invoice-recurring-deduction-saved-draft';
+    const deductionDraftWeek = addIsoDays(weekStart, -7);
+    const deductionDraftHours = (weekEnding) => {
+      const monday = addIsoDays(weekEnding, -6);
+      return {
+        week_start: monday,
+        week_ending: weekEnding,
+        assignments: [],
+        rate: 50,
+        rate_resolved: true,
+        total_hours: 0,
+        already_submitted: false,
+        super_rate: 0.12,
+        gst_on: false,
+        recurring_deduction_week: {
+          label: 'Ute hire',
+          amount: monday === deductionDraftWeek ? 100 : 200,
+          week_start: monday,
+          applied: true,
+          outcome: 'applied',
+          note: null
+        }
+      };
+    };
+    const deductionSavedDraft = {
+      id: 'invoice-ute-draft',
+      invoice_number: 'SW-INV-UTE-DRAFT',
+      status: 'draft',
+      week_start: deductionDraftWeek,
+      week_end: addIsoDays(weekStart, -1),
+      week_ending: addIsoDays(weekStart, -1),
+      gst_on: false
+    };
+    const deductionSavedDraftLines = [{
+      id: 'draft-line-ute',
+      work_date: addIsoDays(deductionDraftWeek, 1),
+      start_time: '07:00',
+      finish_time: '15:00',
+      break_minutes: 0,
+      description: 'Yard clean up',
+      line_type: 'extra',
+      quantity: 8,
+      unit_rate: 50,
+      line_total_ex: 400
+    }];
     const perMetreInvoiceHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -726,6 +855,9 @@ const test = base.extend({
       'fencing-stage-lifecycle': ['update_my_assignment', 'clock_event'],
       'wo-labour-explainer': ['generate_trade_invoice'],
       'trade-invoice-super-gst': ['generate_trade_invoice', 'attach_invoice_pdf'],
+      'trade-invoice-super-gst-payable': ['generate_trade_invoice', 'attach_invoice_pdf'],
+      'trade-invoice-recurring-deduction': ['generate_trade_invoice', 'attach_invoice_pdf'],
+      'trade-invoice-recurring-deduction-not-taken': ['generate_trade_invoice', 'attach_invoice_pdf'],
       'trade-invoice-super-gst-incomplete': ['generate_trade_invoice'],
       'trade-invoice-super-gst-missing-lines': ['generate_trade_invoice'],
       'trade-invoice-super-gst-incomplete-lines': ['generate_trade_invoice'],
@@ -1011,7 +1143,9 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
+        my_hours: deductionDraftScenario
+          ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
+          : withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
           'trade-invoice-per-metre-gst',
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
@@ -1042,13 +1176,28 @@ const test = base.extend({
               total_inc: undefined,
               total: 338.80
             }
-          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy', 'trade-invoice-total-drift', 'trade-invoice-stale-week'].includes(feedScenario)
+          : DEDUCTION_SCENARIOS.includes(feedScenario)
+            ? {
+              ...labourExplainerHours,
+              super_rate: 0.12,
+              gross_earned: 400,
+              super_amount: 48,
+              net_pay: 376,
+              gst_on: false,
+              recurring_deduction_week: deductionWeek
+            }
+          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-payable', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy', 'trade-invoice-total-drift', 'trade-invoice-stale-week'].includes(feedScenario)
             ? {
               ...labourExplainerHours,
               // Stale-week guard fixture: the card belongs to LAST week while the
               // builder is on this week, the exact shape that lost Alyx a week.
               ...(feedScenario === 'trade-invoice-stale-week'
-                ? { assignments: labourExplainerHours.assignments.map((a) => ({ ...a, scheduled_date: addIsoDays(weekStart, -6) })) }
+                ? { assignments: labourExplainerHours.assignments.map((a) => ({
+                  ...a,
+                  scheduled_date: addIsoDays(weekStart, -6),
+                  clocked_on_at: addIsoDays(weekStart, -6) + 'T07:00:00+08:00',
+                  clocked_off_at: addIsoDays(weekStart, -6) + 'T15:00:00+08:00'
+                })) }
                 : {}),
               super_rate: 0.12,
               gross_earned: 400,
@@ -1125,7 +1274,7 @@ const test = base.extend({
               assignments: [],
               total_hours: 0,
               already_submitted: false
-            },
+            }),
         my_trade_invoices: feedScenario === 'trade-invoice-multi-week'
           ? () => ({
             invoices: Object.entries(multiWeekLive).map(([monday, inv]) => ({
@@ -1144,6 +1293,10 @@ const test = base.extend({
           })
           : weeklyInvoiceScenarios.includes(feedScenario) && weeklyInvoiceDraftSaved
           ? { invoices: [weeklyInvoiceResponse()] }
+          : deductionDraftScenario
+          ? { invoices: [deductionSavedDraft] }
+          : DEDUCTION_SCENARIOS.includes(feedScenario)
+          ? { invoices: deductionTaken ? [deductionPriorInvoice] : [] }
           : feedScenario === 'trade-invoice-history-money-truth'
           ? {
             invoices: [
@@ -1184,6 +1337,12 @@ const test = base.extend({
               return { invoice };
             }
             return { invoice: weeklyInvoiceResponse() };
+          }
+          if (deductionDraftScenario) {
+            return { invoice: { ...deductionSavedDraft, lines: deductionSavedDraftLines } };
+          }
+          if (deductionTaken) {
+            return { invoice: { ...deductionPriorInvoice, lines: deductionInvoiceLines } };
           }
           if (feedScenario !== 'trade-invoice-history-money-truth') {
             return { status: 409, body: { error: 'Invoice detail fixture is not enabled' } };
@@ -1382,6 +1541,15 @@ const test = base.extend({
           return weeklyInvoiceResponse();
         },
         generate_trade_invoice: async ({ request }) => {
+          // A rate typed on an assigned job is paid only by an ops-api that
+          // advertises trade_rate_editable. Any other would save the invoice at
+          // its own rate, so the stub refuses rather than pass a figure the
+          // trade would never be paid.
+          const typedAssignedRate = ((request.postDataJSON() || {}).manual_assignments || [])
+            .some((row) => row && row.manually_added === false && row.rate_source === 'client_entered');
+          if (typedAssignedRate && !tradeRateEditable) {
+            return { status: 422, body: { error: 'E2E: this ops-api does not honour a trade-entered rate on an assigned job' } };
+          }
           if (feedScenario === 'trade-invoice-multi-week') {
             const body = request.postDataJSON();
             const weekEnd = addIsoDays(body.week_start, 6);
@@ -1464,7 +1632,23 @@ const test = base.extend({
               xero_bill_id: 'stubbed-xero-bill-31'
             };
           }
-          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy'].includes(feedScenario) || persona !== 'installer') {
+          if (DEDUCTION_SCENARIOS.includes(feedScenario) && persona === 'installer') {
+            const posted = request.postDataJSON();
+            if (['trade_payable', 'recurring_deduction', 'payable_before_deduction'].some((field) => Object.hasOwn(posted, field))) {
+              return { status: 422, body: { error: 'Browser must not submit the deduction or the amount payable' } };
+            }
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-UTE',
+              xero_bill_id: 'xero-e2e-ute',
+              week_start: weekStart,
+              ...deductionInvoiceMoney(posted.gst_on === true),
+              recurring_deduction_week: deductionWeek,
+              lines: deductionInvoiceLines,
+              pending_ops_review: true
+            };
+          }
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-payable', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
           }
           // Live-week collision (2026-09-10 Alyx). The server already holds an
@@ -1556,6 +1740,31 @@ const test = base.extend({
                 hourly_rate: 50,
                 line_total_ex: 400
               }],
+              pending_ops_review: true
+            };
+          }
+          if (feedScenario === 'trade-invoice-super-gst-payable') {
+            // Today's server for a trade with no deduction, 8 hours at $50, in
+            // the figures ops-api computes: GST is 10% of gross and is named
+            // `gst`, total_inc is gross plus GST, trade_payable is net pay
+            // plus GST, and there is no recurring_deduction key at all.
+            const gst = body.gst_on === true ? 40 : 0;
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-SUPER-GST',
+              xero_bill_id: 'xero-e2e-super-gst',
+              gross_earned: 400,
+              super_rate: 0.12,
+              super_amount: 48,
+              net_pay: 376,
+              amount_payable: 376,
+              worker_withhold: 24,
+              company_contribution: 24,
+              gst_on: body.gst_on === true,
+              gst,
+              total_inc: 400 + gst,
+              trade_payable: 376 + gst,
+              lines: deductionInvoiceLines,
               pending_ops_review: true
             };
           }
@@ -1669,11 +1878,14 @@ const test = base.extend({
           return response;
         },
         attach_invoice_pdf: ({ request }) => {
-          if (feedScenario !== 'trade-invoice-super-gst' || persona !== 'installer') {
+          const expectedBill = DEDUCTION_SCENARIOS.includes(feedScenario)
+            ? 'xero-e2e-ute'
+            : ['trade-invoice-super-gst', 'trade-invoice-super-gst-payable'].includes(feedScenario) ? 'xero-e2e-super-gst' : null;
+          if (!expectedBill || persona !== 'installer') {
             return { status: 409, body: { error: 'Invoice PDF attachment fixture is not enabled' } };
           }
           const body = request.postDataJSON();
-          if (body.xero_bill_id !== 'xero-e2e-super-gst') {
+          if (body.xero_bill_id !== expectedBill) {
             return { status: 422, body: { error: 'Expected the persisted Xero bill id' } };
           }
           return { success: true };

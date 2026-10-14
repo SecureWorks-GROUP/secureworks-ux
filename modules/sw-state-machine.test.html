@@ -65,8 +65,8 @@
              SM.ACTIVE_STATUSES.indexOf('lost') === -1 &&
              SM.ACTIVE_STATUSES.indexOf('archived') === -1;
     });
-    check('FENCING_STAGES has 14 entries', function () { return SM.FENCING_STAGES.length === 14; }, 'count = ' + SM.FENCING_STAGES.length);
-    check('PATIO_STAGES has 14 entries', function () { return SM.PATIO_STAGES.length === 14; });
+    check('FENCING_STAGES has 15 entries', function () { return SM.FENCING_STAGES.length === 15; }, 'count = ' + SM.FENCING_STAGES.length);
+    check('PATIO_STAGES has 15 entries', function () { return SM.PATIO_STAGES.length === 15; });
     check('DECKING_STAGES === PATIO_STAGES contents', function () {
       return SM.DECKING_STAGES.join(',') === SM.PATIO_STAGES.join(',');
     });
@@ -120,7 +120,7 @@
     // ── mapStatus: derived_view flag ─────────────────────────────
     check('mapStatus(schedule_install).derived_view === true', function () { return SM.mapStatus('schedule_install').derived_view === true; });
     check('mapStatus(final_payment).derived_view === true', function () { return SM.mapStatus('final_payment').derived_view === true; });
-    check('mapStatus(get_review).derived_view === true', function () { return SM.mapStatus('get_review').derived_view === true; });
+    check('mapStatus(get_review).derived_view === false (a real fencing and patio stage since the paid close-out)', function () { return SM.mapStatus('get_review').derived_view === false; });
 
     // ── Pipeline Visibility Guard: never disappears ──────────────
     check('mapStatus(unknown) → status_mapping_gap', function () { return SM.mapStatus('waiting_on_new_stage').frontend_bucket === 'status_mapping_gap'; });

@@ -435,12 +435,12 @@
 
   function isCall(m) { return text(m && m.type).toUpperCase().indexOf('CALL') >= 0; }
 
-  // Email rows of get_job_conversation. Rows from the stored chat copy are
-  // already in Client chat, so they are left out here.
+  // Email rows of get_job_conversation, GoHighLevel email included: Client
+  // chat is a separate read of the latest 30 messages only.
   function emailRows(resp) {
     if (!resp || typeof resp !== 'object' || !Array.isArray(resp.messages)) throw new Error('Unexpected email answer');
     return {
-      rows: resp.messages.filter(function (m) { return m && m.channel === 'email' && m.source_system !== 'ghl_cache'; }),
+      rows: resp.messages.filter(function (m) { return m && m.channel === 'email'; }),
       capped: !!(resp.summary && resp.summary.count === EMAIL_LIMIT)
     };
   }
@@ -485,7 +485,8 @@
     email: {},
     replies: {},
     sending: {},
-    replyMsg: {}
+    replyMsg: {},
+    pdfLoading: {}
   };
   var tokens = { base: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -1136,9 +1137,10 @@
         h += '</div>';
       });
     }
-    // get_job_conversation lists system email, inbox filings and the mailbox
-    // email the context system has placed on the job (business_events).
-    return h + '<p class="dpc-foot-line">Email sent by the system, email filed from the inbox, and mailbox email the context system has placed on this job. Mailbox email not yet placed on a job is not listed.</p>';
+    // get_job_conversation lists system email, GoHighLevel email, inbox
+    // filings and the mailbox email the context system has placed on the job
+    // (business_events).
+    return h + '<p class="dpc-foot-line">Email sent by the system, GoHighLevel (client messaging) email, email filed from the inbox, and mailbox email the context system has placed on this job. Mailbox email not yet placed on a job is not listed.</p>';
   }
 
   function messagesHtml() {
@@ -1337,8 +1339,13 @@
       refocus('[data-dpc-msg="' + state.msg + '"]');
     } else if (t.hasAttribute('data-dpc-invoice')) {
       var xeroId = t.getAttribute('data-dpc-invoice');
-      if (xeroId) global.openInvoicePdfFromXero(xeroId, t.querySelector('small'));
-      else global.showToast('Could not load invoice PDF', 'error');
+      if (!xeroId) global.showToast('Could not load invoice PDF', 'error');
+      else if (!state.pdfLoading[xeroId]) {
+        state.pdfLoading[xeroId] = true;
+        Promise.resolve(global.openInvoicePdfFromXero(xeroId, t.querySelector('small'))).catch(function () {}).then(function () {
+          delete state.pdfLoading[xeroId];
+        });
+      }
     } else if (t.hasAttribute('data-dpc-send')) {
       sendReply();
     } else if (t.hasAttribute('data-dpc-jobpage')) {

@@ -9,7 +9,7 @@
  * (every saved note). Slice 1 writes exactly one thing: add_note, always with
  * visibility 'internal_only' and from_ops true. Without that visibility a note
  * is copied to the customer's contact notes. Add no other write here beyond
- * slice 2's pressed send_sms below.
+ * slice 2's pressed send_sms and slice 3's two stage writes below.
  *
  * A failed read never renders as empty. An ops-api that does not know
  * dispatch=1 answers with rows missing description / value_inc_gst /
@@ -25,9 +25,22 @@
  * only when an invoice is pressed. Its one write is ghl-proxy send_sms, from
  * +61489267771, when a person presses Send; it never resends on its own.
  *
- * Guards: tests/e2e/ops-tab-set.spec.js (slice 1) and
+ * Slice 3 adds the To do list beside All jobs and the six-stop stage rail
+ * (the tape) in the job header. The pipeline dispatch=1 read carries each
+ * row's Dispatch stage, To do flag and next-step line, and todo_total. The
+ * rail's stage is Dispatch's own record and never the job status (ruling T1).
+ * Its two writes, each only on a person's press: ops-api set_dispatch_stage
+ * (job_id, stage, expected_stage) after a confirm line, and
+ * set_dispatch_next_step (job_id, text). Each writes one job_dispatch_state
+ * row and one job_events row and nothing else. This module never calls
+ * update_job_status, update_repair_stage or update_job_field. A stage read
+ * that failed, or an answer without the stage fields, shows the failed line
+ * for To do and the rail, never an empty To do or a rail at Not started.
+ *
+ * Guards: tests/e2e/ops-tab-set.spec.js (slices 1 and 3) and
  * tests/e2e/ops-dispatch-panel.spec.js (slice 2).
- * Contract: secureworks-backend docs/dispatch-slice-1-read-contract.md.
+ * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md and
+ * docs/dispatch-slice-3-contract.md.
  */
 (function (global) {
   'use strict';
@@ -47,6 +60,23 @@
   var SS_JOB = 'sw_dispatch_job';
   var LS_RIGHT = 'sw_dispatch_right';
   var LS_TAB = 'sw_dispatch_tab';
+  var LS_MODE = 'sw_dispatch_mode';
+  // The stage rail's six stops, in order (slice 3 build note section 4.1).
+  var STAGES = [
+    { key: 'accepted', label: 'Accepted' },
+    { key: 'deposit_paid', label: 'Deposit paid' },
+    { key: 'materials_ordered', label: 'Materials ordered' },
+    { key: 'supplier_confirmed', label: 'Supplier confirmed' },
+    { key: 'materials_on_site', label: 'Materials on site' },
+    { key: 'trade_scheduled', label: 'Trade scheduled' }
+  ];
+  var STAGE_SOURCES = ['set', 'job_status', 'repairs_board'];
+  var TODO_OUT = {
+    in_council: 'Not in To do: in council.',
+    council_to_come: 'Not in To do: council approval still to come.',
+    council_not_decided: 'Not in To do: council not decided on the Jobs tab.'
+  };
+  var NEXT_STEP_MAX = 40;
   var TABS = [
     { key: 'sources', label: 'Sources' },
     { key: 'story', label: 'Context story' },
@@ -173,12 +203,84 @@
       var ta = Date.parse(a.updated_at) || 0, tb = Date.parse(b.updated_at) || 0;
       return tb - ta;
     });
+    // Slice 3: the stage fields are trusted only when the answer says the stage
+    // read worked and every row carries them. Otherwise they are dropped from
+    // every row, so no card, list or rail can draw a stage the read did not give.
+    var stages = resp.dispatch_stages === 'ok' && typeof resp.todo_total === 'number' &&
+      rows.every(function (r) { return typeof r.dispatch_todo === 'boolean' && stageOf(r) !== null; }) ? 'ok' : 'failed';
+    if (stages === 'ok') {
+      var todo = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
+      if (todo !== resp.todo_total) throw new Error('To do count does not match the To do rows');
+    } else {
+      rows.forEach(function (r) {
+        Object.keys(r).forEach(function (k) { if (k.indexOf('dispatch_') === 0) delete r[k]; });
+      });
+    }
     return {
       rows: rows,
       total: typeof resp.total === 'number' ? resp.total : rows.length,
-      degraded: resp.degraded === true
+      degraded: resp.degraded === true,
+      stages: stages,
+      todoTotal: stages === 'ok' ? resp.todo_total : null
     };
   }
+
+  // ── slice 3: the stage rail's rules ──
+
+  // 0 for not_started, 1 to 6 for the stops, -1 for anything else.
+  function stageIndex(key) {
+    if (key === 'not_started') return 0;
+    for (var i = 0; i < STAGES.length; i++) if (STAGES[i].key === key) return i + 1;
+    return -1;
+  }
+
+  // A row's Dispatch stage as the read gave it: { none: true } for a make-safe
+  // row (no rail), null when the fields are missing or do not agree.
+  function stageOf(row) {
+    if (!row || !('dispatch_stage' in row) || !('dispatch_stage_index' in row)) return null;
+    if (row.dispatch_stage === null && row.dispatch_stage_index === null) return { none: true };
+    var i = stageIndex(row.dispatch_stage);
+    if (i < 0 || row.dispatch_stage_index !== i || STAGE_SOURCES.indexOf(row.dispatch_stage_source) < 0) return null;
+    return {
+      key: row.dispatch_stage,
+      index: i,
+      name: i ? STAGES[i - 1].label : 'Not started',
+      source: row.dispatch_stage_source,
+      from: text(row.dispatch_stage_from),
+      setAt: row.dispatch_stage_set_at,
+      setBy: text(row.dispatch_stage_set_by)
+    };
+  }
+
+  // A label from a table the page already has, else the key in words.
+  function keyWords(key) { return text(key).replace(/_/g, ' ') || 'not recorded'; }
+
+  function statusLabel(key) {
+    var sm = global.SW_STATE_MACHINE;
+    var labels = sm && sm.STATUS_LABELS;
+    return (labels && Object.prototype.hasOwnProperty.call(labels, key) && labels[key]) || keyWords(key);
+  }
+
+  function repairStageLabel(key) {
+    var list = Array.isArray(global.REPAIR_STAGES) ? global.REPAIR_STAGES : [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].key === key && list[i].label) return list[i].label;
+    return keyWords(key);
+  }
+
+  // Where the rail's place came from, in one line (build note row 15).
+  function stageSourceText(s, yearNow) {
+    if (s.source === 'set') {
+      var when = parseStamp(s.setAt);
+      var day = when ? dayText(when, yearNow) : '';
+      if (s.setBy) return 'Set by ' + s.setBy + (day ? ', ' + day : '');
+      return 'Set' + (day ? ' ' + day : '');
+    }
+    if (s.source === 'repairs_board') return 'From the Repairs board: ' + repairStageLabel(s.from) + '. Not set in Dispatch yet.';
+    return 'From the job status: ' + statusLabel(s.from) + '. Not set in Dispatch yet.';
+  }
+
+  // The next-step line as the server stores it: trimmed, runs of space as one.
+  function cleanNextStep(v) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
 
   function filterByType(rows, type) {
     if (!type || type === 'all') return rows;
@@ -467,8 +569,8 @@
     search: '',
     leftOpen: readStore('localStorage', LS_LEFT) !== '0',
     scopeOpen: readStore('localStorage', LS_SCOPE) !== '0',
-    base: { status: 'idle', rows: [], total: null, degraded: false },
-    found: { status: 'idle', rows: [], degraded: false, q: '' },
+    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todoTotal: null },
+    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null },
     jobId: null,
     row: null,
     rowStale: false,
@@ -487,7 +589,12 @@
     replies: {},
     sending: {},
     replyMsg: {},
-    pdfLoading: {}
+    pdfLoading: {},
+    // Slice 3: which list is showing (opens on To do), and the rail's press
+    // state: the one open confirm line, the move in flight, the last answer's
+    // line, and the next-step box per job.
+    mode: readStore('localStorage', LS_MODE) === 'all' ? 'all' : 'todo',
+    stage: { confirm: null, moving: null, msg: null, drafts: {}, saving: {}, nextMsg: {} }
   };
   var tokens = { base: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -497,8 +604,23 @@
   function region(name) { var r = root(); return r ? r.querySelector('[data-dpc-region="' + name + '"]') : null; }
   function searching() { return state.search.trim() !== ''; }
 
+  // To do keeps the rows the read marks dispatch_todo, and none at all when
+  // the stage read failed: that shows the failed line, never an empty To do.
   function listedRows() {
-    return filterByType(searching() ? state.found.rows : state.base.rows, state.type);
+    var from = searching() ? state.found : state.base;
+    var rows = from.rows;
+    if (state.mode === 'todo') {
+      rows = from.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
+    }
+    return filterByType(rows, state.type);
+  }
+
+  // The list that is showing has its rows, or failed (a failed stage read
+  // fails To do).
+  function listFailed() {
+    var from = searching() ? state.found : state.base;
+    if (from.status === 'error') return true;
+    return state.mode === 'todo' && from.status === 'ok' && from.stages !== 'ok';
   }
 
   // ───────────────────────── reads ─────────────────────────
@@ -509,11 +631,11 @@
     return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1 }); }).then(function (resp) {
       if (token !== tokens.base) return;
       var got = rowsFromPipeline(resp);
-      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded };
+      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todoTotal: got.todoTotal };
       adoptSelection();
     }).catch(function () {
       if (token !== tokens.base) return;
-      state.base = { status: 'error', rows: [], total: null, degraded: false };
+      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todoTotal: null };
       state.rowStale = true;
       paintList();
       paintWorkspace();
@@ -534,24 +656,25 @@
     if (current) state.row = current;
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
-    var pick = byId(readStore('sessionStorage', SS_JOB)) || rows[0] || null;
+    var todo = state.mode === 'todo' && state.base.stages === 'ok' ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
+    var pick = byId(readStore('sessionStorage', SS_JOB)) || todo[0] || rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
 
   function runSearch() {
     var q = state.search.trim();
     var token = ++tokens.found;
-    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '' }; paintList(); return; }
-    state.found = { status: 'loading', rows: [], degraded: false, q: q };
+    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null }; paintList(); return; }
+    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null };
     paintList();
     Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, search: q }); }).then(function (resp) {
       if (token !== tokens.found) return;
       var got = rowsFromPipeline(resp);
-      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q };
+      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages };
       paintList();
     }).catch(function () {
       if (token !== tokens.found) return;
-      state.found = { status: 'error', rows: [], degraded: false, q: q };
+      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null };
       paintList();
     });
   }
@@ -748,6 +871,99 @@
     });
   }
 
+  // ── slice 3 writes: the rail's stage and the next-step line ──
+
+  // Puts what a write answered onto every copy of the job's row (the list, the
+  // search and the open job), so the card and the rail redraw at once. Only
+  // when the merged row still reads as a whole stage.
+  function applyStageFields(jobId, fields) {
+    var merge = function (r) { return r && r.id === jobId ? Object.assign({}, r, fields) : r; };
+    var next = merge(rowById(jobId) || state.row);
+    if (!next || next.id !== jobId || !stageOf(next)) return;
+    state.base.rows = state.base.rows.map(merge);
+    state.found.rows = state.found.rows.map(merge);
+    if (state.row && state.row.id === jobId) state.row = merge(state.row);
+  }
+
+  function pickStageFields(answer) {
+    var out = {};
+    Object.keys(answer || {}).forEach(function (k) { if (k.indexOf('dispatch_') === 0) out[k] = answer[k]; });
+    return out;
+  }
+
+  // One set_dispatch_stage per confirmed press. The rail is locked while it is
+  // in flight and is never re-sent on its own.
+  function moveStage(jobId, to) {
+    var row = state.row;
+    var s = row && row.id === jobId ? stageOf(row) : null;
+    if (!s || s.none || state.stage.moving || stageIndex(to) < 1) return;
+    state.stage.moving = jobId;
+    state.stage.msg = null;
+    paintTape();
+    Promise.resolve().then(function () {
+      return global.opsPost('set_dispatch_stage', { job_id: jobId, stage: to, expected_stage: s.key });
+    }).then(function (resp) {
+      if (!resp || resp.success !== true || resp.dispatch_stage !== to) throw new Error('Unexpected stage answer');
+      state.stage.moving = null;
+      state.stage.confirm = null;
+      applyStageFields(jobId, Object.assign(pickStageFields(resp), { dispatch_stage_from: null }));
+      paintTape();
+      paintList(true);
+      loadBase();
+    }).catch(function (e) {
+      state.stage.moving = null;
+      state.stage.confirm = null;
+      if (e && e.status === 409 && e.code === 'stage_changed') {
+        if (e.body) applyStageFields(jobId, pickStageFields(e.body));
+        state.stage.msg = { jobId: jobId, kind: 'changed', text: "This job's stage changed. Showing the latest." };
+        paintTape();
+        paintList(true);
+        loadBase();
+        return;
+      }
+      state.stage.msg = { jobId: jobId, kind: 'fail', text: 'Stage not moved.', to: to };
+      paintTape();
+    });
+  }
+
+  function nextDraft(jobId, row) {
+    var d = state.stage.drafts[jobId];
+    return typeof d === 'string' ? d : text(row && row.dispatch_next_step);
+  }
+
+  function nextUnchanged(jobId, row) {
+    return cleanNextStep(nextDraft(jobId, row)) === text(row && row.dispatch_next_step);
+  }
+
+  // One set_dispatch_next_step per press of Save. An empty line clears it.
+  function saveNextStep() {
+    var jobId = state.jobId;
+    var row = state.row;
+    var s = stageOf(row);
+    if (!jobId || !row || row.id !== jobId || !s || s.none || state.stage.saving[jobId] || nextUnchanged(jobId, row)) return;
+    var body = cleanNextStep(nextDraft(jobId, row));
+    if (body.length > NEXT_STEP_MAX) return;
+    state.stage.saving[jobId] = true;
+    state.stage.nextMsg[jobId] = null;
+    paintTape();
+    Promise.resolve().then(function () {
+      return global.opsPost('set_dispatch_next_step', { job_id: jobId, text: body });
+    }).then(function (resp) {
+      if (!resp || resp.success !== true || !('dispatch_next_step' in resp)) throw new Error('Unexpected next step answer');
+      state.stage.saving[jobId] = false;
+      delete state.stage.drafts[jobId];
+      state.stage.nextMsg[jobId] = { ok: true, text: resp.dispatch_next_step ? 'Next step saved.' : 'Next step cleared.' };
+      applyStageFields(jobId, { dispatch_next_step: resp.dispatch_next_step == null ? null : String(resp.dispatch_next_step) });
+      paintTape();
+      paintList(true);
+      loadBase();
+    }).catch(function () {
+      state.stage.saving[jobId] = false;
+      state.stage.nextMsg[jobId] = { ok: false, text: 'Next step not saved. Your text is still here.' };
+      paintTape();
+    });
+  }
+
   // ───────────────────────── render: sidebar ─────────────────────────
 
   function failLine(message, retry, tight) {
@@ -758,11 +974,24 @@
   function cardHtml(row) {
     var k = typeKey(row);
     var h = '<button type="button" class="dpc-job" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) + '">';
-    h += '<span class="dpc-job-top"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span></span>';
+    var s = stageOf(row);
+    var next = s && !s.none ? text(row.dispatch_next_step) : '';
+    h += '<span class="dpc-job-top"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>' +
+      (next ? '<span class="dpc-next">' + esc(next) + '</span>' : '') + '</span>';
     h += '<strong>' + esc(jobTitle(row)) + '</strong>';
     if (text(row.description)) h += '<span>' + esc(text(row.description)) + '</span>';
+    h += stageLineHtml(s);
     h += '<span class="dpc-muted">' + esc(installText(row)) + '</span>';
     return h + '</button>';
+  }
+
+  // The card's stage line (build note row 7). No line for a make-safe row or
+  // when the read gave no stage.
+  function stageLineHtml(s) {
+    if (!s || s.none) return '';
+    if (s.index === 6) return '<span class="dpc-stage dpc-stage-done">Done: trade scheduled</span>';
+    if (s.index === 0) return '<span class="dpc-stage">Not on the rail yet</span>';
+    return '<span class="dpc-stage">Stage: ' + esc(s.name) + '</span>';
   }
 
   function railHtml(row, labels) {
@@ -788,6 +1017,7 @@
 
   // What the list area says when it is not showing jobs, or '' when it is.
   function listState() {
+    if (state.mode === 'todo') return todoState();
     if (searching()) {
       if (state.found.status === 'error') return failLine('Search failed.', 'search');
       if (state.found.status !== 'ok') return '<div class="dpc-empty">Searching...</div>';
@@ -800,14 +1030,30 @@
     return '<div class="dpc-empty">No ' + esc((TYPE_LABELS[state.type] || state.type).toLowerCase()) + ' jobs.</div>';
   }
 
+  function todoState() {
+    var from = searching() ? state.found : state.base;
+    var retry = searching() ? 'search' : 'list';
+    if (searching() && from.status === 'error') return failLine('Search failed.', 'search');
+    if (from.status === 'error') return failLine('Could not load jobs.', 'list');
+    if (from.status !== 'ok') return '<div class="dpc-empty">' + (searching() ? 'Searching...' : 'Loading jobs...') + '</div>';
+    if (from.stages !== 'ok') return failLine('Could not load Dispatch stages.', retry);
+    if (listedRows().length) return '';
+    if (searching()) return '<div class="dpc-empty">No To do jobs match.</div>';
+    if (state.type === 'all') return '<div class="dpc-empty">Nothing in To do.</div>';
+    return '<div class="dpc-empty">No ' + esc((TYPE_LABELS[state.type] || state.type).toLowerCase()) + ' jobs in To do.</div>';
+  }
+
   function degradedNow() {
     return searching() ? (state.found.status === 'ok' && state.found.degraded) : (state.base.status === 'ok' && state.base.degraded);
   }
 
+  // The two list buttons. To do's number is the read's todo_total, shown only
+  // when the stage read worked.
   function modeHtml() {
-    var pressed = !searching() && state.type === 'all';
-    var count = state.base.status === 'ok' ? ' <b>' + esc(state.base.total) + '</b>' : '';
-    return '<button type="button" data-dpc-reset aria-pressed="' + pressed + '">All jobs' + count + '</button>';
+    var todo = state.base.status === 'ok' && state.base.stages === 'ok' ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
+    var all = state.base.status === 'ok' ? ' <b>' + esc(state.base.total) + '</b>' : '';
+    return '<button type="button" data-dpc-mode="todo" aria-pressed="' + (state.mode === 'todo') + '">To do' + todo + '</button>' +
+      '<button type="button" data-dpc-mode="all" aria-pressed="' + (state.mode === 'all') + '">All jobs' + all + '</button>';
   }
 
   function chipsHtml() {
@@ -826,11 +1072,11 @@
     var h = '<aside class="dpc-panel dpc-queue" data-dpc-region="queue" aria-label="Accepted work">';
     h += '<div class="dpc-pad"><div class="dpc-row"><h3 class="dpc-grow">Accepted work</h3>';
     h += '<button type="button" class="dpc-side-btn" data-dpc-side aria-label="Collapse accepted work" title="Collapse">&laquo;</button></div>';
-    h += '<div class="dpc-mode" data-dpc-region="mode">' + modeHtml() + '</div>';
+    h += '<div class="dpc-mode" role="group" aria-label="Which jobs" data-dpc-region="mode">' + modeHtml() + '</div>';
     h += '<div class="dpc-chips" role="group" aria-label="Work type" data-dpc-region="chips">' + chipsHtml() + '</div>';
     h += '<input type="search" class="dpc-search" data-dpc-search placeholder="Search job, suburb or client" value="' + esc(state.search) + '" aria-label="Search jobs">';
     h += '</div><div class="dpc-job-list" data-dpc-region="list"></div>';
-    h += '<div class="dpc-foot">All jobs: any job through the Dispatch lens, to check what was ordered and sent.</div>';
+    h += '<div class="dpc-foot">To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.</div>';
     return h + '</aside>';
   }
 
@@ -847,9 +1093,9 @@
     // Updated in place so a pressed button keeps the keyboard focus.
     var mode = region('mode');
     if (mode && mode.innerHTML !== modeHtml()) {
-      var hadFocus = mode.contains(document.activeElement);
+      var hadFocus = mode.contains(document.activeElement) ? document.activeElement.getAttribute('data-dpc-mode') : null;
       mode.innerHTML = modeHtml();
-      if (hadFocus) mode.querySelector('button').focus();
+      if (hadFocus) mode.querySelector('[data-dpc-mode="' + hadFocus + '"]').focus();
     }
     var chips = region('chips');
     if (chips) Array.prototype.forEach.call(chips.querySelectorAll('[data-dpc-type]'), function (b) {
@@ -858,13 +1104,16 @@
     var stateHtml = listState();
     var rows = stateHtml ? [] : listedRows();
     if (!state.leftOpen) {
-      var failed = searching() ? state.found.status === 'error' : state.base.status === 'error';
+      var failed = listFailed();
       var ready = searching() ? state.found.status === 'ok' : state.base.status === 'ok';
       var head = region('railhead');
       if (head) {
+        var from = searching() ? state.found : state.base;
+        var failText = from.status !== 'error' ? 'Could not load Dispatch stages. Retry'
+          : searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry';
         head.innerHTML = failed
-          ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + (searching() ? 'search' : 'list') + '" aria-label="' + (searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry') + '" title="' + (searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry') + '">&#8635;</button>'
-          : ready ? '<span class="dpc-rail-count" title="Jobs listed">' + rows.length + '</span>' : '';
+          ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + (searching() ? 'search' : 'list') + '" aria-label="' + failText + '" title="' + failText + '">&#8635;</button>'
+          : ready ? '<span class="dpc-rail-count" title="' + (state.mode === 'todo' ? 'Jobs in To do' : 'Jobs listed') + '">' + rows.length + '</span>' : '';
       }
       list.innerHTML = '';
       if (rows.length) { var labels = railLabels(rows); fill(list, rows, function (row) { return railHtml(row, labels); }, drawn); }
@@ -917,7 +1166,75 @@
     if (text(row.description)) h += '<p>' + esc(text(row.description)) + '</p>';
     h += '<div class="dpc-pills"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>';
     h += '<span class="dpc-pill">' + esc(installText(row)) + '</span></div>';
+    return h + tapeHtml(row) + '</div>';
+  }
+
+  // The stage rail, the tape (approved still B). Drawn for every job but a
+  // make-safe one. A press opens the confirm line; only Move or Set writes.
+  function tapeHtml(row) {
+    if (typeKey(row) === 'makesafe') return '';
+    var s = stageOf(row);
+    var h = '<div class="dpc-tape" data-dpc-region="tape"';
+    if (!s || s.none) return h + '>' + failLine("Could not load this job's stage.", 'list', true) + '</div>';
+    var jobId = row.id;
+    var busy = !!state.stage.moving;
+    var confirm = state.stage.confirm && state.stage.confirm.jobId === jobId ? state.stage.confirm : null;
+    h += ' role="group" aria-label="Dispatch stage: ' + esc(s.name) + '"><div class="dpc-tape-meta"><span>Dispatch stage</span><strong>' + esc(s.name) + '</strong>';
+    h += '<span class="dpc-grow"></span><span>' + s.index + ' of ' + STAGES.length + '</span></div>';
+    h += '<div class="dpc-tape-track">';
+    if (s.index > 1) h += '<div class="dpc-tape-fill" style="width:' + ((s.index - 1) / (STAGES.length - 1) * 100) + '%"></div>';
+    h += '</div><ol class="dpc-tape-stops">';
+    STAGES.forEach(function (st, i) {
+      var n = i + 1;
+      var cls = n < s.index ? 'done' : n === s.index ? 'now' : '';
+      var left = i / (STAGES.length - 1) * 100;
+      h += '<li class="' + cls + '" style="left:' + left + '%"><button type="button" class="dpc-tape-stop" data-dpc-stage="' + st.key + '"' +
+        (n === s.index ? ' aria-current="step"' : '') + (busy ? ' disabled' : '') + '>' +
+        '<span class="dpc-tape-mark' + (cls ? ' ' + cls : '') + '" aria-hidden="true"></span><span class="dpc-tape-label">' + esc(st.label) + '</span></button></li>';
+    });
+    h += '</ol>';
+    h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note">' + esc(stageSourceText(s)) + '</p>';
+    if (TODO_OUT[row.dispatch_todo_out]) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note">' + esc(TODO_OUT[row.dispatch_todo_out]) + '</p>';
+    if (confirm) {
+      var num = text(row.job_number) || 'this job';
+      var to = STAGES[stageIndex(confirm.to) - 1].label;
+      var ask = confirm.to === s.key ? 'Set ' + num + ' at ' + to + '?' : 'Move ' + num + ' from ' + s.name + ' to ' + to + '?';
+      h += '<div class="dpc-tape-confirm" role="group" aria-label="Confirm the stage"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
+      h += '<button type="button" class="dpc-primary" data-dpc-stage-go' + (busy ? ' disabled' : '') + '>' + (busy ? 'Moving...' : confirm.to === s.key ? 'Set' : 'Move') + '</button>';
+      h += '<button type="button" data-dpc-stage-cancel' + (busy ? ' disabled' : '') + '>Cancel</button></div>';
+    }
+    var msg = state.stage.msg && state.stage.msg.jobId === jobId ? state.stage.msg : null;
+    if (msg && msg.kind === 'fail') {
+      h += '<div class="dpc-empty dpc-empty-tight dpc-tape-note dpc-note-msg-fail" role="alert">' + esc(msg.text) +
+        ' <button type="button" class="dpc-retry" data-dpc-stage-retry' + (busy ? ' disabled' : '') + '>Retry</button></div>';
+    } else if (msg) {
+      h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note" role="status">' + esc(msg.text) + '</p>';
+    }
+    var saving = !!state.stage.saving[jobId];
+    var draft = nextDraft(jobId, row);
+    var nmsg = state.stage.nextMsg[jobId];
+    h += '<div class="dpc-tape-next"><label for="dpc-next-input">Next step</label>';
+    h += '<input type="text" id="dpc-next-input" data-dpc-next maxlength="' + NEXT_STEP_MAX + '" placeholder="What happens next on this job" value="' + esc(draft) + '"' + (saving ? ' disabled' : '') + '>';
+    h += '<button type="button" data-dpc-next-save' + (saving || nextUnchanged(jobId, row) ? ' disabled' : '') + '>' + (saving ? 'Saving...' : 'Save') + '</button></div>';
+    if (nmsg) h += '<div class="dpc-note-msg' + (nmsg.ok ? '' : ' dpc-note-msg-fail') + '" role="' + (nmsg.ok ? 'status' : 'alert') + '">' + esc(nmsg.text) + '</div>';
     return h + '</div>';
+  }
+
+  // Redraws the rail in place, keeping the next-step box's typing and focus.
+  function paintTape() {
+    var el = region('tape');
+    if (!el || !state.row) return;
+    keepNextFocus(function () { el.outerHTML = tapeHtml(state.row); });
+  }
+
+  function keepNextFocus(paint) {
+    var a = document.activeElement;
+    var had = a && a.hasAttribute && a.hasAttribute('data-dpc-next') && root().contains(a);
+    var at = had ? [a.selectionStart, a.selectionEnd] : null;
+    paint();
+    if (!had) return;
+    var box = root().querySelector('[data-dpc-next]');
+    if (box && !box.disabled) { box.focus(); try { box.setSelectionRange(at[0], at[1]); } catch (e) { /* not a text box */ } }
   }
 
   function scopeHtml() {
@@ -1231,7 +1548,7 @@
     var w = region('workspace');
     if (w) w.outerHTML = workspaceHtml();
   }
-  function paintHead() { var el = region('head'); if (el) el.outerHTML = headHtml(state.row); }
+  function paintHead() { var el = region('head'); if (el) keepNextFocus(function () { el.outerHTML = headHtml(state.row); }); }
   function paintCouncil() { var el = region('council'); if (el) el.innerHTML = councilHtml(); }
   function paintScope() { var el = region('scope'); if (el) el.innerHTML = scopeHtml(); }
   function paintNotes() { var el = region('notes'); if (el) el.innerHTML = notesHtml(); }
@@ -1267,13 +1584,20 @@
   }
 
   function onClick(e) {
-    var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-reset],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
-      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-jobpage]') : null;
+    var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
+      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-jobpage],' +
+      '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save]') : null;
     if (!t || t.disabled) return;
     if (onPanelClick(t, e)) return;
-    if (t.hasAttribute('data-dpc-job')) { selectJob(rowById(t.getAttribute('data-dpc-job'))); }
+    if (onStageClick(t)) return;
+    if (t.hasAttribute('data-dpc-job')) {
+      if (t.getAttribute('data-dpc-job') !== state.jobId) state.stage.confirm = null;
+      selectJob(rowById(t.getAttribute('data-dpc-job')));
+    }
     else if (t.hasAttribute('data-dpc-type')) { state.type = t.getAttribute('data-dpc-type'); paintList(); }
-    else if (t.hasAttribute('data-dpc-reset')) {
+    else if (t.hasAttribute('data-dpc-mode')) {
+      state.mode = t.getAttribute('data-dpc-mode') === 'all' ? 'all' : 'todo';
+      writeStore('localStorage', LS_MODE, state.mode);
       state.type = 'all';
       state.search = '';
       clearTimeout(searchTimer);
@@ -1308,6 +1632,39 @@
       if (url) global.openOpsLightbox(url);
     }
     else if (t.hasAttribute('data-dpc-save')) { saveNote(); }
+  }
+
+  // The rail's controls. True when the press was one of them. A press on a
+  // stop only opens the confirm line; pressing the stop already set does
+  // nothing.
+  function onStageClick(t) {
+    var row = state.row;
+    var s = stageOf(row);
+    if (t.hasAttribute('data-dpc-stage')) {
+      if (!s || s.none || state.stage.moving) return true;
+      var to = t.getAttribute('data-dpc-stage');
+      if (stageIndex(to) < 1 || (to === s.key && s.source === 'set')) return true;
+      state.stage.confirm = { jobId: row.id, to: to };
+      state.stage.msg = null;
+      paintTape();
+      refocus('[data-dpc-stage-go]');
+    } else if (t.hasAttribute('data-dpc-stage-go')) {
+      var c = state.stage.confirm;
+      if (c && row && c.jobId === row.id) moveStage(row.id, c.to);
+    } else if (t.hasAttribute('data-dpc-stage-cancel')) {
+      var was = state.stage.confirm && state.stage.confirm.to;
+      state.stage.confirm = null;
+      paintTape();
+      if (was) refocus('[data-dpc-stage="' + was + '"]');
+    } else if (t.hasAttribute('data-dpc-stage-retry')) {
+      var m = state.stage.msg;
+      if (m && row && m.jobId === row.id && m.to) moveStage(row.id, m.to);
+    } else if (t.hasAttribute('data-dpc-next-save')) {
+      saveNextStep();
+    } else {
+      return false;
+    }
+    return true;
   }
 
   function setTab(key) {
@@ -1380,6 +1737,18 @@
         state.replyMsg[state.jobId] = null;
         var line = box && box.querySelector('.dpc-note-msg');
         if (line) line.remove();
+      }
+      return;
+    }
+    if (t.hasAttribute('data-dpc-next') && state.jobId && state.row) {
+      state.stage.drafts[state.jobId] = t.value;
+      var tape = region('tape');
+      var save = tape && tape.querySelector('[data-dpc-next-save]');
+      if (save) save.disabled = !!state.stage.saving[state.jobId] || nextUnchanged(state.jobId, state.row);
+      if (state.stage.nextMsg[state.jobId]) {
+        state.stage.nextMsg[state.jobId] = null;
+        var said = tape && tape.querySelector('.dpc-tape-next + .dpc-note-msg');
+        if (said) said.remove();
       }
       return;
     }

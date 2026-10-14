@@ -47,13 +47,18 @@ moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
 section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-and 2 of the approved design: job list, job header, Scope and notes, and the
-right panel of Sources, Context story and Messages). It reads
+to 3 of the approved design: job list with To do beside All jobs, job header
+with the six-stop stage rail, Scope and notes, and the right panel of Sources,
+Context story and Messages). It reads
 `pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
 a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
-Its writes are `add_note` (always `visibility: 'internal_only'`) and a pressed
-`send_sms` from `+61489267771`; a quote with no stored PDF is never opened
+Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
+`send_sms` from `+61489267771`, and the rail's `set_dispatch_stage` (after a
+confirm line) and `set_dispatch_next_step`. The rail's stage is Dispatch's own
+record (`job_dispatch_state`), never the job status: it never calls
+`update_job_status`. A stage read that failed fails To do and the rail, never an
+empty To do. A quote with no stored PDF is never opened
 through `send-quote/view`, which records a client view. A failed read never
 renders as empty, and a later slice is not drawn until it is real. Below
 it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the

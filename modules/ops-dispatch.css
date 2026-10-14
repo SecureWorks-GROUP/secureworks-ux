@@ -218,3 +218,78 @@
 @media (max-width: 620px) {
   .dpc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- slice 3: To do, the card's stage and next-step lines, and the stage rail (the tape; approved still B) ---------- */
+.dpc-next { min-width: 0; text-align: right; overflow-wrap: anywhere; font: 600 10px/1.2 var(--mono); color: var(--signal-deep); text-transform: uppercase; letter-spacing: .04em; }
+.dpc .dpc-job > .dpc-stage { display: inline-block; margin: 4px 0 2px; font: 500 10.5px/1.3 var(--mono); color: var(--steel-2); }
+.dpc-stage::before { content: '\25B8'; margin-right: 6px; color: var(--signal); }
+.dpc .dpc-job > .dpc-stage-done, .dpc-stage-done::before { color: var(--sage); }
+.dpc-stage-done::before { content: '\2713'; }
+.dpc-tape { margin-top: 20px; padding: 16px 18px 14px; background: var(--galv-2); border-radius: 10px; container-type: inline-size; }
+.dpc-tape-meta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--mute); }
+.dpc-tape-meta strong { font: 700 18px var(--display); letter-spacing: .03em; color: var(--signal-deep); }
+.dpc-tape-track { position: relative; height: 14px; margin: 0 14px; border-radius: 4px; background:
+  repeating-linear-gradient(90deg, rgba(41,60,70,.35) 0 1px, transparent 1px 8px) bottom / 100% 4px no-repeat,
+  repeating-linear-gradient(90deg, rgba(41,60,70,.55) 0 1px, transparent 1px 40px) bottom / 100% 7px no-repeat, #fff; box-shadow: inset 0 0 0 1px var(--line); }
+.dpc-tape-fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px 0 0 4px; background:
+  repeating-linear-gradient(90deg, rgba(255,255,255,.55) 0 1px, transparent 1px 8px) bottom / 100% 4px no-repeat,
+  repeating-linear-gradient(90deg, rgba(255,255,255,.8) 0 1px, transparent 1px 40px) bottom / 100% 7px no-repeat, var(--signal); transition: width .5s cubic-bezier(.2,.7,.2,1); }
+/* Each stop is one button over its mark and its label. The marks sit in the
+   buttons, centred on the track; the first and last labels hug the panel's
+   edges and are narrower so no two buttons overlap. */
+.dpc .dpc-tape-stops { list-style: none; padding: 0; position: relative; z-index: 1; height: 32px; margin: 22px 14px 0; }
+.dpc-tape-stops li { position: absolute; top: 0; width: 17%; transform: translateX(-50%); }
+.dpc-tape-stops li:first-child { transform: none; width: 11%; margin-left: -14px; }
+.dpc-tape-stops li:last-child { left: auto !important; right: 0; transform: none; width: 11%; margin-right: -14px; }
+.dpc .dpc-tape-stop { display: block; position: relative; width: 100%; min-height: 44px; margin-top: -38px; padding: 38px 0 0; border: 0; border-radius: 6px; background: transparent; text-align: center; font: 500 10.5px/1.25 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: #9DB0BC; }
+.dpc .dpc-tape-stops li:first-child .dpc-tape-stop { text-align: left; }
+.dpc .dpc-tape-stops li:last-child .dpc-tape-stop { text-align: right; }
+.dpc .dpc-tape-stops li.done .dpc-tape-stop { color: var(--steel-2); }
+.dpc .dpc-tape-stops li.now .dpc-tape-stop { color: var(--signal-deep); font-weight: 700; }
+.dpc .dpc-tape-stop:disabled { opacity: 1; }
+.dpc-tape-label { display: block; }
+.dpc-tape-mark { position: absolute; top: 0; left: 50%; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%; background: #fff; border: 2px solid #B9C7D0; }
+.dpc-tape-stops li:first-child .dpc-tape-mark { left: 14px; }
+.dpc-tape-stops li:last-child .dpc-tape-mark { left: calc(100% - 14px); }
+.dpc-tape-mark.done { background: var(--signal); border-color: var(--signal); }
+.dpc-tape-mark.done::after { content: ''; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.dpc-tape-mark.now { top: -3px; width: 24px; height: 24px; margin-left: -12px; background: var(--steel); border: 4px solid #fff; box-shadow: 0 0 0 2px var(--signal), 0 4px 10px rgba(26,39,46,.25); }
+.dpc .dpc-tape-stop:hover:not(:disabled) .dpc-tape-mark, .dpc .dpc-tape-stop:focus-visible .dpc-tape-mark { box-shadow: 0 0 0 2px var(--signal); }
+.dpc .dpc-tape-stop:hover:not(:disabled) .dpc-tape-mark.now, .dpc .dpc-tape-stop:focus-visible .dpc-tape-mark.now { box-shadow: 0 0 0 2px var(--signal), 0 4px 10px rgba(26,39,46,.25); }
+.dpc-tape-note { margin-top: 10px; }
+.dpc-tape-note + .dpc-tape-note { margin-top: 2px; }
+.dpc-tape-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.dpc-tape-confirm .dpc-empty { color: var(--ink); }
+.dpc .dpc-tape-confirm button { min-height: 36px; }
+.dpc-tape-next { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.dpc-tape-next label { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--mute); white-space: nowrap; }
+.dpc-tape-next input { flex: 1; min-width: 0; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 13px; }
+.dpc-tape-next input:focus { border-color: var(--signal); outline: none; }
+.dpc-tape-next input::placeholder { color: #9DB0BC; }
+/* Phone width, and a rail too narrow for six labels: no labels, the name and
+   count wrap above the track, and each stop is a 44 by 44 button on its mark. */
+@container (max-width: 459px) {
+  .dpc .dpc-tape-stops { height: 0; margin-top: 0; }
+  .dpc-tape-stops li, .dpc-tape-stops li:first-child, .dpc-tape-stops li:last-child { width: 44px; transform: translateX(-50%); margin: 0; }
+  .dpc-tape-stops li:last-child { left: 100% !important; right: auto; }
+  .dpc .dpc-tape-stop { height: 44px; min-height: 0; margin-top: -29px; padding: 0; }
+  .dpc-tape-stops li .dpc-tape-mark, .dpc-tape-stops li:first-child .dpc-tape-mark, .dpc-tape-stops li:last-child .dpc-tape-mark { top: 13px; left: 50%; }
+  .dpc-tape-stops li .dpc-tape-mark.now { top: 10px; }
+  .dpc-tape-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dpc-tape-stops + .dpc-tape-note { margin-top: 24px; }
+}
+@media (max-width: 768px) {
+  .dpc-tape { padding: 14px 12px 18px; }
+  .dpc-tape-meta { flex-wrap: wrap; row-gap: 2px; }
+  .dpc-tape-meta strong { font-size: 16px; }
+  .dpc .dpc-tape-stops { height: 0; margin-top: 0; }
+  .dpc-tape-stops li, .dpc-tape-stops li:first-child, .dpc-tape-stops li:last-child { width: 44px; transform: translateX(-50%); margin: 0; }
+  .dpc-tape-stops li:last-child { left: 100% !important; right: auto; }
+  .dpc .dpc-tape-stop { height: 44px; min-height: 0; margin-top: -29px; padding: 0; }
+  .dpc-tape-stops li .dpc-tape-mark, .dpc-tape-stops li:first-child .dpc-tape-mark, .dpc-tape-stops li:last-child .dpc-tape-mark { top: 13px; left: 50%; }
+  .dpc-tape-stops li .dpc-tape-mark.now { top: 10px; }
+  .dpc-tape-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dpc-tape-stops + .dpc-tape-note { margin-top: 24px; }
+  .dpc .dpc-tape-confirm button, .dpc .dpc-tape-next button, .dpc-tape-next input { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .dpc-tape-fill { transition: none; } }

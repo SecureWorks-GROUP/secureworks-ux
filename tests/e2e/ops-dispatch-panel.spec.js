@@ -18,6 +18,9 @@ const ROW = (over) => Object.assign({
   client_name: 'Test Client', site_address: '1 Test Street', status: 'accepted', value: 1000, value_inc_gst: true,
   description: null, next_scheduled_date: null, last_scheduled_date: null,
   council_status: null, council_step: null, council_required: false, po_count: 0, work_type: over.type,
+  // Slice 3's stage fields, as the live dispatch=1 read carries them: each job in To do at Accepted.
+  dispatch_stage: 'accepted', dispatch_stage_index: 1, dispatch_stage_source: 'job_status', dispatch_stage_from: 'accepted',
+  dispatch_stage_set_at: null, dispatch_stage_set_by: null, dispatch_todo: true, dispatch_todo_out: null, dispatch_next_step: null,
 }, over);
 
 const JOBS = {
@@ -25,7 +28,7 @@ const JOBS = {
   b: ROW({ id: 'job-b', job_number: 'SWP-900502', type: 'patio', site_suburb: 'Suburb B', updated_at: '2026-10-12T04:00:00+00:00' }),
   c: ROW({ id: 'job-c', job_number: 'SWR-900503', type: 'repair', site_suburb: 'Suburb C', updated_at: '2026-10-12T03:00:00+00:00' }),
 };
-const LIST = () => ({ columns: { accepted: [JOBS.a, JOBS.b, JOBS.c] }, total: 3 });
+const LIST = () => ({ columns: { accepted: [JOBS.a, JOBS.b, JOBS.c] }, total: 3, dispatch_stages: 'ok', todo_total: 3 });
 
 const quote = (over) => Object.assign({ type: 'quote', quote_number: 'Q-900501', created_at: '2026-09-01T01:00:00+00:00' }, over);
 const invoice = (over) => Object.assign({ job_id: 'job-a', invoice_type: 'ACCREC', status: 'PAID', reference: '', invoice_date: '2026-09-10' }, over);
@@ -614,8 +617,8 @@ test('Dispatch panel: every call it makes is one of job_story, get_conversation,
   const since = calls.slice(mark).map((c) => c.fn + ':' + c.action);
   expect([...new Set(since)].sort()).toEqual(['ghl-proxy:get_conversation', 'ops-api:get_invoice_pdf', 'ops-api:get_job_conversation', 'ops-api:job_story']);
   expect(since.length).toBe(4);
-  // Nothing from a later slice is drawn.
-  await expect(root.locator('.dpc-tape, .dpc-next, .dpc-stage, .dpc-supcard, .dpc-mail, .dpc-deliv, [data-dpc-mode]')).toHaveCount(0);
+  // Nothing from a later slice is drawn (slice 3's rail and To do are: tests/e2e/ops-tab-set.spec.js).
+  await expect(root.locator('.dpc-supcard, .dpc-mail, .dpc-deliv')).toHaveCount(0);
   const panelText = await root.locator('.dpc-context').innerText();
   expect(panelText).not.toMatch(/—|template|attach|recording|transcript|Purchase orders/i);
 });

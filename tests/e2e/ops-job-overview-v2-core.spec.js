@@ -197,7 +197,7 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     const g = C.openItems(overview().story, detail().job, [], NOW);
     expect(g.blocking.map((i) => i.tag.words)).toEqual(['US', 'US']);
     expect(g.waiting.map((i) => i.tag.words)).toEqual(['AVERY', 'REAR NEIGHBOUR']);
-    expect(g.know.map((i) => i.tag.words)).toEqual(['US', 'US']);
+    expect(g.know.map((i) => i.tag.words)).toEqual(['US', 'HELD']);
     expect(g.blocking[0].when).toBe('As at Thu 8 Oct');
     expect(g.blocking[0].blocks).toBe('Holds up the deposit');
     expect(g.blocking[1].when).toBe('Since Fri 2 Oct');

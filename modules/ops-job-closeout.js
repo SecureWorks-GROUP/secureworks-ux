@@ -103,7 +103,6 @@ var JobCloseoutCore = (function () {
         title: 'A review text could not be confirmed as sent. It is never sent again.'
       };
     }
-    if (status === 'skipped' && !reason) reason = reasonWords('asked_recently');
     return {
       kind: 'review_not_sent', tone: 'warn',
       text: 'Review not sent' + (reason ? ': ' + reason : ''),

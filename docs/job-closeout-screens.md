@@ -45,7 +45,7 @@ and a job type other than fencing or patio gets no tags at all.
 | Review sent | `review.status` is `sent`. |
 | Review sending | `claimed` (a send in flight). |
 | Review not confirmed | `unconfirmed`: a text could not be confirmed and is never re-sent. |
-| Review not sent: reason | any other status, reason in words (`asked_recently` "asked in the last 90 days", `no_contact` "no contact linked", `paid_too_long_ago` "paid over 30 days ago", `refused` "text refused"; an unknown reason is shown with its underscores as spaces). |
+| Review not sent: reason | any other status, reason in words (`asked_recently` "asked in the last 90 days", `no_contact` "no contact linked", `paid_too_long_ago` "paid over 30 days ago", `refused` "text refused"; an unknown reason is shown with its underscores as spaces; with no reason, `skipped` included, it reads plain "Review not sent"). |
 | Archives in Xh / Archives in under 1h / Archive due | the card is in Get Review, not held, and `archive_due_at` is a time. Hours round up. Only the backend's due time draws it: an entry time alone does not, because the sweep decides whether a card archives at all (an unpaid card dragged into Get Review never does). |
 
 The job page shows the same tags under Next Actions.

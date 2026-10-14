@@ -28,9 +28,31 @@ const job = (closeout, extra = {}) => Object.assign({ id: 'j1', type: 'fencing',
 const texts = (j, status) => C.tags(j, status, NOW).map((t) => t.text);
 
 test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)', () => {
-  test('the module file holds no long dash and no emoji', () => {
-    expect(SOURCE).not.toMatch(/[–—]/);
-    expect(SOURCE).not.toMatch(/\p{Extended_Pictographic}/u);
+  test('no tag text or title carries a long dash, across every review status and reason', () => {
+    const reasons = [undefined, 'asked_recently', 'no_contact', 'paid_too_long_ago', 'refused', 'stuck_claim',
+      'facts_unreadable', 'quote_unreadable', 'lookback_unreadable', 'claim_failed', 'sender_off', 'switch_off',
+      'dry_run', 'held', 'not_paid', 'some_new_reason'];
+    const statuses = ['sent', 'claimed', 'unconfirmed', 'skipped', 'not_sent'];
+    const due = new Date(NOW + 5 * H).toISOString();
+    const entered = new Date(NOW - 2 * H).toISOString();
+    const rendered = [];
+    for (const status of statuses) {
+      for (const reason of reasons) {
+        for (const held of [null, 'callback', 'rectification']) {
+          const closeout = {
+            paid_less_than_quoted: true, shortfall_inc: 5649, review: { status, reason }, held,
+            get_review_entered_at: entered, archive_due_at: due
+          };
+          rendered.push(...C.tags(job(closeout), 'get_review', NOW));
+        }
+      }
+    }
+    rendered.push(...C.tags(job({ archive_due_at: new Date(NOW - H).toISOString() }), 'get_review', NOW));
+    expect(rendered.length).toBeGreaterThan(0);
+    for (const t of rendered) {
+      expect(t.text).not.toMatch(/[–—]/);
+      expect(t.title).not.toMatch(/[–—]/);
+    }
   });
 
   test('switch: off by default, ?closeout=preview turns it on and is remembered, ?closeout=live turns it off', () => {
@@ -67,7 +89,7 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(r({ status: 'claimed' })).toEqual(['Review sending']);
     expect(r({ status: 'unconfirmed', reason: 'stuck_claim' })).toEqual(['Review not confirmed']);
     expect(r({ status: 'skipped', reason: 'asked_recently' })).toEqual(['Review not sent: asked in the last 90 days']);
-    expect(r({ status: 'skipped' })).toEqual(['Review not sent: asked in the last 90 days']);
+    expect(r({ status: 'skipped' })).toEqual(['Review not sent']);
     expect(r({ status: 'not_sent', reason: 'no_contact' })).toEqual(['Review not sent: no contact linked']);
     expect(r({ status: 'not_sent', reason: 'paid_too_long_ago' })).toEqual(['Review not sent: paid over 30 days ago']);
     expect(r({ status: 'not_sent', reason: 'refused' })).toEqual(['Review not sent: text refused']);

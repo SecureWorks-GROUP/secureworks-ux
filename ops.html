@@ -905,6 +905,11 @@
     .cal-v3-sq { width: 16px; height: 16px; border-radius: 4px; background: var(--v3c, #F15A29); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: none; }
     .cal-v3-sq svg { display: block; }
     .v3u-patio { --v3c: #F15A29; } .v3u-fencing { --v3c: #3A6EA5; } .v3u-insurance { --v3c: #0D9488; } .v3u-biz { --v3c: #6B46C1; }
+    .v3u-repair { --v3c: #0D9488; } .v3u-makesafe { --v3c: #D97706; }
+    .cal-focus-tick { user-select: none; }
+    .cal-focus-tick.on { background: none; }
+    .cal-focus-tick input { margin: 0; width: 13px; height: 13px; accent-color: var(--v3k); cursor: pointer; }
+    .cal-focus-group { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--v3line); border-radius: 8px; padding: 0 2px; }
     .cal-v3-empty { padding: 26px 16px; text-align: center; color: var(--v3g1); font-size: 13px; }
     #viewCalendar.cal-v3 .cal-schedule-grid.v3 { border: 0; border-top: 1px solid var(--v3line); border-radius: 0; box-shadow: none; background: #fff; }
     #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-week + .cal-schedule-week { border-top: 0; }
@@ -6439,6 +6444,20 @@ window.__SW_CAL_V3_ENABLED = (function () {
     localStorage.setItem('sw_cal_view_mode', 'schedule');
   } catch (e) {}
 })();
+// ── Calendar tick-box filters (preview) ──
+// Off unless ?calfilters=preview (remembered in localStorage.sw_cal_filters_preview)
+// and ?calfilters=live turns it off again. On, the v3 Show / Type row is tick
+// boxes (several at once, all ticked to start) and Insurance splits into
+// Repairs and Make Safes, each with its own colour. Off, the row is exactly the
+// single-choice row that is live today. Search <calendar-tick-filters>.
+window.__SW_CAL_FILTERS_PREVIEW = (function () {
+  try {
+    var search = window.location.search || '';
+    if (/[?&]calfilters=live(?:&|$)/.test(search)) { localStorage.removeItem('sw_cal_filters_preview'); return false; }
+    if (/[?&]calfilters=preview(?:&|$)/.test(search)) { localStorage.setItem('sw_cal_filters_preview', '1'); return true; }
+    return localStorage.getItem('sw_cal_filters_preview') === '1';
+  } catch (e) { return false; }
+})();
 
 var _pipelineData = null;
 var _jobsCache = [];
@@ -8358,7 +8377,8 @@ var _calEventFilters = (function() {
 })();
 
 // ── Calendar v3 focus row: Show (everything / labour / materials / business)
-// and Type (all / patio / fencing / insurance). Single choice in each, and the
+// and Type (all / patio / fencing / insurance). Single choice in each (the
+// live row; the tick-box preview is <calendar-tick-filters> below), and the
 // two combine, and both calendar views honour them. Show drives the in-memory
 // _calEventFilters the sidebar tick boxes drive (read through calEventShown);
 // Type is read straight off _calFocus (calV3TypeShown) and leaves the sidebar's
@@ -8376,10 +8396,55 @@ var _calFocus = (function() {
   } catch (e) {}
   return d;
 })();
+// <calendar-tick-filters> The preview row (__SW_CAL_FILTERS_PREVIEW): Show and
+// Type are tick boxes, several at once, every one ticked to start; unticking
+// one hides what it covers, and nothing ticked in a filter shows nothing for
+// it. Insurance is the umbrella over Repairs and Make Safes, which are two
+// options of their own (two pipelines) read off calDivisionOf like every other
+// calendar surface; ticking Insurance ticks both. All and Everything tick or
+// untick the whole row. Stored at sw_cal_pick, apart from the live row's key.
+var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
+var _calPick = (function() {
+  var d = { show: { labour: true, materials: true, business: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
+  try {
+    var v = JSON.parse(localStorage.getItem('sw_cal_pick') || '{}');
+    ['show', 'type'].forEach(function(k) {
+      if (v[k]) CAL_PICK_KEYS[k].forEach(function(o) { if (v[k][o] === false) d[k][o] = false; });
+    });
+  } catch (e) {}
+  return d;
+})();
+// The options one tick box covers: itself, or every option under an umbrella.
+function calPickGroup(kind, key) {
+  if (!CAL_PICK_KEYS[kind]) return [];
+  if (key === 'all') return CAL_PICK_KEYS[kind];
+  if (kind === 'type' && key === 'insurance') return ['repair', 'makesafe'];
+  return CAL_PICK_KEYS[kind].indexOf(key) !== -1 ? [key] : [];
+}
+function setCalPick(kind, key, on) {
+  var keys = calPickGroup(kind, key);
+  if (!keys.length) return;
+  keys.forEach(function(o) { _calPick[kind][o] = !!on; });
+  try { localStorage.setItem('sw_cal_pick', JSON.stringify(_calPick)); } catch (e) {}
+  applyCalFocus();
+  renderCalendar();
+}
+// Whether Show lets labour, materials or business through: the tick box in the
+// preview, else the live single choice (Everything lets all three through).
+function calShowPicked(key) {
+  if (window.__SW_CAL_FILTERS_PREVIEW) return !!_calPick.show[key];
+  return _calFocus.show === 'everything' || _calFocus.show === key;
+}
+// Materials and nothing else: the calendar says "No deliveries booked" rather
+// than an empty grid when there are none.
+function calShowMaterialsOnly() {
+  return calShowPicked('materials') && !calShowPicked('labour') && !calShowPicked('business');
+}
+// </calendar-tick-filters>
 function applyCalFocus() {
   if (!window.__SW_CAL_V3_ENABLED) return;
-  var s = _calFocus.show, biz = (s === 'everything' || s === 'business');
-  _calEventFilters = { jobs: (s === 'everything' || s === 'labour'), meetings: biz, holidays: biz, leave: biz, reminders: biz };
+  var biz = calShowPicked('business');
+  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: biz, leave: biz, reminders: biz };
 }
 function setCalFocus(kind, val) {
   if (kind !== 'show' && kind !== 'type') return;
@@ -9601,7 +9666,7 @@ function renderSwimlaneView(container, range) {
   }
 
   html += '</div>';
-  if (window.__SW_CAL_V3_ENABLED && _calFocus.show === 'materials' && !hasDeliveries) {
+  if (window.__SW_CAL_V3_ENABLED && calShowMaterialsOnly() && !hasDeliveries) {
     html = '<div class="cal-v3-empty" id="calV3Empty">No deliveries booked</div>' + html;
   }
   container.innerHTML = html;
@@ -10140,7 +10205,7 @@ function renderScheduleView(container, range) {
 
         // v3: colour by unit (patio / fencing / insurance) and two states only —
         // client locked in (confirmation_status confirmed) or placeholder.
-        var v3Unit = v3 ? calV3Unit(job) : '';
+        var v3Unit = v3 ? calV3ColourUnit(job) : '';
         html += '<div class="cal-schedule-bar ' + typeClass + ' ' + confClass + readinessClass + (v3 ? ' v3u-' + v3Unit + (confClass === 'confirmed' ? ' v3s-locked' : ' v3s-placeholder') : '') + '"';
         html += ' style="' + barBox + '"';
         html += ' data-job-id="' + realJobId + '"';
@@ -10228,7 +10293,7 @@ function renderScheduleView(container, range) {
 
   // v3, Show = Materials with nothing to show: say so plainly rather than
   // leaving an empty grid that reads like a fault.
-  if (v3 && _calFocus.show === 'materials' && !allDates.some(function(ds) { return v3Del[ds]; })) {
+  if (v3 && calShowMaterialsOnly() && !allDates.some(function(ds) { return v3Del[ds]; })) {
     html = '<div class="cal-v3-empty" id="calV3Empty">No deliveries booked</div>' + html;
   }
 
@@ -10272,7 +10337,14 @@ function calV3IsBusiness(ev) {
 // The Type focus, for both views: a job outside the chosen colour group is
 // dropped. A business line is not a type, so it always passes.
 function calV3TypeShown(ev) {
+  if (window.__SW_CAL_FILTERS_PREVIEW) return calV3IsBusiness(ev) || !!_calPick.type[calV3Symbol(ev)];
   return _calFocus.type === 'all' || calV3IsBusiness(ev) || calV3Unit(ev) === _calFocus.type;
+}
+// The colour a job line or delivery takes: the live three groups, or in the
+// tick-box preview the four types, so Repairs and Make Safes each have their
+// own colour and the Type ticks drop exactly what they colour.
+function calV3ColourUnit(ev) {
+  return window.__SW_CAL_FILTERS_PREVIEW ? calV3Symbol(ev) : calV3Unit(ev);
 }
 // A meeting or reminder linked to a job has no label of its own (Add Event
 // keeps the title only on a job-less row), so its line says what it is and
@@ -10308,7 +10380,7 @@ function calV3Time(t) {
 // says "No crew" in red; a business line with nobody named shows nothing.
 function calV3CrewHtml(names, cap, unit, flagEmpty) {
   if (!names || !names.length) return flagEmpty ? '<span class="v3-nocrew">No crew</span>' : '';
-  var colour = { patio: '#B0401D', fencing: '#294D75', insurance: '#096861', biz: '#4B318A' }[unit] || '#293C46';
+  var colour = { patio: '#B0401D', fencing: '#294D75', insurance: '#096861', repair: '#096861', makesafe: '#92400E', biz: '#4B318A' }[unit] || '#293C46';
   var shown = names.slice(0, cap);
   var html = '<span class="bar-crew" title="' + escapeHtml(names.join(', ')) + '">';
   shown.forEach(function(c) {
@@ -10322,13 +10394,18 @@ function calV3CrewHtml(names, cap, unit, flagEmpty) {
 // day and its job's colour group. The job's facts come from its calendar event
 // when one is in view, else from the order's own job fields.
 function calV3Deliveries() {
-  if (_calFocus.show !== 'everything' && _calFocus.show !== 'materials') return [];
+  if (!calShowPicked('materials')) return [];
+  var preview = !!window.__SW_CAL_FILTERS_PREVIEW;
+  var allTypes = CAL_PICK_KEYS.type.every(function(k) { return _calPick.type[k]; });
   var out = [];
   calDeliveryList(_calDeliveries, _calPOs).forEach(function(po) {
     var ev = null;
     for (var i = 0; i < _calEvents.length; i++) { if (po.job_id && _calEvents[i].job_id === po.job_id) { ev = _calEvents[i]; break; } }
-    var unit = ev ? calV3Unit(ev) : ((po.job_type || po.job_family) ? calV3Unit(po) : '');
-    if (_calFocus.type !== 'all' && unit !== _calFocus.type) return;
+    var unit = ev ? calV3ColourUnit(ev) : ((po.job_type || po.job_family) ? calV3ColourUnit(po) : '');
+    if (preview) {
+      // an order whose job type is unknown shows only while every type is ticked
+      if (unit ? !_calPick.type[unit] : !allTypes) return;
+    } else if (_calFocus.type !== 'all' && unit !== _calFocus.type) return;
     out.push({ po: po, ev: ev, unit: unit, day: String(calDeliveryDay(po)).slice(0, 10) });
   });
   return out;
@@ -10368,6 +10445,34 @@ function syncCalV3Chrome() {
   var sq = function(unit, icons) {
     return '<span class="v3u-' + unit + '" style="display:inline-flex;gap:3px;">' + icons.map(function(ic) { return '<span class="cal-v3-sq">' + calV3Icon(ic, 12) + '</span>'; }).join('') + '</span>';
   };
+  // <calendar-tick-filters> the preview row: tick boxes, Insurance over Repairs and Make Safes
+  var tick = function(kind, key, inner) {
+    var keys = calPickGroup(kind, key);
+    var n = keys.filter(function(o) { return _calPick[kind][o]; }).length;
+    var on = n === keys.length, mixed = n > 0 && !on;
+    return '<label class="cal-focus-btn cal-focus-tick' + (on ? ' on' : '') + (mixed ? ' mixed' : '') + '" data-pick-' + kind + '="' + key + '">'
+      + '<input type="checkbox"' + (on ? ' checked' : '') + (mixed ? ' data-mixed="1"' : '') + ' onchange="setCalPick(\'' + kind + '\',\'' + key + '\',this.checked)">' + inner + '</label>';
+  };
+  var tail =
+    '<span class="cal-focus-key"><span><i style="background:#E6E6EB"></i>Placeholder</span><span><i style="background:#B9B9C2"></i>Client locked in &#128274;</span></span>'
+    + '<span class="cal-v3-new"><button type="button" id="calV3NewBtn" onclick="event.stopPropagation();toggleCalV3NewMenu()">New</button>'
+    + '<span class="cal-v3-new-menu" id="calV3NewMenu"><button type="button" onclick="toggleCalV3NewMenu(false);openAddEventModal();">Event</button><button type="button" onclick="toggleCalV3NewMenu(false);openAssignmentModal();">Job assignment</button></span></span>';
+  if (window.__SW_CAL_FILTERS_PREVIEW) {
+    host.innerHTML =
+      '<span class="cal-focus-lbl">Show</span>'
+      + tick('show', 'all', 'Everything') + tick('show', 'labour', 'Labour')
+      + tick('show', 'materials', '<span style="color:var(--v3g2);display:inline-flex;">' + calV3Icon('truck', 11) + '</span>Materials')
+      + tick('show', 'business', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('biz', 11) + '</span>Business')
+      + '<span class="cal-focus-sep"></span><span class="cal-focus-lbl">Type</span>'
+      + tick('type', 'all', 'All') + tick('type', 'patio', sq('patio', ['patio']) + 'Patios')
+      + tick('type', 'fencing', sq('fencing', ['fencing']) + 'Fencing')
+      + '<span class="cal-focus-group">' + tick('type', 'insurance', 'Insurance')
+      + tick('type', 'repair', sq('repair', ['repair']) + 'Repairs')
+      + tick('type', 'makesafe', sq('makesafe', ['makesafe']) + 'Make Safes') + '</span>'
+      + tail;
+    host.querySelectorAll('input[data-mixed]').forEach(function(i) { i.indeterminate = true; });
+    return;
+  }
   host.innerHTML =
     '<span class="cal-focus-lbl">Show</span>'
     + btn('show', 'everything', 'Everything') + btn('show', 'labour', 'Labour')
@@ -10377,9 +10482,7 @@ function syncCalV3Chrome() {
     + btn('type', 'all', 'All') + btn('type', 'patio', sq('patio', ['patio']) + 'Patios')
     + btn('type', 'fencing', sq('fencing', ['fencing']) + 'Fencing')
     + btn('type', 'insurance', sq('insurance', ['repair', 'makesafe']) + 'Insurance')
-    + '<span class="cal-focus-key"><span><i style="background:#E6E6EB"></i>Placeholder</span><span><i style="background:#B9B9C2"></i>Client locked in &#128274;</span></span>'
-    + '<span class="cal-v3-new"><button type="button" id="calV3NewBtn" onclick="event.stopPropagation();toggleCalV3NewMenu()">New</button>'
-    + '<span class="cal-v3-new-menu" id="calV3NewMenu"><button type="button" onclick="toggleCalV3NewMenu(false);openAddEventModal();">Event</button><button type="button" onclick="toggleCalV3NewMenu(false);openAssignmentModal();">Job assignment</button></span></span>';
+    + tail;
 }
 function toggleCalV3NewMenu(force) {
   var menu = document.getElementById('calV3NewMenu');

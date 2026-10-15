@@ -1,0 +1,3 @@
+no ?annotate: dev/annotate requests=0, __SW_ANNOTATE=undefined, supabase stand-in=false
+?annotate: {"write":"403 Sample data only while notes are on: nothing is saved or sent.","otherHost":"refused: Sample data only while notes are on: example.com is not reached.","rawXhrToSupabase":"blocked"}
+real sign-in held: toolbar=refused, vendor requests=0, banner="Notes are off: this address holds data from a real sign-in (sb-kevgrhcjxspbxgovpmfl-auth-token). Open ops.html?annotate on a port you have never signed in on."

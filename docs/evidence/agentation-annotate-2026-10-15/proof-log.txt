@@ -1,0 +1,31 @@
+[mcp] [MCP] Agentation MCP server started on stdio (HTTP: http://localhost:4747)
+[mcp] [HTTP] Agentation server listening on http://localhost:4747
+mcp server: {"name":"agentation","version":"0.0.1"}
+browser: chromium 149.0.7827.55 (Playwright bundled Chromium, headless, fresh profile)
+[mcp] [HTTP] POST /sessions
+[Store] Using in-memory store (AGENTATION_STORE=memory)
+[mcp] [HTTP] GET /sessions/mv91czfv-jlox5k/events
+[mcp] [HTTP] POST /sessions/mv91czfv-jlox5k/annotations
+[mcp] [HTTP] GET /pending
+agentation_get_all_pending ->
+{
+  "count": 1,
+  "annotations": [
+    {
+      "id": "mv91d1am-5rp3i7",
+      "kind": "feedback",
+      "comment": "TEST NOTE from agentation-ux-20261015 2026-10-15T04:25: toolbar check, please ignore",
+      "element": "\"Sample Client B\"",
+      "elementPath": ".kanban-body > .kanban-card > .kanban-card-header > .kanban-client",
+      "url": "http://127.0.0.1:4791/ops.html?annotate#jobs",
+      "timestamp": 1792038345921,
+      "nearbyText": "Sample Client B [after: \"$6,800.00\"]",
+      "attributes": {}
+    }
+  ]
+}
+PASS: the note reached the agent
+requests that left this Mac (scripts only expected):
+  GET https://cdn.jsdelivr.net/npm/chart.js@4
+  GET https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2
+  GET https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js

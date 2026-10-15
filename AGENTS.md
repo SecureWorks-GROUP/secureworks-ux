@@ -1097,6 +1097,13 @@ action. Reattendance behavior is documented in `trade-app.md`, and Ops report
 cycles in `ops-dashboard.md`; keep those documents authoritative rather than
 duplicating the contracts here.
 
+Owner notes toolbar (dev only): `ops.html?annotate` on localhost/127.0.0.1 loads the
+agentation click-to-annotate toolbar with SAMPLE DATA ONLY (Supabase stand-in, sample
+ops-api reads, writes and other hosts refused), because notes carry the clicked text
+and are kept on disk. Never let it load real data or load off localhost. Gate
+`// <ops-annotate-gate>`, files and use in `dev/annotate/README.md`; guard
+`scripts/test-ops-annotate-gate.js`.
+
 Gotchas:
 - `ops.html` module tags used frozen `?v=` queries. GitHub Pages deploys from `main` with no rewrite step (`build_type: legacy`), so a merge that only changed a module left the captain on the cached copy. `__swOpsStampAssets` (`// <ops-asset-cache-bust>`) restamps those tags at load with `Date.now()`; keep new `?v=` assets on that helper, do not go back to a fixed query.
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global —

@@ -4,6 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecureWorks — Ops Dashboard</title>
+  <script>
+  // <ops-annotate-gate>
+  // Dev only: the agentation note toolbar, with sample data in place of the
+  // real backend, loads only on localhost or 127.0.0.1 with ?annotate in the
+  // address. Anywhere else this writes nothing. See dev/annotate/README.md.
+  (function (loc) {
+    var local = loc.hostname === 'localhost' || loc.hostname === '127.0.0.1';
+    if (local && /[?&]annotate(=|&|$)/.test(loc.search)) {
+      document.write('<script src="dev/annotate/boot.js"><\/script>');
+    }
+  })(window.location);
+  // </ops-annotate-gate>
+  </script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <!-- Supabase -->

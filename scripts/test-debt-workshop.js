@@ -267,6 +267,13 @@ check('the tab shows with ?debt=1, the browser flag, or tab_visible', () => {
   assert.strictEqual(C.tabVisible('', '0', { tab_visible: false }), false);
   assert.strictEqual(C.tabVisible('', null, { tab_visible: true }), true);
 });
+check('a visibility read answers true, false, or unknown (unknown never hides the tab)', () => {
+  assert.strictEqual(C.probeAnswer({ settings: { tab_visible: true } }), true);
+  assert.strictEqual(C.probeAnswer({ settings: { tab_visible: false } }), false);
+  assert.strictEqual(C.probeAnswer({ settings: {} }), null);
+  assert.strictEqual(C.probeAnswer({}), null);
+  assert.strictEqual(C.probeAnswer(null), null);
+});
 check('conversation: oldest first, newest at the bottom, a day line when the Perth day changes', () => {
   const th = C.thread({ messages: [
     { id: '3', occurred_at: '2026-10-07T02:00:00Z', body: 'c' },
@@ -457,6 +464,54 @@ async function uxPosts() {
       });
     });
     console.log('debt-workshop: contract checked against ' + be.file);
+  }
+
+  // The nav button in a bare page: a failed read keeps the tab as last seen and tries again;
+  // only a real answer from the backend shows or hides it.
+  async function probeRun(answers, seen) {
+    const store = seen == null ? {} : { sw_debt_ws_seen: seen };
+    const btn = { style: { display: 'none' } };
+    const timers = [];
+    const pctx = {
+      document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({}), querySelectorAll: () => [btn], addEventListener() {}, visibilityState: 'visible' },
+      window: { location: { search: '' } },
+      localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
+      opsFetch: async () => { const a = answers.shift(); if (a instanceof Error) throw a; return a; },
+      opsPost: async () => ({ ok: true }), showToast() {},
+      console, Intl, Date, Math, Number, String, Object, Array, JSON, Promise,
+      setTimeout: (fn, ms) => { timers.push(ms); return timers.length; },
+    };
+    vm.createContext(pctx);
+    vm.runInContext(src, pctx);
+    const out = [];
+    out.push(await pctx.debtWsProbeVisibility());
+    out.push(btn.style.display);
+    return { out, store, timers };
+  }
+  for (const [name, fn] of [
+    ['a failed first read keeps a tab seen before, and schedules a retry', async () => {
+      const r = await probeRun([new Error('API error: 401')], '1');
+      assert.deepStrictEqual(r.out, [true, '']);
+      assert.deepStrictEqual(r.timers, [5000]);
+    }],
+    ['a failed read on a first visit leaves the tab hidden and retries', async () => {
+      const r = await probeRun([new Error('timeout')], null);
+      assert.deepStrictEqual(r.out, [false, 'none']);
+      assert.deepStrictEqual(r.timers, [5000]);
+    }],
+    ['tab_visible true shows the tab and remembers it', async () => {
+      const r = await probeRun([{ settings: { tab_visible: true } }], null);
+      assert.deepStrictEqual(r.out, [true, '']);
+      assert.strictEqual(r.store.sw_debt_ws_seen, '1');
+      assert.deepStrictEqual(r.timers, []);
+    }],
+    ['tab_visible false hides a remembered tab and forgets it', async () => {
+      const r = await probeRun([{ settings: { tab_visible: false } }], '1');
+      assert.deepStrictEqual(r.out, [false, 'none']);
+      assert.strictEqual(r.store.sw_debt_ws_seen, '0');
+    }],
+  ]) {
+    try { await fn(); } catch (e) { failed += 1; console.error('FAIL debt-workshop: ' + name + '\n  ' + e.message); }
   }
 
   if (failed) { console.error(failed + ' debt-workshop check(s) failed'); process.exit(1); }

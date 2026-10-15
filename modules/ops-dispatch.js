@@ -2051,10 +2051,10 @@
       ed.again = false;
       var code = err && err.code;
       if (code === 'draft_changed' || code === 'draft_not_editable') {
+        delete m.edits[id];
         m.notice = 'This draft changed. Showing the latest.';
         readMail(jobId, true);
-      }
-      ed.failed = true;
+      } else ed.failed = true;
       paintMailIf(jobId);
     });
   }
@@ -2161,17 +2161,20 @@
 
   // The thread's Send now press (or Try the send again after an unconfirmed
   // reply). The address is the supplier's own, never typed.
-  function sendThreadReply(jobId, key) {
+  function sendThreadReply(jobId, key, retry) {
     var m = mailEntry(jobId);
     var t = m && threadByKey(m, key);
-    var body = m ? String(m.replies[key] || '') : '';
-    if (!t || !t.can_reply || !body.trim() || m.busy['reply:' + key]) return;
+    var held = m && m.msg['reply:' + key];
+    if (!t || !t.can_reply || m.busy['reply:' + key]) return;
+    if (retry ? !(held && held.unknown) : held && held.unknown) return;
+    var attempt = retry ? held.attempt : { reply_to_message_id: newestMessageId(t), body_text: String(m.replies[key] || '') };
+    if (!attempt.body_text.trim()) return;
     m.busy['reply:' + key] = true;
     m.msg['reply:' + key] = null;
     m.ask = null;
     paintMailIf(jobId);
     Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_reply', { job_id: jobId, thread_key: key, reply_to_message_id: newestMessageId(t), body_text: body });
+      return global.opsPost('dispatch_order_reply', { job_id: jobId, thread_key: key, reply_to_message_id: attempt.reply_to_message_id, body_text: attempt.body_text });
     }).then(writeOk).then(function () {
       delete m.busy['reply:' + key];
       m.replies[key] = '';
@@ -2180,7 +2183,7 @@
     }, function (err) {
       delete m.busy['reply:' + key];
       var code = err && err.code;
-      if (code === 'send_unknown') m.msg['reply:' + key] = { text: 'We could not tell whether this reply went. Check the thread before trying again.', unknown: true };
+      if (code === 'send_unknown') m.msg['reply:' + key] = { text: 'We could not tell whether this reply went. Check the thread before trying again.', unknown: true, attempt: attempt };
       else if (code === 'thread_changed') { m.notice = 'This thread changed. Showing the latest. Your text is still here.'; readMail(jobId, true); }
       else m.msg['reply:' + key] = { text: 'Reply not sent. Your text is still here.' };
       paintMailIf(jobId);
@@ -3205,11 +3208,11 @@
 
   function draftItemHtml(m, d) {
     var key = 'd:' + d.id;
-    var unknown = d.status === 'send_unknown' || d.status === 'sending';
+    var unknown = d.status === 'send_unknown';
     var h = '<button type="button" class="dpc-mail-item dpc-mail-draft" data-dpc-mail="pick" data-dpc-mail-key="' + esc(key) + '" aria-pressed="' + (m.sel === key) + '">';
     h += '<span class="dpc-mail-top"><strong>' + esc(text(d.supplier_name) || 'Supplier not recorded') + '<span class="dpc-mail-drafttag">Draft</span></strong><small>' + esc(madeText(d.created_at)) + '</small></span>';
     h += '<span class="dpc-mail-subj">' + esc(text(d.subject)) + '</span>';
-    return h + '<span class="' + (unknown ? 'dpc-mat-fail' : 'dpc-muted') + '">' + (unknown ? 'Send not confirmed' : 'Draft ready to send') + '</span></button>';
+    return h + '<span class="' + (unknown ? 'dpc-mat-fail' : 'dpc-muted') + '">' + (unknown ? 'Send not confirmed' : d.status === 'sending' ? 'Sending...' : 'Draft ready to send') + '</span></button>';
   }
 
   function tagWord(t) { return t.tag === 'client' ? 'Client' : 'Supplier'; }
@@ -3255,8 +3258,10 @@
   }
 
   // A released send (dispatch_order_release_unknown): the server writes who into
-  // last_error; when comes from the release answer's stamp. A later save moves
-  // the draft's own stamp, so it is never used as the release time.
+  // last_error; when comes from the release answer's stamp, known only to the
+  // tab that released it. A later save moves the draft's own stamp, so it is
+  // never used as the release time. Follow-up: a back-end released_at on the
+  // draft read.
   var RELEASED_RE = /^Released as not sent by (.+)$/;
   function releasedHtml(m, d) {
     var who = RELEASED_RE.exec(text(d.last_error));
@@ -3267,15 +3272,17 @@
   }
 
   // A send not confirmed for more than a day: Resend's guard against a second
-  // copy has lapsed, so the person must check before trying again.
+  // copy has lapsed, so the person must check before trying again. Each retry
+  // moves updated_at, so this counts from when the draft was made: early, never
+  // late. Follow-up: a back-end first_attempt_at on the draft read.
   var DAY_MS = 24 * 3600 * 1000;
-  function stuckOverDay(d) { var t = Date.parse(text(d.updated_at)); return isFinite(t) && Date.now() - t > DAY_MS; }
+  function stuckOverDay(d) { var t = Date.parse(text(d.created_at)); return isFinite(t) && Date.now() - t > DAY_MS; }
 
   function draftViewHtml(m, d) {
     var id = esc(d.id);
     var ref = 'data-dpc-mail-key="' + id + '"';
-    var unknown = d.status === 'send_unknown' || d.status === 'sending';
-    var sending = !!m.busy['send:' + d.id];
+    var unknown = d.status === 'send_unknown';
+    var sending = !!m.busy['send:' + d.id] || d.status === 'sending';
     var editable = d.status === 'draft' && !sending;
     var ed = m.edits[d.id] || {};
     var po = text(d.po_number) || 'the order';
@@ -3294,6 +3301,9 @@
     h += '<div class="dpc-attach">' + docChip(file, 'PO with ' + (isFinite(n) ? n : '?') + ' line' + (n === 1 ? '' : 's') + ' and the delivery address' +
       (state.mail.pdf['draft:' + d.id] === 'busy' ? ' · Opening...' : ''), pdfAttrs) + pdfFailHtml('draft:' + d.id, pdfAttrs) + '</div>';
     var ask = m.ask && m.ask.id === d.id ? m.ask.kind : null;
+    if (d.status === 'sending') {
+      return h + '<div class="dpc-actions"><button type="button" class="dpc-primary" disabled>Sending...</button></div>';
+    }
     if (unknown) {
       h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">We could not tell whether this email went. Check the thread before trying again.</p>';
       if (stuckOverDay(d)) {
@@ -3344,18 +3354,19 @@
     if (t.tag !== 'supplier') return h;
     if (t.can_reply) {
       var busy = !!m.busy['reply:' + t.key];
-      var draft = String(m.replies[t.key] || '');
-      var to = replyTo(t);
       var msg = m.msg['reply:' + t.key];
+      var held = !!(msg && msg.unknown);
+      var draft = held ? msg.attempt.body_text : String(m.replies[t.key] || '');
+      var to = replyTo(t);
       h += '<div class="dpc-mail-reply"><textarea class="dpc-textarea dpc-mail-replybox" data-dpc-mail-reply="' + key + '" maxlength="20000" placeholder="Reply to the supplier..." aria-label="Reply to the supplier"' +
-        (busy ? ' disabled' : '') + '>' + esc(draft) + '</textarea>';
+        (busy || held ? ' disabled' : '') + '>' + esc(draft) + '</textarea>';
       if (msg) {
         h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">' + esc(msg.text) + '</p>';
         if (msg.unknown) h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="reply-again" ' + ref + (busy ? ' disabled' : '') + '>Try the send again</button></div>';
       }
       if (m.ask && m.ask.kind === 'reply' && m.ask.id === t.key && draft.trim() && !busy) {
         h += confirmHtml('Send this reply to ' + to + '?', ['reply-go', 'Send now'], ['reply-no', 'Not yet'], ref);
-      } else if (!(msg && msg.unknown)) {
+      } else if (!held) {
         h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="reply" ' + ref + (busy || !draft.trim() ? ' disabled' : '') + '>' + (busy ? 'Sending...' : 'Send reply') + '</button></div>';
       }
       h += '</div>';
@@ -3787,7 +3798,8 @@
     else if (act === 'save-retry') saveDraft(jobId, key);
     else if (act === 'reply') ask('reply', 'reply-no');
     else if (act === 'reply-no') unask('reply');
-    else if (act === 'reply-go' || act === 'reply-again') sendThreadReply(jobId, key);
+    else if (act === 'reply-go') sendThreadReply(jobId, key, false);
+    else if (act === 'reply-again') sendThreadReply(jobId, key, true);
     else if (act === 'link') linkThread(jobId, key);
     return true;
   }

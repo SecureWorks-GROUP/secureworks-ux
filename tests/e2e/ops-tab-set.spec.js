@@ -2576,7 +2576,7 @@ function fakeOrders(seed = {}, mailSeed = {}) {
       if (!d) return refuse(404, 'draft_not_found');
       if (d.draft_hash !== b.expected_draft_hash) return refuse(409, 'draft_changed', { draft: d });
       const f = forced('dispatch_order_send');
-      if (f) { if (f.body && f.body.code === 'send_unknown') { d.status = 'send_unknown'; d.updated_at = f.at || stamp(); } return f; }
+      if (f) { if (f.body && f.body.code === 'send_unknown') { d.status = 'send_unknown'; d.updated_at = stamp(); } return f; }
       const o = fake.job(jobId).orders.find((x) => x.id === d.purchase_order_id);
       o.last_sent_at = stamp();
       o.last_sent_pdf_version = o.pdf_version;
@@ -2731,8 +2731,10 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     expect(of('dispatch_order_send')).toHaveLength(2);
     await expect(view.locator('[data-dpc-mail="send"]')).toBeEnabled();
 
-    // Stuck for more than a day: the screen says to check before a retry.
-    fake.fail.dispatch_order_send = [{ status: 502, body: { error: 'unknown', code: 'send_unknown' }, at: new Date(Date.now() - 25 * 3600 * 1000).toISOString() }];
+    // Made more than a day ago: the screen says to check before a retry, even
+    // though the last attempt moved the draft's own stamp to now.
+    fake.mail['job-f1'].drafts[0].created_at = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    fake.fail.dispatch_order_send = [{ status: 502, body: { error: 'unknown', code: 'send_unknown' } }];
     await view.locator('[data-dpc-mail="send"]').click();
     await view.locator('[data-dpc-mail="send-go"]').click();
     await expect(view).toContainText('This send has not been confirmed for more than 24 hours. Check the supplier thread and ask the supplier before trying again');

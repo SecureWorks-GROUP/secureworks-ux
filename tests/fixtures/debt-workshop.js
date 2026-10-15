@@ -226,7 +226,25 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     [uuid(621)]: { ok: true, document: { id: uuid(621), file_name: 'Quote QT-9003.pdf' }, file_name: 'Quote QT-9003.pdf', content: { base64: PDF_B64, mime_type: 'application/pdf' } },
     [uuid(622)]: { ok: true, document: { id: uuid(622), file_name: 'Completion photo.png' }, file_name: 'Completion photo.png', content: { base64: PNG_B64, mime_type: 'image/png' } },
   };
-  return { overview, jobs, jobsAll, janList, statements, documents, invoicePdf: { success: true, pdf_base64: PDF_B64, filename: 'invoice.pdf' }, ids: {
+  // debt_ws_report: the live report (its HTML is the backend's; this is a small stand-in) and
+  // who it goes to. The gate follows the settings: owner and sending on means it can send.
+  const owner = !!settings.viewer_is_owner, sendingOn = !!settings.sending_on;
+  const report = {
+    ok: true, version: 'debt-ws/v1', perth_date: today, read_at: at(0, '09:15'),
+    report: { version: 'debt-report/v1', today, as_at: '9:15am Perth time, today', debt: { count: 12, amount: 21456.82 }, xero_open: { count: 20, amount: 41890.4 }, tie: { ok: true } },
+    html: '<!doctype html><html><head><meta charset="utf-8"><title>Debt position</title></head><body style="font-family:Helvetica,Arial,sans-serif;padding:20px">' +
+      '<h1>Debt position</h1><p>As at 9:15am Perth time, today</p><table><tr><td>Total debt</td><td>$21,456.82</td></tr>' +
+      '<tr><td>Adds up to total open in Xero</td><td>$41,890.40</td></tr></table><p>Check: $41,890.40 equals Xero\'s open total to the cent.</p></body></html>',
+    delivery: {
+      from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], auto_send: false,
+      sending_on: sendingOn, viewer_is_owner: owner, can_send: owner && sendingOn,
+      why_not: !owner ? 'Only the workshop owner (Shaun) can send the report' : !sendingOn ? 'Sending is off until you switch it on' : null,
+    },
+    last_sent: opts.reportLastSent || null,
+    last_attempt: opts.reportLastSent || null,
+  };
+  const reportPdf = { ok: true, filename: 'Debt position ' + today + '.pdf', content_type: 'application/pdf', pdf_base64: PDF_B64, page_count: 1 };
+  return { overview, jobs, jobsAll, janList, statements, documents, report, reportPdf, invoicePdf: { success: true, pdf_base64: PDF_B64, filename: 'invoice.pdf' }, ids: {
     avery: avery.xero_invoice_id, casey: casey.xero_invoice_id, sasha: sasha.xero_invoice_id, riley: uuid(9004), harbour: uuid(701), coastline: uuid(702), drew: uuid(9007),
     jamie: uuid(9008), caseySuggestion: uuid(601), caseyFlag: uuid(611), sashaSuggestion: uuid(605), averyContact: ghlId(1), harbourInvoice: uuid(9301),
     rileyContact: ghlId(404), taylorContact: taylorGhl,

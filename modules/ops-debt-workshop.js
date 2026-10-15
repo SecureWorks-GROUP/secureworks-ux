@@ -10,12 +10,14 @@
 // W2 (job screen): a status strip with the ladder of follow-up steps, then three calm
 //   columns: the job story, money and documents; the conversation with the suggested
 //   message inline; notes.
+// The debt report: "Debt report" (top right of W1) opens the live debt position as its own
+//   view, read fresh each time, with Download PDF and Send to Marnin (owner only, asks first).
 //
 // Reads:  debt_ws_overview, debt_ws_job, debt_ws_document, get_invoice_pdf,
-//         debt_ws_statement_preview, debt_ws_jan_list.
+//         debt_ws_statement_preview, debt_ws_jan_list, debt_ws_report, debt_ws_report_pdf.
 // Writes: debt_ws_note (any staff), and owner only: debt_ws_decide (send, skip or dismiss),
 //         debt_ws_set_category (a move card, Keep chasing, or Change beside the pill),
-//         debt_ws_link_contact, debt_ws_statement_send, debt_ws_jan_list_remove. The backend runs every guard again; the screen only
+//         debt_ws_link_contact, debt_ws_statement_send, debt_ws_jan_list_remove, debt_ws_report_send. The backend runs every guard again; the screen only
 //         disables what it already knows will be refused, and always says why.
 //
 // The tab is hidden until it is switched on: ?debt=1, localStorage.sw_debt_ws === '1',
@@ -96,6 +98,16 @@ var DebtWorkshopCore = (function () {
     no_job: 'This invoice has no job, so there is no card to move.',
     not_in_book: 'This invoice is not in the debt list any more. Read the list again.',
     not_found: 'That could not be found any more. Read the job again.',
+    // The debt report (debt_ws_report_send).
+    no_recipients: 'No one is set to receive the report.',
+    recipient_not_internal: 'The report only goes to SecureWorks Group addresses (@secureworkswa.com.au).',
+    recently_sent: 'The report was just sent. Wait two minutes before sending it again.',
+    report_pdf_failed: 'The report could not be made just now, so nothing was sent. Try again shortly.',
+  };
+  // A few codes mean something different on the report than on a text.
+  var REPORT_REFUSALS = {
+    send_not_confirmed: 'The email could not be confirmed. Check Sent Items in the admin mailbox before sending it again.',
+    already_sent: 'The report could not be claimed for sending. Try again shortly.',
   };
 
   function num(n) { var v = Number(n); return isFinite(v) ? v : 0; }
@@ -555,8 +567,50 @@ var DebtWorkshopCore = (function () {
     return 'DOC';
   }
 
+  // ── The debt report view (debt_ws_report) ──
+  // "Marnin" from marnin@secureworkswa.com.au.
+  function nameFromEmail(email) {
+    var local = String(email || '').split('@')[0].split(/[._-]/)[0];
+    return local ? local.charAt(0).toUpperCase() + local.slice(1).toLowerCase() : '';
+  }
+  // The Send button's words: "Send to Marnin" for one recipient, else "Send report".
+  function reportSendLabel(delivery) {
+    var to = (delivery && Array.isArray(delivery.to)) ? delivery.to : [];
+    return to.length === 1 && nameFromEmail(to[0]) ? 'Send to ' + nameFromEmail(to[0]) : 'Send report';
+  }
+  // Whether Send can be pressed, and why not, in words. The backend checks it all again.
+  function reportGate(delivery) {
+    var d = delivery || {};
+    if (!d.viewer_is_owner) return { ok: false, reason: 'Only an owner can send the report.' };
+    if (!d.sending_on) return { ok: false, reason: SENDING_OFF_WORDS + '.' };
+    if (!d.can_send) return { ok: false, reason: (d.why_not ? String(d.why_not).replace(/\.?$/, '.') : 'The report cannot be sent right now.') };
+    return { ok: true, reason: '' };
+  }
+  // "From admin@... to marnin@..., cc shaun@...".
+  function reportRoute(delivery) {
+    var d = delivery || {}, to = Array.isArray(d.to) ? d.to : [], cc = Array.isArray(d.cc) ? d.cc : [];
+    if (!to.length) return 'No one is set to receive the report.';
+    return 'Sends from ' + (d.from || 'admin@secureworkswa.com.au') + ' to ' + to.join(', ') + (cc.length ? ', cc ' + cc.join(', ') : '') + '.';
+  }
+  // "Last sent to Marnin: today, 9:02am" or "Last sent to Marnin: Mon 13 Oct, 9:02am", or never.
+  function reportLastSent(last, delivery, today) {
+    var who = reportSendLabel(last && last.to && last.to.length ? { to: last.to } : delivery).replace(/^Send to /, '').replace(/^Send report$/, '');
+    var head = 'Last sent' + (who ? ' to ' + who : '') + ': ';
+    if (!last || !last.at) return head + 'never';
+    var day = perthDay(last.at);
+    var when = day && today && day === today ? 'today' : dateWords(day);
+    return head + when + ', ' + perthTime(last.at) + (last.kind === 'auto' ? ' (Monday auto-send)' : last.by ? ' by ' + last.by : '');
+  }
+  // A refusal on the report, in words.
+  function reportRefusalText(x) {
+    var code = refusalCode(x);
+    return REPORT_REFUSALS[code] || refusalText(x);
+  }
+
   return {
     CATS: CATS, FILTERS: FILTERS, BADGES: BADGES, STEPS: STEPS, REFUSALS: REFUSALS, SENDING_OFF_WORDS: SENDING_OFF_WORDS,
+    nameFromEmail: nameFromEmail, reportSendLabel: reportSendLabel, reportGate: reportGate, reportRoute: reportRoute,
+    reportLastSent: reportLastSent, reportRefusalText: reportRefusalText,
     num: num, money: money, money0: money0, plural: plural, perthDate: perthDate, dayNum: dayNum, dateWords: dateWords,
     perthDay: perthDay, perthTime: perthTime, whenWords: whenWords, dayLabel: dayLabel, catByKey: catByKey,
     typeKey: typeKey, badge: badge, stepLabel: stepLabel, kindWord: kindWord, invoiceLabel: invoiceLabel, isReady: isReady, nextStep: nextStep,
@@ -589,6 +643,9 @@ var DW = {
   modalUrl: null, modalGen: 0, modalCompany: null, bound: false, focus: null,
   janLoaded: false, janMsg: null, noteMsg: null, catMenu: false, stmtPossible: {},
   convAll: false, // the job screen shows the payer's own messages; true: the whole job's thread
+  // The debt report view ('report'): read fresh every time it opens (debt_ws_report).
+  repGen: 0, rep: null, repErr: null, repLoading: false, repShown: 0,
+  repConfirm: false, repBusy: null, repMsg: null,
 };
 
 function dwEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -857,6 +914,19 @@ function dwCss() {
     '.dw-sk{display:block;background:linear-gradient(90deg,#EEF1F3 25%,#F6F8F9 50%,#EEF1F3 75%);background-size:200% 100%;animation:dwsk 1.2s ease-in-out infinite;border-radius:3px}',
     '@keyframes dwsk{0%{background-position:200% 0}100%{background-position:-200% 0}}',
     '@media (prefers-reduced-motion: reduce){.dw-sk{animation:none}}',
+    // The debt report view: the button top right, then the report's own view
+    '.dw-headr{display:flex;flex-direction:column;align-items:flex-end;gap:10px}',
+    '.dw-rep-h{padding:20px 24px;display:grid;gap:10px}',
+    '.dw-rep-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px 18px;flex-wrap:wrap}',
+    '.dw-rep-acts{margin-top:0}',
+    '.dw-rep-meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--dw-mid)}',
+    '.dw-rep-meta .why{color:var(--dw-midl)}',
+    '.dw-rep-confirm{padding:12px 14px;background:var(--dw-ort);border:1px solid #F5C3AF;border-radius:var(--dw-r);font-size:13px;line-height:1.5;color:var(--dw-deep)}',
+    '.dw-rep-ok{padding:10px 13px;background:var(--dw-saget);color:var(--dw-sage);border-radius:var(--dw-r);font-size:12.5px;font-weight:600}',
+    '.dw-rep-h .dw-refuse{margin-top:0}',
+    '.dw-rep-body{overflow:hidden}',
+    '.dw-rep-body iframe{width:100%;height:calc(100vh - 260px);min-height:560px;border:0;display:block;background:#fff}',
+    '@media (max-width:640px){.dw-headr{align-items:flex-start;width:100%}.dw-rep-h{padding:16px}.dw-rep-body iframe{height:72vh;min-height:420px}}',
     // Modal
     '.dw-modal{position:fixed;inset:0;background:rgba(26,39,46,.55);display:flex;align-items:center;justify-content:center;z-index:3000;padding:20px}',
     '.dw-sheet{background:#fff;width:min(900px,100%);max-height:calc(100vh - 40px);display:flex;flex-direction:column;border-radius:6px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.3);color:var(--dw-deep)}',
@@ -931,6 +1001,7 @@ function loadDebtWorkshop() {
   dwCss(); dwBind();
   if (!dwRoot()) return;
   if (DW.view === 'job' && DW.jobId) { dwRender(); dwLoadJob(true); dwLoadOverview(true); return; }
+  if (DW.view === 'report') { dwRender(); dwLoadReport(!!DW.rep); return; }
   dwLoadOverview(!!DW.ov); // a probe may already have read it: show that, refresh underneath
 }
 async function dwLoadOverview(quiet) {
@@ -1006,7 +1077,9 @@ function dwCurrent() {
 function dwRender() {
   var root = dwRoot(); if (!root) return;
   var th = document.getElementById('dwThread'), prev = th ? th.scrollTop : null;
-  root.innerHTML = DW.view === 'job' ? dwJobHtml() : dwListHtml();
+  root.innerHTML = DW.view === 'job' ? dwJobHtml() : DW.view === 'report' ? dwReportHtml() : dwListHtml();
+  // The report's frame was just drawn from this read: later repaints only redraw the top.
+  DW.repShown = DW.view === 'report' && DW.rep ? DW.repGen : 0;
   var nt = document.getElementById('dwThread');
   if (nt) {
     if (DW.scrollThread || prev === null) { nt.scrollTop = nt.scrollHeight; DW.scrollThread = false; } // newest at the bottom
@@ -1039,9 +1112,11 @@ function dwListHtml() {
     '<span class="dw-state' + (s.sending_on ? ' on' : '') + '" id="dwSendingState"><i></i>' + (s.sending_on ? 'Sending on' : 'Sending off') + '</span>' +
     (s.agent_on ? '<span class="dw-state on"><i></i>Agent on</span>' : '') +
     (DW.loading ? '<span>Refreshing</span>' : '') +
-    '</div></div><div class="dw-filters" role="group" aria-label="Job type">' +
+    // Top right: the Debt report button, then the job type filters under it.
+    '</div></div><div class="dw-headr"><button type="button" class="dw-btn g" data-dw="report" id="dwReportBtn">Debt report</button>' +
+    '<div class="dw-filters" role="group" aria-label="Job type">' +
     C.FILTERS.map(function (f) { return '<button type="button" class="dw-chip' + (f.key === DW.jt ? ' on' : '') + '" data-dw="jt" data-k="' + f.key + '" aria-pressed="' + (f.key === DW.jt) + '">' + dwEsc(f.label) + '</button>'; }).join('') +
-    '</div></div>';
+    '</div></div></div>';
 
   // Donut and legend
   var t = cur.totals, segs = C.donut(t, cur.cat, 78);
@@ -1452,6 +1527,129 @@ function dwNotesHtml(J) {
 }
 
 // ════════════════════════════════════════════════════════════
+// THE DEBT REPORT (its own view inside the Debt tab)
+// "Debt report" (top right of the overview) opens the live debt position. It is read fresh from
+// debt_ws_report every time the view opens, so it is never a stale copy. The report itself is
+// the backend's HTML, shown in a sandboxed frame (no scripts, no reach into this page).
+// Download PDF reads debt_ws_report_pdf (the same PDF that is emailed). Send to Marnin is
+// owner only and asks first (a second click), then posts debt_ws_report_send, which builds the
+// report again at the moment it sends.
+// ════════════════════════════════════════════════════════════
+function dwOpenReport() {
+  DW.view = 'report'; DW.repConfirm = false; DW.repMsg = null; DW.repBusy = null;
+  dwRender();
+  try { window.scrollTo(0, 0); } catch (e) {}
+  dwLoadReport(false);
+}
+async function dwLoadReport(quiet) {
+  var g = ++DW.repGen;
+  DW.repLoading = true;
+  if (!quiet) { DW.rep = null; DW.repErr = null; }
+  if (DW.view === 'report') dwRender();
+  var res = null, err = null;
+  try { res = await opsFetch('debt_ws_report'); } catch (e) { err = e; }
+  if (g !== DW.repGen) return; // a newer read superseded this one
+  DW.repLoading = false;
+  if (err) { if (!quiet || !DW.rep) { DW.rep = null; DW.repErr = err; } }
+  else { DW.rep = res || {}; DW.repErr = null; }
+  if (DW.view === 'report') dwRender();
+}
+// Redraws only the top of the report view when the frame already shows this read, so the
+// report keeps its scroll position while Send asks and answers.
+function dwReportPaint() {
+  var top = document.getElementById('dwReportTop');
+  if (top && DW.view === 'report' && DW.rep && DW.repShown === DW.repGen) { top.innerHTML = dwReportTopHtml(); return; }
+  dwRender();
+}
+function dwReportSkeleton() {
+  return '<div class="dw-card dw-rep-h" aria-busy="true">' + dwSk('220px', 22) + dwSk('320px', 12, 'margin-top:10px') + '</div>' +
+    '<div class="dw-card dw-rep-body">' + dwSk('100%', 420, 'border-radius:0') + '</div>';
+}
+function dwReportTopHtml() {
+  var C = DebtWorkshopCore, R = DW.rep || {}, d = R.delivery || {}, gate = C.reportGate(d), today = R.perth_date || dwToday();
+  var asAt = R.report && R.report.as_at ? R.report.as_at : (R.read_at ? C.perthTime(R.read_at) : '');
+  var busy = DW.repBusy;
+  var head = '<div class="dw-rep-row"><div><h1 class="dw-title">Debt report</h1><div class="dw-sub">' +
+    (asAt ? '<span>As at ' + dwEsc(asAt) + '</span>' : '') +
+    '<span>Built fresh from live data each time it opens</span>' + (DW.repLoading ? '<span>Refreshing</span>' : '') + '</div></div>' +
+    '<div class="dw-acts dw-rep-acts">' +
+    '<button type="button" class="dw-btn g" data-dw="report-refresh"' + dwDis(DW.repLoading || !!busy) + '>Read again</button>' +
+    '<button type="button" class="dw-btn g" data-dw="report-pdf" id="dwReportPdf"' + dwDis(!!busy) + '>' + (busy === 'pdf' ? 'Making the PDF...' : 'Download PDF') + '</button>' +
+    '<button type="button" class="dw-btn" data-dw="report-send" id="dwReportSend"' + dwDis(!gate.ok || !!busy || DW.repConfirm) + '>' + dwEsc(C.reportSendLabel(d)) + '</button>' +
+    '</div></div>';
+  var meta = '<div class="dw-rep-meta" id="dwReportMeta"><span>' + dwEsc(C.reportRoute(d)) + '</span>' +
+    '<span id="dwReportLast">' + dwEsc(C.reportLastSent(R.last_sent, d, today)) + '</span>' +
+    '<span>Monday auto-send: ' + (d.auto_send ? 'on' : 'off') + '</span>' +
+    (gate.ok ? '' : '<span class="why" id="dwReportWhy">' + dwEsc(gate.reason) + '</span>') + '</div>';
+  var confirm = DW.repConfirm
+    ? '<div class="dw-rep-confirm" id="dwReportConfirm"><b>Send this report now?</b> ' + dwEsc(C.reportRoute(d)) +
+      ' It is built again from live data at the moment it sends, with the PDF attached.' +
+      '<div class="dw-acts"><button type="button" class="dw-btn" data-dw="report-send-confirm" id="dwReportConfirmSend"' + dwDis(!!busy) + '>' + (busy === 'send' ? 'Sending...' : 'Yes, send it') + '</button>' +
+      '<button type="button" class="dw-btn g" data-dw="report-send-cancel"' + dwDis(!!busy) + '>Cancel</button></div></div>'
+    : '';
+  var msg = DW.repMsg ? '<div class="' + (DW.repMsg.ok ? 'dw-rep-ok' : 'dw-refuse') + '" id="dwReportMsg" role="status">' + dwEsc(DW.repMsg.text) + '</div>' : '';
+  return head + meta + confirm + msg;
+}
+function dwReportHtml() {
+  var crumb = '<div class="dw-crumb"><button type="button" class="dw-nav" data-dw="report-back">' + DW_IC.left + ' Back to the Debt tab</button></div>';
+  if (!DW.rep && (DW.repLoading || !DW.repErr)) return '<div class="dw">' + crumb + dwReportSkeleton() + '</div>';
+  if (!DW.rep) return '<div class="dw">' + crumb + '<div class="dw-card">' + dwFailHtml('The debt report', DW.repErr, 'report-reload') + '</div></div>';
+  var html = String(DW.rep.html || '');
+  var frame = html
+    ? '<iframe sandbox="" title="Debt report" id="dwReportFrame" srcdoc="' + dwEsc(html) + '"></iframe>'
+    : '<div class="dw-empty">The report came back empty. Read it again.</div>';
+  return '<div class="dw">' + crumb + '<div class="dw-card dw-rep-h" id="dwReportTop">' + dwReportTopHtml() + '</div>' +
+    '<div class="dw-card dw-rep-body">' + frame + '</div></div>';
+}
+// Download PDF: the same PDF the email carries, made fresh by the backend.
+async function dwReportPdf() {
+  var C = DebtWorkshopCore; if (DW.repBusy) return;
+  DW.repBusy = 'pdf'; DW.repMsg = null; dwReportPaint();
+  try {
+    var r = await opsFetch('debt_ws_report_pdf');
+    if (!r || !r.pdf_base64) throw new Error((r && r.error) || 'No PDF came back');
+    var bin = atob(r.pdf_base64), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = r.filename || 'Debt position.pdf'; a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+    DW.repBusy = null; dwToast('PDF downloaded', 'success');
+  } catch (e) { DW.repBusy = null; DW.repMsg = { ok: false, text: C.reportRefusalText(e) }; }
+  dwReportPaint();
+}
+// Send, step one: ask first. Nothing is posted until "Yes, send it".
+function dwReportSend() {
+  var C = DebtWorkshopCore, d = (DW.rep && DW.rep.delivery) || {};
+  if (DW.repBusy || !C.reportGate(d).ok) return;
+  DW.repConfirm = true; DW.repMsg = null;
+  dwReportPaint();
+  var f = document.querySelector && document.querySelector('#dwReportConfirmSend'); if (f && f.focus) f.focus();
+}
+// Send, step two: the owner said yes. The backend checks the owner, the switch and the
+// addresses again, and builds the report fresh at the moment it sends.
+async function dwReportSendConfirm() {
+  var C = DebtWorkshopCore, d = (DW.rep && DW.rep.delivery) || {};
+  if (DW.repBusy || !C.reportGate(d).ok) return;
+  DW.repBusy = 'send'; DW.repMsg = null; dwReportPaint();
+  try {
+    var r = await dwPost('debt_ws_report_send', {});
+    DW.repBusy = null; DW.repConfirm = false;
+    var to = (r && Array.isArray(r.to) && r.to.length ? r.to : d.to) || [];
+    var cc = (r && Array.isArray(r.cc) ? r.cc : d.cc) || [];
+    // Show "Last sent" straight away from the answer; the next read brings the stored row.
+    if (DW.rep) DW.rep.last_sent = { status: 'sent', kind: 'manual', at: (r && r.sent_at) || new Date().toISOString(), to: to, cc: cc, by: null };
+    DW.repMsg = { ok: true, text: 'Sent to ' + to.join(', ') + (cc.length ? ', cc ' + cc.join(', ') : '') + '.' };
+    dwToast('Debt report sent', 'success');
+  } catch (e) {
+    DW.repBusy = null; DW.repConfirm = false;
+    DW.repMsg = { ok: false, text: C.reportRefusalText(e) };
+  }
+  dwReportPaint();
+}
+
+// ════════════════════════════════════════════════════════════
 // MODAL (documents, invoices, statement previews and the footer lists)
 // ════════════════════════════════════════════════════════════
 function dwModal(o) {
@@ -1745,6 +1943,14 @@ function dwAct(a, k) {
     case 'conv-all': DW.convAll = true; return dwLoadJob(true);
     case 'conv-payer': DW.convAll = false; return dwLoadJob(true);
     case 'modal-close': return dwCloseModal();
+    // The debt report view
+    case 'report': return dwOpenReport();
+    case 'report-back': DW.view = 'list'; DW.repGen++; DW.repConfirm = false; DW.repBusy = null; dwRender(); try { window.scrollTo(0, 0); } catch (e) {} return;
+    case 'report-refresh': case 'report-reload': DW.repMsg = null; DW.repConfirm = false; return dwLoadReport(!!DW.rep);
+    case 'report-pdf': return dwReportPdf();
+    case 'report-send': return dwReportSend();
+    case 'report-send-confirm': return dwReportSendConfirm();
+    case 'report-send-cancel': DW.repConfirm = false; return dwReportPaint();
   }
 }
 function dwBind() {

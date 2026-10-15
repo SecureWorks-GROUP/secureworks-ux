@@ -16,7 +16,7 @@ The Debt buttons (header and mobile nav, `data-debt-nav`) start hidden. They sho
 
 ## W1: the overview
 
-- **Header:** the read time, a "Sending off / Sending on" chip (from `settings.sending_on`), "Agent on" when it is, and the job type filters: All jobs, Fencing, Patio, Insurance.
+- **Header:** the read time, a "Sending off / Sending on" chip (from `settings.sending_on`), "Agent on" when it is, and, top right, the **Debt report** button (see "The debt report" below) above the job type filters: All jobs, Fencing, Patio, Insurance.
 - **Donut and legend:** the five categories (Active, Escalating, Bad debt, Says paid, Rectification), sized by amount.
   - The totals are summed from the same items the list shows (`DebtWorkshopCore.items` and `totals`), so the donut always matches the list for the chosen filter.
   - Clicking a segment or a legend row picks the list. The first category with money in it is picked to start.
@@ -84,6 +84,19 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
 
 **Send** posts `debt_ws_decide {xero_invoice_id, step, suggestion_id, action: "send", text, channel, amount}`. `amount` is what the draft was written for (`suggestion.amount`, else the amount owing); the backend refuses a template send without it (`amount_required`) and refuses one Xero shows part paid since (`part_paid`). **Skip** posts the same with `action: "skip"`. The screen refuses a long dash or an emoji in the text before it posts. After every write, the job and the overview are read again quietly.
 
+## The debt report
+
+**Debt report** (top right of W1, `#dwReportBtn`) opens the live debt position as its own view inside the Debt tab (`DW.view = 'report'`). Shaun approved it on 15 Oct 2026; the plan is the local Lavish page `debt-collection-fresh/.lavish/debt-report-button-plan.html`. The backend is secureworks-backend `docs/debt-workshop/README.md`, "The debt report".
+
+- **Always live.** The view reads `debt_ws_report` every time it opens (and on **Read again**). Nothing is cached between visits.
+- **The report** is the backend's HTML (`html`), shown in a sandboxed frame (`#dwReportFrame`, `sandbox=""`: no scripts, no reach into the page). It holds: cash at bank per Xero account; money received in the last 7 and 30 days; debt expected in the next 7 and 30 days; total debt by the 5 categories, by job type, homeowners against companies, aging and the top 10 debtors; companies (past due, not yet due, oldest, this week's statement); every open invoice worst first; not counted as debt (not due, go-ahead deposits, needs a look, not chased); key points and notes; and the line that ties it all to Xero's open total to the cent. Its categories are the tab's own. The debt total leaves out the not-chased contacts, as the chart does; they are listed under not counted as debt.
+- **Top of the view:** "As at" the read time, **Read again**, **Download PDF**, **Send to Marnin**, then who it goes to ("Sends from admin@secureworkswa.com.au to marnin@..., cc shaun@..."), "Last sent to Marnin: today, 9:02am" (or "never"), and "Monday auto-send: on/off".
+- **Download PDF** reads `debt_ws_report_pdf` and saves the PDF it returns (`Debt position <date>.pdf`), the same PDF the email carries. Anyone who can see the tab can download it.
+- **Send to Marnin** is owner only and needs sending on (`DebtWorkshopCore.reportGate`; the reason shows when it is off). It asks first: the first click shows "Send this report now?" with **Yes, send it** and **Cancel**; nothing is posted until Yes. Yes posts `debt_ws_report_send` with no fields (the backend reads the recipients from its settings and builds the report again at that moment). The answer shows "Sent to ..." and "Last sent" updates at once; only the top of the view is redrawn, so the report keeps its place.
+- **Refusals** read in words (`DebtWorkshopCore.reportRefusalText`): sending off, not the owner, `recently_sent` (sent in the last two minutes), `recipient_not_internal`, `no_recipients`, `report_pdf_failed`, `email_failed`, and `send_not_confirmed` ("Check Sent Items in the admin mailbox before sending it again").
+- **The button's words** come from the recipients: "Send to Marnin" for one recipient, else "Send report".
+- **Back to the Debt tab** returns to the overview.
+
 ## Owner only and refusals
 
 - When `settings.viewer_is_owner` is false, these are disabled or hidden: Send, Send anyway, Skip, Move, Keep chasing, Change, Link, Dismiss, Approve and Remove. A line says so. Notes still work.
@@ -97,6 +110,7 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
 - `npm run test:debt-workshop` (`scripts/test-debt-workshop.js`, in `test:e2e`) runs the pure core in a node VM:
   - the filters and the account lane, totals and the donut, list order, next-step words;
   - the statement and send gates, refusal words, the tab flag;
+  - the debt report's Send words, gate, route and "last sent" line, and that Send asks first and then posts once with no fields;
   - conversation order, notes, ladder, story and money;
   - that the module file holds no long dash, no en dash and no emoji;
   - **the backend contract:** it drives every write on the screen with the fixture and checks each POST field is in that action's backend `onlyKeys` list, that every send carries its amount, and that every code in `REFUSALS` is one the backend throws. The checks run against a hand copy of the backend lists (`BACKEND_CODES`, `BACKEND_ONLY_KEYS`), so CI needs only this repo. When the backend sits next to this worktree (`../backend-debt-workshop`, or `DEBT_WS_BACKEND_DIR`), the copy is also compared with `debt_ws_actions.ts` and `debt_ws_store.ts`; a mismatch means the backend changed, so update the copy. Without the backend it prints a note and carries on.
@@ -106,7 +120,8 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
   - W2 (strip, ladder, story, thread, transcript, notice, suggestion, notes, Back and Next);
   - edit and send with a refusal, dismiss, a promise note;
   - the possible payment (send and statement), the move card, Change (Says paid, Rectification with its confirm, Clear says paid), the Paid pill, Jan's list while locked and once sent, Link contact, documents, staff read only, not deployed, and the phone layout;
+  - the debt report: the button opens the live view (read fresh each time), staff read and download but cannot send, Send asks first then posts and shows Last sent, a refusal in words, sending off, not deployed, and the phone layout;
   - a shared fence (Riley Shaw, share B, the SWF-26624 shape): the neighbour's phone, the share line, no borrowed conversation, the whole-thread toggle with names, Send off until linked, Link posting the invoice; and a linked neighbour texted from here (Send on, posting Riley's invoice).
 - The fixture is `tests/fixtures/debt-workshop.js`: made-up names, with dates from today's Perth date. It uses the backend's real shapes: job invoices carry `number`, ids are UUIDs, GoHighLevel contact ids are letters and digits only, and the move suggestion has its `reply_problem` step.
 - To write the screenshots: `DEBT_WS_EVIDENCE_DIR=docs/evidence/debt-workshop-2026-10-08 npx playwright test tests/e2e/ops-debt-workshop.spec.js`.
-- Latest screenshots: `docs/evidence/debt-workshop-2026-10-08/` (`09-change-category.png` is the Change menu open on the strip).
+- Latest screenshots: `docs/evidence/debt-workshop-2026-10-08/` (`09-change-category.png` is the Change menu open on the strip), and for the debt report `docs/evidence/debt-report-2026-10-15/` (the button, the view asking before it sends, and the report and its PDF drawn from the backend's synthetic test data).

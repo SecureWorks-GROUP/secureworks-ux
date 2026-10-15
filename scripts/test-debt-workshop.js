@@ -313,6 +313,23 @@ check('story and money: a few plain lines, invoices paid or owing', () => {
   assert.strictEqual(C.fileKind('', 'photo.JPG'), 'IMG');
 });
 
+check('debt report: the Send words, the gate, the route and "last sent"', () => {
+  const d = { from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], sending_on: true, viewer_is_owner: true, can_send: true, why_not: null };
+  assert.strictEqual(C.nameFromEmail('marnin@secureworkswa.com.au'), 'Marnin');
+  assert.strictEqual(C.reportSendLabel(d), 'Send to Marnin');
+  assert.strictEqual(C.reportSendLabel({ to: ['a@secureworkswa.com.au', 'b@secureworkswa.com.au'] }), 'Send report');
+  assert.deepStrictEqual(C.reportGate(d), { ok: true, reason: '' });
+  assert.strictEqual(C.reportGate(Object.assign({}, d, { viewer_is_owner: false })).reason, 'Only an owner can send the report.');
+  assert.strictEqual(C.reportGate(Object.assign({}, d, { sending_on: false })).reason, 'Sending is off until you switch it on.');
+  assert.strictEqual(C.reportGate(Object.assign({}, d, { can_send: false, why_not: 'No one is set to receive the report' })).reason, 'No one is set to receive the report.');
+  assert.strictEqual(C.reportRoute(d), 'Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
+  assert.strictEqual(C.reportLastSent(null, d, '2026-10-15'), 'Last sent to Marnin: never');
+  assert.strictEqual(C.reportLastSent({ at: '2026-10-15T01:02:00Z', to: ['marnin@secureworkswa.com.au'], by: 'Shaun' }, d, '2026-10-15'), 'Last sent to Marnin: today, 9:02am by Shaun');
+  assert.strictEqual(C.reportLastSent({ at: '2026-10-12T00:00:00Z', kind: 'auto', to: ['marnin@secureworkswa.com.au'] }, d, '2026-10-15'), 'Last sent to Marnin: Mon 12 Oct, 8:00am (Monday auto-send)');
+  assert.strictEqual(C.reportRefusalText({ code: 'send_not_confirmed' }), 'The email could not be confirmed. Check Sent Items in the admin mailbox before sending it again.');
+  assert.strictEqual(C.reportRefusalText({ code: 'recently_sent' }), C.REFUSALS.recently_sent);
+});
+
 // ════════════════════════════════════════════════════════════
 // CONTRACT WITH THE BACKEND
 // The screen must only word codes ops-api really throws, and only post fields ops-api accepts
@@ -327,11 +344,12 @@ check('story and money: a few plain lines, invoices paid or owing', () => {
 const path = require('path');
 const BACKEND_CODES = [
   'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
-  'contact_belongs_to_other_payer', 'contact_row_not_found',
+  'contact_belongs_to_other_payer', 'contact_row_not_found', 'conversation_unreadable',
   'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
-  'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
+  'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'no_recipients', 'not_chased_by_text', 'not_found',
   'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',
-  'part_paid', 'payer_not_linked', 'payer_not_on_job', 'possible_payment', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
+  'part_paid', 'payer_not_linked', 'payer_not_on_job', 'possible_payment', 'recently_sent', 'recipient_not_internal',
+  'report_pdf_failed', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
   'server_key_required', 'step_not_due', 'suggestion_mismatch', 'suggestion_not_pending', 'text_not_allowed',
   'unknown_action', 'user_required', 'xero_rate_limited', 'xero_unavailable',
 ];
@@ -343,6 +361,8 @@ const BACKEND_ONLY_KEYS = {
   debt_ws_statement_send: ['company_key', 'override_possible_payment'],
   debt_ws_jan_list_remove: ['share_key', 'visit_date'],
   debt_ws_agent_submit: ['xero_invoice_id', 'xero_invoice_ids', 'step', 'kind', 'channel', 'text', 'why', 'proposed_category', 'agent_version'],
+  // The debt report send takes no fields: the backend reads the recipients from its settings.
+  debt_ws_report_send: [],
 };
 // Fields every dashboard POST carries (opsPost adds operator_email); the backend's ENVELOPE.
 const ENVELOPE = ['action', 'operator_email'];
@@ -363,7 +383,7 @@ function readBackend(dir) {
   add(/new DebtWsError\([\s\S]{0,400}?\n\s*\d{3},\n\s*"([A-Za-z_]+)"/g); // the same, spread over lines
   add(/\bbad\(\s*(?:"[^"]*"|`[^`]*`)\s*,\s*"([a-z_]+)"\s*,?\s*\)/g); // bad(message, "code")
   add(/\brefuse\(\s*deps,\s*input,\s*(?:\w+\s*\?\s*"([a-z_]+)"\s*:\s*)?"([a-z_]+)"/g); // refuse(deps, input, "code")
-  add(/\b(?:refuseStatement|release)\(\s*"([a-z_]+)"/g); // the statement and Jan list refusals
+  add(/\b(?:refuseStatement|release|refuseReport)\(\s*"([a-z_]+)"/g); // the statement, Jan list and debt report refusals
   add(/\bconst code = \w+ \? "([a-z_]+)" : "([a-z_]+)"/g);
   add(/\bcode: "([A-Za-z_]+)"/g);
   add(/\bcode = "([A-Za-z_]+)"/g); // the default code
@@ -404,17 +424,28 @@ async function uxPosts() {
   await ctx.dwApprove(fx.ids.harbour, false);
   await ctx.dwApprove(fx.ids.harbour, true);
   await ctx.dwJanRemove(fx.ids.drew);
-  return { sent, fx };
+  // The debt report: Send asks first, then posts on "Yes, send it".
+  DW.view = 'report'; DW.rep = JSON.parse(JSON.stringify(fx.report)); DW.repBusy = null; DW.repConfirm = false;
+  ctx.dwReportSend();
+  const askedFirst = sent.filter((p) => p.action === 'debt_ws_report_send').length === 0 && DW.repConfirm === true;
+  await ctx.dwReportSendConfirm();
+  return { sent, fx, askedFirst };
 }
 
 (async () => {
   let posted = null;
   try { posted = await uxPosts(); } catch (e) { failed += 1; console.error('FAIL debt-workshop: driving the screen writes\n  ' + (e && e.stack)); }
   if (posted) {
-    const { sent, fx } = posted;
+    const { sent, fx, askedFirst } = posted;
     check('every write on the screen was driven', () => {
       const seen = new Set(sent.map((p) => p.action));
-      ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
+      ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove', 'debt_ws_report_send'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
+    });
+    check('the debt report asks first: Send posts nothing until "Yes, send it", then posts once with no fields', () => {
+      assert.strictEqual(askedFirst, true);
+      const rs = sent.filter((p) => p.action === 'debt_ws_report_send');
+      assert.strictEqual(rs.length, 1);
+      assert.deepStrictEqual(rs[0].body, {});
     });
     check('every send carries the amount the draft was written for', () => {
       const sends = sent.filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send');

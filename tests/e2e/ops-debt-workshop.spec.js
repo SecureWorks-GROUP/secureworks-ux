@@ -18,6 +18,9 @@
 //    payment offers Send anyway; a move card; a Link contact card; notes with a promise date.
 //  - Owner-only controls are disabled for staff; refusals are shown in plain words.
 //  - An undeployed backend reads as a calm "not switched on yet".
+//  - The debt report: "Debt report" (top right) opens the live report as its own view, read
+//    fresh; Download PDF saves the backend's PDF; Send to Marnin is owner only, asks first, then
+//    posts debt_ws_report_send and shows "Last sent"; refusals in words.
 // Screenshots: DEBT_WS_EVIDENCE_DIR=docs/evidence/<folder> npx playwright test tests/e2e/ops-debt-workshop.spec.js
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
@@ -65,6 +68,8 @@ async function openDebt(page, { fixture = buildDebtWorkshopFixture(), drop = [],
         debt_ws_statement_preview: fixture.statements[p.company_key],
         debt_ws_document: fixture.documents[p.document_id],
         get_invoice_pdf: fixture.invoicePdf,
+        debt_ws_report: fixture.report,
+        debt_ws_report_pdf: fixture.reportPdf,
       }[action];
       return found ? Promise.resolve(clone(found)) : unknown();
     };
@@ -526,4 +531,81 @@ test('phone: the donut shrinks, the list fits, the job columns stack', async ({ 
   const jobFit = await page.evaluate(() => { const r = document.getElementById('debtWorkshopRoot'); return r.scrollWidth <= r.clientWidth + 1; });
   expect(jobFit).toBe(true);
   await shot(page, '06-mobile-job.png');
+});
+
+test('Debt report: the button opens the live report as its own view; staff read and download, not send', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: false } });
+  await openDebt(page, { fixture });
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt position/);
+  await expect(page.locator('#dwReportFrame')).toHaveAttribute('sandbox', '');
+  // Read fresh from the backend every time the view opens.
+  const reads = async () => (await page.evaluate(() => window.__dwFetches)).filter((f) => f.action === 'debt_ws_report').length;
+  expect(await reads()).toBe(1);
+  await expect(page.locator('#dwReportMeta')).toContainText('Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
+  await expect(page.locator('#dwReportLast')).toHaveText('Last sent to Marnin: never');
+  await expect(page.locator('#dwReportMeta')).toContainText('Monday auto-send: off');
+  await expect(page.locator('#dwReportSend')).toHaveText('Send to Marnin');
+  await expect(page.locator('#dwReportSend')).toBeDisabled();
+  await expect(page.locator('#dwReportWhy')).toHaveText('Only an owner can send the report.');
+  // Download PDF saves the backend's PDF under its dated name.
+  const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#dwReportPdf').click()]);
+  expect(download.suggestedFilename()).toBe(fixture.reportPdf.filename);
+  await shot(page, '10-debt-report.png');
+  // Back to the tab, and opening it again reads it again.
+  await page.locator('[data-dw="report-back"]').click();
+  await expect(page.locator('#dwLegend')).toBeVisible();
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportFrame')).toBeVisible();
+  expect(await reads()).toBe(2);
+  expect((await posts(page)).filter((p) => p.action === 'debt_ws_report_send')).toHaveLength(0);
+});
+
+test('Debt report: Send to Marnin asks first, then sends and shows Last sent; a refusal reads in words', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: true } });
+  const sentAt = new Date().toISOString();
+  await openDebt(page, { fixture, posts: { debt_ws_report_send: { resolve: { ok: true, sent: true, to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], sent_at: sentAt } } } });
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportSend')).toBeEnabled();
+  await page.locator('#dwReportSend').click();
+  // The first click only asks.
+  await expect(page.locator('#dwReportConfirm')).toContainText('Send this report now?');
+  expect((await posts(page)).filter((p) => p.action === 'debt_ws_report_send')).toHaveLength(0);
+  await shot(page, '11-debt-report-confirm.png');
+  // Cancel posts nothing.
+  await page.locator('[data-dw="report-send-cancel"]').click();
+  await expect(page.locator('#dwReportConfirm')).toHaveCount(0);
+  await page.locator('#dwReportSend').click();
+  await page.locator('#dwReportConfirmSend').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_report_send').length).toBe(1);
+  await expect(page.locator('#dwReportMsg')).toHaveText('Sent to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
+  await expect(page.locator('#dwReportLast')).toContainText('Last sent to Marnin: today');
+  // The frame was not redrawn by the send (it keeps its place).
+  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt position/);
+  // A refusal from the backend reads in words.
+  await page.evaluate(() => { window.__dwPostAnswers.debt_ws_report_send = { reject: { message: 'The report was just sent', status: 409, code: 'recently_sent' } }; });
+  await page.locator('#dwReportSend').click();
+  await page.locator('#dwReportConfirmSend').click();
+  await expect(page.locator('#dwReportMsg')).toHaveText('The report was just sent. Wait two minutes before sending it again.');
+});
+
+test('Debt report: with sending off the owner sees why Send is off', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: false, viewer_is_owner: true } });
+  await openDebt(page, { fixture });
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportSend')).toBeDisabled();
+  await expect(page.locator('#dwReportWhy')).toHaveText('Sending is off until you switch it on.');
+  await expect(page.locator('#dwReportPdf')).toBeEnabled();
+});
+
+test('Debt report: an undeployed backend reads as not switched on yet; the phone view fits', async ({ page }) => {
+  await openDebt(page, { drop: ['debt_ws_report'] });
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#viewDebt [data-dw-state="not-deployed"]')).toContainText('Not switched on yet');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDebt(page);
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportFrame')).toBeVisible();
+  const fit = await page.evaluate(() => { const r = document.getElementById('debtWorkshopRoot'); return r.scrollWidth <= r.clientWidth + 1; });
+  expect(fit).toBe(true);
 });

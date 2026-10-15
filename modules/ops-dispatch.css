@@ -370,3 +370,60 @@
   .dpc-lines .dpc-line-head { display: none; }
   .dpc-scratch { grid-template-columns: 1fr; }
 }
+
+/* ---------- Purchase orders and Emails (slice 5) ---------- */
+.dpc .dpc-order-btn { font-size: 12.5px; padding: 6px 12px; margin-left: auto; }
+.dpc .dpc-textbtn, .dpc .dpc-takeoff { border: 0; background: none; padding: 2px 4px; font: 500 11px var(--mono); color: #7E95A3; }
+.dpc .dpc-textbtn:hover:not(:disabled), .dpc .dpc-takeoff:hover:not(:disabled) { color: var(--signal-deep); }
+.dpc .dpc-takeoff { justify-self: end; white-space: nowrap; }
+.dpc-line-ro:has(.dpc-takeoff) { grid-template-columns: minmax(0, 2.4fr) 64px 76px minmax(0, 1.25fr) 104px 64px; }
+.dpc-note { margin: 4px 12px 10px; font-size: 13px; color: var(--steel-2); background: #FFF1EB; border-radius: 8px; padding: 10px 12px; }
+.dpc-order-confirm { padding: 4px 12px 10px; }
+.dpc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.dpc .dpc-actions button { font-size: 12.5px; }
+.dpc-order-confirm .dpc-empty, .dpc-mail-confirm .dpc-empty { color: var(--ink); }
+.dpc-mail { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.dpc-mail-list { background: var(--galv-2); border-right: 1px solid var(--line); max-height: 400px; overflow: auto; }
+.dpc .dpc-mail-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 11px 14px; font-size: 12px; }
+.dpc .dpc-mail-item[aria-pressed="true"] { background: #fff; box-shadow: inset 3px 0 0 var(--signal); }
+.dpc-mail-item > span { display: block; overflow-wrap: anywhere; }
+.dpc-mail-top { display: flex !important; justify-content: space-between; gap: 6px; }
+.dpc-mail-top small { font: 400 10.5px var(--mono); color: var(--mute); white-space: nowrap; }
+.dpc-mail-drafttag { margin-left: 6px; font: 600 9.5px var(--mono); color: var(--signal-deep); letter-spacing: .06em; text-transform: uppercase; }
+.dpc-mail-subj { font-weight: 600; margin: 2px 0; }
+.dpc-mail-prev { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dpc-mail-tags { display: flex !important; gap: 6px; align-items: center; margin-top: 4px; }
+.dpc-mail-head .dpc-mail-tags { margin-top: 0; }
+.dpc-mail-listfail { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.dpc-mail-view { background: #fff; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dpc-mail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+.dpc-mail-head strong { overflow-wrap: anywhere; }
+.dpc-field { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--galv); padding: 3px 0; }
+.dpc-field > span, .dpc-field > label { flex: 0 0 58px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-field input { flex: 1; min-width: 0; border: 0; padding: 6px 0; font-size: 13px; outline: none; background: transparent; }
+.dpc-field input:focus { box-shadow: inset 0 -2px 0 var(--signal); }
+.dpc-field-val { flex: 1; min-width: 0; font-size: 13px; padding: 6px 0; overflow-wrap: anywhere; }
+.dpc-field-val small { display: block; font-size: 11px; color: var(--mute); }
+.dpc-mail-to { font-weight: 500; }
+.dpc-mail-body { min-height: 130px; background: #fff; }
+.dpc-mail-msg { font-size: 13px; color: var(--mute); }
+.dpc-mail-msg.dpc-mat-fail { color: var(--signal-deep); }
+.dpc-attach .dpc-doc { margin-bottom: 0; }
+.dpc-pdf-fail { padding: 4px 0 0; }
+.dpc .dpc-doc-nopdf { cursor: default; }
+.dpc-doc-nopdf small + small { margin-top: 1px; }
+.dpc-mail-chat { display: flex; flex-direction: column; gap: 8px; }
+.dpc-mail-atts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
+.dpc-mail-att { font: 500 10.5px var(--mono); background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+.dpc-mail-reply { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--galv); padding-top: 10px; }
+.dpc-mail-replybox { min-height: 70px; background: #fff; }
+.dpc-mail-link { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dpc-mail-link select { flex: 1; min-width: 0; font-size: 13px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-mail-confirm { display: flex; flex-direction: column; gap: 6px; }
+.dpc-mailsec .dpc-foot-line { margin-top: 10px; }
+@media (max-width: 768px) {
+  .dpc-mail { grid-template-columns: 1fr; }
+  .dpc-mail-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
+  .dpc .dpc-line-ro > .dpc-takeoff { flex: 0 0 auto; }
+  .dpc .dpc-mail-view button, .dpc .dpc-order-btn { min-height: 44px; }
+}

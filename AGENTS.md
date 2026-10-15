@@ -48,10 +48,10 @@ moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
 section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-to 4 of the approved design: job list with To do beside All jobs, job header
+to 5 of the approved design: job list with To do beside All jobs, job header
 with the six-stop stage rail, Scope and notes, the right panel of Sources,
-Context story and Messages, and Materials by supplier, never drawn on a
-make-safe). It reads
+Context story and Messages, Materials by supplier and Emails, the last two never
+drawn on a make-safe). It reads
 `pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
 a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
@@ -61,7 +61,16 @@ Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
 `send_sms` from `+61489267771`, the rail's `set_dispatch_stage` (after a
 confirm line) and `set_dispatch_next_step`, and the six `dispatch_materials_*`
 writes on a person's edit or press, which touch only Dispatch's own tables (no
-order, message or job status). The rail's stage is Dispatch's own
+order, message or job status). Slice 5 (back-end contract
+`docs/dispatch-slice-5-contract.md` in secureworks-backend): Create PO and email
+makes one `purchase_orders` row (`source 'dispatch'`, no price), its PDF in the
+private `dispatch-order-pdfs` bucket (opened only through `dispatch_order_pdf`)
+and a held `job_order_emails` draft, read with `dispatch_order_emails` once per
+job open and after each slice 5 write. A supplier email goes only from a Send
+now press (or Try the send again after an unconfirmed send), with the draft's
+hash; never on create, open or reply, never to a typed address, never via
+`create_po`, `email_po`, `push_po_to_xero` or `send-po-email`. Sources lists the
+job's orders from the same `dispatch_materials` read. The rail's stage is Dispatch's own
 record (`job_dispatch_state`), never the job status: it never calls
 `update_job_status`. A stage read that failed fails To do and the rail, never an
 empty To do; a `todo_total` that does not match the To do rows fails To do only,

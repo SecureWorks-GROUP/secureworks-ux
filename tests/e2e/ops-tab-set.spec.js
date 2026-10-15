@@ -2815,4 +2815,27 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     await expect(mail.locator('.dpc-mail-item')).toHaveCount(1);
     await expect(mail.locator('.dpc-mail-listfail')).toHaveText('Could not load the email threads. Retry');
   });
+
+  test('a supplier reply whose answer is lost is held unconfirmed and never unlocked into a second send', async ({ page }) => {
+    const thread = { key: 'th-s1', tag: 'supplier', po_id: null, po_number: null, subject: 'Posts', counterpart: 'Acacia Steel', last_at: '2026-10-10T01:00:00.000Z',
+      last_preview: 'Can do Friday.', can_reply: true, can_link: false,
+      messages: [{ id: 'm1', direction: 'inbound', from_email: 'orders@acacia.test', to_email: 'orders@secureworksgroup.app', subject: 'Posts', text: 'Can do Friday.', at: '2026-10-10T01:00:00.000Z', attachments: [], delivery_status: null }] };
+    const { mail, of, fake } = await bootOrders(page, ORDER_SEED(), { 'job-f1': { threads: [thread] } });
+    fake.fail.dispatch_order_reply = [{ status: 502, body: {} }, { status: 409, body: { error: 'thread_changed', code: 'thread_changed' } }];
+    await mail.locator('.dpc-mail-item', { hasText: 'Posts' }).click();
+    const view = mail.locator('.dpc-mail-view');
+    const box = view.locator('[data-dpc-mail-reply]');
+    await box.fill('Friday works.');
+    await view.locator('[data-dpc-mail="reply"]').click();
+    await view.locator('[data-dpc-mail="reply-go"]').click();
+    await expect(view.locator('.dpc-mail-msg')).toHaveText('We could not tell whether this reply went. Check the thread before trying again.');
+    await expect(box).toBeDisabled();
+    await expect(view.locator('[data-dpc-mail="reply"]')).toHaveCount(0);
+
+    await view.locator('[data-dpc-mail="reply-again"]').click();
+    await expect(view.locator('.dpc-mail-msg')).toHaveText('This thread changed. Check it for your reply before sending again.');
+    await expect(box).toHaveValue('Friday works.');
+    const sent = of('dispatch_order_reply').map((c) => [c.body.reply_to_message_id, c.body.body_text]);
+    expect(sent).toEqual([['m1', 'Friday works.'], ['m1', 'Friday works.']]);
+  });
 });

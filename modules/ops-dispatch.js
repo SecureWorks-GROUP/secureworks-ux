@@ -2183,8 +2183,13 @@
     }, function (err) {
       delete m.busy['reply:' + key];
       var code = err && err.code;
-      if (code === 'send_unknown') m.msg['reply:' + key] = { text: 'We could not tell whether this reply went. Check the thread before trying again.', unknown: true, attempt: attempt };
-      else if (code === 'thread_changed') { m.notice = 'This thread changed. Showing the latest. Your text is still here.'; readMail(jobId, true); }
+      var lost = !code && !(err && err.status >= 400 && err.status < 500);
+      if (code === 'send_unknown' || lost) m.msg['reply:' + key] = { text: 'We could not tell whether this reply went. Check the thread before trying again.', unknown: true, attempt: attempt };
+      else if (code === 'thread_changed' && retry) {
+        m.replies[key] = attempt.body_text;
+        m.msg['reply:' + key] = { text: 'This thread changed. Check it for your reply before sending again.' };
+        readMail(jobId, true);
+      } else if (code === 'thread_changed') { m.notice = 'This thread changed. Showing the latest. Your text is still here.'; readMail(jobId, true); }
       else m.msg['reply:' + key] = { text: 'Reply not sent. Your text is still here.' };
       paintMailIf(jobId);
     });

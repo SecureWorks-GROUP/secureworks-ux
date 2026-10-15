@@ -94,8 +94,16 @@ test('the Debt tab is hidden until it is switched on', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { tab_visible: true } });
   await page.evaluate((ov) => { window.opsFetch = () => Promise.resolve(ov); return debtWsProbeVisibility(); }, fixture.overview);
   await expect(page.locator('.header-nav [data-view="debt"]')).toBeVisible();
-  // a failed read keeps it hidden
-  await page.evaluate(() => { debtWsReveal(false); window.opsFetch = () => Promise.reject(Object.assign(new Error('Unknown action'), { status: 400 })); return debtWsProbeVisibility(); });
+  // a failed read later keeps the tab as last seen (it never comes and goes)
+  const failRead = () => { window.opsFetch = () => Promise.reject(Object.assign(new Error('Unknown action'), { status: 400 })); return debtWsProbeVisibility(); };
+  await page.evaluate(failRead);
+  await expect(page.locator('.header-nav [data-view="debt"]')).toBeVisible();
+  // tab_visible false hides it and forgets it
+  const off = buildDebtWorkshopFixture(undefined, { settings: { tab_visible: false } });
+  await page.evaluate((ov) => { window.opsFetch = () => Promise.resolve(ov); return debtWsProbeVisibility(); }, off.overview);
+  await expect(page.locator('.header-nav [data-view="debt"]')).toBeHidden();
+  // with nothing remembered, a failed read keeps it hidden
+  await page.evaluate(failRead);
   await expect(page.locator('.header-nav [data-view="debt"]')).toBeHidden();
 });
 

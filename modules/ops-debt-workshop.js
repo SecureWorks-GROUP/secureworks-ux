@@ -440,6 +440,13 @@ var DebtWorkshopCore = (function () {
     return !!(settings && settings.tab_visible);
   }
 
+  // What a visibility read says: true or false when the backend answered with tab_visible,
+  // null when it did not answer (a failed, slow or odd read). Null never hides the tab.
+  function probeAnswer(res) {
+    if (!res || !res.settings || typeof res.settings.tab_visible !== 'boolean') return null;
+    return res.settings.tab_visible;
+  }
+
   // A possible payment in words: "$1,420.37 on Mon 6 Oct from C MORGAN".
   function paymentWords(p) {
     p = p || {};
@@ -556,7 +563,7 @@ var DebtWorkshopCore = (function () {
     dayText: dayText, statementWords: statementWords, statementGate: statementGate, items: items, totals: totals,
     defaultCategory: defaultCategory, listFor: listFor, notDueRows: notDueRows, donut: donut, sendGate: sendGate,
     hasBanned: hasBanned, refusalCode: refusalCode, refusalText: refusalText, answerRefused: answerRefused,
-    isNotDeployed: isNotDeployed, tabVisible: tabVisible, paymentWords: paymentWords, thread: thread,
+    isNotDeployed: isNotDeployed, tabVisible: tabVisible, probeAnswer: probeAnswer, paymentWords: paymentWords, thread: thread,
     channelWord: channelWord, duration: duration, callTitle: callTitle, noteView: noteView, ladder: ladder,
     storyLines: storyLines, moneyRows: moneyRows, fileKind: fileKind, isReplyStep: isReplyStep, isPaused: isPaused,
     draftAmount: draftAmount, statementPossible: statementPossible,
@@ -600,15 +607,56 @@ function debtWsFlagOn() {
   try { stored = localStorage.getItem('sw_debt_ws'); } catch (e) {}
   return DebtWorkshopCore.tabVisible(window.location ? window.location.search : '', stored, null);
 }
-// Called once after login: the URL or browser flag shows the tab straight away; otherwise a
-// quiet read of the overview decides. A failed read (not deployed yet, offline) shows nothing.
+// The last answer the backend gave, kept in this browser ('1' shown, '0' hidden), so the tab
+// shows straight away on the next load and a failed read never takes it away.
+var DW_SEEN_KEY = 'sw_debt_ws_seen';
+function debtWsSeen() { try { return localStorage.getItem(DW_SEEN_KEY); } catch (e) { return null; } }
+function debtWsRemember(on) { try { localStorage.setItem(DW_SEEN_KEY, on ? '1' : '0'); } catch (e) {} }
+
+// Retries after a failed read, then a fresh read whenever the page comes back into view.
+var DW_PROBE = { inflight: null, tries: 0, timer: null, at: 0 };
+var DW_PROBE_RETRY_MS = [5000, 20000, 60000, 180000];
+
+// Called after login (and again on retry or when the page is shown): the URL or browser flag
+// shows the tab straight away; otherwise the overview read decides. A read that fails or
+// gives no answer leaves the tab as it is and tries again, so the tab never comes and goes.
 async function debtWsProbeVisibility() {
   if (debtWsFlagOn()) { debtWsReveal(true); return true; }
-  try {
-    var res = await opsFetch('debt_ws_overview');
-    if (res && res.settings && res.settings.tab_visible) { if (!DW.ov) DW.ov = res; debtWsReveal(true); return true; }
-  } catch (e) { /* not deployed yet or no access: the tab stays hidden */ }
-  return false;
+  if (debtWsSeen() === '1') debtWsReveal(true);
+  if (DW_PROBE.inflight) return DW_PROBE.inflight;
+  DW_PROBE.at = Date.now();
+  DW_PROBE.inflight = (async function () {
+    var answer = null, res = null;
+    try {
+      res = await opsFetch('debt_ws_overview');
+      answer = DebtWorkshopCore.probeAnswer(res);
+    } catch (e) { /* not deployed yet, offline or signed out: answer stays unknown */ }
+    if (answer === true) {
+      if (!DW.ov) DW.ov = res;
+      debtWsRemember(true); debtWsReveal(true); DW_PROBE.tries = 0;
+      return true;
+    }
+    if (answer === false) {
+      debtWsRemember(false); debtWsReveal(false); DW_PROBE.tries = 0;
+      return false;
+    }
+    if (DW_PROBE.tries < DW_PROBE_RETRY_MS.length && !DW_PROBE.timer) {
+      DW_PROBE.timer = setTimeout(function () { DW_PROBE.timer = null; debtWsProbeVisibility(); }, DW_PROBE_RETRY_MS[DW_PROBE.tries]);
+      DW_PROBE.tries += 1;
+    }
+    return debtWsSeen() === '1';
+  })();
+  try { return await DW_PROBE.inflight; } finally { DW_PROBE.inflight = null; }
+}
+
+// Coming back to the page (another tab, a sleeping laptop) reads again, at most once a minute,
+// so a switch made while the page was open shows up without a reload.
+function debtWsOnShow() {
+  if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+  if (typeof window === 'undefined' || !window._opsAppStarted) return;
+  if (Date.now() - DW_PROBE.at < 60000) return;
+  DW_PROBE.tries = 0;
+  debtWsProbeVisibility();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1731,12 +1779,13 @@ function dwBind() {
   document.addEventListener('change', onInput);
 }
 
-// On load: the URL or browser flag shows the tab at once. initApp also calls
+// On load: the URL or browser flag, or the last answer kept in this browser, shows the tab at once. initApp also calls
 // debtWsProbeVisibility() after login; if login already happened, probe now.
 (function dwBoot() {
   try {
     if (typeof document === 'undefined' || !document.querySelectorAll) return;
-    if (debtWsFlagOn()) debtWsReveal(true);
+    if (debtWsFlagOn() || debtWsSeen() === '1') debtWsReveal(true);
+    if (document.addEventListener) document.addEventListener('visibilitychange', debtWsOnShow);
     if (typeof window !== 'undefined' && window._opsAppStarted) debtWsProbeVisibility();
   } catch (e) { /* never break the dashboard over a hidden tab */ }
 })();

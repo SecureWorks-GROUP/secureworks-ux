@@ -741,3 +741,155 @@ test.describe('Quote lines as the backend sends them (core)', () => {
     for (const money of ['1316', '1,316', '210.00', '160', '150', '35.00', '80.00', '10%']) expect(html).not.toContain(money);
   });
 });
+
+// A stuck Xero draft record (secureworks-backend docs/job-work-orders-v1.md,
+// "A stuck Xero draft record"), on the job work order panel: an approved
+// variation's invoice record in 'unknown', or in 'creating' for 15 minutes,
+// is answered for by the approver after checking Xero by hand.
+const XERO_ID = '0f8e2c1a-3b4d-4e5f-8a9b-1c2d3e4f5a6b';
+const STUCK_REQUESTED_AT = '2026-10-15T02:00:00.000Z'; // 10:00 am Perth
+const STUCK_UPDATED_AT = '2026-10-15T02:00:01.234567+00:00';
+
+function stuckInvoice(status, over) {
+  return Object.assign({
+    status, line: { description: 'Variation 1 - approved 13 Oct 2026: Extra works', quantity: 1, unit_price: 921.6, account_code: '200' },
+    xero_requested_at: STUCK_REQUESTED_AT, xero_invoice_id: null, invoice_number: null, failure: null, updated_at: STUCK_UPDATED_AT,
+  }, over || {});
+}
+
+function withStuck(invoice) {
+  const list = customerVariations();
+  list[0] = Object.assign({}, list[0], { invoice });
+  return list;
+}
+
+const MIN = 60 * 1000;
+const REQUESTED_MS = Date.parse(STUCK_REQUESTED_AT);
+
+test.describe('A stuck Xero draft record (core)', () => {
+  test('stuck is unknown at once, and creating only once its claim is 15 minutes old', () => {
+    expect(C.xeroDraftStuck(null, REQUESTED_MS)).toBeNull();
+    expect(C.xeroDraftStuck(stuckInvoice('prepared'), REQUESTED_MS)).toBeNull();
+    expect(C.xeroDraftStuck(stuckInvoice('xero_draft_created'), REQUESTED_MS)).toBeNull();
+    expect(C.xeroDraftStuck(stuckInvoice('unknown'), REQUESTED_MS + MIN)).toMatchObject({ status: 'unknown', answerable: true });
+    expect(C.xeroDraftStuck(stuckInvoice('creating'), REQUESTED_MS + 14 * MIN)).toMatchObject({ status: 'creating', answerable: false, answerableAt: REQUESTED_MS + 15 * MIN });
+    expect(C.xeroDraftStuck(stuckInvoice('creating'), REQUESTED_MS + 15 * MIN)).toMatchObject({ status: 'creating', answerable: true });
+    // A claim with no time on it is never taken as old enough.
+    expect(C.xeroDraftStuck(stuckInvoice('creating', { xero_requested_at: null }), REQUESTED_MS + 60 * MIN)).toMatchObject({ answerable: false });
+    expect(C.canReconcileXeroDraft(stuckInvoice('unknown'), SHAUN, REQUESTED_MS)).toBe(true);
+    expect(C.canReconcileXeroDraft(stuckInvoice('unknown'), 'esther@secureworkswa.com.au', REQUESTED_MS)).toBe(false);
+    expect(C.canReconcileXeroDraft(stuckInvoice('unknown', { updated_at: null }), SHAUN, REQUESTED_MS)).toBe(false);
+    expect(C.canReconcileXeroDraft(stuckInvoice('creating'), SHAUN, REQUESTED_MS + 5 * MIN)).toBe(false);
+  });
+
+  test('the Xero invoice id is read from the id itself or from the draft link in Xero', () => {
+    expect(C.xeroInvoiceIdFrom(XERO_ID)).toBe(XERO_ID);
+    expect(C.xeroInvoiceIdFrom(' ' + XERO_ID.toUpperCase() + ' ')).toBe(XERO_ID);
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=' + XERO_ID)).toBe(XERO_ID);
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + XERO_ID.toUpperCase() + '&foo=1')).toBe(XERO_ID);
+    // Any other text with an id in it is not the invoice's id.
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Contacts/View/' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Contacts/View.aspx?contactID=' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom('Invoice ' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom(XERO_ID + 'a')).toBe('');
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Edit.aspx?InvoiceID=' + XERO_ID + '0')).toBe('');
+    expect(C.xeroInvoiceIdFrom('INV-0123')).toBe('');
+    expect(C.xeroInvoiceIdFrom('')).toBe('');
+  });
+
+  test('the dialog answer: found (id required, number optional) or none, always after checking Xero', () => {
+    expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: 'https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=' + XERO_ID, invoiceNumber: ' INV-0123 ', checked: true }))
+      .toEqual({ fields: { outcome: 'draft_exists', xero_invoice_id: XERO_ID, invoice_number: 'INV-0123' }, errors: [] });
+    expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: XERO_ID, invoiceNumber: '', checked: true }).fields)
+      .toEqual({ outcome: 'draft_exists', xero_invoice_id: XERO_ID });
+    expect(C.xeroReconcileFields({ outcome: 'no_draft', invoiceId: XERO_ID, invoiceNumber: 'INV-1', checked: true }))
+      .toEqual({ fields: { outcome: 'no_draft' }, errors: [] });
+    expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: '', checked: true }).errors).toEqual(['Paste the Xero invoice id, or the link to the draft in Xero.']);
+    expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: 'INV-0123', checked: true }).errors[0]).toMatch(/not a Xero invoice id/);
+    const contact = C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: 'https://go.xero.com/Contacts/View/' + XERO_ID, checked: true });
+    expect(contact.fields).toBeNull();
+    expect(contact.errors[0]).toMatch(/not a Xero invoice id/);
+    expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: XERO_ID, invoiceNumber: 'x'.repeat(51), checked: true }).errors).toEqual(['The invoice number is longer than 50 characters.']);
+    expect(C.xeroReconcileFields({ outcome: 'no_draft', checked: false })).toEqual({ fields: null, errors: ['Tick that you checked Xero by hand first.'] });
+    expect(C.xeroReconcileFields({ outcome: '', checked: true }).errors).toEqual(['Say what you found in Xero.']);
+  });
+
+  test('refusals read in words; the ones that mean the record moved read it again', () => {
+    expect(C.xeroReconcileRefusalWords('xero_invoice_already_recorded')).toMatch(/already recorded for another variation/);
+    expect(C.xeroReconcileRefusalWords('xero_draft_in_progress')).toMatch(/less than 15 minutes ago/);
+    expect(C.xeroReconcileRefusalWords('mystery', 'Server said no')).toBe('Server said no');
+    expect(C.xeroReconcileRefusalWords('', '')).toBe('The answer could not be saved. Nothing changed.');
+    for (const code of ['nothing_to_reconcile', 'xero_draft_already_recorded', 'xero_draft_in_progress', 'stale_review', 'expected_updated_at_required', 'invoice_line_not_found']) {
+      expect(C.xeroReconcileNeedsReread(code)).toBe(true);
+    }
+    for (const code of ['xero_invoice_already_recorded', 'invalid_request', 'approver_required', '']) expect(C.xeroReconcileNeedsReread(code)).toBe(false);
+    expect(C.xeroReconcileDoneWords('draft_exists', { invoice: { invoice_number: 'INV-0123' }, duplicate: false })).toBe('Recorded: INV-0123 is this variation\'s Xero draft. Nothing was sent to Xero or the customer.');
+    expect(C.xeroReconcileDoneWords('draft_exists', { invoice: { invoice_number: 'INV-0123' }, duplicate: true })).toMatch(/already recorded/);
+    expect(C.xeroReconcileDoneWords('no_draft', { invoice: { status: 'prepared' } })).toMatch(/^Released: the line is back to prepared/);
+  });
+
+  test('the panel: stuck states in words, the button for the approver only', () => {
+    const block = approvedWithVariation();
+    const panel = (invoice, email, now, extra) => C.renderOpsPanel(block, readWith(block, withStuck(invoice)), 'ready',
+      { viewerEmail: email, cv: Object.assign({ now }, extra || {}) });
+
+    const unknown = panel(stuckInvoice('unknown', { failure: 'Xero timed out' }), SHAUN, REQUESTED_MS + MIN);
+    expect(unknown).toContain('data-job-wo-cv-xero-stuck="unknown"');
+    expect(unknown).toContain('Xero draft not confirmed');
+    expect(unknown).toContain('Xero did not confirm whether the draft for this line was made (asked for 15 Oct 2026, 10:00 am)');
+    expect(unknown).toContain('What went wrong: Xero timed out');
+    expect(unknown).toMatch(/data-job-wo-cv-xero-open data-cv-id="cv-1" onclick/);
+
+    const office = panel(stuckInvoice('unknown'), 'esther@secureworkswa.com.au', REQUESTED_MS + MIN);
+    expect(office).toContain('Xero draft not confirmed');
+    expect(office).not.toContain('data-job-wo-cv-xero-open');
+    expect(office).toContain('Only Shaun records what Xero shows, after checking it by hand.');
+
+    const young = panel(stuckInvoice('creating'), SHAUN, REQUESTED_MS + 5 * MIN);
+    expect(young).toContain('Xero draft being made');
+    expect(young).toContain('If it still says this after 15 Oct 2026, 10:15 am, check Xero');
+    expect(young).not.toContain('data-job-wo-cv-xero-open');
+
+    const old = panel(stuckInvoice('creating'), SHAUN, REQUESTED_MS + 20 * MIN);
+    expect(old).toContain('Xero draft stuck');
+    expect(old).toContain('never finished');
+    expect(old).toContain('data-job-wo-cv-xero-open');
+
+    expect(panel(stuckInvoice('prepared'), SHAUN, REQUESTED_MS)).not.toContain('data-job-wo-cv-xero-stuck');
+  });
+
+  test('the dialog: both answers, the fields that go with each, and the press held until Xero was checked', () => {
+    const block = approvedWithVariation();
+    const read = readWith(block, withStuck(stuckInvoice('unknown')));
+    const dialog = (over) => C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { now: REQUESTED_MS, xero: Object.assign({ id: 'cv-1', outcome: '', invoiceId: '', invoiceNumber: '', checked: false, errors: [] }, over || {}) } });
+
+    const blank = dialog();
+    expect(blank).toContain('role="dialog"');
+    expect(blank).toContain('What does Xero show?');
+    expect(blank).toContain('This screen never calls Xero');
+    expect(blank).toMatch(/data-job-wo-cv-xero-submit disabled/);
+    expect(blank).not.toContain('data-cv-xero-f="invoiceId"');
+    // The open button is held while its dialog is open.
+    expect(blank).toMatch(/data-job-wo-cv-xero-open data-cv-id="cv-1" disabled/);
+
+    const found = dialog({ outcome: 'draft_exists', invoiceId: XERO_ID, checked: true });
+    expect(found).toContain('data-cv-xero-f="invoiceId"');
+    expect(found).toContain('Record this Xero draft');
+    expect(found).toContain('Nothing is sent to Xero or the customer.');
+    expect(found).not.toMatch(/data-job-wo-cv-xero-submit disabled/);
+
+    const none = dialog({ outcome: 'no_draft', checked: false, errors: ['Tick that you checked Xero by hand first.'] });
+    expect(none).toContain('Release the line');
+    expect(none).toContain('making it again puts a second one there');
+    expect(none).toContain('data-job-wo-cv-xero-errors');
+    expect(none).toMatch(/data-job-wo-cv-xero-submit disabled/);
+
+    for (const out of [blank, found, none, C.xeroReconcileRefusalWords('stale_review'), C.xeroReconcileDoneWords('no_draft', {})]) {
+      expect(out).not.toMatch(/[–—]/);
+      expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
+    }
+    for (const code of Object.keys({ nothing_to_reconcile: 1, xero_draft_already_recorded: 1, xero_draft_in_progress: 1, xero_invoice_already_recorded: 1, stale_review: 1, expected_updated_at_required: 1, invoice_line_not_found: 1, invalid_outcome: 1, invalid_request: 1, invalid_invoice_number: 1, approver_required: 1, approver_identity_missing: 1, approver_not_set: 1, terminal_approval_switched_off: 1 })) {
+      expect(C.xeroReconcileRefusalWords(code, '')).not.toMatch(/[–—]/);
+    }
+  });
+});

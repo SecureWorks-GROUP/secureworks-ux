@@ -788,3 +788,181 @@ test.describe('Customer variations on the job work order (preview)', () => {
     expect(actions.filter((a) => /work_order|variation/.test(a))).toEqual([]);
   });
 });
+
+// A stuck Xero draft record (secureworks-backend docs/job-work-orders-v1.md,
+// "A stuck Xero draft record"), on the panel ?wo=preview shows. An approved variation whose invoice record is
+// 'unknown', or 'creating' for 15 minutes, says so; Shaun checks Xero by hand
+// and answers with reconcile_customer_variation_xero_draft, which never calls
+// Xero, carrying the record's updated_at as read.
+const XERO_ID = '0f8e2c1a-3b4d-4e5f-8a9b-1c2d3e4f5a6b';
+const XERO_LINK = 'https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=' + XERO_ID;
+const STUCK_AT = '2026-10-15T02:00:01.234567+00:00';
+
+function stuckVariation(status, over) {
+  return Object.assign(approvedVariation(), {
+    invoice: Object.assign({
+      status, line: { description: 'Variation 1 - approved 13 Oct 2026: Remove the tree roots the quote left', quantity: 1, unit_price: 921.6, account_code: '200' },
+      prepared_at: '2026-10-15T01:00:00Z', xero_contact_id: 'contact-1', xero_requested_by: 'user-esther',
+      xero_requested_at: '2026-10-15T02:00:00Z', xero_invoice_id: null, invoice_number: null, xero_created_at: null,
+      failure: status === 'unknown' ? 'Xero did not answer in time' : null, updated_at: STUCK_AT,
+    }, over || {}),
+  });
+}
+
+function recordedVariation() {
+  return stuckVariation('xero_draft_created', { xero_invoice_id: XERO_ID, invoice_number: 'INV-0123', xero_created_at: '2026-10-16T01:00:00Z', updated_at: '2026-10-16T01:00:00Z' });
+}
+
+test.describe('A stuck Xero draft on a customer variation (preview)', () => {
+  test('preview off: no panel, no stuck state and no reconcile call', async ({ page }) => {
+    await page.goto('/ops.html?wo=live');
+    const { data, read } = withVariations([stuckVariation('unknown')]);
+    await openBuild(page, data, { job_work_order: read }, SHAUN);
+    await expect(page.locator('#jdBuild')).toContainText('Materials Dispatch');
+    await expect(page.locator('[data-job-wo-panel]')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-cv-xero-stuck]')).toHaveCount(0);
+    const actions = await page.evaluate(() => window.__calls.map((c) => c.action));
+    expect(actions.filter((a) => /work_order|variation|xero/.test(a))).toEqual([]);
+  });
+
+  test('Shaun records the draft found in Xero from its link; the answer carries the record as read', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const before = withVariations([stuckVariation('unknown')]);
+    const after = withVariations([recordedVariation()]);
+    await openBuild(page, before.data, {
+      job_work_order: [before.read, after.read],
+      reconcile_customer_variation_xero_draft: { customer_variation_id: 'cv-1', invoice: recordedVariation().invoice, duplicate: false },
+      job_detail: after.data,
+    }, SHAUN);
+    const stuck = page.locator('[data-job-wo-cv-row][data-cv-id="cv-1"] [data-job-wo-cv-xero-stuck="unknown"]');
+    await expect(stuck).toContainText('Xero draft not confirmed');
+    await expect(stuck).toContainText('Xero did not confirm whether the draft for this line was made (asked for 15 Oct 2026, 10:00 am)');
+    await expect(stuck.locator('[data-job-wo-cv-xero-failure]')).toHaveText('What went wrong: Xero did not answer in time');
+
+    await stuck.locator('[data-job-wo-cv-xero-open]').click();
+    const dialog = page.getByRole('dialog', { name: 'What does Xero show?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('This screen never calls Xero');
+    await expect(dialog.locator('[data-job-wo-cv-xero-submit]')).toBeDisabled();
+    await dialog.getByLabel(/I found the draft in Xero/).check();
+    await dialog.locator('[data-cv-xero-f="invoiceId"]').fill(XERO_LINK);
+    await dialog.locator('[data-cv-xero-f="invoiceNumber"]').fill('INV-0123');
+    await expect(dialog.locator('[data-job-wo-cv-xero-submit]')).toBeDisabled();
+    await dialog.getByLabel('I checked Xero by hand just now.').check();
+    // What was typed survives the repaint the tick makes.
+    await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveValue(XERO_LINK);
+    await expect(dialog.locator('[data-job-wo-cv-xero-what]')).toContainText('Nothing is sent to Xero or the customer.');
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+
+    await expect(page.locator('[data-job-wo-cv-message]')).toHaveText('Recorded: INV-0123 is this variation\'s Xero draft. Nothing was sent to Xero or the customer.');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-cv-xero-stuck]')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-cv-invoice]')).toContainText('In Xero as a draft INV-0123.');
+    expect(await posts(page)).toEqual([{
+      action: 'reconcile_customer_variation_xero_draft',
+      body: { variation_id: 'cv-1', expected_updated_at: STUCK_AT, outcome: 'draft_exists', xero_invoice_id: XERO_ID, invoice_number: 'INV-0123' },
+    }]);
+  });
+
+  test('Shaun releases a stuck creating line once its claim is 15 minutes old; nothing else is sent', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const old = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const stuckOne = stuckVariation('creating', { xero_requested_at: old });
+    const before = withVariations([stuckOne]);
+    const released = stuckVariation('prepared', { xero_requested_at: old, updated_at: '2026-10-16T02:00:00Z' });
+    const after = withVariations([released]);
+    await openBuild(page, before.data, {
+      job_work_order: [before.read, after.read],
+      reconcile_customer_variation_xero_draft: { customer_variation_id: 'cv-1', invoice: released.invoice, duplicate: false },
+      job_detail: after.data,
+    }, SHAUN);
+    const stuck = page.locator('[data-job-wo-cv-xero-stuck="creating"][data-cv-answerable="1"]');
+    await expect(stuck).toContainText('Xero draft stuck');
+    await expect(stuck).toContainText('never finished');
+    await stuck.locator('[data-job-wo-cv-xero-open]').click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel(/There is no draft in Xero/).check();
+    await expect(dialog.locator('[data-job-wo-cv-xero-release-warn]')).toContainText('making it again puts a second one there');
+    await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveCount(0);
+    await dialog.getByLabel('I checked Xero by hand just now.').check();
+    await expect(dialog.locator('[data-job-wo-cv-xero-submit]')).toHaveText('Release the line');
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(page.locator('[data-job-wo-cv-message]')).toContainText('Released: the line is back to prepared');
+    await expect(page.locator('[data-job-wo-cv-xero-stuck]')).toHaveCount(0);
+    expect(await posts(page)).toEqual([{
+      action: 'reconcile_customer_variation_xero_draft',
+      body: { variation_id: 'cv-1', expected_updated_at: STUCK_AT, outcome: 'no_draft' },
+    }]);
+  });
+
+  test('a creating line under 15 minutes old says it is being made, with no button', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const fresh = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data, read } = withVariations([stuckVariation('creating', { xero_requested_at: fresh })]);
+    await openBuild(page, data, { job_work_order: read }, SHAUN);
+    const stuck = page.locator('[data-job-wo-cv-xero-stuck="creating"][data-cv-answerable="0"]');
+    await expect(stuck).toContainText('Xero draft being made');
+    await expect(stuck).toContainText('If it still says this after');
+    await expect(page.locator('[data-job-wo-cv-xero-open]')).toHaveCount(0);
+  });
+
+  test('anyone but Shaun sees the stuck state and who answers it, with no button', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const { data, read } = withVariations([stuckVariation('unknown')]);
+    await openBuild(page, data, { job_work_order: read }, 'esther@secureworkswa.com.au');
+    await expect(page.locator('[data-job-wo-cv-xero-stuck="unknown"]')).toContainText('Xero draft not confirmed');
+    await expect(page.locator('[data-job-wo-cv-xero-approver-only]')).toHaveText('Only Shaun records what Xero shows, after checking it by hand.');
+    await expect(page.locator('[data-job-wo-cv-xero-open]')).toHaveCount(0);
+  });
+
+  test('a mistyped id is caught before anything is sent; Back closes the dialog', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const { data, read } = withVariations([stuckVariation('unknown')]);
+    await openBuild(page, data, { job_work_order: read }, SHAUN);
+    await page.locator('[data-job-wo-cv-xero-open]').click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel(/I found the draft in Xero/).check();
+    await dialog.locator('[data-cv-xero-f="invoiceId"]').fill('INV-0123');
+    await dialog.getByLabel('I checked Xero by hand just now.').check();
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(dialog.locator('[data-job-wo-cv-xero-errors]')).toContainText('That is not a Xero invoice id.');
+    await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveValue('INV-0123');
+    const contactLink = 'https://go.xero.com/Contacts/View/' + XERO_ID;
+    await dialog.locator('[data-cv-xero-f="invoiceId"]').fill(contactLink);
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(dialog.locator('[data-job-wo-cv-xero-errors]')).toContainText('That is not a Xero invoice id.');
+    await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveValue(contactLink);
+    await dialog.locator('[data-job-wo-cv-xero-close]').click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-cv-xero-open]')).toBeEnabled();
+    expect(await posts(page)).toEqual([]);
+  });
+
+  test('a refusal reads in words: one that leaves the record as read stays in the dialog, a stale one reads the job again', async ({ page }) => {
+    await page.goto('/ops.html?wo=preview');
+    const before = withVariations([stuckVariation('unknown')]);
+    const moved = withVariations([stuckVariation('unknown', { updated_at: '2026-10-16T03:00:00Z', failure: 'Second try timed out' })]);
+    await openBuild(page, before.data, {
+      job_work_order: [before.read, moved.read],
+      reconcile_customer_variation_xero_draft: { reject: { code: 'xero_invoice_already_recorded', status: 409, message: 'raw' } },
+      job_detail: moved.data,
+    }, SHAUN);
+    await page.locator('[data-job-wo-cv-xero-open]').click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel(/I found the draft in Xero/).check();
+    await dialog.locator('[data-cv-xero-f="invoiceId"]').fill(XERO_ID);
+    await dialog.getByLabel('I checked Xero by hand just now.').check();
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(dialog.locator('[data-job-wo-cv-xero-errors]')).toHaveText('That Xero invoice is already recorded for another variation. Check the invoice id in Xero.');
+    await expect(dialog.locator('[data-job-wo-cv-xero-submit]')).toBeEnabled();
+
+    await page.evaluate(() => { window.__answers.reconcile_customer_variation_xero_draft = { reject: { code: 'stale_review', status: 409, message: 'raw' } }; });
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(page.locator('[data-job-wo-cv-message]')).toHaveText('The Xero draft record changed after it was read. It has been read again: check it, then answer.');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('[data-job-wo-cv-xero-failure]')).toHaveText('What went wrong: Second try timed out');
+    const sent = await posts(page);
+    expect(sent).toHaveLength(2);
+    for (const c of sent) expect(c.body.expected_updated_at).toBe(STUCK_AT);
+  });
+});

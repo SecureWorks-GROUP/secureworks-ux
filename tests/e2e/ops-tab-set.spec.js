@@ -2427,10 +2427,11 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
     expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
     expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
-    // Nothing from slice 6 or later is drawn, not even disabled.
+    // Slice 6 draws Deliveries and install under Emails; nothing says coming soon,
+    // and the edit above sent no delivery or install write (only MAT_WRITES were posted).
     await openJob(root, 'SWF-900101');
-    await expect(root).not.toContainText(/coming soon|Deliveries|Mark delivery confirmed/i);
-    await expect(root.locator('.dpc-deliv')).toHaveCount(0);
+    await expect(root).not.toContainText(/coming soon/i);
+    await expect(root.locator('.dpc-sched h3')).toHaveText('Deliveries and install');
   });
 });
 

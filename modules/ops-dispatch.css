@@ -473,3 +473,13 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
   .dpc-deliv-row > span:first-child { grid-column: 1 / -1; }
   .dpc .dpc-deliv-btn, .dpc .dpc-portal button, .dpc-deliv-edit button { min-height: 44px; }
 }
+
+/* ---------- Schedule: the install row (slice 7) ---------- */
+.dpc-install { margin-top: 8px; }
+.dpc-install-row { grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr)); }
+.dpc-install .dpc-dstate em { color: var(--ink); }
+.dpc-install .dpc-deliv-item > .dpc-empty { padding: 10px 12px; }
+.dpc-install + .dpc-deliv-msg + .dpc-portal, .dpc-install + .dpc-portal { margin-top: 12px; }
+@media (max-width: 768px) {
+  .dpc-install-row { grid-template-columns: 1fr 1fr; }
+}

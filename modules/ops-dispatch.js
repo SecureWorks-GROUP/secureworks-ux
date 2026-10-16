@@ -76,6 +76,17 @@
  * status, a Dispatch stage, Xero or a message. Open Calendar calls the page's
  * own showView('calendar') once, the same as the Calendar tab.
  *
+ * Slice 7 finishes that section as Deliveries and install: under the
+ * deliveries table, the install row (who is booked on which day, from the list
+ * row's dispatch_install; no new read) and Mark confirmed. Its one write, on a
+ * person's press: ops-api set_dispatch_install_confirmed (job_id, confirmed,
+ * expected_install_day, expected_confirmed_at), which writes Dispatch's own
+ * mark on job_dispatch_state and one job_events row. It makes, moves, locks or
+ * confirms no booking (never create_assignment, update_assignment,
+ * confirm_assignment or bulk_confirm), sends nothing and moves no job status
+ * or Dispatch stage. A stop 6 job stays in To do until its install is
+ * confirmed; the card and the rail say why.
+ *
  * Guards: tests/e2e/ops-tab-set.spec.js (slices 1, 3, 4 and 5) and
  * tests/e2e/ops-dispatch-panel.spec.js (slice 2).
  * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md,
@@ -249,6 +260,8 @@
       if (resp.dispatch_materials !== 'ok') { delete r.materials_lines_total; delete r.materials_lines_ready; }
       // Slice 6: the rail's sightings counts, the same way.
       if (resp.dispatch_deliveries !== 'ok') { delete r.deliveries_orders_total; delete r.deliveries_orders_sighted; }
+      // Slice 7: a failed bookings read is never "Not booked".
+      if (resp.dispatch_installs !== 'ok') { delete r.dispatch_install; delete r.dispatch_install_open; }
     });
     rows.sort(function (a, b) {
       var ta = Date.parse(a.updated_at) || 0, tb = Date.parse(b.updated_at) || 0;
@@ -732,6 +745,39 @@
     return p && p.y >= 2000 && p.y <= 2099 && /^\d{4}-\d{2}-\d{2}$/.test(text(v)) ? text(v) : '';
   }
 
+  // ── slice 7: the install row's rules ──
+
+  // Why a stop 6 job is in To do (the read's dispatch_install_open).
+  var INSTALL_OPEN = {
+    not_confirmed: 'In To do until the install is confirmed.',
+    moved: 'In To do: the install booking moved after it was confirmed.',
+    booked_after: 'In To do: the install was booked after it was confirmed.'
+  };
+
+  // The list row's install block as the server works it out
+  // (dispatch_install.ts), or null when it is missing or not whole.
+  function installOf(row) {
+    var d = row && row.dispatch_install;
+    if (!d || typeof d !== 'object' || ['ahead', 'past', 'none'].indexOf(d.state) < 0 || !Array.isArray(d.people) || !Array.isArray(d.also_days) ||
+      typeof d.calendar_confirmed !== 'boolean' || typeof d.confirmed_current !== 'boolean') return null;
+    if (d.state !== 'none' && !parseDay(d.day)) return null;
+    if (d.confirmed !== null && (!d.confirmed || typeof d.confirmed !== 'object' || !parseStamp(d.confirmed.at))) return null;
+    return d;
+  }
+
+  // The Trade booked cell: "Tue 20/10, names", "Tue 20/10 to Thu 22/10,
+  // names", "Last booked 4/9, names"; '' when nothing is booked.
+  function bookedText(d) {
+    var names = d.people.map(function (p) { return text(p && p.name) || 'Name not on record'; }).join(', ');
+    var tail = names ? ', ' + names : '';
+    if (d.state === 'ahead') {
+      var end = parseDay(d.end_day);
+      return dayText(parseDay(d.day)) + (end && text(d.end_day) !== text(d.day) ? ' to ' + dayText(end) : '') + tail;
+    }
+    if (d.state === 'past') return 'Last booked ' + dayMonth(parseDay(d.day)) + tail;
+    return '';
+  }
+
   // The rail panel's sightings line (build note section 4.4), from the list
   // row's two counts; '' when the job has no counted order or the counts did
   // not come.
@@ -830,7 +876,10 @@
       edit: null,
       ask: null,
       msg: null
-    }
+    },
+    // Slice 7, the install row: the job whose press is in flight, the open
+    // confirm line ({ jobId, kind: 'none' | 'clear' }) and the line under the table.
+    install: { busy: null, ask: null, msg: null }
   };
   var tokens = { base: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -895,7 +944,7 @@
     var current = state.jobId ? byId(state.jobId) : null;
     if (current) state.row = current;
     paintList(true);
-    if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
+    if (state.jobId && state.row) { paintHead(); paintCouncil(); paintSched(); return; }
     var todo = state.mode === 'todo' && todoOk(state.base) ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
     var pick = byId(readStore('sessionStorage', SS_JOB)) || todo[0] || rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
@@ -1898,6 +1947,9 @@
     state.deliv.edit = null;
     state.deliv.ask = null;
     state.deliv.msg = null;
+    // Slice 7: the install row's confirm line and its last line.
+    state.install.ask = null;
+    state.install.msg = null;
   }
 
   function mailPick(jobId, key) {
@@ -2443,6 +2495,63 @@
     state.deliv.msg = null;
   }
 
+  // ── slice 7: Mark confirmed, its one write ──
+  // Sent once per press, against the install day and mark the screen showed.
+  // Its answer redraws the row, the open job's list row, To do's count, the
+  // card and the rail line: no list re-read, the open job stays open, and
+  // nothing here retries on its own.
+
+  // A write's (or a refusal's) install fields onto every copy of the job's row.
+  function applyInstallFields(jobId, src) {
+    if (!src || typeof src !== 'object') return;
+    var f = {};
+    if (installOf({ dispatch_install: src.dispatch_install })) f.dispatch_install = src.dispatch_install;
+    if (src.dispatch_install_open === null || INSTALL_OPEN[src.dispatch_install_open]) f.dispatch_install_open = src.dispatch_install_open;
+    if (typeof src.dispatch_todo === 'boolean') f.dispatch_todo = src.dispatch_todo;
+    if (src.dispatch_todo_out === null || typeof src.dispatch_todo_out === 'string') f.dispatch_todo_out = src.dispatch_todo_out;
+    applyStageFields(jobId, f);
+    // To do's number, counted again from the rows the list read gave.
+    if (state.base.status === 'ok' && todoOk(state.base)) {
+      state.base.todoTotal = state.base.rows.filter(function (r) { return r.dispatch_todo === true; }).length;
+    }
+    paintList(true);
+    if (state.jobId === jobId) paintHead();
+  }
+
+  var INSTALL_CHANGED = ['install_changed', 'confirmation_changed'];
+
+  function confirmInstall(jobId, confirmed) {
+    var row = state.row;
+    var d = row && row.id === jobId ? installOf(row) : null;
+    var ins = state.install;
+    if (!d || ins.busy) return;
+    ins.busy = jobId;
+    ins.ask = null;
+    ins.msg = null;
+    paintSchedIf(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('set_dispatch_install_confirmed', {
+        job_id: jobId, confirmed: confirmed, expected_install_day: d.state === 'none' ? null : d.day, expected_confirmed_at: d.confirmed ? d.confirmed.at : null
+      });
+    }).then(writeOk).then(function (resp) {
+      ins.busy = null;
+      if (installOf({ dispatch_install: resp.dispatch_install })) applyInstallFields(jobId, resp);
+      else loadBase(); // saved, but the answer cannot redraw the row: one list read shows it
+      paintSchedIf(jobId);
+    }, function (err) {
+      ins.busy = null;
+      if (err && INSTALL_CHANGED.indexOf(err.code) >= 0) {
+        applyInstallFields(jobId, err.body);
+        ins.msg = { jobId: jobId, text: 'This booking changed somewhere else. Showing the latest.' };
+        paintSchedIf(jobId);
+        loadBase();
+        return;
+      }
+      ins.msg = { jobId: jobId, text: confirmed ? 'Not saved.' : 'Confirmation not cleared.', retry: confirmed };
+      paintSchedIf(jobId);
+    });
+  }
+
   // ───────────────────────── render: sidebar ─────────────────────────
 
   function failLine(message, retry, tight) {
@@ -2459,7 +2568,7 @@
       (next ? '<span class="dpc-next">' + esc(next) + '</span>' : '') + '</span>';
     h += '<strong>' + esc(jobTitle(row)) + '</strong>';
     if (text(row.description)) h += '<span>' + esc(text(row.description)) + '</span>';
-    h += stageLineHtml(s);
+    h += stageLineHtml(s, row);
     var ready = readyText(row.materials_lines_total, row.materials_lines_ready);
     h += '<span class="dpc-muted">' + esc((ready ? ready + ' · ' : '') + installText(row)) + '</span>';
     return h + '</button>';
@@ -2467,8 +2576,10 @@
 
   // The card's stage line (build note row 7). No line for a make-safe row or
   // when the read gave no stage.
-  function stageLineHtml(s) {
+  function stageLineHtml(s, row) {
     if (!s || s.none) return '';
+    // Slice 7: a stop 6 job back in To do until its install is confirmed, in the to-come look.
+    if (s.index === 6 && row && row.dispatch_todo === true && INSTALL_OPEN[row.dispatch_install_open]) return '<span class="dpc-stage">Stage: Trade scheduled · install not confirmed</span>';
     if (s.index === 6) return '<span class="dpc-stage dpc-stage-done">Done: trade scheduled</span>';
     if (s.index === 0) return '<span class="dpc-stage">Not on the rail yet</span>';
     return '<span class="dpc-stage">Stage: ' + esc(s.name) + '</span>';
@@ -2557,7 +2668,7 @@
     h += '<div class="dpc-chips" role="group" aria-label="Work type" data-dpc-region="chips">' + chipsHtml() + '</div>';
     h += '<input type="search" class="dpc-search" data-dpc-search placeholder="Search job, suburb or client" value="' + esc(state.search) + '" aria-label="Search jobs">';
     h += '</div><div class="dpc-job-list" data-dpc-region="list"></div>';
-    h += '<div class="dpc-foot">To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.</div>';
+    h += '<div class="dpc-foot">To do: jobs from Accepted until the trade is scheduled and the install confirmed. All jobs: any job through the Dispatch lens, to check what was ordered and sent.</div>';
     return h + '</aside>';
   }
 
@@ -2681,10 +2792,14 @@
     if (TODO_OUT[row.dispatch_todo_out]) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note">' + esc(TODO_OUT[row.dispatch_todo_out]) + '</p>';
     var sightings = deliveriesRailLine(row, s);
     if (sightings) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note" data-dpc-deliv-rail>' + esc(sightings) + '</p>';
+    if (INSTALL_OPEN[row.dispatch_install_open]) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note" data-dpc-install-rail>' + esc(INSTALL_OPEN[row.dispatch_install_open]) + '</p>';
     if (confirm) {
       var num = text(row.job_number) || 'this job';
       var to = STAGES[stageIndex(confirm.to) - 1].label;
       var ask = confirm.to === s.key ? 'Set ' + num + ' at ' + to + '?' : 'Move ' + num + ' from ' + s.name + ' to ' + to + '?';
+      // Slice 7: Move still works with nothing booked; the line says so.
+      var inst = installOf(row);
+      if (confirm.to === 'trade_scheduled' && inst && inst.state === 'none') ask += ' No install is booked on this job.';
       h += '<div class="dpc-tape-confirm" role="group" aria-label="Confirm the stage"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
       h += '<button type="button" class="dpc-primary" data-dpc-stage-go' + (busy ? ' disabled' : '') + '>' + (busy ? 'Moving...' : confirm.to === s.key ? 'Set' : 'Move') + '</button>';
       h += '<button type="button" data-dpc-stage-cancel' + (busy ? ' disabled' : '') + '>Cancel</button></div>';
@@ -3854,9 +3969,70 @@
     return h + '</div>' + delivMsgHtml(jobId);
   }
 
-  // The one way into the live calendar. Not drawn when the page has no showView.
+  // ── slice 7: the install row, under the deliveries table ──
+
+  function installMarkBtn(busy) {
+    return '<button type="button" class="dpc-deliv-btn" data-dpc-install="mark"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Saving...' : 'Mark confirmed') + '</button>';
+  }
+
+  function installConfirmedHtml(d, busy) {
+    var c = d.confirmed;
+    var by = c ? text(c.by) || 'someone not recorded' : '';
+    if (c && d.confirmed_current) {
+      return '<span class="dpc-dstate on">' + esc(stampText(c.at) + ', ' + by) + '<button type="button" class="dpc-textbtn" data-dpc-install="clear-ask"' + (busy ? ' disabled' : '') + '>Not confirmed</button></span>';
+    }
+    if (c) {
+      var why = parseDay(c.for_day)
+        ? 'Confirmed for ' + dayText(parseDay(c.for_day)) + ' by ' + by + '. The booking has moved.'
+        : 'Confirmed with nothing booked, by ' + by + '. A booking has been made since.';
+      return '<span class="dpc-dstate"><em>' + esc(why) + '</em>' + installMarkBtn(busy) + '</span>';
+    }
+    return '<span class="dpc-dstate">' + installMarkBtn(busy) + '</span>';
+  }
+
+  function installMsgHtml(jobId) {
+    var m = state.install.msg;
+    if (!m || m.jobId !== jobId) return '';
+    if (typeof m.retry !== 'boolean') return '<p class="dpc-deliv-msg" role="status">' + esc(m.text) + '</p>';
+    return '<p class="dpc-deliv-msg dpc-mat-fail" role="alert">' + esc(m.text) + ' <button type="button" class="dpc-retry" data-dpc-install="retry">Retry</button></p>';
+  }
+
+  function installHtml(row) {
+    var h = '<div class="dpc-deliv dpc-install"><div class="dpc-deliv-row dpc-install-row dpc-deliv-head"><span>Install</span><span>Trade booked</span><span>Install confirmed</span></div>';
+    var d = installOf(row);
+    if (!d) {
+      return h + '<div class="dpc-deliv-item"><div class="dpc-empty dpc-mat-fail" role="alert">Could not load the bookings. <button type="button" class="dpc-retry" data-dpc-install="retry-read">Retry</button></div></div></div>';
+    }
+    var ins = state.install;
+    var busy = ins.busy === row.id;
+    var current = !!(d.confirmed && d.confirmed_current);
+    var booked = bookedText(d);
+    h += '<div class="dpc-deliv-item"><div class="dpc-deliv-row dpc-install-row" data-step="' + (current ? 3 : 1) + '">';
+    h += '<span><strong>Install</strong><small>' + esc(text(row.job_number) || 'No job number') + '</small></span>';
+    h += '<span class="dpc-dstate' + (booked ? ' on' : '') + '">' + (booked ? esc(booked) : '<em>Not booked</em>') + '</span>';
+    h += installConfirmedHtml(d, busy) + '</div>';
+    if (d.also_days.length) {
+      h += '<p class="dpc-deliv-sub">Also booked: ' + esc(d.also_days.map(function (v) { return dayText(parseDay(v)); }).filter(Boolean).join(', ')) + '.</p>';
+    }
+    if (d.calendar_confirmed) h += '<p class="dpc-deliv-sub">The calendar shows this booking as confirmed.</p>';
+    var ask = ins.ask && ins.ask.jobId === row.id ? ins.ask.kind : null;
+    var off = busy ? ' disabled' : '';
+    if (ask === 'none' && !d.confirmed_current) {
+      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Mark the install confirmed"><p class="dpc-empty dpc-empty-tight">No install is booked on this job. Mark the install confirmed anyway?</p>' +
+        '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-install="go"' + off + '>' + (busy ? 'Saving...' : 'Mark confirmed') + '</button>' +
+        '<button type="button" data-dpc-install="cancel"' + off + '>Cancel</button></div></div></div>';
+    } else if (ask === 'clear' && current) {
+      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Clear the install confirmation"><p class="dpc-empty dpc-empty-tight">Clear the install confirmation? It was marked by ' +
+        esc(text(d.confirmed.by) || 'someone not recorded') + '.</p><div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-install="clear-go"' + off + '>' + (busy ? 'Clearing...' : 'Clear') + '</button>' +
+        '<button type="button" data-dpc-install="keep"' + off + '>Keep</button></div></div></div>';
+    }
+    return h + '</div></div>' + installMsgHtml(row.id);
+  }
+
+  // The one way into the live calendar, at the foot of the section. Not drawn
+  // when the page has no showView.
   function portalHtml() {
-    var h = '<div class="dpc-portal"><span class="dpc-grow">' + esc(PORTAL_TEXT) + '</span>';
+    var h = '<div class="dpc-portal"><span class="dpc-grow">' + esc(PORTAL_TEXT) + ' Bookings are made and changed there.</span>';
     if (typeof global.showView === 'function') h += '<button type="button" data-dpc-deliv-cal>Open Calendar</button>';
     return h + '</div>';
   }
@@ -3866,15 +4042,15 @@
     var row = state.row;
     if (!row || isMakesafe(row)) return '';
     var open = state.deliv.open;
-    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Deliveries</h3>';
-    if (open) h += '<p>Each PO from expected, to confirmed by the supplier, to sighted on site</p>';
-    h += '</div><button type="button" class="dpc-chev" data-dpc-toggle="sched" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Deliveries">' + CHEV_SVG + '</button></div>';
-    if (open) h += '<div class="dpc-sec-body">' + delivBodyHtml(matEntry(row.id)) + portalHtml() + '</div>';
+    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Deliveries and install</h3>';
+    if (open) h += '<p>Each PO to site, then the trade booked and the install confirmed</p>';
+    h += '</div><button type="button" class="dpc-chev" data-dpc-toggle="sched" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Deliveries and install">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + delivBodyHtml(matEntry(row.id)) + installHtml(row) + portalHtml() + '</div>';
     return h + '</div>';
   }
 
   var SCHED_FOCUS_KEYS = ['data-dpc-deliv-expected', 'data-dpc-deliv-edit-date', 'data-dpc-deliv-sight', 'data-dpc-deliv-unsight', 'data-dpc-deliv-po',
-    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-toggle'];
+    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-toggle'];
   function paintSched() {
     var el = region('sched');
     if (!el) return;
@@ -3950,7 +4126,7 @@
       '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-mat-retry],[data-dpc-mat-addline],[data-dpc-mat-suggest],[data-dpc-mat-remove],[data-dpc-mat-del],[data-dpc-mat-clear],' +
       '[data-dpc-order],[data-dpc-order-pdf],[data-dpc-mail],' +
-      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal]') : null;
+      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install]') : null;
     if (!t || t.disabled) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
@@ -3958,6 +4134,7 @@
     if (onOrderClick(t)) return;
     if (onMailClick(t)) return;
     if (onDelivClick(t)) return;
+    if (onInstallClick(t)) return;
     if (t.hasAttribute('data-dpc-job')) {
       if (t.getAttribute('data-dpc-job') !== state.jobId) state.stage.confirm = null;
       selectJob(rowById(t.getAttribute('data-dpc-job')));
@@ -4200,6 +4377,43 @@
     return true;
   }
 
+  // The install row's presses. True when the press was one of them. Only
+  // Mark confirmed (with a booking), its confirm line's Mark confirmed, Clear
+  // and Retry send anything.
+  function onInstallClick(t) {
+    if (!t.hasAttribute('data-dpc-install')) return false;
+    var jobId = state.jobId;
+    var ins = state.install;
+    var act = t.getAttribute('data-dpc-install');
+    var d = state.row && state.row.id === jobId ? installOf(state.row) : null;
+    if (!jobId) return true;
+    if (act === 'retry-read') { loadBase(); return true; }
+    if (!d) return true;
+    if (act === 'mark') {
+      if (d.state === 'none') {
+        ins.ask = { jobId: jobId, kind: 'none' };
+        ins.msg = null;
+        paintSched();
+        refocus('[data-dpc-install="cancel"]');
+      } else confirmInstall(jobId, true);
+    } else if (act === 'go') confirmInstall(jobId, true);
+    else if (act === 'clear-ask') {
+      ins.ask = { jobId: jobId, kind: 'clear' };
+      ins.msg = null;
+      paintSched();
+      refocus('[data-dpc-install="keep"]');
+    } else if (act === 'clear-go') confirmInstall(jobId, false);
+    else if (act === 'cancel' || act === 'keep') {
+      ins.ask = null;
+      paintSched();
+      refocus(act === 'keep' ? '[data-dpc-install="clear-ask"]' : '[data-dpc-install="mark"]');
+    } else if (act === 'retry') {
+      var m = ins.msg && ins.msg.jobId === jobId ? ins.msg.retry : null;
+      if (typeof m === 'boolean') confirmInstall(jobId, m);
+    }
+    return true;
+  }
+
   // The Schedule section's presses, and a thread's Mark delivery confirmed.
   // True when the press was one of them. Only Mark sighted, Clear, Save, Clear
   // (a hand-set date) and Retry send anything; opening and cancelling a line
@@ -4213,6 +4427,7 @@
       writeStore('localStorage', LS_SCHED, d.open ? '1' : '0');
       if (d.edit && d.edit.via === 'deliveries') d.edit = null;
       d.ask = null;
+      state.install.ask = null;
       paintSched();
       refocus('[data-dpc-toggle="sched"]');
       return true;

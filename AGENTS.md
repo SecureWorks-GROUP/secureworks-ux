@@ -48,10 +48,10 @@ moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
 section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-to 5 of the approved design: job list with To do beside All jobs, job header
+to 7 of the approved design: job list with To do beside All jobs, job header
 with the six-stop stage rail, Scope and notes, the right panel of Sources,
-Context story and Messages, Materials by supplier and Emails, the last two never
-drawn on a make-safe). It reads
+Context story and Messages, Materials by supplier, Emails, and Deliveries and
+install, the last three never drawn on a make-safe). It reads
 `pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
 a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
@@ -70,7 +70,10 @@ job open and after each slice 5 write. A supplier email goes only from a Send
 now press (or Try the send again after an unconfirmed send), with the draft's
 hash; never on create, open or reply, never to a typed address, never via
 `create_po`, `email_po`, `push_po_to_xero` or `send-po-email`. Sources lists the
-job's orders from the same `dispatch_materials` read. The rail's stage is Dispatch's own
+job's orders from the same `dispatch_materials` read. Slices 6 and 7 add only
+`dispatch_delivery_set_expected`, `_set_confirmed` and `_mark_sighted` (one
+order row each, never its status) and `set_dispatch_install_confirmed`
+(Dispatch's own install mark, never a booking write). The rail's stage is Dispatch's own
 record (`job_dispatch_state`), never the job status: it never calls
 `update_job_status`. A stage read that failed fails To do and the rail, never an
 empty To do; a `todo_total` that does not match the To do rows fails To do only,

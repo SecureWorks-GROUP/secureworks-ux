@@ -869,10 +869,12 @@
     // Slice 6, Deliveries. The rows live in the job's materials read (mat.jobs);
     // here is only what a person is doing: the press in flight per order, the
     // one open inline line (a confirmed date, from the row or a thread), the
-    // open "Not sighted" confirm, and the last line under the table.
+    // open "Not sighted" confirm, the last line under the table, and what is
+    // typed in an expected date box per order until it is saved.
     deliv: {
       open: readStore('localStorage', LS_SCHED) !== '0',
       busy: {},
+      typed: {},
       edit: null,
       ask: null,
       msg: null
@@ -1947,6 +1949,7 @@
     state.deliv.edit = null;
     state.deliv.ask = null;
     state.deliv.msg = null;
+    state.deliv.typed = {};
     // Slice 7: the install row's confirm line and its last line.
     state.install.ask = null;
     state.install.msg = null;
@@ -2452,9 +2455,15 @@
 
   function setExpected(jobId, poId, value) {
     var r = delivRow(matEntry(jobId), poId);
-    if (!r || !r.delivery.expected_editable || (r.delivery.expected || null) === value) return;
+    if (!r || !r.delivery.expected_editable || (r.delivery.expected || null) === value) {
+      delete state.deliv.typed[poId];
+      return;
+    }
     delivSend(jobId, poId, 'dispatch_delivery_set_expected', { delivery_date: value }, function () {
       state.deliv.msg = { jobId: jobId, text: 'Not saved.', retry: { kind: 'expected', poId: poId, value: value } };
+    }).then(function () {
+      delete state.deliv.typed[poId];
+      paintSchedIf(jobId);
     });
   }
 
@@ -3879,7 +3888,7 @@
       return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' + (d.expected ? esc(dayOf(d.expected)) : '<em>No date in Xero</em>') + '<small>Set in Xero</small></span>';
     }
     return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' +
-      dateBoxHtml(d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy) + '</span>';
+      dateBoxHtml(Object.prototype.hasOwnProperty.call(state.deliv.typed, r.purchase_order_id) ? state.deliv.typed[r.purchase_order_id] : d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy) + '</span>';
   }
 
   function delivConfirmedHtml(r, busy) {
@@ -4598,6 +4607,12 @@
     if (t.hasAttribute('data-dpc-deliv-edit-date') || t.hasAttribute('data-dpc-deliv-expected')) {
       var wrap = t.parentNode;
       if (wrap && wrap.classList) wrap.classList.toggle('dpc-deliv-blank', !t.value);
+      if (t.hasAttribute('data-dpc-deliv-expected') && state.jobId && !(!t.value && t.validity && t.validity.badInput)) {
+        var poId = t.getAttribute('data-dpc-deliv-expected');
+        var dr = delivRow(matEntry(state.jobId), poId);
+        if (dr && (dr.delivery.expected || '') === t.value) delete state.deliv.typed[poId];
+        else state.deliv.typed[poId] = t.value;
+      }
       if (t.hasAttribute('data-dpc-deliv-edit-date') && state.deliv.edit) {
         state.deliv.edit.date = t.value;
         var line = t.closest('.dpc-deliv-edit');

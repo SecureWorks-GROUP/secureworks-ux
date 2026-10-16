@@ -1143,6 +1143,7 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
+        my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
         my_hours: deductionDraftScenario
           ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
           : withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [

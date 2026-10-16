@@ -4465,7 +4465,7 @@
       var ed = d.edit;
       var act = t.getAttribute('data-dpc-deliv-edit');
       if (!ed) return true;
-      if (act === 'save') saveConfirmed(wholeDay(ed.date) || null);
+      if (act === 'save') { if (wholeDay(ed.date)) saveConfirmed(ed.date); }
       else if (act === 'clear') saveConfirmed(null);
       else if (act === 'retry') saveConfirmed(ed.last);
       else if (act === 'cancel') {
@@ -4508,15 +4508,24 @@
       m.link[key] = t.value;
       var btn = region('mail') && region('mail').querySelector('[data-dpc-mail="link"][data-dpc-mail-key="' + key + '"]');
       if (btn) btn.disabled = !t.value || !!m.busy['link:' + key];
-    } else if (t.hasAttribute('data-dpc-deliv-expected')) {
-      // Saved on change, once. A box only part filled (a segment deleted, a
-      // year still being typed) is not a date and is never sent; an emptied
-      // box clears the date.
-      var v = text(t.value);
-      if (!v && t.validity && t.validity.badInput) return;
-      if (v && !wholeDay(v)) return;
-      setExpected(state.jobId, t.getAttribute('data-dpc-deliv-expected'), v || null);
     }
+  }
+
+  // The expected date box is saved when it is left or Enter is pressed, never
+  // while a segment is still being typed. A box only part filled is not a date
+  // and is never sent; an emptied box clears the date.
+  function commitExpected(jobId, t) {
+    var v = text(t.value);
+    if (!v && t.validity && t.validity.badInput) return;
+    if (v && !wholeDay(v)) return;
+    setExpected(jobId, t.getAttribute('data-dpc-deliv-expected'), v || null);
+  }
+
+  function onKeyDown(e) {
+    var t = e.target;
+    if (e.key !== 'Enter' || !t || !t.hasAttribute || !state.jobId || !t.hasAttribute('data-dpc-deliv-expected')) return;
+    e.preventDefault();
+    commitExpected(state.jobId, t);
   }
 
   // A cell or the pad is saved when it is left. A repaint that takes the
@@ -4533,6 +4542,8 @@
     } else if (t.hasAttribute('data-dpc-mail-subject') || t.hasAttribute('data-dpc-mail-body')) {
       var draftId = t.getAttribute('data-dpc-mail-subject') || t.getAttribute('data-dpc-mail-body');
       setTimeout(function () { saveDraft(jobId, draftId); }, 0);
+    } else if (t.hasAttribute('data-dpc-deliv-expected')) {
+      commitExpected(jobId, t);
     }
   }
 
@@ -4645,6 +4656,7 @@
       r.addEventListener('input', onInput);
       r.addEventListener('change', onChange);
       r.addEventListener('focusout', onFocusOut);
+      r.addEventListener('keydown', onKeyDown);
       r.addEventListener('toggle', onToggle, true);
       wired = true;
     }

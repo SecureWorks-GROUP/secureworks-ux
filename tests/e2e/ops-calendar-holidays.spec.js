@@ -1,11 +1,10 @@
-// Ops Dash calendar: the Holidays tick box, the new colours, outlined tick
-// boxes and WA public holidays, all behind the preview switch.
-// Search <calendar-holidays-preview> in ops.html.
+// Ops Dash calendar: the Holidays tick box, the colours, outlined tick boxes
+// and WA public holidays, live for everyone.
+// Search <calendar-holidays> in ops.html.
 //
 // What this guards:
-//  - off by default: no Holidays tick box, Business still covers holidays and
-//    company days, colours exactly as live today, no WA holidays drawn
-//  - ?calholidays=preview turns it on (remembered), ?calholidays=live turns it off
+//  - the plain address shows it all; a stale ?calholidays value or the old
+//    localStorage.sw_cal_holidays_preview key cannot hide it
 //  - Holidays alone covers holidays and company days; Business keeps meetings,
 //    leave and reminders; Everything covers both
 //  - colours: patios blue, fencing yellow, repairs green, make safes purple,
@@ -86,7 +85,6 @@ function snapshot(page) {
       holidayCellBg: (() => { const c = cal.querySelector('.cal-schedule-cell.holiday-col'); return c ? getComputedStyle(c).backgroundColor : ''; })(),
       leave: cal.querySelectorAll('.cal-schedule-leave-badge').length,
       crewBadges: [...cal.querySelectorAll('.cal-holiday-badge')].map((b) => b.textContent),
-      preview: document.getElementById('viewCalendar').classList.contains('cal-v3-hp'),
     };
   });
 }
@@ -99,38 +97,37 @@ async function open(page, query) {
   await revealOpsStaticFixture(page);
 }
 
-test.describe('Holidays preview: off by default', () => {
-  test('the live screen is unchanged: no Holidays tick box, Business covers company days, old colours, no WA holidays', async ({ page }) => {
-    await open(page);
-    await seedAndRender(page);
-    let s = await snapshot(page);
-    expect(s.preview).toBe(false);
-    expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
-    expect(s.squares.j1).toBe('rgb(241, 90, 41)'); // patio orange, as live
-    expect(s.holidays.map((h) => [h.label, h.hol])).toEqual([['Example Conference', false]]);
-
-    await tick(page, 'show', 'business');
-    s = await snapshot(page);
-    expect(s.holidays).toEqual([]);
-    expect(s.meetings).toEqual([]);
-
-    // a WA public holiday is not drawn on the live screen
-    await tick(page, 'show', 'business');
-    await seedAndRender(page, { week: '2026-09-28', events: [], org: [] });
-    s = await snapshot(page);
-    expect(s.holidays).toEqual([]);
-  });
+test.describe('Holidays: live for everyone', () => {
+  for (const [name, query, stored] of [
+    ['the plain address', '', null],
+    ['a stale ?calholidays=live', '?calholidays=live', null],
+    ['an old stored preview choice of off', '', '0'],
+  ]) {
+    test('the live screen has the Holidays tick box, new colours and WA holidays: ' + name, async ({ page }) => {
+      if (stored !== null) {
+        await page.addInitScript((v) => { try { localStorage.setItem('sw_cal_holidays_preview', v); } catch (e) {} }, stored);
+      }
+      await open(page, query);
+      await seedAndRender(page);
+      let s = await snapshot(page);
+      expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+      expect(s.squares.j1).toBe('rgb(37, 99, 235)');
+      expect(s.holidays.map((h) => [h.label, h.hol])).toEqual([['Example Conference', true]]);
+      await seedAndRender(page, { week: '2026-09-28', events: [], org: [] });
+      s = await snapshot(page);
+      expect(s.holidays.map((h) => h.label)).toEqual(["King's Birthday"]);
+    });
+  }
 });
 
-test.describe('Holidays preview: on', () => {
+test.describe('Holidays', () => {
   test.beforeEach(async ({ page }) => {
-    await open(page, '?calholidays=preview');
+    await open(page);
     await seedAndRender(page);
   });
 
   test('Holidays sits beside Business, ticked to start, and Everything covers it', async ({ page }) => {
     let s = await snapshot(page);
-    expect(s.preview).toBe(true);
     expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
     expect(s.ticks.every((t) => t.on)).toBe(true);
 
@@ -220,33 +217,48 @@ test.describe('Holidays preview: on', () => {
     expect(s.crewBadges).toEqual([]);
   });
 
-  test('the choice is remembered, and ?calholidays=live turns the preview off', async ({ page }) => {
+  test('the Crew view holiday header is bright red with readable white text, today included', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-09-28T09:00:00+08:00'));
+    await seedAndRender(page, { view: 'crew', week: '2026-09-28', events: [], org: [] });
+    const header = await page.evaluate(() => {
+      const parse = (c) => c.match(/[\d.]+/g).map(Number);
+      const lum = ([r, g, b]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); })
+        .reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+      const h = document.querySelector('#calendarBody .cal-swimlane-day-header.holiday-col.today');
+      const bg = parse(getComputedStyle(h).backgroundColor);
+      const contrast = (el) => {
+        let fg = parse(getComputedStyle(el).color);
+        const a = fg.length > 3 ? fg[3] : 1;
+        fg = [0, 1, 2].map((i) => fg[i] * a + bg[i] * (1 - a));
+        const [hi, lo] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      return { bg: getComputedStyle(h).backgroundColor, name: contrast(h.querySelector('.day-name')), num: contrast(h.querySelector('.day-num')), cellBg: getComputedStyle(document.querySelector('#calendarBody .cal-swim-cell.holiday-col')).backgroundColor };
+    });
+    expect(header.bg).toBe('rgb(225, 29, 46)');
+    expect(header.name).toBeGreaterThanOrEqual(4.5);
+    expect(header.num).toBeGreaterThanOrEqual(4.5);
+    expect(header.cellBg).toBe('rgb(254, 244, 244)');
+  });
+
+  test('an unticked Holidays is remembered across a reload', async ({ page }) => {
     await tick(page, 'show', 'holidays');
     await page.goto('/ops.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof window.setCalPick === 'function');
     await revealOpsStaticFixture(page);
     await seedAndRender(page);
-    let s = await snapshot(page);
-    expect(s.preview).toBe(true);
+    const s = await snapshot(page);
     expect(s.ticks.find((t) => t.text === 'Holidays').on).toBe(false);
     expect(s.holidays).toEqual([]);
-
-    await page.goto('/ops.html?calholidays=live', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => typeof window.setCalPick === 'function');
-    await revealOpsStaticFixture(page);
-    await seedAndRender(page);
-    s = await snapshot(page);
-    expect(s.preview).toBe(false);
-    expect(s.ticks.some((t) => t.text === 'Holidays')).toBe(false);
   });
 });
 
-test.describe('Holidays preview: saved picks from before it', () => {
+test.describe('Holidays: saved picks from before it', () => {
   test('a pick saved without a holidays key loads with Holidays ticked and the rest as saved', async ({ page }) => {
     await page.addInitScript(() => {
       try { localStorage.setItem('sw_cal_pick', JSON.stringify({ show: { labour: true, materials: true, business: false }, type: { patio: true, fencing: true, repair: true, makesafe: true } })); } catch (e) {}
     });
-    await open(page, '?calholidays=preview');
+    await open(page);
     await seedAndRender(page);
     const s = await snapshot(page);
     expect(s.ticks.find((t) => t.text === 'Business').on).toBe(false);

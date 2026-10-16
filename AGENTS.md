@@ -232,7 +232,7 @@ the flag-off sidebar Divisions rule is unchanged. A business line is decided in
 ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
 job-less label row, plus org events. Business lines take the TOP lanes of the
 week and jobs start under them; an org event stretches across its days instead
-of the corner badge, and a meeting on a job is its own purple line, never merged
+of the corner badge, and a meeting on a job is its own grey line, never merged
 into the job's line. The Show / Type row is tick boxes, all ticked to start
 (`_calPick`, `setCalPick`, stored at `sw_cal_pick`; Insurance ticks Repairs and
 Make Safes together; search `// <calendar-tick-filters>`) and works in BOTH views. Show sets the in-memory
@@ -242,8 +242,8 @@ read off `_calPick` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
-stays its own division (ruling 2026-09-16). Leave, holidays and reminders show under
-Everything and Business. Deliveries are read-only and come from
+stays its own division (ruling 2026-09-16). Leave and reminders show under Everything and
+Business; holidays and company days under Everything and Holidays. Deliveries are read-only and come from
 `calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
 order, see `// <calendar-delivery-row>`) passed through the Show and Type
 focus; both views use it, and Materials with none in view says "No deliveries

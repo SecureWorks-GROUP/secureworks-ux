@@ -246,7 +246,7 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
       '<h1>Debt position</h1><p>As at 9:15am Perth time, today</p><table><tr><td>Total debt</td><td>$21,456.82</td></tr>' +
       '<tr><td>Adds up to total open in Xero</td><td>$41,890.40</td></tr></table><p>Check: $41,890.40 equals Xero\'s open total to the cent.</p></body></html>',
     delivery: {
-      from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], auto_send: false,
+      from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], auto_send: !!settings.report_auto_send,
       sending_on: sendingOn, viewer_is_owner: owner, can_send: owner && sendingOn,
       why_not: !owner ? 'Only the workshop owner (Shaun) can send the report' : !sendingOn ? 'Sending is off until you switch it on' : null,
     },

@@ -325,7 +325,12 @@ check('debt report: the Send words, the gate, the route and "last sent"', () => 
   assert.strictEqual(C.reportRoute(d), 'Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
   assert.strictEqual(C.reportLastSent(null, d, '2026-10-15'), 'Last sent to Marnin: never');
   assert.strictEqual(C.reportLastSent({ at: '2026-10-15T01:02:00Z', to: ['marnin@secureworkswa.com.au'], by: 'Shaun' }, d, '2026-10-15'), 'Last sent to Marnin: today, 9:02am by Shaun');
-  assert.strictEqual(C.reportLastSent({ at: '2026-10-12T00:00:00Z', kind: 'auto', to: ['marnin@secureworkswa.com.au'] }, d, '2026-10-15'), 'Last sent to Marnin: Mon 12 Oct, 8:00am (Monday auto-send)');
+  assert.strictEqual(C.reportLastSent({ at: '2026-10-14T04:00:00Z', kind: 'auto', to: ['marnin@secureworkswa.com.au'] }, d, '2026-10-15'), 'Last sent to Marnin: Wed 14 Oct, 12:00pm (Wednesday 12pm auto-send)');
+  // Consolidate first: a stale Xero copy keeps Send off with the backend's reason, and a refused send reads in its words.
+  const stale = "Our Xero copy of invoices was last synced at 11:39am Perth time, more than 20 minutes ago, so the report would not show today's debt. Wait for the next sync (every 15 minutes) and try again";
+  assert.deepStrictEqual(C.reportGate(Object.assign({}, d, { can_send: false, why_not: stale })), { ok: false, reason: stale + '.' });
+  assert.strictEqual(C.reportRefusalText({ code: 'xero_copy_stale', error: stale }), stale + '.');
+  assert.strictEqual(C.reportRefusalText({ code: 'xero_copy_stale', message: stale }), stale + '.');
   assert.strictEqual(C.reportRefusalText({ code: 'send_not_confirmed' }), 'The email could not be confirmed. Check Sent Items in the admin mailbox before sending it again.');
   assert.strictEqual(C.reportRefusalText({ code: 'recently_sent' }), C.REFUSALS.recently_sent);
 });
@@ -413,7 +418,7 @@ const BACKEND_CODES = [
   'part_paid', 'payer_not_linked', 'payer_not_on_job', 'possible_payment', 'recently_sent', 'recipient_not_internal',
   'report_pdf_failed', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
   'server_key_required', 'step_not_due', 'suggestion_mismatch', 'suggestion_not_pending', 'text_not_allowed',
-  'unknown_action', 'user_required', 'xero_rate_limited', 'xero_unavailable',
+  'unknown_action', 'user_required', 'xero_copy_stale', 'xero_rate_limited', 'xero_unavailable',
 ];
 const BACKEND_ONLY_KEYS = {
   debt_ws_note: ['xero_invoice_id', 'company_key', 'share_key', 'job_id', 'body', 'note', 'text', 'promise_date'],

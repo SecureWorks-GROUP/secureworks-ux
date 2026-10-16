@@ -1,5 +1,6 @@
-// Trade App: the job's work order (docs/job-work-order-screens.md), behind the
-// preview switch (localStorage sw_wo_preview = '1', set by ?wo=preview).
+// Trade App: the job's work order (docs/job-work-order-screens.md), live for
+// every allocated trade with no switch (a stale ?wo= or sw_wo_preview value,
+// the Ops panel's own preview, never hides it).
 //  - On an allocated fencing or patio job the Scope tab shows the work order
 //    from my_job_work_order, as that read sends it today (scope keys only from
 //    the backend trade allowlist): hours on a line priced in hours, per-metre
@@ -7,7 +8,7 @@
 //  - On the invoice, a job with an approved work order is billed by the hours
 //    worked: the blank typed "WO allocated $" box is not offered on that job.
 //    A per-metre trade's server-issued crew work order keeps its Work Order mode.
-//  - With the preview off nothing changes and my_job_work_order is never read.
+//  - A stale ?wo=live or sw_wo_preview = '0' still shows it.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { fillCardTime } = require('../helpers/invoice-time');
@@ -65,11 +66,13 @@ async function stub(page, { detail, workOrderRead }) {
   return reads;
 }
 
-async function setPreview(page, on) {
-  await page.evaluate((on) => {
-    if (on) localStorage.setItem('sw_wo_preview', '1');
-    else localStorage.removeItem('sw_wo_preview');
-  }, on);
+// A stale Ops preview value left in the browser: ?wo=live in the address and
+// sw_wo_preview = '0' stored. Neither may hide the trade's work order.
+async function setStaleSwitch(page) {
+  await page.evaluate(() => {
+    localStorage.setItem('sw_wo_preview', '0');
+    history.replaceState(null, '', location.pathname + '?wo=live' + location.hash);
+  });
 }
 
 async function openJob(page, jobNumber) {
@@ -78,16 +81,15 @@ async function openJob(page, jobNumber) {
   await expect(page.locator('#viewJob')).toHaveClass(/active/);
 }
 
-test.describe('Job work order on the Trade App job (preview)', () => {
+test.describe('Job work order on the Trade App job', () => {
   test.use({ persona: 'installer' });
 
-  test('preview on: hours on a line priced in hours, per metre as quoted, and no dollar figure', async ({ appPage: page }) => {
+  test('hours on a line priced in hours, per metre as quoted, and no dollar figure', async ({ appPage: page }) => {
     const reads = await stub(page, {
       detail: fencingDetail(),
       workOrderRead: { schema: 'trade-job-work-order.v1', job_id: 'e2e-job-1', work_order: approvedWorkOrder('e2e-job-1'), reason: null, can_report_variation: true, my_variations: [] },
     });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     await openJob(page, 'E2E-JOB-001');
     const wo = page.locator('#jdTab_scope [data-trade-job-wo]');
     await expect(wo).toContainText('WO-0042');
@@ -104,7 +106,7 @@ test.describe('Job work order on the Trade App job (preview)', () => {
     expect(reads).toContain('e2e-job-1');
   });
 
-  test('preview on: an approved customer variation is a marked addendum with its hours, and no dollar figure', async ({ appPage: page }) => {
+  test('an approved customer variation is a marked addendum with its hours, and no dollar figure', async ({ appPage: page }) => {
     // The my_job_work_order shape since backend #1031: work_order.addenda[],
     // each {variation_number, label, approved_at, description, scope_items[]}.
     // Money keys are added here to prove the page never shows one.
@@ -124,7 +126,6 @@ test.describe('Job work order on the Trade App job (preview)', () => {
       workOrderRead: { schema: 'trade-job-work-order.v1', job_id: 'e2e-job-1', work_order: wo, reason: null, can_report_variation: true, my_variations: [] },
     });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     await openJob(page, 'E2E-JOB-001');
     const view = page.locator('#jdTab_scope [data-trade-job-wo]');
     const add = view.locator('[data-trade-job-wo-addendum][data-variation-number="1"]');
@@ -141,29 +142,30 @@ test.describe('Job work order on the Trade App job (preview)', () => {
     for (const money of ['320', '921']) expect(text).not.toContain(money);
   });
 
-  test('preview on: a job with no approved work order says so', async ({ appPage: page }) => {
+  test('a job with no approved work order says so', async ({ appPage: page }) => {
     await stub(page, {
       detail: fencingDetail(),
       workOrderRead: { schema: 'trade-job-work-order.v1', job_id: 'e2e-job-1', work_order: null, reason: 'no_approved_work_order', can_report_variation: true, my_variations: [] },
     });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     await openJob(page, 'E2E-JOB-001');
     await expect(page.locator('#jdTab_scope [data-trade-job-wo-none]')).toBeVisible();
   });
 
-  test('preview off: no work order section and no work order read', async ({ appPage: page }) => {
-    const reads = await stub(page, { detail: fencingDetail(), workOrderRead: { work_order: approvedWorkOrder('e2e-job-1') } });
+  test('a stale ?wo=live or stored switch does not hide the work order', async ({ appPage: page }) => {
+    const reads = await stub(page, {
+      detail: fencingDetail(),
+      workOrderRead: { schema: 'trade-job-work-order.v1', job_id: 'e2e-job-1', work_order: approvedWorkOrder('e2e-job-1'), reason: null, can_report_variation: true, my_variations: [] },
+    });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, false);
+    await setStaleSwitch(page);
     await openJob(page, 'E2E-JOB-001');
-    await expect(page.locator('#jdTab_scope')).toContainText('Build spec');
-    await expect(page.locator('[data-trade-job-wo]')).toHaveCount(0);
-    expect(reads).toEqual([]);
+    await expect(page.locator('#jdTab_scope [data-trade-job-wo]')).toContainText('WO-0042');
+    expect(reads).toContain('e2e-job-1');
   });
 });
 
-test.describe('Job work order on the trade invoice (preview)', () => {
+test.describe('Job work order on the trade invoice', () => {
   test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6 });
 
   async function openInvoice(page) {
@@ -180,7 +182,6 @@ test.describe('Job work order on the trade invoice (preview)', () => {
       workOrderRead: (jobId) => ({ schema: 'trade-job-work-order.v1', job_id: jobId, work_order: approvedWorkOrder(jobId, { job_number: 'SWF-26767' }), reason: null, can_report_variation: true, my_variations: [] }),
     });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     const card = await openInvoice(page);
     const note = card.locator('[data-job-wo-invoice-note]');
     await expect(note).toContainText('Work order WO-0042 is on this job');
@@ -211,7 +212,6 @@ test.describe('Job work order on the trade invoice (preview)', () => {
         : { schema: 'trade-job-work-order.v1', job_id: jobId, work_order: approvedWorkOrder(jobId, { job_number: 'SWF-26767' }), reason: null, can_report_variation: true, my_variations: [] }),
     });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     const card = await openInvoice(page);
     await expect(card.locator('[data-job-wo-invoice-note]')).toBeVisible();
     await expect(card.getByRole('button', { name: 'Work Order' })).toBeDisabled();
@@ -233,15 +233,36 @@ test.describe('Job work order on the trade invoice (preview)', () => {
   test('a job with no approved work order keeps the typed Work Order mode', async ({ appPage: page }) => {
     await stub(page, { workOrderRead: (jobId) => ({ job_id: jobId, work_order: null, reason: 'no_approved_work_order' }) });
     await signIn(page, PERSONAS.installer);
-    await setPreview(page, true);
     const card = await openInvoice(page);
     await card.getByRole('button', { name: 'Work Order' }).click();
     await expect(card.locator('[data-cardwoalloc]')).toBeVisible();
     await expect(card.locator('[data-job-wo-invoice-note]')).toHaveCount(0);
   });
+
+  test('a read that finds no work order leaves the field the trade is typing in alone', async ({ appPage: page }) => {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    await page.route(`${OPS_API}**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') !== 'my_job_work_order') return route.fallback();
+      await held;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job_id: url.searchParams.get('job_id'), work_order: null, reason: 'no_approved_work_order' }) });
+    });
+    await signIn(page, PERSONAS.installer);
+    const card = await openInvoice(page);
+    const date = card.locator('[data-carddate]');
+    await date.focus();
+    await date.evaluate((el) => { el.__typing = true; });
+
+    const landed = page.waitForResponse((r) => r.url().includes('action=my_job_work_order'));
+    release();
+    await landed;
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => !!(document.activeElement && document.activeElement.__typing))).toBe(true);
+  });
 });
 
-test.describe('Job work order and a server-issued crew work order (preview)', () => {
+test.describe('Job work order and a server-issued crew work order', () => {
   // Fixtures date work orders from perthWeekMonday(); a UTC browser after Perth
   // Monday midnight would filter that week out.
   test.use({ persona: 'fencing_manager', timezoneId: 'Australia/Perth' });
@@ -251,7 +272,6 @@ test.describe('Job work order and a server-issued crew work order (preview)', ()
       workOrderRead: (jobId) => ({ schema: 'trade-job-work-order.v1', job_id: jobId, work_order: approvedWorkOrder(jobId, { job_number: 'FENCE-HENRY-001' }), reason: null, can_report_variation: true, my_variations: [] }),
     });
     await signIn(page, PERSONAS.fencing_manager);
-    await setPreview(page, true);
     await page.locator('[data-view="hours"]').click();
     await page.getByRole('button', { name: 'Weekly Invoice' }).click();
     await page.getByRole('button', { name: 'Continue' }).click();

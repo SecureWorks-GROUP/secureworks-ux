@@ -8,9 +8,10 @@
 // the invoice). Both pages read a work order's lines through this file only,
 // so a task, its hours and a variation addendum read the same everywhere.
 //
-// Preview (captain's rule for new screens): off unless ?wo=preview or
-// localStorage sw_wo_preview = '1'. ?wo=live turns it off.
-// With it off, both pages behave exactly as before.
+// Preview (captain's rule for new screens), Ops page only: off unless
+// ?wo=preview or localStorage sw_wo_preview = '1'. ?wo=live turns it off.
+// With it off, the Ops page behaves exactly as before. The Trade App screens
+// are live and read no switch (captain, 16 Oct 2026).
 //
 // Money: the Ops renderer shows the agreed labour, each line's allocation and
 // the billed figures (office staff only). The trade renderer reads no money

@@ -13,20 +13,20 @@ only; a variation joins the existing work order as a marked addendum; fencing is
 quoted, per metre, with hours only where the quote has hours; the quote's own cost table is
 the one rate source.
 
-## The preview switch
+## The switches
 
-Built for real, published behind a preview, using the same live data. The live screens are
-unchanged until the captain says "make it live".
+The Trade App screens are live for every allocated trade (captain, 16 Oct 2026): no switch,
+and a stale `?wo=` in the address or `localStorage.sw_wo_preview` value never hides them.
 
-- Open `ops.html?wo=preview` or `trade.html?wo=preview`. The browser remembers it in
-  `localStorage.sw_wo_preview = '1'`, so the Trade App keeps it after it restores a screen.
+The Ops (office) screens are still behind their own preview, using the same live data:
+
+- Open `ops.html?wo=preview`. The browser remembers it in `localStorage.sw_wo_preview = '1'`.
 - `?wo=live` turns it off and forgets it. Any other `wo` value is ignored.
-- With it off: no work order panel, the Work Order PDF prints exactly as before, every
-  "Create Work Order" opens the old office form for every job, the Trade App never reads
-  `my_job_work_order`, and the invoice keeps the typed Work Order mode.
+- With it off: no work order panel, the Work Order PDF prints exactly as before, and every
+  "Create Work Order" opens the old office form for every job.
 
-Making it live means making `previewState` answer on by default (one line in
-`shared/job-work-order.js`) and updating these tests.
+Making Ops live means making `previewState` answer on by default (one line in
+`shared/job-work-order.js`) and updating the Ops tests.
 
 ## Ops job page (Build tab, top)
 
@@ -238,5 +238,6 @@ office money door (`TRADE_JOB_WO_MONEY_KEYS`) also strips `trade_allocation_ex` 
   approver only, both answers with the record's `updated_at`, a mistyped id or a non-invoice
   Xero link, and refusals.
 - `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload
-  `my_job_work_order` sends today) and the invoice, preview on and off, including a per-metre
+  `my_job_work_order` sends today, and with a stale `?wo=live` / stored switch) and the
+  invoice, with no switch, including a per-metre
   trade's server-issued crew work order keeping its Work Order mode.

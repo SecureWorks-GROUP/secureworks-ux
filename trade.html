@@ -26,7 +26,7 @@
   <!-- Trade keeps its own login screen. Do NOT load ops auth-gate.js here:
        it hides the trade login UI and confuses crew sign-in after the ops JWT cutover. -->
   <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
-  <!-- Job work order (docs/job-work-order-screens.md): read only while the ?wo=preview switch is on. -->
+  <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=3"></script>
 
   <style>
@@ -13744,29 +13744,16 @@
   // as the trade reads it: each task with its hours, per-metre lines as quoted,
   // variations as marked addenda, and NO dollar figure for anyone, the lead
   // trade included (captain, 12 Oct 2026). Rules and HTML:
-  // shared/job-work-order.js. Preview only: ?wo=preview or localStorage
-  // sw_wo_preview = '1' (?wo=live turns it off); with it off nothing here runs.
+  // shared/job-work-order.js. Live for every trade (captain, 16 Oct 2026):
+  // no switch, and a stale ?wo= or localStorage sw_wo_preview value (the Ops
+  // panel's own preview) never hides it here.
   // Screen doc: docs/job-work-order-screens.md.
-  var TRADE_JOB_WO_STORE_KEY = 'sw_wo_preview';
   var TRADE_JOB_WO_TTL_MS = 2 * 60 * 1000;
-  var _tradeJobWoPreview = null;
   var _tradeJobWo = {}; // job id -> { state: 'loading'|'ready'|'failed', read, at }
 
-  function tradeJobWoPreviewOn() {
-    if (_tradeJobWoPreview !== null) return _tradeJobWoPreview;
-    var C = window.JobWorkOrderCore;
-    if (!C) { _tradeJobWoPreview = false; return false; }
-    var stored = null;
-    try { stored = localStorage.getItem(TRADE_JOB_WO_STORE_KEY); } catch (e) { stored = null; }
-    var st = C.previewState(window.location.search, stored);
-    if (st.persist) {
-      try {
-        if (st.persist === '1') localStorage.setItem(TRADE_JOB_WO_STORE_KEY, '1');
-        else localStorage.removeItem(TRADE_JOB_WO_STORE_KEY);
-      } catch (e) { /* the URL still decides this load */ }
-    }
-    _tradeJobWoPreview = st.on;
-    return _tradeJobWoPreview;
+  // On whenever the shared core loaded; the URL and storage are not read.
+  function tradeJobWoOn() {
+    return !!window.JobWorkOrderCore;
   }
 
   function tradeJobWoEligibleType(type) {
@@ -13788,21 +13775,20 @@
   }
 
   // Read the job's work order once (again, or after a failure, once TTL_MS has
-  // passed, so a repaint never fires a read per keystroke); onDone(changed) runs
-  // when the answer lands.
+  // passed, so a repaint never fires a read per keystroke); onDone runs when
+  // the answer lands.
   function tradeJobWoLoad(jobId, onDone) {
-    if (!jobId || !tradeJobWoPreviewOn()) return;
+    if (!jobId || !tradeJobWoOn()) return;
     var e = _tradeJobWo[jobId];
     if (e && (e.state === 'loading' || Date.now() - e.at < TRADE_JOB_WO_TTL_MS)) return;
-    var before = e && e.state === 'ready' ? JSON.stringify(e.read) : null;
     _tradeJobWo[jobId] = { state: 'loading', read: e ? e.read : null, at: 0 };
     api('my_job_work_order', { job_id: jobId }, null, { preserveSessionOnAuthFailure: true }).then(function(res) {
       _tradeJobWo[jobId] = { state: 'ready', read: res || { work_order: null }, at: Date.now() };
-      if (onDone) onDone(JSON.stringify(_tradeJobWo[jobId].read) !== before);
+      if (onDone) onDone();
     }).catch(function() {
       var kept = e ? e.read : null;
       _tradeJobWo[jobId] = { state: kept ? 'ready' : 'failed', read: kept, at: Date.now() };
-      if (onDone) onDone(false);
+      if (onDone) onDone();
     });
   }
 
@@ -13813,9 +13799,9 @@
   }
 
   // The Work Order and Scope tabs: the job's work order scope, on an
-  // allocated fencing or patio job. '' while the preview is off.
+  // allocated fencing or patio job.
   function renderTradeJobWorkOrder(data) {
-    if (!tradeJobWoPreviewOn() || !data || !data.job || isForeignCrewJob(data)) return '';
+    if (!tradeJobWoOn() || !data || !data.job || isForeignCrewJob(data)) return '';
     if (!tradeJobWoEligibleType(getTradeJobType(data.job)) && !tradeJobWoEligibleType(data.job.type)) return '';
     var jobId = data.job.id;
     if (_tradeJobWo[jobId] && _tradeJobWo[jobId].state === 'failed') delete _tradeJobWo[jobId];
@@ -13833,7 +13819,7 @@
   // card carrying a server-issued crew work order (work_order_id) and a
   // per-metre trade's cards keep their Work Order mode.
   function tradeJobWoRetiresTypedBox(c) {
-    return !!(c && c.job_id && !c.work_order_id && tradeJobWoPreviewOn() && !isPerMetreUser()
+    return !!(c && c.job_id && !c.work_order_id && tradeJobWoOn() && !isPerMetreUser()
       && tradeJobWoApproved(c.job_id));
   }
 
@@ -13855,12 +13841,15 @@
   // invoice whose typed box it could retire; when one turns out to have an
   // approved work order, repaint.
   function loadInvoiceJobWorkOrders(onChange) {
-    if (!tradeJobWoPreviewOn() || isPerMetreUser()) return;
+    if (!tradeJobWoOn() || isPerMetreUser()) return;
     (_jobCards || []).forEach(function(c) {
       if (!c || !c.job_id || c.work_order_id || c.is_makesafe) return;
       var t = String(c.job_type || '').toLowerCase();
       if (t && !tradeJobWoEligibleType(t)) return;
-      tradeJobWoLoad(c.job_id, function(changed) { if (changed && onChange) onChange(); });
+      var before = JSON.stringify(tradeJobWoApproved(c.job_id));
+      tradeJobWoLoad(c.job_id, function() {
+        if (onChange && JSON.stringify(tradeJobWoApproved(c.job_id)) !== before) onChange();
+      });
     });
   }
 

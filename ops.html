@@ -980,6 +980,15 @@
     #viewCalendar.cal-v3 .cal-schedule-bar .bar-crew .v3-more { font-size: 10.5px; color: var(--v3g1); margin-left: 2px; }
     #viewCalendar.cal-v3 .cal-schedule-bar .v3-nocrew { margin-left: auto; flex: none; font-size: 10.5px; color: #C0392B; }
     #viewCalendar.cal-v3 .cal-schedule-bar .bar-lock { font-size: 10.5px; line-height: 1; }
+    /* <calendar-borders> live for everyone: a thin outline in a darker
+       shade of each line's own colour, drawn as an inset shadow so the
+       transparent side borders, the box drag measures and the 2px lane gap stay
+       as they are; and a visible light grid between every day cell. */
+    #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-bar { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v3c, #F15A29) 72%, #000); }
+    #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-bar.v3-hol { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v3hol, #E11D2E) 65%, #000); }
+    #viewCalendar.cal-v3 .cal-schedule-grid.v3 { border-top-color: #D4D4DA; box-shadow: -1px 0 0 #D4D4DA; }
+    #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-cell,
+    #viewCalendar.cal-v3 .cal-schedule-grid.v3 > .cal-schedule-week:nth-last-child(2) .cal-schedule-cell { border-right-color: #D4D4DA; border-bottom-color: #D4D4DA; }
     .cal-v3-dels { position: absolute; left: 4px; right: 4px; bottom: 4px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
     .cal-v3-del { display: flex; align-items: flex-start; gap: 5px; min-width: 0; font-size: 10.5px; line-height: 14px; color: color-mix(in srgb, var(--v3c, #55555C) 68%, #000); }
     .cal-v3-del .v3-truck { flex: none; display: inline-flex; margin-top: 1px; }
@@ -6452,6 +6461,10 @@ window.__SW_CAL_V3_ENABLED = (function () {
 // company days bright red, business grey. The old ?calholidays switch and its
 // localStorage.sw_cal_holidays_preview key are gone and ignored.
 // Search <calendar-holidays>.
+// ── Calendar borders (live for everyone) ── <calendar-borders>
+// Every v3 job and business line has a thin outline in a darker shade of its own
+// colour, and the day cells a visible light grid, so neighbouring jobs and days
+// read apart. Styles only, scoped to #viewCalendar.cal-v3.
 var _pipelineData = null;
 var _jobsCache = [];
 var _suppliers = [];

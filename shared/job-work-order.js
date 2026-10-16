@@ -519,7 +519,7 @@ var JobWorkOrderCore = (function () {
     return ['stale_review', 'expected_updated_at_required', 'variation_sealed', 'not_a_draft', 'work_order_not_approved', 'customer_variation_not_found'].indexOf(str(code)) >= 0;
   }
 
-  // ── A stuck Xero draft record (preview: ?woxero=preview) ──
+  // ── A stuck Xero draft record ──
   // A customer variation's invoice record (invoice on customer_variations[])
   // that is 'unknown' (Xero did not confirm the create) or 'creating' (a claim
   // never finished) is not retried by anything. A work order approver checks
@@ -529,20 +529,9 @@ var JobWorkOrderCore = (function () {
   // (xero_requested_at) is 15 minutes old; before that the server refuses
   // 409 xero_draft_in_progress.
   var XERO_CREATING_STALE_AFTER_MS = 15 * 60 * 1000;
-  var XERO_INVOICE_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-
-  // Its own switch, the same shape as ?wo=: ?woxero=preview turns it on (and
-  // the page remembers it), ?woxero=live turns it off. It shows only on the
-  // job work order panel, which needs ?wo=preview as well.
-  function xeroDraftPreviewState(search, stored) {
-    var m = /[?&]woxero=([^&#]*)/.exec(str(search));
-    if (m) {
-      var v = lower(m[1].replace(/%20|\+/g, ''));
-      if (v === 'preview') return { on: true, persist: '1' };
-      if (v === 'live') return { on: false, persist: '0' };
-    }
-    return { on: str(stored) === '1', persist: null };
-  }
+  var XERO_INVOICE_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  var XERO_INVOICE_ID_RE = new RegExp('^' + XERO_INVOICE_ID + '$', 'i');
+  var XERO_INVOICE_LINK_RE = new RegExp('^\\S*[?&]InvoiceID=(' + XERO_INVOICE_ID + ')(?![0-9a-f-])', 'i');
 
   // "13 Oct 2026, 2:05 pm" in Perth.
   function timeWords(v) {
@@ -577,13 +566,14 @@ var JobWorkOrderCore = (function () {
     return !!(stuck && stuck.answerable && obj(invoice).updated_at && isApprover(viewerEmail));
   }
 
-  // The Xero InvoiceID from what was pasted: the id itself, or a Xero link
-  // carrying it (.../Edit.aspx?InvoiceID=<id>). '' when there is none.
+  // The Xero InvoiceID from what was pasted: the whole text is the id, or a
+  // link carrying it after InvoiceID= (.../Edit.aspx?InvoiceID=<id>). Any
+  // other text, a Xero link with some other id in it included, gives ''.
   function xeroInvoiceIdFrom(text) {
     var s = str(text).trim();
-    var link = /InvoiceID=([0-9a-f-]{36})/i.exec(s);
-    var m = link ? XERO_INVOICE_ID_RE.exec(link[1]) : XERO_INVOICE_ID_RE.exec(s);
-    return m ? m[0].toLowerCase() : '';
+    if (XERO_INVOICE_ID_RE.test(s)) return s.toLowerCase();
+    var link = XERO_INVOICE_LINK_RE.exec(s);
+    return link ? link[1].toLowerCase() : '';
   }
 
   // The dialog, as answered: {outcome, invoiceId, invoiceNumber, checked}.
@@ -951,15 +941,12 @@ var JobWorkOrderCore = (function () {
     var inv = (p && obj(p.invoice)) || obj(c.invoice);
     var line = (p && obj(p.line)) || (inv && obj(inv.line));
     ui = obj(ui) || {};
-    if (ui.xeroPreview) {
-      var reference = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
-      h += renderXeroDraftStuck(c, inv, ui, viewerEmail, reference);
-    }
+    var ref = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
+    h += renderXeroDraftStuck(c, inv, ui, viewerEmail, ref);
     if (!line) {
       return h + '<button type="button" class="btn btn-secondary btn-sm" data-job-wo-cv-invoice-line data-cv-id="' + esc(c.id) + '"' + (busy || previewBusy ? ' disabled' : '') +
         ' onclick="JobWorkOrderOps.cvInvoiceLine(this.getAttribute(\'data-cv-id\'))">' + (previewBusy ? 'Preparing...' : 'Preview the customer invoice line') + '</button></div>';
     }
-    var ref = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
     h += '<div class="jwo-k">Customer invoice line<span class="jwo-k-sub">Preview</span></div>';
     h += '<table class="jwo-table" data-job-wo-cv-invoice-preview><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Unit price ex GST</th><th class="r">Account</th></tr></thead><tbody>' +
       '<tr><td class="jwo-instr">' + esc(line.description || '') + '</td><td class="r">' + esc(numWords(num(line.quantity))) + '</td>' +
@@ -1264,7 +1251,6 @@ var JobWorkOrderCore = (function () {
     customerVariationFormValues: customerVariationFormValues,
     customerVariationRefusalWords: customerVariationRefusalWords,
     customerVariationNeedsReread: customerVariationNeedsReread,
-    xeroDraftPreviewState: xeroDraftPreviewState,
     xeroDraftStuck: xeroDraftStuck,
     canReconcileXeroDraft: canReconcileXeroDraft,
     xeroInvoiceIdFrom: xeroInvoiceIdFrom,

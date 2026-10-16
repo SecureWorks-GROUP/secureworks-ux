@@ -743,7 +743,7 @@ test.describe('Quote lines as the backend sends them (core)', () => {
 });
 
 // A stuck Xero draft record (secureworks-backend docs/job-work-orders-v1.md,
-// "A stuck Xero draft record"), behind ?woxero=preview: an approved
+// "A stuck Xero draft record"), on the job work order panel: an approved
 // variation's invoice record in 'unknown', or in 'creating' for 15 minutes,
 // is answered for by the approver after checking Xero by hand.
 const XERO_ID = '0f8e2c1a-3b4d-4e5f-8a9b-1c2d3e4f5a6b';
@@ -766,16 +766,7 @@ function withStuck(invoice) {
 const MIN = 60 * 1000;
 const REQUESTED_MS = Date.parse(STUCK_REQUESTED_AT);
 
-test.describe('A stuck Xero draft record (core, preview)', () => {
-  test('its own preview switch: ?woxero=preview on and remembered, ?woxero=live off, anything else ignored', () => {
-    expect(C.xeroDraftPreviewState('?woxero=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.xeroDraftPreviewState('?wo=preview&woxero=live', '1')).toEqual({ on: false, persist: '0' });
-    expect(C.xeroDraftPreviewState('?woxero=maybe', '1')).toEqual({ on: true, persist: null });
-    expect(C.xeroDraftPreviewState('?wo=preview', null)).toEqual({ on: false, persist: null });
-    // ?wo= alone never switches it.
-    expect(C.previewState('?woxero=preview', null)).toEqual({ on: false, persist: null });
-  });
-
+test.describe('A stuck Xero draft record (core)', () => {
   test('stuck is unknown at once, and creating only once its claim is 15 minutes old', () => {
     expect(C.xeroDraftStuck(null, REQUESTED_MS)).toBeNull();
     expect(C.xeroDraftStuck(stuckInvoice('prepared'), REQUESTED_MS)).toBeNull();
@@ -795,6 +786,13 @@ test.describe('A stuck Xero draft record (core, preview)', () => {
     expect(C.xeroInvoiceIdFrom(XERO_ID)).toBe(XERO_ID);
     expect(C.xeroInvoiceIdFrom(' ' + XERO_ID.toUpperCase() + ' ')).toBe(XERO_ID);
     expect(C.xeroInvoiceIdFrom('https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=' + XERO_ID)).toBe(XERO_ID);
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + XERO_ID.toUpperCase() + '&foo=1')).toBe(XERO_ID);
+    // Any other text with an id in it is not the invoice's id.
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Contacts/View/' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Contacts/View.aspx?contactID=' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom('Invoice ' + XERO_ID)).toBe('');
+    expect(C.xeroInvoiceIdFrom(XERO_ID + 'a')).toBe('');
+    expect(C.xeroInvoiceIdFrom('https://go.xero.com/Edit.aspx?InvoiceID=' + XERO_ID + '0')).toBe('');
     expect(C.xeroInvoiceIdFrom('INV-0123')).toBe('');
     expect(C.xeroInvoiceIdFrom('')).toBe('');
   });
@@ -808,6 +806,9 @@ test.describe('A stuck Xero draft record (core, preview)', () => {
       .toEqual({ fields: { outcome: 'no_draft' }, errors: [] });
     expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: '', checked: true }).errors).toEqual(['Paste the Xero invoice id, or the link to the draft in Xero.']);
     expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: 'INV-0123', checked: true }).errors[0]).toMatch(/not a Xero invoice id/);
+    const contact = C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: 'https://go.xero.com/Contacts/View/' + XERO_ID, checked: true });
+    expect(contact.fields).toBeNull();
+    expect(contact.errors[0]).toMatch(/not a Xero invoice id/);
     expect(C.xeroReconcileFields({ outcome: 'draft_exists', invoiceId: XERO_ID, invoiceNumber: 'x'.repeat(51), checked: true }).errors).toEqual(['The invoice number is longer than 50 characters.']);
     expect(C.xeroReconcileFields({ outcome: 'no_draft', checked: false })).toEqual({ fields: null, errors: ['Tick that you checked Xero by hand first.'] });
     expect(C.xeroReconcileFields({ outcome: '', checked: true }).errors).toEqual(['Say what you found in Xero.']);
@@ -827,10 +828,10 @@ test.describe('A stuck Xero draft record (core, preview)', () => {
     expect(C.xeroReconcileDoneWords('no_draft', { invoice: { status: 'prepared' } })).toMatch(/^Released: the line is back to prepared/);
   });
 
-  test('the panel: stuck states in words, the button for the approver only, nothing with the preview off', () => {
+  test('the panel: stuck states in words, the button for the approver only', () => {
     const block = approvedWithVariation();
     const panel = (invoice, email, now, extra) => C.renderOpsPanel(block, readWith(block, withStuck(invoice)), 'ready',
-      { viewerEmail: email, cv: Object.assign({ xeroPreview: true, now }, extra || {}) });
+      { viewerEmail: email, cv: Object.assign({ now }, extra || {}) });
 
     const unknown = panel(stuckInvoice('unknown', { failure: 'Xero timed out' }), SHAUN, REQUESTED_MS + MIN);
     expect(unknown).toContain('data-job-wo-cv-xero-stuck="unknown"');
@@ -855,15 +856,12 @@ test.describe('A stuck Xero draft record (core, preview)', () => {
     expect(old).toContain('data-job-wo-cv-xero-open');
 
     expect(panel(stuckInvoice('prepared'), SHAUN, REQUESTED_MS)).not.toContain('data-job-wo-cv-xero-stuck');
-    const off = C.renderOpsPanel(block, readWith(block, withStuck(stuckInvoice('unknown'))), 'ready', { viewerEmail: SHAUN, cv: { now: REQUESTED_MS } });
-    expect(off).not.toContain('data-job-wo-cv-xero');
-    expect(off).not.toContain('not confirmed');
   });
 
   test('the dialog: both answers, the fields that go with each, and the press held until Xero was checked', () => {
     const block = approvedWithVariation();
     const read = readWith(block, withStuck(stuckInvoice('unknown')));
-    const dialog = (over) => C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { xeroPreview: true, now: REQUESTED_MS, xero: Object.assign({ id: 'cv-1', outcome: '', invoiceId: '', invoiceNumber: '', checked: false, errors: [] }, over || {}) } });
+    const dialog = (over) => C.renderOpsPanel(block, read, 'ready', { viewerEmail: SHAUN, cv: { now: REQUESTED_MS, xero: Object.assign({ id: 'cv-1', outcome: '', invoiceId: '', invoiceNumber: '', checked: false, errors: [] }, over || {}) } });
 
     const blank = dialog();
     expect(blank).toContain('role="dialog"');

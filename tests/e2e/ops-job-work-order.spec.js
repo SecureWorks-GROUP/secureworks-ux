@@ -790,8 +790,7 @@ test.describe('Customer variations on the job work order (preview)', () => {
 });
 
 // A stuck Xero draft record (secureworks-backend docs/job-work-orders-v1.md,
-// "A stuck Xero draft record"), behind its own preview, ?woxero=preview, on
-// the panel ?wo=preview shows. An approved variation whose invoice record is
+// "A stuck Xero draft record"), on the panel ?wo=preview shows. An approved variation whose invoice record is
 // 'unknown', or 'creating' for 15 minutes, says so; Shaun checks Xero by hand
 // and answers with reconcile_customer_variation_xero_draft, which never calls
 // Xero, carrying the record's updated_at as read.
@@ -815,20 +814,19 @@ function recordedVariation() {
 }
 
 test.describe('A stuck Xero draft on a customer variation (preview)', () => {
-  test('with only ?wo=preview the stuck record shows nothing new and nothing answers it', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=live');
+  test('preview off: no panel, no stuck state and no reconcile call', async ({ page }) => {
+    await page.goto('/ops.html?wo=live');
     const { data, read } = withVariations([stuckVariation('unknown')]);
     await openBuild(page, data, { job_work_order: read }, SHAUN);
-    await expect(page.locator('[data-job-wo-cv-row][data-cv-id="cv-1"]')).toBeVisible();
-    await expect(page.locator('[data-job-wo-cv-invoice-preview]')).toBeVisible();
+    await expect(page.locator('#jdBuild')).toContainText('Materials Dispatch');
+    await expect(page.locator('[data-job-wo-panel]')).toHaveCount(0);
     await expect(page.locator('[data-job-wo-cv-xero-stuck]')).toHaveCount(0);
-    await expect(page.locator('[data-job-wo-panel] button', { hasText: /xero/i })).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('sw_wo_xero_preview'))).toBeNull();
-    expect(await posts(page)).toEqual([]);
+    const actions = await page.evaluate(() => window.__calls.map((c) => c.action));
+    expect(actions.filter((a) => /work_order|variation|xero/.test(a))).toEqual([]);
   });
 
   test('Shaun records the draft found in Xero from its link; the answer carries the record as read', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const before = withVariations([stuckVariation('unknown')]);
     const after = withVariations([recordedVariation()]);
     await openBuild(page, before.data, {
@@ -836,7 +834,6 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
       reconcile_customer_variation_xero_draft: { customer_variation_id: 'cv-1', invoice: recordedVariation().invoice, duplicate: false },
       job_detail: after.data,
     }, SHAUN);
-    expect(await page.evaluate(() => localStorage.getItem('sw_wo_xero_preview'))).toBe('1');
     const stuck = page.locator('[data-job-wo-cv-row][data-cv-id="cv-1"] [data-job-wo-cv-xero-stuck="unknown"]');
     await expect(stuck).toContainText('Xero draft not confirmed');
     await expect(stuck).toContainText('Xero did not confirm whether the draft for this line was made (asked for 15 Oct 2026, 10:00 am)');
@@ -868,7 +865,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
   });
 
   test('Shaun releases a stuck creating line once its claim is 15 minutes old; nothing else is sent', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const old = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const stuckOne = stuckVariation('creating', { xero_requested_at: old });
     const before = withVariations([stuckOne]);
@@ -899,7 +896,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
   });
 
   test('a creating line under 15 minutes old says it is being made, with no button', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const fresh = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const { data, read } = withVariations([stuckVariation('creating', { xero_requested_at: fresh })]);
     await openBuild(page, data, { job_work_order: read }, SHAUN);
@@ -910,7 +907,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
   });
 
   test('anyone but Shaun sees the stuck state and who answers it, with no button', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const { data, read } = withVariations([stuckVariation('unknown')]);
     await openBuild(page, data, { job_work_order: read }, 'esther@secureworkswa.com.au');
     await expect(page.locator('[data-job-wo-cv-xero-stuck="unknown"]')).toContainText('Xero draft not confirmed');
@@ -919,7 +916,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
   });
 
   test('a mistyped id is caught before anything is sent; Back closes the dialog', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const { data, read } = withVariations([stuckVariation('unknown')]);
     await openBuild(page, data, { job_work_order: read }, SHAUN);
     await page.locator('[data-job-wo-cv-xero-open]').click();
@@ -930,6 +927,11 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     await dialog.locator('[data-job-wo-cv-xero-submit]').click();
     await expect(dialog.locator('[data-job-wo-cv-xero-errors]')).toContainText('That is not a Xero invoice id.');
     await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveValue('INV-0123');
+    const contactLink = 'https://go.xero.com/Contacts/View/' + XERO_ID;
+    await dialog.locator('[data-cv-xero-f="invoiceId"]').fill(contactLink);
+    await dialog.locator('[data-job-wo-cv-xero-submit]').click();
+    await expect(dialog.locator('[data-job-wo-cv-xero-errors]')).toContainText('That is not a Xero invoice id.');
+    await expect(dialog.locator('[data-cv-xero-f="invoiceId"]')).toHaveValue(contactLink);
     await dialog.locator('[data-job-wo-cv-xero-close]').click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.locator('[data-job-wo-cv-xero-open]')).toBeEnabled();
@@ -937,7 +939,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
   });
 
   test('a refusal reads in words: one that leaves the record as read stays in the dialog, a stale one reads the job again', async ({ page }) => {
-    await page.goto('/ops.html?wo=preview&woxero=preview');
+    await page.goto('/ops.html?wo=preview');
     const before = withVariations([stuckVariation('unknown')]);
     const moved = withVariations([stuckVariation('unknown', { updated_at: '2026-10-16T03:00:00Z', failure: 'Second try timed out' })]);
     await openBuild(page, before.data, {

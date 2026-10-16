@@ -24,11 +24,9 @@
 //         prepare_customer_variation_invoice_line, which only builds the
 //         customer's invoice line for a preview. Nothing here creates a Xero
 //         draft (create_customer_variation_xero_draft is never called).
-//         Behind its own preview too (?woxero=preview, localStorage
-//         sw_wo_xero_preview = '1'; ?woxero=live turns it off): an approved
-//         variation whose Xero draft record is stuck ('unknown', or
-//         'creating' for 15 minutes) says so, and the approver answers what
-//         Xero shows with reconcile_customer_variation_xero_draft
+//         An approved variation whose Xero draft record is stuck ('unknown',
+//         or 'creating' for 15 minutes) says so, and the approver answers
+//         what Xero shows with reconcile_customer_variation_xero_draft
 //         {variation_id, expected_updated_at (invoice.updated_at as read),
 //         outcome, xero_invoice_id?, invoice_number?}, which never calls Xero.
 //
@@ -42,10 +40,8 @@ var JobWorkOrderOps = (function () {
   'use strict';
 
   var STORE_KEY = 'sw_wo_preview';
-  var XERO_STORE_KEY = 'sw_wo_xero_preview';
   var MOUNT_ID = 'jdJobWorkOrder';
   var _preview = null;
-  var _xeroPreview = null;
   // One state per job_detail read: the job_work_order read and the approve button.
   var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0, cv: freshCv() };
 
@@ -74,24 +70,6 @@ var JobWorkOrderOps = (function () {
     return _preview;
   }
 
-  // The stuck Xero draft answer: its own switch, on the panel ?wo=preview shows.
-  function xeroPreviewOn() {
-    if (_xeroPreview !== null) return _xeroPreview;
-    var C = core();
-    if (!C || !C.xeroDraftPreviewState) { _xeroPreview = false; return false; }
-    var stored = null;
-    try { stored = localStorage.getItem(XERO_STORE_KEY); } catch (e) { stored = null; }
-    var st = C.xeroDraftPreviewState(location.search, stored);
-    if (st.persist) {
-      try {
-        if (st.persist === '1') localStorage.setItem(XERO_STORE_KEY, '1');
-        else localStorage.removeItem(XERO_STORE_KEY);
-      } catch (e) { /* private window: the URL still decides this load */ }
-    }
-    _xeroPreview = st.on;
-    return _xeroPreview;
-  }
-
   function viewerEmail() {
     return (typeof _opsUserEmail !== 'undefined' && _opsUserEmail) || '';
   }
@@ -116,7 +94,7 @@ var JobWorkOrderOps = (function () {
       messageLevel: _state.level,
       preview: true,
       canOpen: true,
-      cv: Object.assign({}, _state.cv, { xeroPreview: xeroPreviewOn(), now: Date.now() })
+      cv: Object.assign({}, _state.cv, { now: Date.now() })
     });
     if (_state.confirming && h) {
       var wo = shownWorkOrder(data);
@@ -534,7 +512,7 @@ var JobWorkOrderOps = (function () {
     });
   }
 
-  // ── A stuck Xero draft record (preview: ?woxero=preview) ──
+  // ── A stuck Xero draft record ──
   // The approver checked Xero by hand and says what is there. The answer
   // carries the record's updated_at as it was read when the dialog opened.
   function stuckInvoiceOf(v) {
@@ -545,7 +523,7 @@ var JobWorkOrderOps = (function () {
   function cvXeroOpen(id) {
     var C = core();
     var v = findVariation(id);
-    if (!C || !xeroPreviewOn() || !v || v.status !== 'approved' || _state.cv.busy || _state.cv.form || _state.cv.xero) return;
+    if (!C || !v || v.status !== 'approved' || _state.cv.busy || _state.cv.form || _state.cv.xero) return;
     var inv = stuckInvoiceOf(v);
     if (!C.canReconcileXeroDraft(inv, viewerEmail(), Date.now())) return;
     syncForm();
@@ -755,7 +733,6 @@ var JobWorkOrderOps = (function () {
     cvConfirmBack: cvConfirmBack,
     cvConfirmed: cvConfirmed,
     cvInvoiceLine: cvInvoiceLine,
-    xeroPreviewOn: xeroPreviewOn,
     cvXeroOpen: cvXeroOpen,
     cvXeroChanged: cvXeroChanged,
     cvXeroClose: cvXeroClose,

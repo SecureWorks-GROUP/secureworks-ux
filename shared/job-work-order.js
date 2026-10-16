@@ -519,6 +519,134 @@ var JobWorkOrderCore = (function () {
     return ['stale_review', 'expected_updated_at_required', 'variation_sealed', 'not_a_draft', 'work_order_not_approved', 'customer_variation_not_found'].indexOf(str(code)) >= 0;
   }
 
+  // ── A stuck Xero draft record (preview: ?woxero=preview) ──
+  // A customer variation's invoice record (invoice on customer_variations[])
+  // that is 'unknown' (Xero did not confirm the create) or 'creating' (a claim
+  // never finished) is not retried by anything. A work order approver checks
+  // Xero by hand, then answers with reconcile_customer_variation_xero_draft
+  // (backend docs/job-work-orders-v1.md, "A stuck Xero draft record"), which
+  // never calls Xero. A 'creating' record is answered for only once its claim
+  // (xero_requested_at) is 15 minutes old; before that the server refuses
+  // 409 xero_draft_in_progress.
+  var XERO_CREATING_STALE_AFTER_MS = 15 * 60 * 1000;
+  var XERO_INVOICE_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+  // Its own switch, the same shape as ?wo=: ?woxero=preview turns it on (and
+  // the page remembers it), ?woxero=live turns it off. It shows only on the
+  // job work order panel, which needs ?wo=preview as well.
+  function xeroDraftPreviewState(search, stored) {
+    var m = /[?&]woxero=([^&#]*)/.exec(str(search));
+    if (m) {
+      var v = lower(m[1].replace(/%20|\+/g, ''));
+      if (v === 'preview') return { on: true, persist: '1' };
+      if (v === 'live') return { on: false, persist: '0' };
+    }
+    return { on: str(stored) === '1', persist: null };
+  }
+
+  // "13 Oct 2026, 2:05 pm" in Perth.
+  function timeWords(v) {
+    var ms = typeof v === 'number' ? v : toMs(v);
+    if (!isFinite(ms)) return '';
+    var d = new Date(ms + PERTH_MS);
+    var h = d.getUTCHours();
+    var mm = d.getUTCMinutes();
+    return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' +
+      ((h % 12) || 12) + ':' + (mm < 10 ? '0' : '') + mm + (h < 12 ? ' am' : ' pm');
+  }
+
+  // null unless the record is stuck, else {status, answerable, requestedAt,
+  // answerableAt}: answerable says whether the approver may answer for it now.
+  function xeroDraftStuck(invoice, nowMs) {
+    var inv = obj(invoice);
+    if (!inv || (inv.status !== 'unknown' && inv.status !== 'creating')) return null;
+    var requested = toMs(inv.xero_requested_at);
+    var out = { status: inv.status, answerable: true, requestedAt: isFinite(requested) ? requested : null, answerableAt: null };
+    if (inv.status === 'creating') {
+      out.answerableAt = isFinite(requested) ? requested + XERO_CREATING_STALE_AFTER_MS : null;
+      out.answerable = isFinite(requested) && isFinite(nowMs) && nowMs - requested >= XERO_CREATING_STALE_AFTER_MS;
+    }
+    return out;
+  }
+
+  // The answer button: an approver (display hint; the server checks the
+  // approver list), on a stuck record that may be answered for now, read with
+  // its updated_at.
+  function canReconcileXeroDraft(invoice, viewerEmail, nowMs) {
+    var stuck = xeroDraftStuck(invoice, nowMs);
+    return !!(stuck && stuck.answerable && obj(invoice).updated_at && isApprover(viewerEmail));
+  }
+
+  // The Xero InvoiceID from what was pasted: the id itself, or a Xero link
+  // carrying it (.../Edit.aspx?InvoiceID=<id>). '' when there is none.
+  function xeroInvoiceIdFrom(text) {
+    var s = str(text).trim();
+    var link = /InvoiceID=([0-9a-f-]{36})/i.exec(s);
+    var m = link ? XERO_INVOICE_ID_RE.exec(link[1]) : XERO_INVOICE_ID_RE.exec(s);
+    return m ? m[0].toLowerCase() : '';
+  }
+
+  // The dialog, as answered: {outcome, invoiceId, invoiceNumber, checked}.
+  // Returns {fields, errors}: fields in the reconcile input shape without
+  // variation_id and expected_updated_at, errors in words.
+  function xeroReconcileFields(values) {
+    var v = obj(values) || {};
+    var errors = [];
+    var fields = null;
+    if (v.outcome === 'draft_exists') {
+      var id = xeroInvoiceIdFrom(v.invoiceId);
+      var number = str(v.invoiceNumber).trim();
+      if (!str(v.invoiceId).trim()) errors.push('Paste the Xero invoice id, or the link to the draft in Xero.');
+      else if (!id) errors.push('That is not a Xero invoice id. Open the draft in Xero and copy the link from the address bar: the id is the part after InvoiceID=.');
+      if (number.length > 50) errors.push('The invoice number is longer than 50 characters.');
+      fields = { outcome: 'draft_exists', xero_invoice_id: id };
+      if (number) fields.invoice_number = number;
+    } else if (v.outcome === 'no_draft') {
+      fields = { outcome: 'no_draft' };
+    } else {
+      errors.push('Say what you found in Xero.');
+    }
+    if (!v.checked) errors.push('Tick that you checked Xero by hand first.');
+    return { fields: errors.length ? null : fields, errors: errors };
+  }
+
+  // reconcile_customer_variation_xero_draft refusals, in words.
+  var XERO_RECONCILE_REFUSALS = {
+    nothing_to_reconcile: 'This line is no longer stuck: it is back to prepared, so there is nothing to answer for. It has been read again.',
+    xero_draft_already_recorded: 'A Xero draft is already recorded for this variation. It has been read again. Change it in Xero if it is wrong.',
+    xero_draft_in_progress: 'The Xero draft was asked for less than 15 minutes ago and may still be on its way. It has been read again: wait, check Xero, then answer.',
+    xero_invoice_already_recorded: 'That Xero invoice is already recorded for another variation. Check the invoice id in Xero.',
+    stale_review: 'The Xero draft record changed after it was read. It has been read again: check it, then answer.',
+    expected_updated_at_required: 'The Xero draft record has been read again: check it, then answer.',
+    invoice_line_not_found: 'This variation has no invoice record to answer for. It has been read again.',
+    invalid_outcome: 'Say whether you found the draft in Xero or found none.',
+    invalid_request: 'That is not a Xero invoice id. Copy it from the draft\'s link in Xero.',
+    invalid_invoice_number: 'The invoice number is the one Xero shows (at most 50 characters).',
+    approver_required: 'Only Shaun answers for a stuck Xero draft.',
+    approver_identity_missing: 'Answering for a stuck Xero draft needs Shaun\'s own signed-in session.',
+    approver_not_set: 'No work order approver is named, so nobody can answer for it.',
+    terminal_approval_switched_off: 'Answering from the terminal is switched off. Answer from the Ops dashboard.'
+  };
+  function xeroReconcileRefusalWords(code, message) {
+    return XERO_RECONCILE_REFUSALS[str(code)] || str(message) || 'The answer could not be saved. Nothing changed.';
+  }
+  // A refusal after which the record must be read again: it moved on, or is
+  // not in the state the screen showed.
+  function xeroReconcileNeedsReread(code) {
+    return ['nothing_to_reconcile', 'xero_draft_already_recorded', 'xero_draft_in_progress', 'stale_review', 'expected_updated_at_required', 'invoice_line_not_found'].indexOf(str(code)) >= 0;
+  }
+
+  // What a saved answer did, in words. res: the reconcile response.
+  function xeroReconcileDoneWords(outcome, res) {
+    var inv = obj(res && res.invoice) || {};
+    if (outcome === 'draft_exists') {
+      var name = firstText(inv.invoice_number) || 'the Xero draft';
+      if (res && res.duplicate) return name + ' was already recorded for this variation. Nothing changed.';
+      return 'Recorded: ' + name + ' is this variation\'s Xero draft. Nothing was sent to Xero or the customer.';
+    }
+    return 'Released: the line is back to prepared, so its Xero draft can be made again. Nothing was sent to Xero or the customer.';
+  }
+
   // The old office "New Work Order" form, when a fencing or patio job is picked
   // while the preview is on: it makes no work order for that job and points to
   // the job work order instead. job: {id, job_number, type}.
@@ -787,7 +915,7 @@ var JobWorkOrderCore = (function () {
       h += '</div>';
       if (hold) h += '<div class="jwo-rule jwo-rule-info" data-job-wo-cv-hold>' + esc(hold) + '</div>';
     } else if (st.key === 'approved') {
-      h += renderCustomerVariationInvoiceLine(c, obj(ui.previews) && ui.previews[c.id], ui.previewBusyId === c.id, ui.busy);
+      h += renderCustomerVariationInvoiceLine(c, obj(ui.previews) && ui.previews[c.id], ui.previewBusyId === c.id, ui.busy, ui, viewerEmail);
     }
     return h + '</div>';
   }
@@ -813,7 +941,7 @@ var JobWorkOrderCore = (function () {
   // The customer invoice line of an approved variation, as a preview only:
   // the line prepare_customer_variation_invoice_line builds from the record.
   // This screen never creates the Xero draft (that switch is off).
-  function renderCustomerVariationInvoiceLine(c, preview, previewBusy, busy) {
+  function renderCustomerVariationInvoiceLine(c, preview, previewBusy, busy, ui, viewerEmail) {
     var h = '<div class="jwo-cv-inv" data-job-wo-cv-invoice>';
     var price = num(c.customer_price_ex);
     if (isFinite(price) && price <= 0) {
@@ -822,21 +950,110 @@ var JobWorkOrderCore = (function () {
     var p = obj(preview);
     var inv = (p && obj(p.invoice)) || obj(c.invoice);
     var line = (p && obj(p.line)) || (inv && obj(inv.line));
+    ui = obj(ui) || {};
+    if (ui.xeroPreview) {
+      var reference = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
+      h += renderXeroDraftStuck(c, inv, ui, viewerEmail, reference);
+    }
     if (!line) {
       return h + '<button type="button" class="btn btn-secondary btn-sm" data-job-wo-cv-invoice-line data-cv-id="' + esc(c.id) + '"' + (busy || previewBusy ? ' disabled' : '') +
         ' onclick="JobWorkOrderOps.cvInvoiceLine(this.getAttribute(\'data-cv-id\'))">' + (previewBusy ? 'Preparing...' : 'Preview the customer invoice line') + '</button></div>';
     }
-    var reference = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
+    var ref = p && obj(p.create_invoice_draft) ? firstText(p.create_invoice_draft.reference) : '';
     h += '<div class="jwo-k">Customer invoice line<span class="jwo-k-sub">Preview</span></div>';
     h += '<table class="jwo-table" data-job-wo-cv-invoice-preview><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Unit price ex GST</th><th class="r">Account</th></tr></thead><tbody>' +
       '<tr><td class="jwo-instr">' + esc(line.description || '') + '</td><td class="r">' + esc(numWords(num(line.quantity))) + '</td>' +
       '<td class="r">' + esc(moneyWords(line.unit_price)) + '</td><td class="r">' + esc(line.account_code || '') + '</td></tr></tbody></table>';
-    if (reference) h += '<div class="jwo-line-note">Reference ' + esc(reference) + '</div>';
+    if (ref) h += '<div class="jwo-line-note">Reference ' + esc(ref) + '</div>';
     if (inv && inv.status === 'xero_draft_created') {
       h += '<div class="jwo-line-note">In Xero as a draft' + (inv.invoice_number ? ' ' + esc(inv.invoice_number) : '') + '.</div>';
     }
     h += '<div class="jwo-line-note" data-job-wo-cv-invoice-note>Preview only: nothing is sent to Xero from here. Hours, the trade allocation and rates stay off the customer\'s line.</div>';
     return h + '</div>';
+  }
+
+  // The stuck Xero draft state of an approved variation's invoice record
+  // (preview only), with the approver's button and, while open, its dialog.
+  // '' when the record is not stuck.
+  function renderXeroDraftStuck(c, inv, ui, viewerEmail, reference) {
+    var nowMs = num(ui.now);
+    var stuck = xeroDraftStuck(inv, nowMs);
+    if (!stuck) return '';
+    var name = firstText(c.label) || 'this variation';
+    var asked = stuck.requestedAt != null ? ' (asked for ' + timeWords(stuck.requestedAt) + ')' : '';
+    var lookFor = reference ? 'a draft with reference ' + reference : 'a draft for ' + name;
+    var h = '<div class="jwo-xd-stuck" data-job-wo-cv-xero-stuck="' + esc(stuck.status) + '" data-cv-answerable="' + (stuck.answerable ? '1' : '0') + '">';
+    if (stuck.status === 'unknown') {
+      h += '<div class="jwo-xd-head"><span class="jwo-chip jwo-chip-unreadable">Xero draft not confirmed</span></div>';
+      h += '<div>Xero did not confirm whether the draft for this line was made' + esc(asked) + '. It may be in Xero. Nothing tries again by itself: check Xero for ' + esc(lookFor) + ', then record what you found.</div>';
+    } else if (stuck.answerable) {
+      h += '<div class="jwo-xd-head"><span class="jwo-chip jwo-chip-unreadable">Xero draft stuck</span></div>';
+      h += '<div>Making the Xero draft for this line started' + esc(asked) + ' and never finished. It may be in Xero. Nothing tries again by itself: check Xero for ' + esc(lookFor) + ', then record what you found.</div>';
+    } else {
+      h += '<div class="jwo-xd-head"><span class="jwo-chip jwo-chip-draft">Xero draft being made</span></div>';
+      h += '<div>The Xero draft for this line is being made' + esc(asked) + '. If it still says this after ' +
+        esc(stuck.answerableAt != null ? timeWords(stuck.answerableAt) : '15 minutes') + ', check Xero and record what you found.</div>';
+    }
+    if (firstText(inv && inv.failure)) h += '<div class="jwo-line-note" data-job-wo-cv-xero-failure>What went wrong: ' + esc(firstText(inv.failure)) + '</div>';
+    if (stuck.answerable) {
+      if (isApprover(viewerEmail)) {
+        var dialog = obj(ui.xero);
+        var can = canReconcileXeroDraft(inv, viewerEmail, nowMs);
+        h += '<div class="jwo-cv-actions"><button type="button" class="btn btn-primary btn-sm" data-job-wo-cv-xero-open data-cv-id="' + esc(c.id) + '"' +
+          (!can || ui.busy || dialog || obj(ui.form) ? ' disabled' : '') +
+          ' onclick="JobWorkOrderOps.cvXeroOpen(this.getAttribute(\'data-cv-id\'))">Record what Xero shows</button></div>';
+        if (dialog && dialog.id === c.id) h += renderXeroReconcileDialog(dialog, c, stuck, ui.busy);
+      } else {
+        h += '<div class="jwo-line-note" data-job-wo-cv-xero-approver-only>Only Shaun records what Xero shows, after checking it by hand.</div>';
+      }
+    }
+    return h + '</div>';
+  }
+
+  // The small dialog: found the draft (its Xero invoice id and number) or
+  // found none (release the line to be made again). dialog: {id, outcome,
+  // invoiceId, invoiceNumber, checked, errors}.
+  function renderXeroReconcileDialog(dialog, c, stuck, busy) {
+    var v = dialog;
+    var found = v.outcome === 'draft_exists';
+    var none = v.outcome === 'no_draft';
+    var h = '<div class="jwo-xd-backdrop" data-job-wo-cv-xero-backdrop>' +
+      '<div class="jwo-xd" role="dialog" aria-modal="true" aria-labelledby="jwoXdTitle" data-job-wo-cv-xero-dialog data-cv-id="' + esc(c.id) + '"' +
+      ' onkeydown="if(event.key===\'Escape\')JobWorkOrderOps.cvXeroClose()">';
+    h += '<div class="jwo-xd-title" id="jwoXdTitle">What does Xero show?</div>';
+    h += '<div class="jwo-sub">' + esc(firstText(c.label) || 'This variation') + DOT +
+      (stuck.status === 'unknown' ? 'Xero did not confirm the draft.' : 'Making the draft never finished.') +
+      ' This screen never calls Xero: it records what you found there.</div>';
+    var errors = arr(v.errors);
+    if (errors.length) h += '<div class="jwo-msg jwo-msg-error" data-job-wo-cv-xero-errors>' + errors.map(esc).join('<br>') + '</div>';
+    h += '<label class="jwo-xd-choice"><input type="radio" name="jwoXdOutcome" value="draft_exists" data-cv-xero-f="outcome"' + (found ? ' checked' : '') +
+      ' onchange="JobWorkOrderOps.cvXeroChanged(this)"> <span><b>I found the draft in Xero.</b> Record it as this variation\'s draft.</span></label>';
+    if (found) {
+      h += '<div class="jwo-xd-fields">' +
+        '<label class="jwo-cv-label">Xero invoice id, or the draft\'s link from Xero<input type="text" class="form-input" maxlength="300" autocomplete="off" spellcheck="false"' +
+        ' placeholder="https://go.xero.com/...InvoiceID=..." data-cv-xero-f="invoiceId" value="' + esc(v.invoiceId || '') + '"></label>' +
+        '<label class="jwo-cv-label">Invoice number (optional)<input type="text" class="form-input" maxlength="50" autocomplete="off" placeholder="INV-0000"' +
+        ' data-cv-xero-f="invoiceNumber" value="' + esc(v.invoiceNumber || '') + '"></label></div>';
+    }
+    h += '<label class="jwo-xd-choice"><input type="radio" name="jwoXdOutcome" value="no_draft" data-cv-xero-f="outcome"' + (none ? ' checked' : '') +
+      ' onchange="JobWorkOrderOps.cvXeroChanged(this)"> <span><b>There is no draft in Xero.</b> Put the line back so the draft can be made again.</span></label>';
+    if (none) {
+      h += '<div class="jwo-rule jwo-rule-warn jwo-xd-fields" data-job-wo-cv-xero-release-warn>Only if you are sure: if a draft is in Xero after all, making it again puts a second one there.</div>';
+    }
+    h += '<label class="jwo-xd-choice jwo-xd-check"><input type="checkbox" data-cv-xero-f="checked"' + (v.checked ? ' checked' : '') +
+      ' onchange="JobWorkOrderOps.cvXeroChanged(this)"> <span>I checked Xero by hand just now.</span></label>';
+    var what = found
+      ? 'This records that Xero draft against the variation. It is then kept like any draft made from here. Nothing is sent to Xero or the customer.'
+      : none
+        ? 'This puts the line back to prepared. Nothing is sent to Xero or the customer.'
+        : '';
+    if (what) h += '<div class="jwo-line-note" data-job-wo-cv-xero-what>' + esc(what) + '</div>';
+    var label = found ? 'Record this Xero draft' : none ? 'Release the line' : 'Save';
+    h += '<div class="jwo-cv-actions">' +
+      '<button type="button" class="btn btn-primary btn-sm" data-job-wo-cv-xero-submit' + (busy || (!found && !none) || !v.checked ? ' disabled' : '') +
+      ' onclick="JobWorkOrderOps.cvXeroSubmit()">' + (busy ? 'Saving...' : label) + '</button>' +
+      '<button type="button" class="btn btn-secondary btn-sm" data-job-wo-cv-xero-close' + (busy ? ' disabled' : '') + ' onclick="JobWorkOrderOps.cvXeroClose()">Back</button></div>';
+    return h + '</div></div>';
   }
 
   // The add or edit form. form.values as customerVariationFormValues gives.
@@ -1047,6 +1264,15 @@ var JobWorkOrderCore = (function () {
     customerVariationFormValues: customerVariationFormValues,
     customerVariationRefusalWords: customerVariationRefusalWords,
     customerVariationNeedsReread: customerVariationNeedsReread,
+    xeroDraftPreviewState: xeroDraftPreviewState,
+    xeroDraftStuck: xeroDraftStuck,
+    canReconcileXeroDraft: canReconcileXeroDraft,
+    xeroInvoiceIdFrom: xeroInvoiceIdFrom,
+    xeroReconcileFields: xeroReconcileFields,
+    xeroReconcileRefusalWords: xeroReconcileRefusalWords,
+    xeroReconcileNeedsReread: xeroReconcileNeedsReread,
+    xeroReconcileDoneWords: xeroReconcileDoneWords,
+    timeWords: timeWords,
     eligibleType: eligibleType,
     createRoute: createRoute,
     lineOf: lineOf,

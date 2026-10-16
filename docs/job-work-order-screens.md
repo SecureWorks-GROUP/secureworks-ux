@@ -110,6 +110,39 @@ read loads it says so, with `customer_variations_open_count` from job_detail.
   (`create_customer_variation_xero_draft` is never called; its backend switch is off and a
   follow-up must land before it is offered).
 
+## A stuck Xero draft (Ops job page, its own preview)
+
+Backend: secureworks-backend `docs/job-work-orders-v1.md` ("A stuck Xero draft record"), merged
+in https://github.com/SecureWorks-GROUP/secureworks-backend/pull/1065. A customer variation's
+Xero draft record that is `unknown` (Xero did not confirm the create) or stuck in `creating` is
+not retried by anything; a work order approver checks Xero by hand and says what is there.
+
+- **Preview switch**, on top of `?wo=preview`: `ops.html?wo=preview&woxero=preview`, remembered
+  in `localStorage.sw_wo_xero_preview = '1'`; `?woxero=live` turns it off and forgets it. With it
+  off the customer variations section is exactly as above.
+- **Where**: the customer invoice line of an approved variation (`invoice` on
+  `customer_variations[]`, or the prepare answer's `invoice` once previewed).
+  - `unknown`: "Xero draft not confirmed", when it was asked for, and what went wrong
+    (`invoice.failure`).
+  - `creating` with its claim (`xero_requested_at`) 15 minutes old or more: "Xero draft stuck".
+  - `creating` younger than that: "Xero draft being made", and the time after which it can be
+    answered. No button: the server refuses 409 `xero_draft_in_progress` before then.
+- **Record what Xero shows** (Shaun only, `APPROVER_EMAILS` as a hint; the server checks the
+  approver list) opens a small dialog: "I found the draft in Xero" (the Xero invoice id, or the
+  draft's link from Xero, which carries it after `InvoiceID=`, plus the invoice number if known)
+  or "There is no draft in Xero" (the line goes back to prepared so the draft can be made again,
+  with a warning that a draft found later would make two). The press is held until "I checked
+  Xero by hand just now" is ticked. It sends `reconcile_customer_variation_xero_draft
+  {variation_id, expected_updated_at, outcome, xero_invoice_id?, invoice_number?}`, where
+  `expected_updated_at` is `invoice.updated_at` when the dialog opened. It never calls Xero.
+- **Answers and refusals** read in words (`xeroReconcileDoneWords`,
+  `xeroReconcileRefusalWords`). `stale_review`, `nothing_to_reconcile`,
+  `xero_draft_already_recorded`, `xero_draft_in_progress`, `invoice_line_not_found` and
+  `expected_updated_at_required` close the dialog and re-read the job; any other refusal (such
+  as `xero_invoice_already_recorded`) stays in the dialog with what was typed.
+
+Making it live means making `xeroDraftPreviewState` answer on by default and updating these tests.
+
 ## Create Work Order: one way for fencing and patio
 
 The old office "New Work Order" form (`#woModal`) made a crew work order whose prefill
@@ -202,7 +235,9 @@ office money door (`TRADE_JOB_WO_MONEY_KEYS`) also strips `trade_allocation_ex` 
   a draft, and Create Work Order leading fencing and patio to the job work order while other
   job types keep the old form; customer variations added, edited, approved (with the shown
   `updated_at`, and a stale review re-read), cancelled, the invoice line preview with no Xero
-  write, and the PDF addendum.
+  write, and the PDF addendum; a stuck Xero draft (`?woxero=preview`): off, on for `unknown`
+  and `creating`, approver only, both answers with the record's `updated_at`, a mistyped id, and
+  refusals.
 - `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload
   `my_job_work_order` sends today) and the invoice, preview on and off, including a per-metre
   trade's server-issued crew work order keeping its Work Order mode.

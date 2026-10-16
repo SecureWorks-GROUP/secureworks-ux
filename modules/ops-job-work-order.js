@@ -24,6 +24,13 @@
 //         prepare_customer_variation_invoice_line, which only builds the
 //         customer's invoice line for a preview. Nothing here creates a Xero
 //         draft (create_customer_variation_xero_draft is never called).
+//         Behind its own preview too (?woxero=preview, localStorage
+//         sw_wo_xero_preview = '1'; ?woxero=live turns it off): an approved
+//         variation whose Xero draft record is stuck ('unknown', or
+//         'creating' for 15 minutes) says so, and the approver answers what
+//         Xero shows with reconcile_customer_variation_xero_draft
+//         {variation_id, expected_updated_at (invoice.updated_at as read),
+//         outcome, xero_invoice_id?, invoice_number?}, which never calls Xero.
 //
 // Create work order: while the preview is on, a fencing or patio job's
 // "Create work order" (job quick view, calendar, the old office form) comes
@@ -35,15 +42,17 @@ var JobWorkOrderOps = (function () {
   'use strict';
 
   var STORE_KEY = 'sw_wo_preview';
+  var XERO_STORE_KEY = 'sw_wo_xero_preview';
   var MOUNT_ID = 'jdJobWorkOrder';
   var _preview = null;
+  var _xeroPreview = null;
   // One state per job_detail read: the job_work_order read and the approve button.
   var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0, cv: freshCv() };
 
   // The customer variations section: the open form, the confirm row, the
   // invoice line previews, and its own message.
   function freshCv() {
-    return { form: null, confirm: null, busy: false, previews: {}, previewBusyId: null, message: '', level: 'info' };
+    return { form: null, confirm: null, busy: false, previews: {}, previewBusyId: null, xero: null, message: '', level: 'info' };
   }
 
   function core() { return window.JobWorkOrderCore || null; }
@@ -63,6 +72,24 @@ var JobWorkOrderOps = (function () {
     }
     _preview = st.on;
     return _preview;
+  }
+
+  // The stuck Xero draft answer: its own switch, on the panel ?wo=preview shows.
+  function xeroPreviewOn() {
+    if (_xeroPreview !== null) return _xeroPreview;
+    var C = core();
+    if (!C || !C.xeroDraftPreviewState) { _xeroPreview = false; return false; }
+    var stored = null;
+    try { stored = localStorage.getItem(XERO_STORE_KEY); } catch (e) { stored = null; }
+    var st = C.xeroDraftPreviewState(location.search, stored);
+    if (st.persist) {
+      try {
+        if (st.persist === '1') localStorage.setItem(XERO_STORE_KEY, '1');
+        else localStorage.removeItem(XERO_STORE_KEY);
+      } catch (e) { /* private window: the URL still decides this load */ }
+    }
+    _xeroPreview = st.on;
+    return _xeroPreview;
   }
 
   function viewerEmail() {
@@ -89,7 +116,7 @@ var JobWorkOrderOps = (function () {
       messageLevel: _state.level,
       preview: true,
       canOpen: true,
-      cv: _state.cv
+      cv: Object.assign({}, _state.cv, { xeroPreview: xeroPreviewOn(), now: Date.now() })
     });
     if (_state.confirming && h) {
       var wo = shownWorkOrder(data);
@@ -303,6 +330,18 @@ var JobWorkOrderOps = (function () {
     var confirm = _state.cv.confirm;
     var reason = el && el.querySelector('[data-job-wo-cv-cancel-reason]');
     if (confirm && confirm.kind === 'cancel' && reason) confirm.reason = reason.value;
+    var dialog = _state.cv.xero;
+    var dbox = el && el.querySelector('[data-job-wo-cv-xero-dialog]');
+    if (dialog && dbox) {
+      var outcome = dbox.querySelector('[data-cv-xero-f="outcome"]:checked');
+      dialog.outcome = outcome ? outcome.value : '';
+      var idBox = dbox.querySelector('[data-cv-xero-f="invoiceId"]');
+      if (idBox) dialog.invoiceId = idBox.value;
+      var numBox = dbox.querySelector('[data-cv-xero-f="invoiceNumber"]');
+      if (numBox) dialog.invoiceNumber = numBox.value;
+      var checked = dbox.querySelector('[data-cv-xero-f="checked"]');
+      dialog.checked = !!(checked && checked.checked);
+    }
     var box = el && el.querySelector('[data-job-wo-cv-form]');
     if (!form || !box) return;
     var values = { description: '', tasks: [], trade_allocation_ex: '', customer_price_ex: '' };
@@ -495,6 +534,90 @@ var JobWorkOrderOps = (function () {
     });
   }
 
+  // ── A stuck Xero draft record (preview: ?woxero=preview) ──
+  // The approver checked Xero by hand and says what is there. The answer
+  // carries the record's updated_at as it was read when the dialog opened.
+  function stuckInvoiceOf(v) {
+    var p = _state.cv.previews[v.id];
+    return (p && p.invoice) || v.invoice || null;
+  }
+
+  function cvXeroOpen(id) {
+    var C = core();
+    var v = findVariation(id);
+    if (!C || !xeroPreviewOn() || !v || v.status !== 'approved' || _state.cv.busy || _state.cv.form || _state.cv.xero) return;
+    var inv = stuckInvoiceOf(v);
+    if (!C.canReconcileXeroDraft(inv, viewerEmail(), Date.now())) return;
+    syncForm();
+    _state.cv.confirm = null;
+    _state.cv.message = '';
+    _state.cv.xero = { id: v.id, updatedAt: inv.updated_at, outcome: '', invoiceId: '', invoiceNumber: '', checked: false, errors: [] };
+    render();
+    focusIn('[data-job-wo-cv-xero-dialog] [data-cv-xero-f="outcome"]');
+  }
+
+  // A choice in the dialog changed: show the fields that go with it.
+  function cvXeroChanged(el) {
+    if (!_state.cv.xero) return;
+    var key = el && el.getAttribute('data-cv-xero-f');
+    var value = el && el.value;
+    syncForm();
+    render();
+    if (key === 'outcome') focusIn('[data-job-wo-cv-xero-dialog] [data-cv-xero-f="outcome"][value="' + value + '"]');
+    else if (key) focusIn('[data-job-wo-cv-xero-dialog] [data-cv-xero-f="' + key + '"]');
+  }
+
+  function cvXeroClose() {
+    if (_state.cv.busy || !_state.cv.xero) return;
+    var id = _state.cv.xero.id;
+    _state.cv.xero = null;
+    repaint();
+    focusIn('[data-job-wo-cv-xero-open][data-cv-id="' + id + '"]');
+  }
+
+  function cvXeroSubmit() {
+    var C = core();
+    var dialog = _state.cv.xero;
+    var v = dialog && findVariation(dialog.id);
+    if (!C || !dialog || !v || _state.cv.busy) return;
+    syncForm();
+    var checked = C.xeroReconcileFields(dialog);
+    if (checked.errors.length) {
+      dialog.errors = checked.errors;
+      render();
+      return;
+    }
+    var seq = _state.seq;
+    var body = Object.assign({ variation_id: v.id, expected_updated_at: dialog.updatedAt }, checked.fields);
+    dialog.errors = [];
+    _state.cv.busy = true;
+    render();
+    opsPost('reconcile_customer_variation_xero_draft', body).then(function (res) {
+      if (seq !== _state.seq) return;
+      _state.cv.xero = null;
+      rereadJob(C.xeroReconcileDoneWords(body.outcome, res), 'ok', 'cv');
+      if (typeof showToast === 'function') showToast(body.outcome === 'draft_exists' ? 'Xero draft recorded' : 'Line released to be made again', 'success');
+    }).catch(function (e) {
+      if (seq !== _state.seq) return;
+      var code = (e && e.code) || '';
+      var words = C.xeroReconcileRefusalWords(code, e && e.message);
+      if (C.xeroReconcileNeedsReread(code)) {
+        _state.cv.xero = null;
+        rereadJob(words, 'warn', 'cv');
+        return;
+      }
+      _state.cv.busy = false;
+      if (_state.cv.xero) _state.cv.xero.errors = [words];
+      render();
+    });
+  }
+
+  function focusIn(selector) {
+    var el = document.getElementById(MOUNT_ID);
+    var target = el && el.querySelector(selector);
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
   function openPdf() {
     var data = currentData();
     if (data && typeof generateRichWorkOrder === 'function') generateRichWorkOrder(data);
@@ -572,6 +695,17 @@ var JobWorkOrderOps = (function () {
       '.jwo-cv-task-table td{padding:3px 4px;}' +
       '.jwo-confirm .form-input{flex:1 1 200px;}' +
       '.jwo-instr{font-size:12px;white-space:pre-wrap;}' +
+      '.jwo-xd-stuck{border:1px solid #EF444460;background:#EF444408;padding:8px 10px;margin:6px 0 8px;font-size:12px;display:flex;flex-direction:column;gap:6px;}' +
+      '.jwo-xd-stuck[data-cv-answerable="0"]{border-color:#F59E0B60;background:#F59E0B08;}' +
+      '.jwo-xd-head{display:flex;gap:8px;align-items:center;}' +
+      '.jwo-xd-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:10050;padding:16px;}' +
+      '.jwo-xd{background:var(--sw-card,#fff);color:var(--sw-text);width:100%;max-width:460px;max-height:calc(100vh - 32px);overflow:auto;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.25);display:flex;flex-direction:column;gap:10px;font-size:13px;}' +
+      '.jwo-xd-title{font-size:15px;font-weight:700;color:var(--sw-dark);}' +
+      '.jwo-xd-choice{display:flex;gap:8px;align-items:flex-start;cursor:pointer;}' +
+      '.jwo-xd-choice input{margin-top:3px;}' +
+      '.jwo-xd-fields{margin-left:24px;display:flex;flex-direction:column;gap:8px;}' +
+      '.jwo-xd-fields .form-input{width:100%;box-sizing:border-box;}' +
+      '.jwo-xd-check{border-top:1px solid var(--sw-border);padding-top:10px;}' +
       '.jwo-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px;}' +
       '.jwo-fig{background:var(--sw-light);padding:8px 10px;}' +
       '.jwo-fig-k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);}' +
@@ -620,7 +754,12 @@ var JobWorkOrderOps = (function () {
     cvCancel: cvCancel,
     cvConfirmBack: cvConfirmBack,
     cvConfirmed: cvConfirmed,
-    cvInvoiceLine: cvInvoiceLine
+    cvInvoiceLine: cvInvoiceLine,
+    xeroPreviewOn: xeroPreviewOn,
+    cvXeroOpen: cvXeroOpen,
+    cvXeroChanged: cvXeroChanged,
+    cvXeroClose: cvXeroClose,
+    cvXeroSubmit: cvXeroSubmit
   };
 })();
 window.JobWorkOrderOps = JobWorkOrderOps;

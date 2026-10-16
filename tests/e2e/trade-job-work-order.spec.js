@@ -238,6 +238,28 @@ test.describe('Job work order on the trade invoice', () => {
     await expect(card.locator('[data-cardwoalloc]')).toBeVisible();
     await expect(card.locator('[data-job-wo-invoice-note]')).toHaveCount(0);
   });
+
+  test('a read that finds no work order leaves the field the trade is typing in alone', async ({ appPage: page }) => {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    await page.route(`${OPS_API}**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') !== 'my_job_work_order') return route.fallback();
+      await held;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job_id: url.searchParams.get('job_id'), work_order: null, reason: 'no_approved_work_order' }) });
+    });
+    await signIn(page, PERSONAS.installer);
+    const card = await openInvoice(page);
+    const date = card.locator('[data-carddate]');
+    await date.focus();
+    await date.evaluate((el) => { el.__typing = true; });
+
+    const landed = page.waitForResponse((r) => r.url().includes('action=my_job_work_order'));
+    release();
+    await landed;
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => !!(document.activeElement && document.activeElement.__typing))).toBe(true);
+  });
 });
 
 test.describe('Job work order and a server-issued crew work order', () => {

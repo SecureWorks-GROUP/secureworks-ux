@@ -13775,21 +13775,20 @@
   }
 
   // Read the job's work order once (again, or after a failure, once TTL_MS has
-  // passed, so a repaint never fires a read per keystroke); onDone(changed) runs
-  // when the answer lands.
+  // passed, so a repaint never fires a read per keystroke); onDone runs when
+  // the answer lands.
   function tradeJobWoLoad(jobId, onDone) {
     if (!jobId || !tradeJobWoOn()) return;
     var e = _tradeJobWo[jobId];
     if (e && (e.state === 'loading' || Date.now() - e.at < TRADE_JOB_WO_TTL_MS)) return;
-    var before = e && e.state === 'ready' ? JSON.stringify(e.read) : null;
     _tradeJobWo[jobId] = { state: 'loading', read: e ? e.read : null, at: 0 };
     api('my_job_work_order', { job_id: jobId }, null, { preserveSessionOnAuthFailure: true }).then(function(res) {
       _tradeJobWo[jobId] = { state: 'ready', read: res || { work_order: null }, at: Date.now() };
-      if (onDone) onDone(JSON.stringify(_tradeJobWo[jobId].read) !== before);
+      if (onDone) onDone();
     }).catch(function() {
       var kept = e ? e.read : null;
       _tradeJobWo[jobId] = { state: kept ? 'ready' : 'failed', read: kept, at: Date.now() };
-      if (onDone) onDone(false);
+      if (onDone) onDone();
     });
   }
 
@@ -13847,7 +13846,10 @@
       if (!c || !c.job_id || c.work_order_id || c.is_makesafe) return;
       var t = String(c.job_type || '').toLowerCase();
       if (t && !tradeJobWoEligibleType(t)) return;
-      tradeJobWoLoad(c.job_id, function(changed) { if (changed && onChange) onChange(); });
+      var before = JSON.stringify(tradeJobWoApproved(c.job_id));
+      tradeJobWoLoad(c.job_id, function() {
+        if (onChange && JSON.stringify(tradeJobWoApproved(c.job_id)) !== before) onChange();
+      });
     });
   }
 

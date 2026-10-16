@@ -623,8 +623,8 @@ test('Dispatch panel: every call it makes is one of job_story, get_conversation,
   const since = calls.slice(mark).map((c) => c.fn + ':' + c.action);
   expect([...new Set(since)].sort()).toEqual(['ghl-proxy:get_conversation', 'ops-api:get_invoice_pdf', 'ops-api:get_job_conversation', 'ops-api:job_story']);
   expect(since.length).toBe(4);
-  // Nothing from a later slice is drawn (slice 3's rail and To do are: tests/e2e/ops-tab-set.spec.js).
-  await expect(root.locator('.dpc-supcard, .dpc-mail, .dpc-deliv')).toHaveCount(0);
+  // The panel draws no supplier card or email item (slices 3 to 7 are guarded in tests/e2e/ops-tab-set.spec.js).
+  await expect(root.locator('.dpc-supcard, .dpc-mail')).toHaveCount(0);
   const panelText = await root.locator('.dpc-context').innerText();
   expect(panelText).not.toMatch(/—|template|attach|recording|transcript/i);
 });

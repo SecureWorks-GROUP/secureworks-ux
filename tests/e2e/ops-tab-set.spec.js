@@ -203,7 +203,7 @@ const D_NOTES = {
 };
 
 // Slice 1's section, now that slice 4 draws a second one under it.
-const SCOPE_SEC = '.dpc-sec:not(.dpc-mat):not(.dpc-mailsec)';
+const SCOPE_SEC = '.dpc-sec:not(.dpc-mat):not(.dpc-mailsec):not(.dpc-sched)';
 const SCOPE_TOGGLE = '[data-dpc-toggle=""]';
 
 // ── Slice 4 fixtures: made-up supplier contacts, lines and orders ──
@@ -296,7 +296,7 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   await expect(cards.nth(2)).toContainText('Not booked');
   await expect(cards.nth(1)).toContainText(`Last booked 14/9/${PERTH_YEAR - 1}`);
   await expect(cards.nth(4).locator('.dpc-type')).toHaveText('Insurance');
-  await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
+  await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled and the install confirmed. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
 
   // Nothing says sample or concept, and nothing from the later slices is drawn.
   const tabText = await page.locator('#viewDispatch').innerText();
@@ -304,12 +304,14 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
-  // Materials by supplier (slice 4) and Emails (slice 5) are drawn under Scope and notes: their own tests below.
-  for (const later of ['.dpc-banner', '.dpc-deliv']) {
+  // Materials by supplier (slice 4), Emails (slice 5) and Deliveries (slice 6) are drawn under Scope and notes.
+  for (const later of ['.dpc-banner']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
-  await expect(root).not.toContainText(/items ready|crew/i);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails', 'Deliveries and install']);
+  await expect(root).not.toContainText(/items ready/i);
+  // No crew chip on the job header (the calendar strip under Deliveries names the crews).
+  await expect(root.locator('.dpc-jobhead')).not.toContainText(/crew/i);
 });
 
 test('Dispatch: work type buttons filter in the browser and All jobs resets', async ({ page }) => {
@@ -1307,7 +1309,7 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(cards.locator('strong')).toHaveText(['SWF-920001', 'SWF-920002', 'SWF-920003', 'SWF-920004', 'SWP-920005', 'SWP-920006', 'SWR-920007', 'SWF-920008'].map((n) => n + ' · Suburb'));
     // The first To do job opens.
     await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-920001 · Suburb');
-    await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
+    await expect(root.locator('.dpc-foot')).toHaveText('To do: jobs from Accepted until the trade is scheduled and the install confirmed. All jobs: any job through the Dispatch lens, to check what was ordered and sent.');
     expect(of('pipeline').length).toBe(1);
 
     // All jobs lists every job; a press clears the search and the work type.
@@ -1807,7 +1809,7 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     const { root, mat, of } = await bootMaterials(page);
     for (const number of ['SWF-900101', 'SWP-900201', 'SWP-900202', 'SWF-900301', 'SWI-900101']) {
       await openJob(root, number);
-      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
+      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails', 'Deliveries and install']);
       await expect(mat.locator('.dpc-eyebrow')).toHaveText('Order');
       await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials, split them by supplier, then create the PO and email in one go');
       await expect(mat.locator('.dpc-sec-body')).toContainText('No suppliers chosen for this job yet. Add one to start writing out the materials.');
@@ -2425,10 +2427,11 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(calls.filter((c) => c.action === 'job_notes').map((c) => c.jobId)).toEqual(['job-p1']);
     expect(calls.filter((c) => c.action === 'dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-p1']);
     expect(booted.calls.filter((c) => c.action === 'list_suppliers')).toHaveLength(1);
-    // Nothing from slice 6 or later is drawn, not even disabled.
+    // Slice 6 draws Deliveries and install under Emails; nothing says coming soon,
+    // and the edit above sent no delivery or install write (only MAT_WRITES were posted).
     await openJob(root, 'SWF-900101');
-    await expect(root).not.toContainText(/coming soon|Deliveries|Mark delivery confirmed/i);
-    await expect(root.locator('.dpc-deliv')).toHaveCount(0);
+    await expect(root).not.toContainText(/coming soon/i);
+    await expect(root.locator('.dpc-sched h3')).toHaveText('Deliveries and install');
   });
 });
 

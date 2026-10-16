@@ -427,3 +427,59 @@
   .dpc .dpc-line-ro > .dpc-takeoff { flex: 0 0 auto; }
   .dpc .dpc-mail-view button, .dpc .dpc-order-btn { min-height: 44px; }
 }
+
+/* ---------- Schedule: Deliveries (slice 6) ---------- */
+.dpc-deliv { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.dpc-deliv-item { border-top: 1px solid var(--galv); }
+.dpc-deliv-row { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 0; align-items: stretch; }
+.dpc-deliv-row > span { padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-deliv-row strong { font: 600 15px var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); }
+.dpc-deliv-row small { font: 500 10.5px var(--mono); color: var(--mute); }
+.dpc-deliv-head { background: var(--galv-2); }
+.dpc-deliv-head > span { padding: 8px 12px; font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--mute); }
+.dpc-dstate { position: relative; font-family: var(--mono); font-size: 12.5px; color: #9DB0BC; }
+.dpc-dstate em { font-style: normal; font-family: var(--body); font-size: 12px; }
+.dpc-dstate.on { color: var(--ink); background: linear-gradient(90deg, rgba(241,90,41,.08), transparent 70%); box-shadow: inset 3px 0 0 var(--signal); }
+.dpc-deliv-row[data-step="3"] .dpc-dstate.on { background: linear-gradient(90deg, rgba(74,114,89,.1), transparent 70%); box-shadow: inset 3px 0 0 var(--sage); }
+.dpc-deliv-date { position: relative; display: block; width: 100%; }
+.dpc-deliv-date input { font: 12px var(--mono); color: var(--ink); border: 1px dashed #9DB0BC; border-radius: 6px; padding: 5px 7px; width: 100%; min-width: 0; background: #fff; }
+.dpc-deliv-date input:focus { border-color: var(--signal); outline: none; }
+.dpc-deliv-date input:disabled { opacity: .6; }
+.dpc-deliv-ph { display: none; }
+/* An empty box reads "Set date" where the browser can hide its own dd/mm/yyyy. */
+@supports selector(::-webkit-datetime-edit) {
+  .dpc-deliv-blank input:not(:focus)::-webkit-datetime-edit { color: transparent; }
+  .dpc-deliv-blank input:not(:focus) + .dpc-deliv-ph { display: block; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; font: 12px var(--mono); color: #9DB0BC; }
+}
+.dpc .dpc-deliv-btn { font: 12px var(--body); padding: 5px 9px; color: var(--ink); border-color: var(--steel-2); border-radius: 6px; text-align: left; }
+.dpc .dpc-deliv-daybtn { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-decoration: underline dotted #9DB0BC; text-underline-offset: 3px; }
+.dpc .dpc-deliv-daybtn:hover:not(:disabled) { color: var(--signal-deep); }
+.dpc .dpc-dstate .dpc-textbtn { padding: 0; }
+.dpc-deliv-sub { padding: 0 12px 10px; }
+p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
+.dpc-deliv-edit { display: flex; flex-direction: column; gap: 6px; }
+.dpc-deliv-edit .dpc-empty { color: var(--ink); }
+.dpc-deliv-edit .dpc-actions { align-items: center; margin-top: 0; }
+.dpc-deliv-edit .dpc-deliv-date { width: 170px; }
+.dpc-deliv-msg { font-size: 13px; color: var(--mute); margin-top: 8px; }
+.dpc-deliv-msg.dpc-mat-fail { color: var(--signal-deep); }
+.dpc-mail-deliv { border-top: 1px solid var(--galv); padding-top: 10px; }
+.dpc-portal { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--steel); color: #C9D6DD; font-size: 12.5px; }
+.dpc .dpc-portal button { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.2); font-size: 12px; }
+.dpc .dpc-portal button:hover:not(:disabled) { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.35); }
+@media (max-width: 768px) {
+  .dpc-deliv-row { grid-template-columns: 1fr 1fr; }
+  .dpc-deliv-head { display: none; }
+  .dpc-deliv-row > span:first-child { grid-column: 1 / -1; }
+  .dpc .dpc-deliv-btn, .dpc .dpc-portal button, .dpc-deliv-edit button { min-height: 44px; }
+}
+
+/* ---------- Schedule: the install row (slice 7) ---------- */
+.dpc-install { margin-top: 8px; }
+.dpc-install-row { grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr)); }
+.dpc-install .dpc-dstate em { color: var(--ink); }
+.dpc-install .dpc-deliv-item > .dpc-empty { padding: 10px 12px; }
+.dpc-install + .dpc-deliv-msg + .dpc-portal, .dpc-install + .dpc-portal { margin-top: 12px; }
+@media (max-width: 768px) {
+  .dpc-install-row { grid-template-columns: 1fr 1fr; }
+}

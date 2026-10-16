@@ -90,7 +90,17 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     invoices: [{ xero_invoice_id: r.xero_invoice_id, number: r.invoice_number, reference: r.reference, kind: r.kind, total: r.amount_due, amount_due: r.amount_due, status: 'AUTHORISED', date: r.invoice_date }],
     documents: [], conversation: { messages: [] }, notes: [], ladder: [], suggestion: null, flags: [], possible_payments: [],
     contact: { ghl_contact_id: r.ghl_linked ? ghlId(9000 + Number(String(r.invoice_number).slice(-2))) : null, candidates: [] }, pay_link: null,
+    manual_text: manualText(r),
   }, o);
+  // debt_ws_job.manual_text: may Shaun type his own text here (ops-api manualTextBlock)?
+  function manualText(r) {
+    const no = (code, reason) => ({ allowed: false, code, reason });
+    if (r.lane === 'account') return no('not_chased_by_text', 'Company invoices go on the Monday statement, not a text');
+    if (r.category === 'says_paid') return no('chasing_paused', 'They say they have paid. Follow-ups are paused while Xero catches up');
+    if (r.category === 'rectification') return no('chasing_paused', 'In Rectification. Chasing stops until the fix is done');
+    if (r.on_jan_list || (r.step_due && r.step_due.step === 'd21')) return no('chasing_paused', 'Day 21 is Jan\'s visit list. No more texts');
+    return { allowed: true, code: null, reason: null };
+  }
 
   const casey = findRow(3);
   // "Tuesday the 13th of October", the way the templates write a date.

@@ -330,6 +330,64 @@ check('debt report: the Send words, the gate, the route and "last sent"', () => 
   assert.strictEqual(C.reportRefusalText({ code: 'recently_sent' }), C.REFUSALS.recently_sent);
 });
 
+// ── The chat window (approved 16 Oct 2026) ──
+check('chat window: the green Proposed words per step, the bar\'s who and its second line', () => {
+  assert.strictEqual(C.proposedWords('d7'), 'day 7 reminder (with a call)');
+  assert.strictEqual(C.proposedWords('d1'), 'day 1 reminder');
+  assert.strictEqual(C.proposedWords('d17'), 'day 17 final reminder');
+  assert.strictEqual(C.proposedWords('reply_problem'), 'reply to a problem raised');
+  assert.strictEqual(C.payerTitle({ name: 'Riley Shaw', label: 'B' }), 'Riley Shaw (B)');
+  assert.strictEqual(C.payerTitle({ name: 'Casey Morgan', label: 'main' }), 'Casey Morgan', 'one payer: no letter');
+  assert.strictEqual(C.chatSub({ invoice_number: 'INV-1703', amount_due: 1216.63, day: 8 }), 'Texts go from 771 · INV-1703 · $1,216.63 · day 8');
+  assert.strictEqual(C.stepLabel('manual'), 'Manual text');
+  assert.strictEqual(C.noteView({ kind: 'text_sent', step: 'manual', body: 'Thanks' }).text, 'Manual text sent');
+});
+check('chat window: Debt log notes and promises are yellow lines in time order; the screen\'s own records stay out', () => {
+  const conv = { messages: [
+    { id: 'm1', channel: 'sms', direction: 'outbound', occurred_at: '2026-10-06T01:02:00Z', body: 'Day 1' },
+    { id: 'm2', channel: 'sms', direction: 'inbound', occurred_at: '2026-10-08T08:41:00Z', body: 'Sorry, I will sort it this week' },
+  ] };
+  const notes = [
+    { id: 'n1', kind: 'note', body: 'said she would pay by Friday', created_by_name: 'Shaun', created_at: '2026-10-08T08:50:00Z', xero_invoice_ids: ['inv-a'] },
+    { id: 'n2', kind: 'text_sent', step: 'd1', created_by_name: 'Shaun', created_at: '2026-10-06T01:02:00Z', xero_invoice_ids: ['inv-a'] },
+    { id: 'n3', kind: 'promise', body: 'Promised to pay by Friday the 10th of October', created_by_name: 'Shaun', created_at: '2026-10-07T02:00:00Z', xero_invoice_ids: ['inv-a'] },
+    { id: 'n4', kind: 'note', body: 'Neighbour paid share A', created_by_name: 'Shaun', created_at: '2026-10-07T03:00:00Z', xero_invoice_ids: ['inv-b'] },
+    { id: 'n5', kind: 'call', body: 'no answer', created_by_name: 'Shaun', created_at: '2026-10-07T04:00:00Z', xero_invoice_ids: [] },
+  ];
+  const mine = C.chatItems(conv, notes, '2026-10-08', { invoiceId: 'inv-a' });
+  assert.deepStrictEqual(mine.map((x) => x.type === 'day' ? 'day:' + x.label : x.m.id), ['day:Tue 6 Oct', 'm1', 'day:Yesterday', 'dlog:n3', 'dlog:n5', 'day:Today', 'm2', 'dlog:n1']);
+  const line = mine.find((x) => x.m && x.m.id === 'dlog:n1').m;
+  assert.deepStrictEqual([line.channel, line.text], ['dlog', 'Note by Shaun: said she would pay by Friday']);
+  assert.strictEqual(mine.find((x) => x.m && x.m.id === 'dlog:n3').m.text, 'Promise by Shaun: Promised to pay by Friday the 10th of October');
+  assert.strictEqual(mine.find((x) => x.m && x.m.id === 'dlog:n5').m.text, 'Call note by Shaun: no answer');
+  // Everyone on this job: the other share's note shows too.
+  const all = C.chatItems(conv, notes, '2026-10-08', { invoiceId: 'inv-a', all: true });
+  assert(all.some((x) => x.m && x.m.id === 'dlog:n4'));
+  assert.strictEqual(C.chatItems({ messages: [] }, [], '2026-10-08', {}).length, 0);
+});
+check('chat window: what the bottom holds, and why nothing goes when it cannot', () => {
+  const today = '2026-10-08';
+  const ok = { allowed: true, code: null, reason: null };
+  const draft = { kind: 'draft', step: 'd12', text: 'Hi Casey' };
+  const mode = (J, own) => C.composeMode(J, today, own);
+  assert.strictEqual(mode({ row: {}, suggestion: draft, manual_text: ok }).mode, 'step', 'the proposed step first');
+  assert.deepStrictEqual(mode({ row: {}, suggestion: draft, manual_text: ok }, true), { mode: 'manual', reason: '', proposed: true }, 'own text, with the step to put back');
+  assert.strictEqual(mode({ row: {}, suggestion: draft }, true).mode, 'step', 'an older backend: only the proposed step');
+  assert.strictEqual(mode({ row: {}, suggestion: draft, manual_text: { allowed: false, code: 'chasing_paused', reason: 'x' } }, true).mode, 'step');
+  const between = mode({ row: { next_step: { step: 'd17', date: '2026-10-13' } }, suggestion: null, manual_text: ok });
+  assert.deepStrictEqual(between, { mode: 'manual', reason: '', next: 'Day 17 final text on Tue 13 Oct' }, 'no step today: your own text');
+  assert.strictEqual(mode({ row: { next_step: { step: 'd17', date: '2026-10-13' } }, suggestion: null }).reason, 'Nothing to send today. Next: Day 17 final text on Tue 13 Oct.');
+  assert.strictEqual(mode({ row: { category: 'says_paid' }, manual_text: ok }).reason, 'They say they have paid. Follow-ups are paused while Xero catches up.');
+  assert.strictEqual(mode({ row: { category: 'rectification' } }).reason, 'In Rectification. Chasing stops until the fix is done.');
+  assert.strictEqual(mode({ row: { paused_until: '2026-10-10' } }).reason, 'Follow-ups paused until Sat 10 Oct, a promise to pay.');
+  assert.strictEqual(mode({ row: { on_jan_list: true } }).reason, 'On Jan\'s visit list. No more texts.');
+  assert.strictEqual(mode({ row: { lane: 'account' } }).reason, 'Company invoices go on the Monday statement, not a text.');
+  assert.strictEqual(mode({ row: { not_chased: true } }).reason, 'This contact is never chased, so no texts go from here.');
+  assert.strictEqual(mode({ row: {}, manual_text: { allowed: false, code: 'chasing_paused', reason: 'Day 21 is a hold for a progress payment. No more texts' } }).reason, 'Day 21 is a hold for a progress payment. No more texts.');
+  assert.strictEqual(mode({ row: { open: false }, suggestion: draft, manual_text: ok }).mode, 'none', 'paid in Xero: nothing to send');
+  assert.strictEqual(mode({ row: {}, suggestion: { kind: 'move' }, manual_text: ok }).mode, 'move');
+});
+
 // ════════════════════════════════════════════════════════════
 // CONTRACT WITH THE BACKEND
 // The screen must only word codes ops-api really throws, and only post fields ops-api accepts
@@ -344,7 +402,7 @@ check('debt report: the Send words, the gate, the route and "last sent"', () => 
 const path = require('path');
 const BACKEND_CODES = [
   'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
-  'contact_belongs_to_other_payer', 'contact_row_not_found', 'conversation_unreadable',
+  'chasing_paused', 'contact_belongs_to_other_payer', 'contact_row_not_found', 'conversation_unreadable',
   'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
   'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'no_recipients', 'not_chased_by_text', 'not_found',
   'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',
@@ -355,7 +413,7 @@ const BACKEND_CODES = [
 ];
 const BACKEND_ONLY_KEYS = {
   debt_ws_note: ['xero_invoice_id', 'company_key', 'share_key', 'job_id', 'body', 'note', 'text', 'promise_date'],
-  debt_ws_decide: ['xero_invoice_id', 'step', 'suggestion_id', 'action', 'text', 'override_possible_payment', 'amount', 'channel'],
+  debt_ws_decide: ['xero_invoice_id', 'step', 'suggestion_id', 'action', 'text', 'override_possible_payment', 'amount', 'channel', 'client_ref'],
   debt_ws_set_category: ['xero_invoice_id', 'category', 'suggestion_id'],
   debt_ws_link_contact: ['job_id', 'ghl_contact_id', 'xero_invoice_id', 'replace'],
   debt_ws_statement_send: ['company_key', 'override_possible_payment'],
@@ -376,7 +434,8 @@ function readBackend(dir) {
   const actionsFile = path.join(dir, 'supabase', 'functions', 'ops-api', 'debt_ws_actions.ts');
   const storeFile = path.join(dir, 'supabase', 'functions', 'ops-api', 'debt_ws_store.ts');
   if (!fs.existsSync(actionsFile)) return null;
-  const text = fs.readFileSync(actionsFile, 'utf8') + '\n' + (fs.existsSync(storeFile) ? fs.readFileSync(storeFile, 'utf8') : '');
+  // Windows checkouts may carry CRLF line ends: read them as plain newlines.
+  const text = (fs.readFileSync(actionsFile, 'utf8') + '\n' + (fs.existsSync(storeFile) ? fs.readFileSync(storeFile, 'utf8') : '')).replace(/\r\n/g, '\n');
   const codes = new Set();
   const add = (re) => { for (const m of text.matchAll(re)) m.slice(1).forEach((c) => { if (c) codes.add(c); }); };
   add(/new DebtWsError\(\s*(?:"[^"]*"|`[^`]*`|'[^']*'|[^,()]+(?:\([^()]*\))?)\s*,\s*\d{3}\s*,\s*"([A-Za-z_]+)"/g); // (message, status, "code")
@@ -420,6 +479,14 @@ async function uxPosts() {
   onJob(fx.ids.avery); await ctx.dwLink(fx.ids.averyContact);
   onJob(fx.ids.riley); await ctx.dwLink(fx.ids.rileyContact);
   onJob(fx.ids.avery); await ctx.dwSend(false);
+  // A manual text: Shaun's own words in the reply box, posted as step "manual" with a client_ref.
+  onJob(fx.ids.casey); DW.own[fx.ids.casey] = true; DW.refs[fx.ids.casey] = '70000000-0000-4000-8000-000000000001';
+  DW.drafts[fx.ids.casey + ':manual'] = 'Thanks Casey, Friday is fine.\n\nCheers,\nShaun'; await ctx.dwSend(false);
+  // The reply box holds the proposed step's text word for word (the template, untouched).
+  onJob(fx.ids.casey); DW.own[fx.ids.casey] = false; delete DW.drafts[ctx.dwDraftKey()];
+  const replyBox = /<textarea[^>]*id="dwReply"[^>]*>([\s\S]*?)<\/textarea>/.exec(ctx.dwMiddleHtml(DW.job));
+  const unesc = (h) => h.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const proposedInBox = replyBox ? unesc(replyBox[1]) : null;
   DW.view = 'list'; DW.ov = JSON.parse(JSON.stringify(fx.overview));
   await ctx.dwApprove(fx.ids.harbour, false);
   await ctx.dwApprove(fx.ids.harbour, true);
@@ -429,14 +496,22 @@ async function uxPosts() {
   ctx.dwReportSend();
   const askedFirst = sent.filter((p) => p.action === 'debt_ws_report_send').length === 0 && DW.repConfirm === true;
   await ctx.dwReportSendConfirm();
-  return { sent, fx, askedFirst };
+  return { sent, fx, askedFirst, proposedInBox };
 }
 
 (async () => {
   let posted = null;
   try { posted = await uxPosts(); } catch (e) { failed += 1; console.error('FAIL debt-workshop: driving the screen writes\n  ' + (e && e.stack)); }
   if (posted) {
-    const { sent, fx, askedFirst } = posted;
+    const { sent, fx, askedFirst, proposedInBox } = posted;
+    check('the reply box holds the proposed step\'s text exactly as the template wrote it', () => {
+      assert.strictEqual(proposedInBox, fx.jobs[fx.ids.casey].suggestion.text);
+    });
+    check('a manual text posts step "manual" with the amount owing and its client_ref, no suggestion', () => {
+      const m = sent.filter((p) => p.action === 'debt_ws_decide' && p.body.step === 'manual');
+      assert.strictEqual(m.length, 1);
+      assert.deepStrictEqual(m[0].body, { xero_invoice_id: fx.ids.casey, step: 'manual', action: 'send', text: 'Thanks Casey, Friday is fine.\n\nCheers,\nShaun', channel: 'sms', amount: 1420.37, client_ref: '70000000-0000-4000-8000-000000000001' });
+    });
     check('every write on the screen was driven', () => {
       const seen = new Set(sent.map((p) => p.action));
       ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove', 'debt_ws_report_send'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
@@ -449,9 +524,9 @@ async function uxPosts() {
     });
     check('every send carries the amount the draft was written for', () => {
       const sends = sent.filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send');
-      assert.strictEqual(sends.length, 4, 'casey twice, the move reply, avery');
+      assert.strictEqual(sends.length, 5, 'casey twice, the move reply, avery, casey\'s own text');
       sends.forEach((p) => assert(Number(p.body.amount) > 0, 'no amount on a ' + p.body.step + ' send'));
-      assert.deepStrictEqual(sends.map((p) => p.body.amount), [1420.37, 1420.37, 2101, 1351.63]);
+      assert.deepStrictEqual(sends.map((p) => p.body.amount), [1420.37, 1420.37, 2101, 1351.63, 1420.37]);
       assert.strictEqual(sends[2].body.step, 'reply_problem', 'the move reply is sent on its reply step');
     });
     check('Link contact posts the invoice, so the backend links its PAYER (a neighbour\'s own row on a shared fence)', () => {

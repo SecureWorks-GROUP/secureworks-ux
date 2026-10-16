@@ -8,8 +8,13 @@
 //   that picks the list, one row per invoice (companies grouped), Jan's visit list on
 //   Bad debt, and a quiet footer (paid this week, needs a look, not chased, not due yet).
 // W2 (job screen): a status strip with the ladder of follow-up steps, then three calm
-//   columns: the job story, money and documents; the conversation with the suggested
-//   message inline; notes.
+//   columns: the job story, money and documents; the chat window; notes.
+//   The chat window (approved 16 Oct 2026, shaped like GoHighLevel's): who we are texting
+//   at the top with two chips (the payer only, or everyone on the job), the thread with
+//   the Debt log's notes as yellow lines, and a reply box at the bottom with the proposed
+//   step's text already typed in, word for word from the template. Shaun may write his own
+//   text instead: it goes through the same send and every check, as a manual text that
+//   never moves the follow-up days (ops-api debt_ws_decide, step "manual").
 // The debt report: "Debt report" (top right of W1) opens the live debt position as its own
 //   view, read fresh each time, with Download PDF and Send to Marnin (owner only, asks first).
 //
@@ -60,7 +65,22 @@ var DebtWorkshopCore = (function () {
     reply_says_paid: { label: 'Reply: says paid' },
     reply_promise: { label: 'Reply: promise to pay' },
     reply_problem: { label: 'Reply: problem raised' },
+    // Shaun's own words from the reply box: logged as a manual text, never a step.
+    manual: { label: 'Manual text' },
   };
+  // The green "Proposed: ..." words above the reply box, one per step (the chat window).
+  var PROPOSED = {
+    d1: 'day 1 reminder',
+    d3: 'day 3 reminder',
+    d7: 'day 7 reminder (with a call)',
+    d12: 'day 12 reminder',
+    d17: 'day 17 final reminder',
+    reply_says_paid: 'reply to "I have paid"',
+    reply_promise: 'reply to a promise to pay',
+    reply_problem: 'reply to a problem raised',
+  };
+  // The step a manual text is posted under (ops-api debt_ws_decide, step "manual").
+  var MANUAL_STEP = 'manual';
   // Job types that sit on the account (company) side: insurance work.
   var ACCOUNT_TYPES = ['makesafe', 'make_safe', 'repair', 'roof_report', 'roof', 'insurance'];
   var SENDING_OFF_WORDS = 'Sending is off until you switch it on';
@@ -83,6 +103,7 @@ var DebtWorkshopCore = (function () {
     send_refused_by_guard: 'The text was stopped before it went, so nothing was sent.',
     send_not_confirmed: 'The send could not be confirmed. Check the GoHighLevel conversation before trying again; it will not send twice.',
     not_chased_by_text: 'This invoice is not chased by text.',
+    chasing_paused: 'Chasing is paused for this invoice, so nothing was sent. Read the job again.',
     xero_unavailable: 'Xero could not be read for the last check, so nothing was sent. Try again shortly.',
     xero_rate_limited: 'Xero is busy right now, so nothing was sent. Try again shortly.',
     bank_check_unavailable: 'The bank feed could not be read, so nothing was sent. Try again shortly.',
@@ -493,6 +514,79 @@ var DebtWorkshopCore = (function () {
     return [dir, duration(m.call_duration), st].filter(Boolean).join(' · ');
   }
 
+  // ── The chat window (approved 16 Oct 2026) ──
+  // The thread is the conversation plus the people's notes from the Debt log (note, call,
+  // promise), each a yellow line at its own time. The screen's own records (a text sent, a
+  // skip, a category change) stay out: the texts themselves are already in the thread.
+  // On the payer's view only notes on this invoice (or on no invoice) show; Everyone shows all.
+  function chatItems(conv, notes, today, opts) {
+    opts = opts || {};
+    var msgs = Array.isArray(conv) ? conv : (conv && Array.isArray(conv.messages) ? conv.messages : []);
+    var id = String(opts.invoiceId || '');
+    var lines = (Array.isArray(notes) ? notes : []).filter(function (n) {
+      if (!n || HUMAN_NOTES.indexOf(n.kind || 'note') < 0 || !n.created_at) return false;
+      var ids = Array.isArray(n.xero_invoice_ids) ? n.xero_invoice_ids.map(String) : [];
+      return opts.all || !id || !ids.length || ids.indexOf(id) >= 0;
+    }).map(function (n) {
+      return { id: 'dlog:' + String(n.id || ''), channel: 'dlog', occurred_at: n.created_at, text: dlogWords(n), kind: n.kind || 'note' };
+    });
+    return thread(msgs.concat(lines), today);
+  }
+  // A Debt log note as one line: "Note by Shaun: said she would pay by Friday".
+  function dlogWords(n) {
+    n = n || {};
+    var k = n.kind || 'note', who = n.created_by_name ? ' by ' + n.created_by_name : '';
+    var head = { note: 'Note', call: 'Call note', promise: 'Promise' }[k] || 'Note';
+    var text = k === 'call' ? String(n.body || '') : noteView(n).text;
+    return head + who + (text ? ': ' + text : '');
+  }
+  // "day 7 reminder (with a call)" for the green label; a step with no words reads as its label.
+  function proposedWords(step) {
+    if (PROPOSED[step]) return PROPOSED[step];
+    var l = stepLabel(step); return l ? l.charAt(0).toLowerCase() + l.slice(1) : 'reply';
+  }
+  // The person in the chat bar: "Riley Shaw (B)" on a shared fence, plain on a single payer.
+  function payerTitle(p) {
+    p = p || {};
+    var lab = p.label && p.label !== 'main' ? ' (' + p.label + ')' : '';
+    return String(p.name || 'Unknown payer') + lab;
+  }
+  // The chat bar's second line: "Texts go from 771 · INV-9003 · $1,420.37 · day 12".
+  function chatSub(row) {
+    row = row || {};
+    return ['Texts go from 771', row.invoice_number ? String(row.invoice_number) : '', row.amount_due != null ? money(row.amount_due) : '', dayText(row)].filter(Boolean).join(' · ');
+  }
+  // What the bottom of the chat window holds. own: Shaun chose "Write my own text instead".
+  //   step:   the proposed step's text typed into the reply box (the template, word for word);
+  //   manual: an empty reply box for Shaun's own text (no step due now, or he chose to);
+  //   move:   the agent's move card; flag: the agent's note card (then the manual box if allowed);
+  //   none:   no box, and why in words (paid, says paid, rectification, paused, Jan's list,
+  //           a company invoice, not chased), as the screen said before the chat window.
+  // manual_text (ops-api debt_ws_job) decides whether a manual text may go; without it (an
+  // older backend) the box only ever holds the proposed step.
+  function composeMode(J, today, own) {
+    J = J || {};
+    var row = J.row || {}, sug = J.suggestion || null, mt = J.manual_text && typeof J.manual_text === 'object' ? J.manual_text : null;
+    var manualOk = !!(mt && mt.allowed === true);
+    if (row.open === false) return { mode: 'none', reason: 'Xero shows this invoice as paid. Nothing to send.' };
+    if (sug && sug.kind === 'move') return { mode: 'move', reason: '' };
+    if (sug && sug.kind === 'draft' && !(own && manualOk)) return { mode: 'step', reason: '' };
+    if (sug && sug.kind === 'draft') return { mode: 'manual', reason: '', proposed: true };
+    var why;
+    if (row.category === 'says_paid') why = 'They say they have paid. Follow-ups are paused while Xero catches up.';
+    else if (row.category === 'rectification') why = 'In Rectification. Chasing stops until the fix is done.';
+    else if (isPaused(row, today)) why = 'Follow-ups paused until ' + dateWords(row.paused_until) + ', a promise to pay.';
+    else if (row.on_jan_list) why = 'On Jan\'s visit list. No more texts.';
+    else if (row.lane === 'account') why = 'Company invoices go on the Monday statement, not a text.';
+    else if (row.not_chased) why = 'This contact is never chased, so no texts go from here.';
+    var next = row.next_step && row.next_step.step ? stepLabel(row.next_step.step, row.kind) + ' ' + whenWords(row.next_step.date, today) : '';
+    if (!why && manualOk) return { mode: sug && sug.kind === 'flag' ? 'flag' : 'manual', reason: '', next: next };
+    if (sug && sug.kind === 'flag') return { mode: 'flag', reason: '' };
+    if (!why && mt && mt.reason) why = String(mt.reason).replace(/\.?$/, '.');
+    if (!why) why = next ? 'Nothing to send today. Next: ' + next + '.' : 'Nothing to send today.';
+    return { mode: 'none', reason: why };
+  }
+
   // Notes: a person's note reads normally; the screen's own records (a text sent, a skip,
   // a category change) are muted auto rows.
   var HUMAN_NOTES = ['note', 'call', 'promise'];
@@ -623,6 +717,8 @@ var DebtWorkshopCore = (function () {
     draftAmount: draftAmount, statementPossible: statementPossible,
     firstName: firstName, payerOf: payerOf, shareSummary: shareSummary, partyWords: partyWords,
     unplacedWords: unplacedWords, ghlNameHint: ghlNameHint,
+    MANUAL_STEP: MANUAL_STEP, PROPOSED: PROPOSED, chatItems: chatItems, dlogWords: dlogWords, proposedWords: proposedWords,
+    payerTitle: payerTitle, chatSub: chatSub, composeMode: composeMode,
   };
 })();
 // </debt-workshop-core>
@@ -643,6 +739,10 @@ var DW = {
   modalUrl: null, modalGen: 0, modalCompany: null, bound: false, focus: null,
   janLoaded: false, janMsg: null, noteMsg: null, catMenu: false, stmtPossible: {},
   convAll: false, // the job screen shows the payer's own messages; true: the whole job's thread
+  // The chat window's reply box: own[jobId] true when Shaun chose to write his own text;
+  // refs[jobId] the one-off reference of the manual text being written (a double tap never
+  // texts twice: ops-api claims each reference once).
+  own: {}, refs: {},
   // The debt report view ('report'): read fresh every time it opens (debt_ws_report).
   repGen: 0, rep: null, repErr: null, repLoading: false, repShown: 0,
   repConfirm: false, repBusy: null, repMsg: null,
@@ -861,9 +961,28 @@ function dwCss() {
     '.dw-msg .subj{font-weight:700;display:block;white-space:normal}',
     '.dw-msg .dw-link{font-size:11.5px;margin-top:4px;display:inline-block}',
     '.dw-quiet{font-size:13px;color:var(--dw-midl);padding:8px 0}',
-    // Shared fences: the share line under the header, the whole-thread toggle, other people's messages
+    // W2: the chat window (approved 16 Oct 2026): the bar, the thread, the reply box
+    '.dw-chat{border:1px solid var(--dw-line);border-radius:10px;overflow:hidden;background:#fff;display:flex;flex-direction:column;min-width:0}',
+    '.dw-chatbar{background:#F5F3EF;border-bottom:1px solid var(--dw-soft);padding:10px 14px;display:flex;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;align-items:center}',
+    '.dw-chatbar .who{min-width:0}.dw-chatbar .who b{font-size:14px;color:var(--dw-deep);overflow-wrap:anywhere}.dw-chatbar .sub{font-size:12px;color:var(--dw-midl);margin-top:2px}',
+    '.dw-cchips{display:flex;gap:6px;flex-wrap:wrap}',
+    '#viewDebt .dw-chip.sm{padding:3px 11px;font-size:11.5px}',
+    '.dw-chat .dw-thread{background:#FAFBFC;padding:12px 14px;max-height:480px;min-height:120px}',
+    '.dw-chat .dw-thread-empty{display:block;min-height:0}',
+    '.dw-chat .dw-msg.in{background:#fff;border:1px solid var(--dw-soft)}.dw-chat .dw-msg.out{background:#E9F1F6}',
+    '.dw-chat .dw-msg.mail{background:#fff;border:1px dashed var(--dw-line);color:var(--dw-mid)}.dw-chat .dw-msg.out.mail{background:#F6F9FB}',
+    '.dw-mailnote{display:block;font-size:10.5px;color:var(--dw-midl);margin-top:4px;white-space:normal}',
+    '.dw-msg.dlog{align-self:center;max-width:92%;background:#FFF8E6;border:1px solid #F1E2B5;color:#7A5B12;font-size:12px;padding:5px 10px;border-radius:6px}.dw-msg.dlog .t{color:#A8906A}',
+    '.dw-compose{border-top:1px solid var(--dw-soft);padding:12px 14px;display:grid;gap:8px;background:#fff;min-width:0}',
+    '.dw-compose>*{margin-top:0 !important;min-width:0}',
+    '.dw-proposed{font-size:11.5px;font-weight:700;color:var(--dw-sage);display:flex;justify-content:space-between;gap:2px 10px;flex-wrap:wrap;align-items:baseline}',
+    '.dw-proposed .hint{color:var(--dw-midl);font-weight:400}.dw-proposed .src{color:var(--dw-midl);font-weight:600;font-size:11px}.dw-proposed.own{color:var(--dw-dark)}',
+    '.dw-reply-in{width:100%;min-height:150px;border:1px solid #C9D4DB;border-radius:8px;padding:9px 11px;font:inherit;font-size:13.5px;line-height:1.5;resize:vertical;color:var(--dw-deep);background:#fff}',
+    '.dw-reply-in:focus{outline:0;border-color:var(--dw-or)}',
+    '.dw-crow{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}.dw-crow .l,.dw-crow .r{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}',
+    '.dw-cfoot{display:flex;gap:14px;flex-wrap:wrap}',
+    // Shared fences: the share line under the header, other people's messages (Everyone on this job)
     '.dw-shares{font-size:12.5px;color:var(--dw-mid);margin-top:5px}',
-    '#viewDebt .dw-convt{font-size:12px;margin-top:6px;display:inline-block}',
     '.dw-msg.other{opacity:.72}.dw-msg.in.other{background:#F6F7F8}.dw-msg.out.other{background:#FBF4F1}',
     // A message not yet filed on a job, and the payer's GoHighLevel first name when it differs from Xero's
     '.dw-msg .dw-unpl{display:block;font-size:10px;color:var(--dw-midl);margin-top:4px;font-style:italic;white-space:normal}',
@@ -873,13 +992,11 @@ function dwCss() {
     '.dw-notice .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}',
     '.dw-notice .w{font-size:12px;color:#8A6A3A;margin-top:3px}',
     '.dw-notice .d{font-size:11px;color:#A8906A;margin-top:4px}',
-    '.dw-sug{margin-top:16px;border:1.5px dashed var(--dw-or);border-radius:12px;padding:15px 16px;background:#FFFBF9}',
     '.dw-lab{font-size:10.5px;font-weight:700;color:var(--dw-or);text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}',
     '.dw-lab .src{color:var(--dw-midl);font-weight:600;text-transform:none;letter-spacing:0;font-size:11.5px}',
     '.dw-txt{font-size:13.5px;line-height:1.5;margin:10px 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}',
-    '.dw-sug textarea,.dw-note-in{width:100%;border:1px solid var(--dw-line);border-radius:var(--dw-r);padding:9px 11px;font:inherit;font-size:13.5px;line-height:1.5;background:#fff;resize:vertical;color:var(--dw-deep)}',
-    '.dw-sug textarea{min-height:170px;margin:10px 0 4px}',
-    '.dw-sug textarea:focus,.dw-note-in:focus,.dw-note-row input:focus{outline:0;border-color:var(--dw-or)}',
+    '.dw-note-in{width:100%;border:1px solid var(--dw-line);border-radius:var(--dw-r);padding:9px 11px;font:inherit;font-size:13.5px;line-height:1.5;background:#fff;resize:vertical;color:var(--dw-deep)}',
+    '.dw-note-in:focus,.dw-note-row input:focus{outline:0;border-color:var(--dw-or)}',
     '.dw-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}',
     '.dw-acts .spacer{flex:1}',
     '.dw-gate{font-size:12px;color:var(--dw-midl);margin-top:8px}',
@@ -945,11 +1062,12 @@ function dwCss() {
     // Phone and small screens: the columns stack under 900px, the list rows fold under 640px
     '@media (max-width:900px){.dw-ov{grid-template-columns:1fr;justify-items:center;gap:20px;padding:22px 16px}.dw-donut{width:176px;height:176px}.dw-mid b{font-size:22px}.dw-legend{width:100%}',
     '.dw-ws{grid-template-columns:1fr}.dw-ws>section+section{border-left:0;border-top:1px solid var(--dw-soft)}.dw-ws>section{padding:18px 16px}',
-    '.dw-strip{grid-template-columns:1fr;padding:20px 16px 10px}.dw-owing{text-align:left}.dw-ladder{padding:8px 16px 18px}.dw-thread{max-height:440px}}',
+    '.dw-strip{grid-template-columns:1fr;padding:20px 16px 10px}.dw-owing{text-align:left}.dw-ladder{padding:8px 16px 18px}.dw-thread{max-height:440px}.dw-chat .dw-thread{max-height:420px}}',
     '@media (max-width:640px){.dw-title{font-size:22px}.dw-head{align-items:flex-start}',
     '#viewDebt .dw-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"main amt" "nx day";gap:6px 12px;padding:13px 16px}.dw-row .dw-chev{display:none}.dw-row .dw-day{text-align:right}',
     '.dw-co{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"main amt" "day day" "act act";gap:6px 12px;padding:13px 16px}.dw-co .act{align-items:flex-start}.dw-co .btns{justify-content:flex-start}.dw-co .why{text-align:left}',
-    '#viewDebt .dw-lg{gap:10px;padding:10px 10px}.dw-lg .am{min-width:0}.dw-list-h{padding:16px 16px 10px}.dw-jan{padding:16px 16px 6px}.dw-strip h2{font-size:20px}.dw-owing b{font-size:27px}.dw-msg{max-width:92%}.dw-sheet iframe{height:64vh}}',
+    '#viewDebt .dw-lg{gap:10px;padding:10px 10px}.dw-lg .am{min-width:0}.dw-list-h{padding:16px 16px 10px}.dw-jan{padding:16px 16px 6px}.dw-strip h2{font-size:20px}.dw-owing b{font-size:27px}.dw-msg{max-width:92%}.dw-sheet iframe{height:64vh}',
+    '.dw-chatbar{padding:10px 12px}.dw-chat .dw-thread{padding:10px 12px}.dw-compose{padding:10px 12px}.dw-crow .r{width:100%;justify-content:flex-end}.dw-reply-in{min-height:180px}}',
   ].join('\n');
   document.head.appendChild(s);
 }
@@ -1044,6 +1162,7 @@ function dwOpenJob(id) {
 function dwShowJob(id) {
   DW.view = 'job'; DW.jobId = id; DW.job = null; DW.jobErr = null;
   DW.editing = false; DW.why = false; DW.refusal = null; DW.noteText = ''; DW.promise = ''; DW.noteMsg = null; DW.open = {}; DW.catMenu = false; DW.convAll = false;
+  DW.own[id] = false; DW.refs[id] = dwNewRef();
   dwRender();
   try { window.scrollTo(0, 0); } catch (e) {}
   dwLoadJob(false);
@@ -1384,37 +1503,47 @@ function dwLeftHtml(J) {
   return story + money + '<div class="dw-h">Documents and invoices</div><div id="dwDocs">' + (docs || '<div class="dw-quiet">No documents on this job.</div>') + '</div>';
 }
 
-// Middle: the conversation, newest at the bottom, then what to do next.
-// The conversation is the PAYER's own (a neighbour's on a shared fence), with a quiet toggle
-// to the whole job's thread, where other people's messages carry their name.
+// Middle: the chat window (approved 16 Oct 2026), shaped like GoHighLevel's.
+//   Top bar:  who we are texting (the PAYER: a neighbour on a shared fence, with their own
+//             phone), "Texts go from 771", the invoice, the amount and the day; two chips,
+//             "<first name> only" (the payer's own messages, the default) and "Everyone on
+//             this job" (the whole job's thread, other people's messages named).
+//   Thread:   oldest at the top, newest at the bottom, a day line when the Perth day changes.
+//             Our texts on the right, theirs on the left. Emails show, marked as email (read
+//             only: reply in Outlook). A message not yet filed on a job keeps its grey label.
+//             Notes and promises from the Debt log are yellow lines at their own time.
+//   Reply:    the proposed step's text already typed in (the template, word for word), with a
+//             green "Proposed: ..." label; or Shaun's own text; or, when nothing may be sent,
+//             why in words in place of the box.
+// Agent notices sit above the window.
 function dwMiddleHtml(J) {
-  var C = DebtWorkshopCore, s = dwSettings(), linked = dwLinked(J), payer = C.payerOf(J), who = C.firstName(payer.name) || 'them';
+  var C = DebtWorkshopCore, s = dwSettings(), linked = dwLinked(J), payer = C.payerOf(J), row = J.row || {};
+  var who = C.firstName(payer.name) || 'them';
   var conv = J.conversation && typeof J.conversation === 'object' ? J.conversation : {};
   var all = conv.mode === 'all';
-  var items = C.thread(conv, dwToday());
-  var phone = payer.phone ? '<span id="dwPayerPhone">' + dwEsc(payer.phone) + '</span>' : '';
+  var items = C.chatItems(conv, J.notes, dwToday(), { invoiceId: row.xero_invoice_id || DW.jobId, all: all });
+  var phone = payer.phone ? ' · <span id="dwPayerPhone">' + dwEsc(payer.phone) + '</span>' : '';
+  var chips = J.job ? '<div class="dw-cchips" role="group" aria-label="Whose messages">' +
+    '<button type="button" class="dw-chip sm' + (all ? '' : ' on') + '" data-dw="conv-payer" id="dwChipPayer" aria-pressed="' + !all + '">' + dwEsc(who + ' only') + '</button>' +
+    '<button type="button" class="dw-chip sm' + (all ? ' on' : '') + '" data-dw="conv-all" id="dwChipAll" aria-pressed="' + all + '">Everyone on this job</button></div>' : '';
+  var bar = '<div class="dw-chatbar" id="dwChatBar"><div class="who"><b id="dwChatWho">' + dwEsc(C.payerTitle(payer)) + phone + '</b>' +
+    '<div class="sub" id="dwChatSub">' + dwEsc(C.chatSub(row)) + '</div></div>' + chips + '</div>';
   var empty = all ? 'No messages on this job yet.'
     : conv.reason === 'payer_not_linked' ? 'No conversation with ' + who + ' yet. Link ' + who + '\'s GoHighLevel contact to see it and text them.'
     : linked ? 'No messages with ' + who + ' yet.' : 'No GoHighLevel contact is linked, so there is no conversation to show.';
   var thread = items.length ? '<div class="dw-thread" id="dwThread">' + items.map(function (x) { return x.type === 'day' ? '<div class="dw-dayl">' + dwEsc(x.label) + '</div>' : dwMsgHtml(x.m); }).join('') + '</div>'
-    : '<div class="dw-quiet" id="dwThreadEmpty">' + dwEsc(empty) + '</div>';
-  // The toggle shows only when the job's thread holds more than the payer's own messages.
-  var total = Number(conv.all_job_messages_count), mine = Array.isArray(conv.messages) ? conv.messages.length : 0;
-  var toggle = all
-    ? '<button type="button" class="dw-link dw-convt" data-dw="conv-payer" id="dwConvToggle">Show only ' + dwEsc(who) + '\'s messages</button>'
-    : isFinite(total) && total > mine ? '<button type="button" class="dw-link dw-convt" data-dw="conv-all" id="dwConvToggle">Show the whole job\'s conversation (' + total + ' ' + (total === 1 ? 'message' : 'messages') + ')</button>' : '';
+    : '<div class="dw-thread dw-thread-empty"><div class="dw-quiet" id="dwThreadEmpty">' + dwEsc(empty) + '</div></div>';
   var flags = (Array.isArray(J.flags) ? J.flags : []).map(function (f) {
     return '<div class="dw-notice" data-flag="' + dwEsc(f.id) + '"><div class="top"><div><b>' + dwEsc(f.text) + '</b>' + (f.why ? '<div class="w">' + dwEsc(f.why) + '</div>' : '') +
       '<div class="d">Agent notice' + (f.created_at ? ' · ' + dwEsc(C.dateWords(C.perthDay(f.created_at))) : '') + '</div></div>' +
       (s.viewer_is_owner ? '<button type="button" class="dw-link" data-dw="dismiss" data-k="' + dwEsc(f.id) + '"' + dwDis(!!DW.busy) + '>Dismiss</button>' : '') + '</div></div>';
   }).join('');
-  var link = linked ? '' : dwLinkCardHtml(J, s);
-  var owner = s.viewer_is_owner ? '' : '<div class="dw-gate" id="dwReadOnly">Only an owner can send, skip, move or link. You can still add notes.</div>';
-  var refusal = DW.refusal ? '<div class="dw-refuse" id="dwRefusal" role="alert">' + dwEsc(DW.refusal) + '</div>' : '';
-  return '<div class="dw-h">Conversation ' + phone + '</div>' + thread + toggle + flags + link + dwSuggestionHtml(J, s, linked) + refusal + owner;
+  return '<div class="dw-h">Conversation</div>' + flags + '<div class="dw-chat" id="dwChat">' + bar + thread + dwComposeHtml(J, s, linked) + '</div>';
 }
 function dwMsgHtml(m) {
   var C = DebtWorkshopCore, id = String(m.id || ''), time = C.perthTime(m.occurred_at || m.at), body = String(m.body || m.preview || '');
+  // A note or promise from the Debt log: one yellow line in time order.
+  if (m.channel === 'dlog') return '<div class="dw-msg dlog" data-msg="' + dwEsc(id) + '">' + dwEsc(m.text) + (time ? ' <span class="t">· ' + dwEsc(time) + '</span>' : '') + '</div>';
   var author = m.author && !DW_UUID.test(String(m.author)) ? String(m.author) : '';
   // Not filed on a job yet (the payer's own message, this job one it could belong to): a quiet label.
   var unpl = C.unplacedWords(m), unplTag = unpl ? '<span class="dw-unpl">' + dwEsc(unpl) + '</span>' : '';
@@ -1424,14 +1553,16 @@ function dwMsgHtml(m) {
       (tr ? '<div><button type="button" class="dw-link" data-dw="transcript" data-k="' + dwEsc(id) + '" aria-expanded="' + open + '">' + (open ? 'Hide transcript' : 'Show transcript') + '</button></div>' + (open ? '<div class="tr">' + dwEsc(tr) + '</div>' : '') : '<span class="meta">No transcript</span>') + unplTag + '</div>';
   }
   if (m.channel === 'note') return '<div class="dw-msg note" data-msg="' + dwEsc(id) + '"><span class="meta">Staff note' + (author ? ' · ' + dwEsc(author) : '') + (time ? ' · ' + dwEsc(time) : '') + '</span>' + dwEsc(body) + '</div>';
-  var out = m.direction === 'outbound';
+  var out = m.direction === 'outbound', mail = m.channel === 'email';
   // On the whole job's thread, a message with someone other than the payer says who.
   var party = C.partyWords(m);
   var who = out ? (author || 'Us') + (party ? ' to ' + party : '') : (party || author || 'Client');
   var long = body.length > 600 && !DW.open[id];
-  return '<div class="dw-msg ' + (out ? 'out' : 'in') + (m.is_payer === false ? ' other' : '') + '" data-msg="' + dwEsc(id) + '"><span class="meta">' + dwEsc(who + ' · ' + C.channelWord(m.channel) + (time ? ' · ' + time : '')) + '</span>' +
+  // Emails are read only here: they are answered in Outlook.
+  var mailTag = mail ? '<span class="dw-mailnote">Email, read only. Reply in Outlook.</span>' : '';
+  return '<div class="dw-msg ' + (out ? 'out' : 'in') + (mail ? ' mail' : '') + (m.is_payer === false ? ' other' : '') + '" data-msg="' + dwEsc(id) + '"><span class="meta">' + dwEsc(who + ' · ' + C.channelWord(m.channel) + (time ? ' · ' + time : '')) + '</span>' +
     (m.subject ? '<span class="subj">' + dwEsc(m.subject) + '</span>' : '') + dwEsc(long ? body.slice(0, 600).replace(/\s+\S*$/, '') + '...' : body) +
-    (body.length > 600 ? '<br><button type="button" class="dw-link" data-dw="more" data-k="' + dwEsc(id) + '">' + (long ? 'Show all' : 'Show less') + '</button>' : '') + unplTag + '</div>';
+    (body.length > 600 ? '<br><button type="button" class="dw-link" data-dw="more" data-k="' + dwEsc(id) + '">' + (long ? 'Show all' : 'Show less') + '</button>' : '') + mailTag + unplTag + '</div>';
 }
 // The payer's Link contact card: candidates are searched by the payer's own phone and email.
 function dwLinkCardHtml(J, s) {
@@ -1448,51 +1579,56 @@ function dwLinkCardHtml(J, s) {
   });
   return html + '</div>';
 }
+
+// ── The reply box's text ──
+// The proposed step's text is the suggestion's own text (the template, or the agent's draft),
+// untouched until Shaun edits it; an edit is kept for that suggestion until it is sent or put back.
+// Shaun's own text is kept per job. dwComposeMode says which of the two the box holds.
 function dwDraftKey() { var J = DW.job || {}, s = J.suggestion || {}; return String(DW.jobId) + ':' + String(s.id || s.step || 'draft'); }
 function dwDraftText() { var k = dwDraftKey(), s = (DW.job && DW.job.suggestion) || {}; return DW.drafts[k] != null ? DW.drafts[k] : String(s.text || ''); }
-function dwSuggestionHtml(J, s, linked) {
-  var C = DebtWorkshopCore, sug = J.suggestion, row = J.row || {}, today = dwToday();
-  if (!sug) {
-    var words;
-    if (row.category === 'says_paid') words = 'They say they have paid. Follow-ups are paused while Xero catches up.';
-    else if (row.category === 'rectification') words = 'In Rectification. Chasing stops until the fix is done.';
-    else if (C.isPaused(row, today)) words = 'Follow-ups paused until ' + C.dateWords(row.paused_until) + ', a promise to pay.';
-    else if (row.on_jan_list) words = 'On Jan\'s visit list. No more texts.';
-    else if (row.next_step && row.next_step.step) words = 'Nothing to send today. Next: ' + C.stepLabel(row.next_step.step, row.kind) + ' ' + C.whenWords(row.next_step.date, today) + '.';
-    else words = 'Nothing to send today.';
-    return '<div class="dw-nothing" id="dwNothing">' + dwEsc(words) + '</div>';
-  }
-  var text = dwDraftText(), edited = text !== String(sug.text || '');
-  var src = sug.source === 'agent' ? 'Written by the agent' : 'From the template';
-  var editor = DW.editing ? '<textarea data-dw-in="draft" id="dwDraftEdit" aria-label="Edit the message">' + dwEsc(text) + '</textarea>' : '<div class="dw-txt" id="dwDraftText">' + dwEsc(text) + '</div>';
-  var why = sug.why ? (DW.why ? '<div class="dw-why" id="dwWhy">' + dwEsc(sug.why) + '</div>' : '') : '';
-  var whyLink = sug.why ? '<button type="button" class="dw-link" data-dw="why" aria-expanded="' + !!DW.why + '">' + (DW.why ? 'Hide why' : 'Why this one') + '</button>' : '';
+function dwOwnKey() { return String(DW.jobId) + ':manual'; }
+function dwOwnText() { var t = DW.drafts[dwOwnKey()]; return t != null ? t : ''; }
+function dwComposeMode(J) { return DebtWorkshopCore.composeMode(J || DW.job, dwToday(), !!DW.own[DW.jobId]); }
+// A one-off reference for a manual text (a v4 UUID): ops-api claims each one once.
+function dwNewRef() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+}
+function dwManualRef() { if (!DW.refs[DW.jobId]) DW.refs[DW.jobId] = dwNewRef(); return DW.refs[DW.jobId]; }
 
-  if (sug.kind === 'move') {
-    var cat = C.catByKey(sug.proposed_category) || { name: 'Rectification', color: '#7B5EA7' };
-    var canText = dwCanText(J);
-    var replyOk = !!text.trim() && s.sending_on && canText;
-    var label = 'Move to ' + cat.name + (replyOk ? ' + send reply' : '');
-    var lab = sug.proposed_category === 'says_paid' ? 'Looks like they have paid' : 'Looks like something to fix';
-    var gate = !s.viewer_is_owner ? '' : (text.trim() && !s.sending_on ? 'Sending is off until you switch it on, so only the move happens.' : text.trim() && !linked ? 'No contact is linked, so only the move happens.' : '');
-    return '<div class="dw-move" id="dwMove"><div class="dw-lab"><span>' + dwEsc(lab) + '</span><span class="src">' + dwEsc(src) + '</span></div>' +
-      (sug.why ? '<p>' + dwEsc(sug.why) + '</p>' : '') +
-      '<p>Move this job to <b style="color:' + cat.color + '">' + dwEsc(cat.name) + '</b>? The follow-ups stop while it is there.</p>' +
-      (sug.text ? '<div class="dw-reply"><div class="dw-lab"><span>Suggested reply</span>' + (edited ? '<span class="src">edited</span>' : '') + '</div>' + (DW.editing ? '<textarea data-dw-in="draft" id="dwDraftEdit" aria-label="Edit the reply" style="width:100%;min-height:120px;border:1px solid #DCCFEE;border-radius:3px;padding:8px;font:inherit;font-size:13px">' + dwEsc(text) + '</textarea>' : dwEsc(text)) + '</div>' : '') +
-      '<div class="dw-acts"><button type="button" class="dw-btn p" data-dw="move" id="dwMoveBtn"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>' + dwEsc(DW.busy === 'move' ? 'Moving...' : label) + '</button>' +
-      '<button type="button" class="dw-btn g" data-dw="keep" id="dwKeepBtn"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>Keep chasing</button>' +
-      (sug.text ? '<button type="button" class="dw-link" data-dw="edit">' + (DW.editing ? 'Done editing' : 'Edit reply') + '</button>' : '') + '</div>' +
-      (gate ? '<div class="dw-gate">' + dwEsc(gate) + '</div>' : '') + '</div>';
+// The bottom of the chat window: the reply box, the agent's move card, or why nothing goes.
+function dwComposeHtml(J, s, linked) {
+  var C = DebtWorkshopCore, sug = J.suggestion, row = J.row || {}, cm = dwComposeMode(J);
+  var owner = s.viewer_is_owner ? '' : '<div class="dw-gate" id="dwReadOnly">Only an owner can send, skip, move or link. You can still add notes.</div>';
+  var refusal = DW.refusal ? '<div class="dw-refuse" id="dwRefusal" role="alert">' + dwEsc(DW.refusal) + '</div>' : '';
+  var noteBtn = '<button type="button" class="dw-btn g sm" data-dw="add-note" id="dwAddNote">Add a note</button>';
+  var link = linked ? '' : dwLinkCardHtml(J, s);
+  if (cm.mode === 'none') {
+    return '<div class="dw-compose" id="dwCompose">' + link + '<div class="dw-nothing" id="dwNothing">' + dwEsc(cm.reason) + '</div>' +
+      '<div class="dw-crow"><span></span><div class="r">' + noteBtn + '</div></div>' + refusal + owner + '</div>';
   }
-  if (sug.kind === 'flag') {
-    return '<div class="dw-flag" id="dwFlag"><div class="dw-lab" style="color:var(--dw-mid)"><span>Agent note</span></div><div class="dw-txt">' + dwEsc(sug.text || '') + '</div>' + (sug.why ? '<div class="dw-why">' + dwEsc(sug.why) + '</div>' : '') + '</div>';
+  if (cm.mode === 'move') return '<div class="dw-compose" id="dwCompose">' + link + dwMoveHtml(J, s, linked) + refusal + owner + '</div>';
+  var flag = cm.mode === 'flag' ? '<div class="dw-flag" id="dwFlag"><div class="dw-lab" style="color:var(--dw-mid)"><span>Agent note</span></div><div class="dw-txt">' + dwEsc(sug.text || '') + '</div>' + (sug.why ? '<div class="dw-why">' + dwEsc(sug.why) + '</div>' : '') + '</div>' : '';
+  var manualOk = !!(J.manual_text && J.manual_text.allowed === true);
+  if (cm.mode === 'flag' && !manualOk) return '<div class="dw-compose" id="dwCompose">' + flag + refusal + owner + '</div>';
+
+  var step = cm.mode === 'step', email = step && sug.channel === 'email';
+  var text = step ? dwDraftText() : dwOwnText();
+  var edited = step && text !== String(sug.text || '');
+  var label;
+  if (step) {
+    var src = sug.source === 'agent' ? 'Written by the agent' : 'From the template';
+    label = '<div class="dw-proposed" id="dwProposed"><span class="w">Proposed: ' + dwEsc(C.proposedWords(sug.step)) + ' <span class="hint">· edit it or send as is</span></span>' +
+      '<span class="src">' + dwEsc(src) + '<span id="dwEdited">' + (edited ? ', edited' : '') + '</span></span></div>';
+  } else {
+    label = '<div class="dw-proposed own" id="dwProposed"><span class="w">Your own text <span class="hint">· not a planned step, so the follow-up days do not move</span></span></div>' +
+      (!cm.proposed && cm.next ? '<div class="dw-gate" id="dwNextLine">Nothing proposed today. Next: ' + dwEsc(cm.next) + '.</div>' : '');
   }
-  var email = sug.channel === 'email';
-  var stepWords = sug.step ? C.stepLabel(sug.step, row.kind) : '';
-  if (email) stepWords = stepWords.replace(/ text/, ' email');
-  var title = stepWords ? 'Suggested ' + stepWords.charAt(0).toLowerCase() + stepWords.slice(1) : 'Suggested reply';
+  var who = C.firstName(C.payerOf(J).name);
+  var box = '<textarea class="dw-reply-in" data-dw-in="draft" data-k="' + dwEsc(step ? dwDraftKey() : dwOwnKey()) + '" id="dwReply" aria-label="' + dwEsc('Your text to ' + (who || 'them')) + '"' +
+    (step ? '' : ' placeholder="' + dwEsc('Write a text to ' + (who || 'them')) + '"') + '>' + dwEsc(text) + '</textarea>';
   var possible = Array.isArray(J.possible_payments) ? J.possible_payments : [];
-  var g = C.sendGate({ settings: s, channel: sug.channel, linked: linked, possible: possible, who: C.firstName(C.payerOf(J).name) });
+  var g = C.sendGate({ settings: s, channel: email ? 'email' : 'sms', linked: linked, possible: possible, who: who });
   var warn = possible.length ? '<div class="dw-warn" id="dwPossible"><b>Possible payment in the bank feed</b>' + possible.map(function (p) { return dwEsc(C.paymentWords(p)) + (p.reason ? ' (' + dwEsc(p.reason) + ')' : ''); }).join('<br>') + '<br>Match it in Xero before chasing. If it is not theirs, you can send anyway.</div>' : '';
   var sendBtn;
   if (g.code === 'possible_payment') {
@@ -1501,14 +1637,40 @@ function dwSuggestionHtml(J, s, linked) {
     var sendLabel = g.code === 'sending_off' ? g.reason : DW.busy === 'send' ? 'Sending...' : email ? 'Send email' : 'Send text';
     sendBtn = '<button type="button" class="dw-btn" data-dw="send" id="dwSend"' + dwDis(!g.ok || !!DW.busy) + '>' + dwEsc(sendLabel) + '</button>';
   }
+  // Left of the buttons: put the proposed text back (undo edits, or leave your own text), and
+  // write your own text instead (when a manual text may go).
+  var left = '';
+  if (step) left += '<button type="button" class="dw-btn g sm" data-dw="revert" id="dwRevert"' + dwDis(!edited) + '>Put the proposed text back</button>';
+  else if (cm.proposed) left += '<button type="button" class="dw-btn g sm" data-dw="revert" id="dwRevert">Put the proposed text back</button>';
+  if (step && manualOk) left += '<button type="button" class="dw-link" data-dw="own" id="dwOwn">Write my own text instead</button>';
+  var acts = '<div class="dw-crow"><div class="l">' + left + '</div><div class="r">' + noteBtn + sendBtn + '</div></div>';
+  // Under the buttons: Skip this step (owner only) and Why this one, for a proposed step.
+  var why = step && sug.why ? (DW.why ? '<div class="dw-why" id="dwWhy">' + dwEsc(sug.why) + '</div>' : '') : '';
+  var foot = step ? '<div class="dw-cfoot"><button type="button" class="dw-link" data-dw="skip" id="dwSkip"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>Skip this step</button>' +
+    (sug.why ? '<button type="button" class="dw-link" data-dw="why" aria-expanded="' + !!DW.why + '">' + (DW.why ? 'Hide why' : 'Why this one') + '</button>' : '') + '</div>' : '';
   var gateLine = !g.ok && g.code !== 'sending_off' && g.code !== 'possible_payment' && g.code !== 'not_owner' ? '<div class="dw-gate">' + dwEsc(g.reason) + '.</div>' : '';
-  var callLine = sug.step === 'd7' ? '<div class="dw-gate">Day 7 is a call too: ring them, then add a note on what was said.</div>' : '';
-  return '<div class="dw-sug" id="dwSuggestion"><div class="dw-lab"><span>' + dwEsc(title) + '</span><span class="src">' + dwEsc(src + (edited ? ', edited' : '')) + '</span></div>' +
-    editor + warn +
-    '<div class="dw-acts">' + sendBtn +
-    '<button type="button" class="dw-btn g" data-dw="edit" id="dwEdit">' + (DW.editing ? 'Done' : 'Edit') + '</button>' +
-    '<button type="button" class="dw-link" data-dw="skip" id="dwSkip"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>Skip</button>' +
-    '<span class="spacer"></span>' + whyLink + '</div>' + why + gateLine + callLine + '</div>';
+  var callLine = step && sug.step === 'd7' ? '<div class="dw-gate">Day 7 is a call too: ring them, then add a note on what was said.</div>' : '';
+  return '<div class="dw-compose" id="dwCompose">' + flag + link + label + box + warn + acts + foot + why + gateLine + callLine + refusal + owner + '</div>';
+}
+// The agent's move card (unchanged by the chat window): why, the proposed category, the
+// suggested reply (editable), Move + send reply, and Keep chasing.
+function dwMoveHtml(J, s, linked) {
+  var C = DebtWorkshopCore, sug = J.suggestion, text = dwDraftText(), edited = text !== String(sug.text || '');
+  var src = sug.source === 'agent' ? 'Written by the agent' : 'From the template';
+  var cat = C.catByKey(sug.proposed_category) || { name: 'Rectification', color: '#7B5EA7' };
+  var canText = dwCanText(J);
+  var replyOk = !!text.trim() && s.sending_on && canText;
+  var label = 'Move to ' + cat.name + (replyOk ? ' + send reply' : '');
+  var lab = sug.proposed_category === 'says_paid' ? 'Looks like they have paid' : 'Looks like something to fix';
+  var gate = !s.viewer_is_owner ? '' : (text.trim() && !s.sending_on ? 'Sending is off until you switch it on, so only the move happens.' : text.trim() && !linked ? 'No contact is linked, so only the move happens.' : '');
+  return '<div class="dw-move" id="dwMove"><div class="dw-lab"><span>' + dwEsc(lab) + '</span><span class="src">' + dwEsc(src) + '</span></div>' +
+    (sug.why ? '<p>' + dwEsc(sug.why) + '</p>' : '') +
+    '<p>Move this job to <b style="color:' + cat.color + '">' + dwEsc(cat.name) + '</b>? The follow-ups stop while it is there.</p>' +
+    (sug.text ? '<div class="dw-reply"><div class="dw-lab"><span>Suggested reply</span>' + (edited ? '<span class="src">edited</span>' : '') + '</div>' + (DW.editing ? '<textarea data-dw-in="draft" data-k="' + dwEsc(dwDraftKey()) + '" id="dwDraftEdit" aria-label="Edit the reply" style="width:100%;min-height:120px;border:1px solid #DCCFEE;border-radius:3px;padding:8px;font:inherit;font-size:13px">' + dwEsc(text) + '</textarea>' : dwEsc(text)) + '</div>' : '') +
+    '<div class="dw-acts"><button type="button" class="dw-btn p" data-dw="move" id="dwMoveBtn"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>' + dwEsc(DW.busy === 'move' ? 'Moving...' : label) + '</button>' +
+    '<button type="button" class="dw-btn g" data-dw="keep" id="dwKeepBtn"' + dwDis(!s.viewer_is_owner || !!DW.busy) + '>Keep chasing</button>' +
+    (sug.text ? '<button type="button" class="dw-link" data-dw="edit">' + (DW.editing ? 'Done editing' : 'Edit reply') + '</button>' : '') + '</div>' +
+    (gate ? '<div class="dw-gate">' + dwEsc(gate) + '</div>' : '') + '</div>';
 }
 
 // Right: notes only.
@@ -1745,19 +1907,29 @@ async function dwPreview(key) {
 function dwRowId() { var J = DW.job || {}; return (J.row && J.row.xero_invoice_id) || DW.jobId; }
 function dwAfterWrite() { dwLoadJob(true); dwLoadOverview(true); }
 
+// Send text: the proposed step (as edited, or word for word), or Shaun's own text as a manual
+// text. Both go through debt_ws_decide and every check the backend runs (owner, sending on,
+// live Xero, the bank feed, 771 only); a manual text is logged as one and never moves the days.
 async function dwSend(override) {
-  var C = DebtWorkshopCore, J = DW.job; if (!J || !J.suggestion || DW.busy) return;
-  var sug = J.suggestion, text = dwDraftText();
+  var C = DebtWorkshopCore, J = DW.job; if (!J || DW.busy) return;
+  var mode = dwComposeMode(J).mode, manual = mode === 'manual' || mode === 'flag';
+  if (!manual && !(mode === 'step' && J.suggestion)) return;
+  var sug = J.suggestion || {}, text = manual ? dwOwnText() : dwDraftText();
   if (!text.trim()) { DW.refusal = 'Write the message first.'; return dwRender(); }
   if (C.hasBanned(text)) { DW.refusal = C.REFUSALS.text_not_allowed; return dwRender(); }
   DW.busy = 'send'; DW.refusal = null; dwRender();
   try {
-    // amount: what the draft was written for, so the backend can refuse it after a part payment.
-    var body = { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms', amount: C.draftAmount(sug, J.row) };
+    // amount: what the text was written for, so the backend can refuse it after a part payment.
+    var body = manual
+      // A manual text: no step, no suggestion; client_ref keys it so it is never texted twice.
+      ? { xero_invoice_id: dwRowId(), step: C.MANUAL_STEP, action: 'send', text: text, channel: 'sms', amount: C.draftAmount(null, J.row), client_ref: dwManualRef() }
+      : { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms', amount: C.draftAmount(sug, J.row) };
     if (override) body.override_possible_payment = true; // logged by the backend; owner only
     await dwPost('debt_ws_decide', body);
-    DW.busy = null; delete DW.drafts[dwDraftKey()]; DW.editing = false; DW.why = false;
-    dwToast((sug.channel === 'email' ? 'Email' : 'Text') + ' sent', 'success');
+    DW.busy = null; DW.editing = false; DW.why = false;
+    if (manual) { delete DW.drafts[dwOwnKey()]; DW.own[DW.jobId] = false; DW.refs[DW.jobId] = dwNewRef(); }
+    else delete DW.drafts[dwDraftKey()];
+    dwToast(manual ? 'Text sent (your own text, not a step)' : (sug.channel === 'email' ? 'Email' : 'Text') + ' sent', 'success');
     dwAfterWrite();
   } catch (e) {
     DW.busy = null; DW.refusal = C.refusalText(e);
@@ -1927,6 +2099,12 @@ function dwAct(a, k) {
     case 'doc': return dwOpenDoc(k);
     case 'inv': return dwOpenInvoice(k);
     case 'edit': DW.editing = !DW.editing; if (DW.editing) DW.focus = '#dwDraftEdit'; return dwRender();
+    // The chat window's reply box
+    case 'revert': // put the proposed text back: undo edits, and leave your own text
+      delete DW.drafts[dwDraftKey()]; DW.own[DW.jobId] = false; DW.refusal = null; DW.focus = '#dwReply'; return dwRender();
+    case 'own': // write my own text instead: a new manual text with its own reference
+      DW.own[DW.jobId] = true; DW.refs[DW.jobId] = dwNewRef(); DW.refusal = null; DW.focus = '#dwReply'; return dwRender();
+    case 'add-note': return dwFocusNote();
     case 'why': DW.why = !DW.why; return dwRender();
     case 'send': return dwSend(false);
     case 'send-anyway': return dwSend(true);
@@ -1940,8 +2118,9 @@ function dwAct(a, k) {
     case 'cat-set': return dwCatChoose(k);
     case 'cat-confirm': return dwSetCategory(k);
     case 'transcript': case 'more': DW.open[k] = !DW.open[k]; return dwRender();
-    case 'conv-all': DW.convAll = true; return dwLoadJob(true);
-    case 'conv-payer': DW.convAll = false; return dwLoadJob(true);
+    // The chips above the thread: the payer only, or everyone on this job.
+    case 'conv-all': if (DW.convAll) return; DW.convAll = true; return dwLoadJob(true);
+    case 'conv-payer': if (!DW.convAll) return; DW.convAll = false; return dwLoadJob(true);
     case 'modal-close': return dwCloseModal();
     // The debt report view
     case 'report': return dwOpenReport();
@@ -1952,6 +2131,21 @@ function dwAct(a, k) {
     case 'report-send-confirm': return dwReportSendConfirm();
     case 'report-send-cancel': DW.repConfirm = false; return dwReportPaint();
   }
+}
+// After typing in the reply box: light "Put the proposed text back" and the "edited" mark
+// without redrawing (a redraw would move the cursor).
+function dwComposeSync() {
+  var J = DW.job, sug = J && J.suggestion; if (!sug || dwComposeMode(J).mode !== 'step') return;
+  var edited = dwDraftText() !== String(sug.text || '');
+  var rv = document.getElementById('dwRevert'), ed = document.getElementById('dwEdited');
+  if (rv) { rv.disabled = !edited; if (edited) rv.removeAttribute('aria-disabled'); else rv.setAttribute('aria-disabled', 'true'); }
+  if (ed) ed.textContent = edited ? ', edited' : '';
+}
+// Add a note: the note box in the Notes column, brought into view with the cursor in it.
+function dwFocusNote() {
+  var n = document.getElementById('dwNoteIn'); if (!n) return;
+  try { n.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+  n.focus();
 }
 function dwBind() {
   if (DW.bound || typeof document === 'undefined' || !document.addEventListener) return;
@@ -1977,7 +2171,7 @@ function dwBind() {
   var onInput = function (e) {
     var t = e.target, k = t && t.getAttribute && t.getAttribute('data-dw-in');
     if (!k || !t.closest('#viewDebt')) return;
-    if (k === 'draft') DW.drafts[dwDraftKey()] = t.value;
+    if (k === 'draft') { DW.drafts[t.getAttribute('data-k') || dwDraftKey()] = t.value; dwComposeSync(); }
     else if (k === 'note') DW.noteText = t.value;
     else if (k === 'promise') DW.promise = t.value;
   };

@@ -242,8 +242,8 @@ read off `_calPick` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
-stays its own division (ruling 2026-09-16). Leave, holidays and reminders show under
-Everything and Business. Deliveries are read-only and come from
+stays its own division (ruling 2026-09-16). Leave and reminders show under Everything and
+Business; holidays and company days under Everything and Holidays. Deliveries are read-only and come from
 `calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
 order, see `// <calendar-delivery-row>`) passed through the Show and Type
 focus; both views use it, and Materials with none in view says "No deliveries

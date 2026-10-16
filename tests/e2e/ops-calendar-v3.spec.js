@@ -168,7 +168,7 @@ test('v3 is on by default: new chrome, sidebar hidden, focus row drawn', async (
   expect(s.v3).toBe(true);
   expect(s.sidebar).toBe('none');
   expect(s.grid).toContain('v3');
-  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
   expect(s.focus.every((f) => f.on)).toBe(true);
 });
 
@@ -251,7 +251,8 @@ test('Show focuses on labour, business or materials, and Everything brings it ba
   await pick(page, 'show', 'business');
   s = await snapshot(page);
   expect(jobBars(s)).toHaveLength(0);
-  expect(bizBars(s)).toHaveLength(3);
+  // the company day follows its own Holidays tick box, so Business alone keeps the meetings
+  expect(bizBars(s)).toHaveLength(2);
   // leave stays visible with business (nothing today's page shows is removed)
   expect(s.cells.find((c) => c.date === '2026-08-05').leave).toContain('Ivy');
 
@@ -510,7 +511,7 @@ test('the new chrome is in place before the calendar feed answers, and stays whe
     await expect(page.locator('#viewCalendar')).toHaveClass(/cal-v3/);
     // the old sidebar and its live tick boxes are never on screen with v3 on
     await expect(page.locator('#viewCalendar .cal-sidebar').first()).toBeHidden();
-    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(10);
+    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(11);
   };
   await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
   await expect.poll(() => calendarReads, { message: 'the calendar feed was never read' }).toBeGreaterThan(0);

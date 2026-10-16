@@ -906,51 +906,50 @@
     .cal-v3-sq svg { display: block; }
     .v3u-patio { --v3c: #F15A29; } .v3u-fencing { --v3c: #3A6EA5; } .v3u-insurance { --v3c: #0D9488; } .v3u-biz { --v3c: #6B46C1; }
     .v3u-repair { --v3c: #0D9488; } .v3u-makesafe { --v3c: #D97706; }
-    /* <calendar-holidays-preview> colours, only while #viewCalendar carries
-       cal-v3-hp (?calholidays=preview): patios blue, fencing yellow, repairs
+    /* <calendar-holidays> v3 colours: patios blue, fencing yellow, repairs
        green, make safes purple, holidays and company days bright red,
        business grey. Yellow takes a dark icon; every other square stays white. */
-    #viewCalendar.cal-v3.cal-v3-hp { --v3biz: #6B7280; --v3hol: #E11D2E; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-patio { --v3c: #2563EB; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-fencing { --v3c: #EAB308; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-repair { --v3c: #16A34A; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-makesafe { --v3c: #7C3AED; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-biz { --v3c: #6B7280; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-hol { --v3c: #E11D2E; }
-    #viewCalendar.cal-v3.cal-v3-hp .v3u-fencing .cal-v3-sq { color: #422006; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-schedule-grid.v3 .cal-schedule-bar.v3-hol { background: var(--v3hol); color: #fff; font-weight: 600; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-schedule-bar.v3-hol .cal-v3-sq { background: #fff; color: var(--v3hol); }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-schedule-grid.v3 .cal-schedule-cell.holiday-col { background: #FDECEC; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-swimlane-day-header.holiday-col { background: #FDECEC; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-swim-cell.holiday-col { background: #FEF4F4; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-holiday-badge { color: #fff; background: var(--v3hol); }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: #374151; background: #E5E7EB; }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-job-block.meeting-block { border-color: #6B7280; background: rgba(107,114,128,0.10); }
-    #viewCalendar.cal-v3.cal-v3-hp .cal-reminder-pill { color: #374151; background: rgba(107,114,128,0.10); border-color: rgba(107,114,128,0.30); }
+    #viewCalendar.cal-v3.cal-v3-hol { --v3biz: #6B7280; --v3hol: #E11D2E; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-patio { --v3c: #2563EB; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-fencing { --v3c: #EAB308; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-repair { --v3c: #16A34A; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-makesafe { --v3c: #7C3AED; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-biz { --v3c: #6B7280; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-hol { --v3c: #E11D2E; }
+    #viewCalendar.cal-v3.cal-v3-hol .v3u-fencing .cal-v3-sq { color: #422006; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-bar.v3-hol { background: var(--v3hol); color: #fff; font-weight: 600; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-bar.v3-hol .cal-v3-sq { background: #fff; color: var(--v3hol); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-cell.holiday-col { background: #FDECEC; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swimlane-day-header.holiday-col { background: #FDECEC; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.holiday-col { background: #FEF4F4; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-holiday-badge { color: #fff; background: var(--v3hol); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: #374151; background: #E5E7EB; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-job-block.meeting-block { border-color: #6B7280; background: rgba(107,114,128,0.10); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-reminder-pill { color: #374151; background: rgba(107,114,128,0.10); border-color: rgba(107,114,128,0.30); }
     .cal-focus-tick { user-select: none; }
     .cal-focus-tick.on { background: none; }
     .cal-focus-tick input { margin: 0; width: 13px; height: 13px; accent-color: var(--v3k); cursor: pointer; }
     .cal-focus-group { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--v3line); border-radius: 8px; padding: 0 2px; }
-    /* <calendar-holidays-preview> every Show and Type tick box is an outlined
+    /* <calendar-holidays> every Show and Type tick box is an outlined
        button: grey outline and white when unticked, its own colour's outline and
        tint when ticked, a dashed outline when an umbrella is partly ticked. */
-    #viewCalendar.cal-v3-hp .cal-focus { gap: 3px; }
-    #viewCalendar.cal-v3-hp .cal-focus-tick { --tk: #111113; height: 26px; padding: 0 7px; gap: 5px; border: 1px solid #D4D4DA; border-radius: 7px; background: #fff; color: var(--v3g1); }
-    #viewCalendar.cal-v3-hp .cal-focus-tick:hover { border-color: #A1A1AA; background: #fff; }
-    #viewCalendar.cal-v3-hp .cal-focus-tick.on { border-color: var(--tk); background: color-mix(in srgb, var(--tk) 9%, #fff); color: var(--v3k); }
-    #viewCalendar.cal-v3-hp .cal-focus-tick.mixed { border-style: dashed; border-color: var(--tk); color: var(--v3k); }
-    #viewCalendar.cal-v3-hp .cal-focus-tick input { accent-color: var(--tk); }
-    #viewCalendar.cal-v3-hp .cal-focus-group { gap: 3px; padding: 2px; border-radius: 9px; }
-    #viewCalendar.cal-v3-hp .cal-focus-key { gap: 10px; }
-    #viewCalendar.cal-v3-hp .cal-v3-new { margin-left: 8px; }
-    @media (max-width: 1380px) { #viewCalendar.cal-v3-hp .cal-focus-key { display: none; } #viewCalendar.cal-v3-hp .cal-v3-new { margin-left: auto; } }
-    #viewCalendar.cal-v3-hp [data-pick-show="materials"] { --tk: #74747C; }
-    #viewCalendar.cal-v3-hp [data-pick-show="business"] { --tk: #6B7280; }
-    #viewCalendar.cal-v3-hp [data-pick-show="holidays"] { --tk: #E11D2E; }
-    #viewCalendar.cal-v3-hp [data-pick-type="patio"] { --tk: #2563EB; }
-    #viewCalendar.cal-v3-hp [data-pick-type="fencing"] { --tk: #CA8A04; }
-    #viewCalendar.cal-v3-hp [data-pick-type="repair"] { --tk: #16A34A; }
-    #viewCalendar.cal-v3-hp [data-pick-type="makesafe"] { --tk: #7C3AED; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus { gap: 3px; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-tick { --tk: #111113; height: 26px; padding: 0 7px; gap: 5px; border: 1px solid #D4D4DA; border-radius: 7px; background: #fff; color: var(--v3g1); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-tick:hover { border-color: #A1A1AA; background: #fff; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-tick.on { border-color: var(--tk); background: color-mix(in srgb, var(--tk) 9%, #fff); color: var(--v3k); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-tick.mixed { border-style: dashed; border-color: var(--tk); color: var(--v3k); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-tick input { accent-color: var(--tk); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-group { gap: 3px; padding: 2px; border-radius: 9px; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-focus-key { gap: 10px; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-v3-new { margin-left: 8px; }
+    @media (max-width: 1380px) { #viewCalendar.cal-v3.cal-v3-hol .cal-focus-key { display: none; } #viewCalendar.cal-v3.cal-v3-hol .cal-v3-new { margin-left: auto; } }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="materials"] { --tk: #74747C; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="business"] { --tk: #6B7280; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="holidays"] { --tk: #E11D2E; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="patio"] { --tk: #2563EB; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="fencing"] { --tk: #CA8A04; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="repair"] { --tk: #16A34A; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="makesafe"] { --tk: #7C3AED; }
     .cal-v3-empty { padding: 26px 16px; text-align: center; color: var(--v3g1); font-size: 13px; }
     #viewCalendar.cal-v3 .cal-schedule-grid.v3 { border: 0; border-top: 1px solid var(--v3line); border-radius: 0; box-shadow: none; background: #fff; }
     #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-week + .cal-schedule-week { border-top: 0; }
@@ -6445,22 +6444,13 @@ window.__SW_CAL_V3_ENABLED = (function () {
     localStorage.setItem('sw_cal_view_mode', 'schedule');
   } catch (e) {}
 })();
-// ── Calendar Holidays tick box and new colours (preview) ──
-// Off unless ?calholidays=preview (remembered in localStorage.sw_cal_holidays_preview)
-// and ?calholidays=live turns it off again. On, the v3 Show row gains a Holidays
-// tick box that alone covers holidays and company days (Business keeps meetings,
-// leave and reminders), and v3 colours become: patios blue, fencing yellow,
-// repairs green, make safes purple, holidays and company days bright red,
-// business grey. Off, the calendar is exactly what is live today.
-// Search <calendar-holidays-preview>.
-window.__SW_CAL_HOLIDAYS_PREVIEW = (function () {
-  try {
-    var search = window.location.search || '';
-    if (/[?&]calholidays=live(?:&|$)/.test(search)) { localStorage.removeItem('sw_cal_holidays_preview'); return false; }
-    if (/[?&]calholidays=preview(?:&|$)/.test(search)) { localStorage.setItem('sw_cal_holidays_preview', '1'); return true; }
-    return localStorage.getItem('sw_cal_holidays_preview') === '1';
-  } catch (e) { return false; }
-})();
+// ── Calendar Holidays tick box and colours (live for everyone) ──
+// The v3 Show row has a Holidays tick box that alone covers holidays and company
+// days (Business keeps meetings, leave and reminders), and v3 colours are:
+// patios blue, fencing yellow, repairs green, make safes purple, holidays and
+// company days bright red, business grey. The old ?calholidays switch and its
+// localStorage.sw_cal_holidays_preview key are gone and ignored.
+// Search <calendar-holidays>.
 var _pipelineData = null;
 var _jobsCache = [];
 var _suppliers = [];
@@ -8387,10 +8377,10 @@ var _calEventFilters = (function() {
 // options of their own (two pipelines) read off calDivisionOf like every other
 // calendar surface; ticking Insurance ticks both. All and Everything tick or
 // untick the whole row. Stored at sw_cal_pick.
-// <calendar-holidays-preview> With the preview on, Show has a fourth tick box,
+// <calendar-holidays> Show has a fourth tick box,
 // Holidays (holidays and company days), which Everything covers too. A saved
 // pick from before it existed has no holidays key, so it loads ticked.
-var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business'].concat(window.__SW_CAL_HOLIDAYS_PREVIEW ? ['holidays'] : []), type: ['patio', 'fencing', 'repair', 'makesafe'] };
+var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business', 'holidays'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
 var _calPick = (function() {
   var d = { show: { labour: true, materials: true, business: true, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
   try {
@@ -8429,10 +8419,8 @@ function calShowMaterialsOnly() {
 function applyCalFocus() {
   if (!window.__SW_CAL_V3_ENABLED) return;
   var biz = calShowPicked('business');
-  // Holidays and company days follow Business on the live screen, and their
-  // own Holidays tick box in the preview (<calendar-holidays-preview>).
-  var hol = window.__SW_CAL_HOLIDAYS_PREVIEW ? calShowPicked('holidays') : biz;
-  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: hol, leave: biz, reminders: biz };
+  // Holidays and company days follow their own Holidays tick box (<calendar-holidays>).
+  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: calShowPicked('holidays'), leave: biz, reminders: biz };
 }
 applyCalFocus();
 // Whether the Show filters let a calendar row through, for both views. v3 off:
@@ -8532,14 +8520,14 @@ var WaHolidaysCore = (function() {
 // </wa-public-holidays>
 
 // The holidays and company days the calendar draws: the Holiday / Company Day
-// events, and in the preview (<calendar-holidays-preview>, v3 only) every WA
+// events, and (v3 only, <calendar-holidays>) every WA
 // public holiday from the year before the one in view to the year after. A WA
 // holiday is left out only on a day a single-day Holiday / Company Day event
 // falls on, or where such an event covering that day carries the holiday's own
 // name; a multi-day company event over it (a shutdown) keeps its line and name.
 function calHolidayEvents() {
   var org = (_calOrgEvents || []).slice();
-  if (!(window.__SW_CAL_HOLIDAYS_PREVIEW && window.__SW_CAL_V3_ENABLED)) return org;
+  if (!window.__SW_CAL_V3_ENABLED) return org;
   var taken = {}, named = {};
   var norm = function(t) { return String(t || '').trim().toLowerCase(); };
   org.forEach(function(ev) {
@@ -10242,8 +10230,8 @@ function renderScheduleView(container, range) {
         // Internal / job-less bar
         var lblTypeClass = job.job_type ? job.job_type : '';
         var lblStyle = (job.job_type || v3) ? '' : 'background:#6B7280;border-color:#6B7280;color:#fff;';
-        // <calendar-holidays-preview> a holiday or company day is its own bright red line
-        var v3Hol = v3 && job.isOrg && window.__SW_CAL_HOLIDAYS_PREVIEW;
+        // <calendar-holidays> a holiday or company day is its own bright red line
+        var v3Hol = v3 && job.isOrg;
         html += '<div class="cal-schedule-bar ' + lblTypeClass + ' tentative' + (v3 ? (v3Hol ? ' v3-biz v3-hol v3u-hol' : ' v3-biz v3u-biz') : '') + '"';
         html += ' style="' + barBox + lblStyle + '"';
         html += ' data-assignment-id="' + job.assignmentId + '"';
@@ -10397,7 +10385,7 @@ var CAL_V3_ICONS = {
   makesafe: '<path d="M8 1.8 15.2 14H.800z"/><path d="M8 6.4v3.5" stroke="var(--v3c,#0D9488)" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.9" r=".95" fill="var(--v3c,#0D9488)"/>',
   // clock (business)
   biz: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 4.9V8l2.1 1.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
-  // flag (holiday or company day, <calendar-holidays-preview>)
+  // flag (holiday or company day, <calendar-holidays>)
   holiday: '<path d="M2.6 1.4h1.7v13.2H2.600z"/><path d="M4.3 2.2h9.6l-2.4 3.4 2.4 3.4H4.300z"/>',
   truck: '<path d="M1 3.8h8.2v7.4H1z"/><path d="M9.8 6h2.7l2.5 2.6v2.6H9.800z"/><circle cx="4.2" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/><circle cx="12" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/>'
 };
@@ -10448,9 +10436,7 @@ function calV3Time(t) {
 // says "No crew" in red; a business line with nobody named shows nothing.
 function calV3CrewHtml(names, cap, unit, flagEmpty) {
   if (!names || !names.length) return flagEmpty ? '<span class="v3-nocrew">No crew</span>' : '';
-  var colour = (window.__SW_CAL_HOLIDAYS_PREVIEW
-    ? { patio: '#1D4ED8', fencing: '#854D0E', repair: '#15803D', makesafe: '#6D28D9', biz: '#4B5563', hol: '#B91C1C' }
-    : { patio: '#B0401D', fencing: '#294D75', insurance: '#096861', repair: '#096861', makesafe: '#92400E', biz: '#4B318A' })[unit] || '#293C46';
+  var colour = { patio: '#1D4ED8', fencing: '#854D0E', repair: '#15803D', makesafe: '#6D28D9', biz: '#4B5563', hol: '#B91C1C' }[unit] || '#293C46';
   var shown = names.slice(0, cap);
   var html = '<span class="bar-crew" title="' + escapeHtml(names.join(', ')) + '">';
   shown.forEach(function(c) {
@@ -10500,7 +10486,8 @@ function syncCalV3Chrome() {
   var host = document.getElementById('calFocus');
   var on = !!window.__SW_CAL_V3_ENABLED;
   if (view) view.classList.toggle('cal-v3', on);
-  if (view) view.classList.toggle('cal-v3-hp', on && !!window.__SW_CAL_HOLIDAYS_PREVIEW);
+  // <calendar-holidays> the extra class keeps the holidays look's rules above the base v3 rules
+  if (view) view.classList.toggle('cal-v3-hol', on);
   if (!on || !host) { if (host) host.innerHTML = ''; return; }
   ['1w', '2w', 'month'].forEach(function(m) {
     var b = document.getElementById(m === '1w' ? 'btnRange1w' : m === '2w' ? 'btnRange2w' : 'btnRangeMonth');
@@ -10526,7 +10513,7 @@ function syncCalV3Chrome() {
     + tick('show', 'all', 'Everything') + tick('show', 'labour', 'Labour')
     + tick('show', 'materials', '<span style="color:var(--v3g2);display:inline-flex;">' + calV3Icon('truck', 11) + '</span>Materials')
     + tick('show', 'business', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('biz', 11) + '</span>Business')
-    + (window.__SW_CAL_HOLIDAYS_PREVIEW ? tick('show', 'holidays', '<span style="color:var(--v3hol);display:inline-flex;">' + calV3Icon('holiday', 11) + '</span>Holidays') : '')
+    + tick('show', 'holidays', '<span style="color:var(--v3hol);display:inline-flex;">' + calV3Icon('holiday', 11) + '</span>Holidays')
     + '<span class="cal-focus-sep"></span><span class="cal-focus-lbl">Type</span>'
     + tick('type', 'all', 'All') + tick('type', 'patio', sq('patio', ['patio']) + 'Patios')
     + tick('type', 'fencing', sq('fencing', ['fencing']) + 'Fencing')

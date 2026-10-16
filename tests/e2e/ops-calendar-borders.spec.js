@@ -1,15 +1,15 @@
 // Ops Dash calendar: thin borders on every job line and a visible day grid,
-// behind the preview switch. Search <calendar-borders> in ops.html.
+// live for everyone. Search <calendar-borders> in ops.html.
 //
 // What this guards:
-//  - off by default: no outline on any line and the day grid as live today
-//  - ?calborders=preview turns it on (remembered), ?calborders=live turns it off
-//  - on: every job line carries a 1px outline in a darker shade of its own
-//    colour, and every day cell a visible light grid line
+//  - every job line carries a 1px outline in a darker shade of its own colour,
+//    and every day cell a visible light grid line, in 1 Week and Month
+//  - a stale ?calborders switch or stored sw_cal_borders_preview value from the
+//    old preview cannot hide them
 //  - the outline moves no line: every bar keeps the same box (drag and the
-//    overlap guards measure it) in 1 Week and Month
+//    overlap guards measure it)
 //
-// Static-fixture spec, same pattern as ops-calendar-holidays-preview.spec.js.
+// Static-fixture spec, same pattern as ops-calendar-v3.spec.js.
 // Every name here is made up; dates are pinned through window._calDate.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
@@ -63,7 +63,6 @@ function snapshot(page) {
     });
     const cell = getComputedStyle(cal.querySelector('.cal-schedule-cell[data-date="2026-08-04"]'));
     return {
-      on: document.getElementById('viewCalendar').classList.contains('cal-v3-bd'),
       bars,
       cellLine: cell.borderRightWidth + ' ' + cell.borderRightColor + ' / ' + cell.borderBottomColor,
     };
@@ -77,43 +76,37 @@ async function open(page, query) {
   await revealOpsStaticFixture(page);
 }
 
-test('off by default: no outline on any line, day grid as live', async ({ page }) => {
-  await open(page);
-  await seedAndRender(page);
-  const s = await snapshot(page);
-  expect(s.on).toBe(false);
-  expect(s.bars.length).toBeGreaterThan(0);
-  s.bars.forEach((b) => expect(b.shadow).toBe('none'));
-  expect(s.cellLine).toBe('1px rgb(235, 235, 238) / rgb(235, 235, 238)');
-});
-
-test('preview: every job line is outlined in a darker shade of its colour, the day grid is visible, no line moves', async ({ page }) => {
-  for (const range of ['1w', 'month']) {
-    await open(page, '?calborders=live');
-    await seedAndRender(page, { range });
-    const before = await snapshot(page);
-
-    await open(page, '?calborders=preview');
-    await seedAndRender(page, { range });
-    const s = await snapshot(page);
-    expect(s.on).toBe(true);
-    expect(s.cellLine).toBe('1px rgb(212, 212, 218) / rgb(212, 212, 218)');
-    const shadows = Object.fromEntries(s.bars.map((b) => [b.job, b.shadow]));
-    // patio blue, fencing yellow, make safe purple, repair green, each darkened
-    expect(Object.keys(shadows).sort()).toEqual(['j1', 'j2', 'j3', 'j4']);
-    Object.values(shadows).forEach((sh) => expect(sh).toMatch(/ 0px 0px 0px 1px inset$/));
-    expect(new Set(Object.values(shadows)).size).toBe(4);
-    expect(s.bars.map((b) => b.box)).toEqual(before.bars.map((b) => b.box));
+test('every job line is outlined in a darker shade of its colour and the day grid is visible, on the plain calendar and with a stale switch', async ({ page }) => {
+  for (const [query, stored] of [['', null], ['?calborders=live', '0'], ['?calborders=preview', null]]) {
+    for (const range of ['1w', 'month']) {
+      await page.addInitScript((v) => { try { if (v === null) localStorage.removeItem('sw_cal_borders_preview'); else localStorage.setItem('sw_cal_borders_preview', v); } catch (e) {} }, stored);
+      await open(page, query);
+      await seedAndRender(page, { range });
+      const s = await snapshot(page);
+      expect(s.cellLine).toBe('1px rgb(212, 212, 218) / rgb(212, 212, 218)');
+      const shadows = Object.fromEntries(s.bars.map((b) => [b.job, b.shadow]));
+      // patio blue, fencing yellow, make safe purple, repair green, each darkened
+      expect(Object.keys(shadows).sort()).toEqual(['j1', 'j2', 'j3', 'j4']);
+      Object.values(shadows).forEach((sh) => expect(sh).toMatch(/ 0px 0px 0px 1px inset$/));
+      expect(new Set(Object.values(shadows)).size).toBe(4);
+    }
   }
 });
 
-test('the preview is remembered, and ?calborders=live turns it off', async ({ page }) => {
-  await open(page, '?calborders=preview');
-  await open(page);
-  await seedAndRender(page);
-  expect((await snapshot(page)).on).toBe(true);
-  await open(page, '?calborders=live');
-  await seedAndRender(page);
-  expect((await snapshot(page)).on).toBe(false);
-  expect(await page.evaluate(() => localStorage.getItem('sw_cal_borders_preview'))).toBe(null);
+test('the outline moves no line: every bar keeps the box drag and the overlap guards measure', async ({ page }) => {
+  for (const range of ['1w', 'month']) {
+    await open(page);
+    await seedAndRender(page, { range });
+    const s = await snapshot(page);
+    const boxes = await page.evaluate(() => {
+      // Take the outline and grid off and measure again: the boxes must match.
+      const st = document.createElement('style');
+      st.textContent = '#viewCalendar.cal-v3 .cal-schedule-grid.v3, #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-bar { box-shadow: none !important; }';
+      document.head.appendChild(st);
+      const out = [...document.querySelectorAll('#calendarBody .cal-schedule-bar[data-job-id]')].map((b) => { const r = b.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round).join(','); });
+      st.remove();
+      return out;
+    });
+    expect(s.bars.map((b) => b.box)).toEqual(boxes);
+  }
 });

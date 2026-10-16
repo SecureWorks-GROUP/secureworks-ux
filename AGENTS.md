@@ -232,7 +232,7 @@ the flag-off sidebar Divisions rule is unchanged. A business line is decided in
 ONE place, `calV3IsBusiness`: a meeting, a reminder (linked to a job or not), a
 job-less label row, plus org events. Business lines take the TOP lanes of the
 week and jobs start under them; an org event stretches across its days instead
-of the corner badge, and a meeting on a job is its own purple line, never merged
+of the corner badge, and a meeting on a job is its own grey line, never merged
 into the job's line. The Show / Type row is tick boxes, all ticked to start
 (`_calPick`, `setCalPick`, stored at `sw_cal_pick`; Insurance ticks Repairs and
 Make Safes together; search `// <calendar-tick-filters>`) and works in BOTH views. Show sets the in-memory

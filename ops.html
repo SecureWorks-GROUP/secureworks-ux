@@ -10245,8 +10245,8 @@ function renderScheduleView(container, range) {
         }
         html += '>';
         if (v3) {
-          // Business line: the same format as a job line, in purple (grey,
-          // and red for a holiday, in the preview).
+          // Business line: the same format as a job line, in grey (red for a
+          // holiday or company day).
           html += '<span class="cal-v3-sq">' + calV3Icon(v3Hol ? 'holiday' : 'biz', 12) + '</span>';
           if (job.v3Time) html += '<span class="v3-time">' + calV3Time(job.v3Time) + '</span>';
           html += '<span class="bar-label">' + escapeHtml(job.label) + '</span>';

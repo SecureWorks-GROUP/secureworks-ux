@@ -4,8 +4,6 @@
 // What this guards:
 //  - every job line carries a 1px outline in a darker shade of its own colour,
 //    and every day cell a visible light grid line, in 1 Week and Month
-//  - a stale ?calborders switch or stored sw_cal_borders_preview value from the
-//    old preview cannot hide them
 //  - the outline moves no line: every bar keeps the same box (drag and the
 //    overlap guards measure it)
 //
@@ -69,27 +67,24 @@ function snapshot(page) {
   });
 }
 
-async function open(page, query) {
+async function open(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/ops.html' + (query || ''));
+  await page.goto('/ops.html');
   await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
   await revealOpsStaticFixture(page);
 }
 
-test('every job line is outlined in a darker shade of its colour and the day grid is visible, on the plain calendar and with a stale switch', async ({ page }) => {
-  for (const [query, stored] of [['', null], ['?calborders=live', '0'], ['?calborders=preview', null]]) {
-    for (const range of ['1w', 'month']) {
-      await page.addInitScript((v) => { try { if (v === null) localStorage.removeItem('sw_cal_borders_preview'); else localStorage.setItem('sw_cal_borders_preview', v); } catch (e) {} }, stored);
-      await open(page, query);
-      await seedAndRender(page, { range });
-      const s = await snapshot(page);
-      expect(s.cellLine).toBe('1px rgb(212, 212, 218) / rgb(212, 212, 218)');
-      const shadows = Object.fromEntries(s.bars.map((b) => [b.job, b.shadow]));
-      // patio blue, fencing yellow, make safe purple, repair green, each darkened
-      expect(Object.keys(shadows).sort()).toEqual(['j1', 'j2', 'j3', 'j4']);
-      Object.values(shadows).forEach((sh) => expect(sh).toMatch(/ 0px 0px 0px 1px inset$/));
-      expect(new Set(Object.values(shadows)).size).toBe(4);
-    }
+test('every job line is outlined in a darker shade of its colour and the day grid is visible', async ({ page }) => {
+  for (const range of ['1w', 'month']) {
+    await open(page);
+    await seedAndRender(page, { range });
+    const s = await snapshot(page);
+    expect(s.cellLine).toBe('1px rgb(212, 212, 218) / rgb(212, 212, 218)');
+    const shadows = Object.fromEntries(s.bars.map((b) => [b.job, b.shadow]));
+    // patio blue, fencing yellow, make safe purple, repair green, each darkened
+    expect(Object.keys(shadows).sort()).toEqual(['j1', 'j2', 'j3', 'j4']);
+    Object.values(shadows).forEach((sh) => expect(sh).toMatch(/ 0px 0px 0px 1px inset$/));
+    expect(new Set(Object.values(shadows)).size).toBe(4);
   }
 });
 

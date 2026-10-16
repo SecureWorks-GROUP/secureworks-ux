@@ -3875,8 +3875,8 @@
   function dayOf(v) { return dayText(parseDay(v)); }
 
   // A date box styled as the approved dashed input. Empty, it reads "Set date".
-  function dateBoxHtml(value, attrs, label, off) {
-    var v = wholeDay(value);
+  function dateBoxHtml(value, attrs, label, off, asTyped) {
+    var v = asTyped ? value : wholeDay(value);
     return '<span class="dpc-deliv-date' + (v ? '' : ' dpc-deliv-blank') + '"><input type="date" ' + attrs + ' value="' + esc(v) + '" aria-label="' + esc(label) + '"' +
       (off ? ' disabled' : '') + '><span class="dpc-deliv-ph" aria-hidden="true">Set date</span></span>';
   }
@@ -3887,8 +3887,10 @@
     if (!d.expected_editable) {
       return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' + (d.expected ? esc(dayOf(d.expected)) : '<em>No date in Xero</em>') + '<small>Set in Xero</small></span>';
     }
+    var typed = state.deliv.typed[r.purchase_order_id];
+    var asTyped = Object.prototype.hasOwnProperty.call(state.deliv.typed, r.purchase_order_id) && (typed === '' || /^\d{4}-\d{2}-\d{2}$/.test(typed));
     return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' +
-      dateBoxHtml(Object.prototype.hasOwnProperty.call(state.deliv.typed, r.purchase_order_id) ? state.deliv.typed[r.purchase_order_id] : d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy) + '</span>';
+      dateBoxHtml(asTyped ? typed : d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy, asTyped) + '</span>';
   }
 
   function delivConfirmedHtml(r, busy) {
@@ -4524,10 +4526,16 @@
   // while a segment is still being typed. A box only part filled is not a date
   // and is never sent; an emptied box clears the date.
   function commitExpected(jobId, t) {
+    var poId = t.getAttribute('data-dpc-deliv-expected');
     var v = text(t.value);
-    if (!v && t.validity && t.validity.badInput) return;
-    if (v && !wholeDay(v)) return;
-    setExpected(jobId, t.getAttribute('data-dpc-deliv-expected'), v || null);
+    if ((!v && t.validity && t.validity.badInput) || (v && !wholeDay(v))) {
+      delete state.deliv.typed[poId];
+      var r = delivRow(matEntry(jobId), poId);
+      t.value = r ? wholeDay(r.delivery.expected) : '';
+      if (t.parentNode && t.parentNode.classList) t.parentNode.classList.toggle('dpc-deliv-blank', !t.value);
+      return;
+    }
+    setExpected(jobId, poId, v || null);
   }
 
   function onKeyDown(e) {

@@ -8533,24 +8533,28 @@ var WaHolidaysCore = (function() {
 
 // The holidays and company days the calendar draws: the Holiday / Company Day
 // events, and in the preview (<calendar-holidays-preview>, v3 only) every WA
-// public holiday from the year before the one in view to the year after, except
-// on a day a Holiday / Company Day event already covers.
+// public holiday from the year before the one in view to the year after. A WA
+// holiday is left out only on a day a single-day Holiday / Company Day event
+// falls on, or where such an event covering that day carries the holiday's own
+// name; a multi-day company event over it (a shutdown) keeps its line and name.
 function calHolidayEvents() {
   var org = (_calOrgEvents || []).slice();
   if (!(window.__SW_CAL_HOLIDAYS_PREVIEW && window.__SW_CAL_V3_ENABLED)) return org;
-  var taken = {};
+  var taken = {}, named = {};
+  var norm = function(t) { return String(t || '').trim().toLowerCase(); };
   org.forEach(function(ev) {
     if (!ev || !ev.event_date) return;
     var d = String(ev.event_date).slice(0, 10), end = ev.event_end ? String(ev.event_end).slice(0, 10) : d, guard = 0;
+    if (end <= d) taken[d] = true;
     while (d <= end && guard++ < 400) {
-      taken[d] = true;
+      named[d + '|' + norm(ev.title)] = true;
       var t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + 1); d = localDateStr(t);
     }
   });
   var y = (_calDate instanceof Date && !isNaN(_calDate)) ? _calDate.getFullYear() : new Date().getFullYear();
   for (var yy = y - 1; yy <= y + 1; yy++) {
     WaHolidaysCore.forYear(yy).forEach(function(h) {
-      if (taken[h.date]) return;
+      if (taken[h.date] || named[h.date + '|' + norm(h.title)]) return;
       taken[h.date] = true;
       org.push({ event_date: h.date, event_end: null, title: h.title, event_type: 'public_holiday', wa_public_holiday: true });
     });

@@ -12,7 +12,8 @@
 //    holidays bright red, business grey
 //  - every tick box is an outlined button, coloured when ticked
 //  - WA public holidays are drawn with nobody entering them, never twice on a
-//    day a Holiday / Company Day event already covers
+//    day a single-day Holiday / Company Day event covers or one carrying the
+//    holiday's own name; a multi-day company event over one keeps its line
 //  - saved picks from before the Holidays tick box still load
 //
 // Static-fixture spec, same pattern as ops-calendar-tick-filters.spec.js:
@@ -49,7 +50,7 @@ async function seedAndRender(page, opts = {}) {
     }
     document.getElementById('viewCalendar').classList.add('active');
     window._calDate = new Date((opts.week || '2026-08-03') + 'T00:00:00');
-    window._calRangeMode = '1w';
+    window._calRangeMode = opts.range || '1w';
     window._calViewMode = opts.view || 'schedule';
     window._calEvents = opts.events || EVENTS;
     window._calOrgEvents = opts.org || ORG_EVENTS;
@@ -196,6 +197,18 @@ test.describe('Holidays preview: on', () => {
     await seedAndRender(page, { week: '2026-09-28', events: [], org: [{ event_date: '2026-09-28', title: "King's Birthday", event_type: 'public_holiday' }] });
     const s = await snapshot(page);
     expect(s.holidays).toEqual([{ label: "King's Birthday", wa: false, hol: true, bg: 'rgb(225, 29, 46)' }]);
+  });
+
+  test('a company shutdown over the public holidays keeps each holiday line and name', async ({ page }) => {
+    const org = [{ event_date: '2026-12-24', event_end: '2027-01-05', title: 'Example Shutdown', event_type: 'public_holiday' }];
+    await seedAndRender(page, { week: '2026-12-21', range: '2w', events: [], org });
+    let s = await snapshot(page);
+    expect(s.holidays.filter((h) => h.wa).map((h) => h.label)).toEqual(['Christmas Day', 'Boxing Day', 'Boxing Day (additional day)', "New Year's Day"]);
+    expect(s.holidays.some((h) => !h.wa && h.label === 'Example Shutdown')).toBe(true);
+
+    await seedAndRender(page, { view: 'crew', week: '2026-12-21', events: [], org });
+    s = await snapshot(page);
+    expect(s.crewBadges).toEqual(['Example Shutdown', 'Christmas Day', 'Boxing Day', 'Example Shutdown']);
   });
 
   test('the Crew view follows the Holidays tick box', async ({ page }) => {

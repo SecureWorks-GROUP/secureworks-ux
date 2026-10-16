@@ -699,11 +699,14 @@ var DebtWorkshopCore = (function () {
     if (!last || !last.at) return head + 'never';
     var day = perthDay(last.at);
     var when = day && today && day === today ? 'today' : dateWords(day);
-    return head + when + ', ' + perthTime(last.at) + (last.kind === 'auto' ? ' (Monday auto-send)' : last.by ? ' by ' + last.by : '');
+    return head + when + ', ' + perthTime(last.at) + (last.kind === 'auto' ? ' (Wednesday 12pm auto-send)' : last.by ? ' by ' + last.by : '');
   }
   // A refusal on the report, in words.
   function reportRefusalText(x) {
     var code = refusalCode(x);
+    // A stale Xero copy (the backend consolidates first) is said in the backend's own words,
+    // because they carry the time of the last sync.
+    if (code === 'xero_copy_stale') return refusalText(x).replace(/\.?$/, '.');
     return REPORT_REFUSALS[code] || refusalText(x);
   }
 
@@ -1749,7 +1752,7 @@ function dwReportTopHtml() {
     '</div></div>';
   var meta = '<div class="dw-rep-meta" id="dwReportMeta"><span>' + dwEsc(C.reportRoute(d)) + '</span>' +
     '<span id="dwReportLast">' + dwEsc(C.reportLastSent(R.last_sent, d, today)) + '</span>' +
-    '<span>Monday auto-send: ' + (d.auto_send ? 'on' : 'off') + '</span>' +
+    '<span id="dwReportAuto">Wednesday 12pm auto-send: ' + (d.auto_send ? 'on' : 'off') + '</span>' +
     (gate.ok ? '' : '<span class="why" id="dwReportWhy">' + dwEsc(gate.reason) + '</span>') + '</div>';
   var confirm = DW.repConfirm
     ? '<div class="dw-rep-confirm" id="dwReportConfirm"><b>Send this report now?</b> ' + dwEsc(C.reportRoute(d)) +

@@ -655,7 +655,7 @@ test('Debt report: the button opens the live report as its own view; staff read 
   expect(await reads()).toBe(1);
   await expect(page.locator('#dwReportMeta')).toContainText('Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
   await expect(page.locator('#dwReportLast')).toHaveText('Last sent to Marnin: never');
-  await expect(page.locator('#dwReportMeta')).toContainText('Monday auto-send: off');
+  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 12pm auto-send: off');
   await expect(page.locator('#dwReportSend')).toHaveText('Send to Marnin');
   await expect(page.locator('#dwReportSend')).toBeDisabled();
   await expect(page.locator('#dwReportWhy')).toHaveText('Only an owner can send the report.');
@@ -698,6 +698,19 @@ test('Debt report: Send to Marnin asks first, then sends and shows Last sent; a 
   await page.locator('#dwReportSend').click();
   await page.locator('#dwReportConfirmSend').click();
   await expect(page.locator('#dwReportMsg')).toHaveText('The report was just sent. Wait two minutes before sending it again.');
+  // A stale Xero copy (consolidate first) refuses in the backend's own words.
+  const stale = "Our Xero copy of invoices was last synced at 11:39am Perth time, more than 20 minutes ago, so the report would not show today's debt. Wait for the next sync (every 15 minutes) and try again";
+  await page.evaluate((m) => { window.__dwPostAnswers.debt_ws_report_send = { reject: { message: m, status: 409, code: 'xero_copy_stale' } }; }, stale);
+  await page.locator('#dwReportSend').click();
+  await page.locator('#dwReportConfirmSend').click();
+  await expect(page.locator('#dwReportMsg')).toHaveText(stale + '.');
+});
+
+test('Debt report: the Wednesday 12pm auto-send reads on when it is switched on', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: true, report_auto_send: true } });
+  await openDebt(page, { fixture });
+  await page.locator('#dwReportBtn').click();
+  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 12pm auto-send: on');
 });
 
 test('Debt report: with sending off the owner sees why Send is off', async ({ page }) => {

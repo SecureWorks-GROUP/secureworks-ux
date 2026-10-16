@@ -203,7 +203,7 @@ const D_NOTES = {
 };
 
 // Slice 1's section, now that slice 4 draws a second one under it.
-const SCOPE_SEC = '.dpc-sec:not(.dpc-mat):not(.dpc-mailsec)';
+const SCOPE_SEC = '.dpc-sec:not(.dpc-mat):not(.dpc-mailsec):not(.dpc-sched)';
 const SCOPE_TOGGLE = '[data-dpc-toggle=""]';
 
 // ── Slice 4 fixtures: made-up supplier contacts, lines and orders ──
@@ -304,12 +304,14 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // To do and the stage rail (slice 3) are drawn: the Dispatch: To do tests.
-  // Materials by supplier (slice 4) and Emails (slice 5) are drawn under Scope and notes: their own tests below.
-  for (const later of ['.dpc-banner', '.dpc-deliv']) {
+  // Materials by supplier (slice 4), Emails (slice 5) and Deliveries (slice 6) are drawn under Scope and notes.
+  for (const later of ['.dpc-banner']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
-  await expect(root).not.toContainText(/items ready|crew/i);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails', 'Deliveries']);
+  await expect(root).not.toContainText(/items ready/i);
+  // No crew chip on the job header (the calendar strip under Deliveries names the crews).
+  await expect(root.locator('.dpc-jobhead')).not.toContainText(/crew/i);
 });
 
 test('Dispatch: work type buttons filter in the browser and All jobs resets', async ({ page }) => {
@@ -1807,7 +1809,7 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     const { root, mat, of } = await bootMaterials(page);
     for (const number of ['SWF-900101', 'SWP-900201', 'SWP-900202', 'SWF-900301', 'SWI-900101']) {
       await openJob(root, number);
-      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails']);
+      await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials by supplier', 'Emails', 'Deliveries']);
       await expect(mat.locator('.dpc-eyebrow')).toHaveText('Order');
       await expect(mat.locator('.dpc-sec-head p')).toHaveText('Write out the materials, split them by supplier, then create the PO and email in one go');
       await expect(mat.locator('.dpc-sec-body')).toContainText('No suppliers chosen for this job yet. Add one to start writing out the materials.');

@@ -12,10 +12,16 @@
 //  - Insurance shows company rows with statement status, Preview (statement in a modal) and
 //    Approve (disabled with the reason when sending is off or there is no email).
 //  - Bad debt shows Jan's visit list with Remove; the footer opens Paid this week and Needs a look.
-//  - W2: status strip with the ladder; story, money and documents (opened in a modal); the
-//    conversation oldest first with transcripts folded; agent notices with Dismiss; the suggestion
-//    with Send / Edit / Skip / Why this one; Send disabled while sending is off; a possible
-//    payment offers Send anyway; a move card; a Link contact card; notes with a promise date.
+//  - W2: status strip with the ladder; story, money and documents (opened in a modal); agent
+//    notices with Dismiss; a move card; a Link contact card; notes with a promise date.
+//  - The chat window (approved 16 Oct 2026): a bar with who we text, "Texts go from 771", the
+//    invoice, amount and day, and two chips (the payer only, or everyone on the job); the thread
+//    oldest first with transcripts folded, emails marked read only, notes as yellow lines; the
+//    reply box with the proposed step's text typed in word for word, a green "Proposed: ..."
+//    label, Put the proposed text back, Add a note, Send text, Skip this step and Why this one;
+//    Send disabled while sending is off; a possible payment offers Send anyway; Write my own
+//    text instead posts a manual text (step "manual" with a client_ref); when nothing may go,
+//    why in words in place of the box.
 //  - Owner-only controls are disabled for staff; refusals are shown in plain words.
 //  - An undeployed backend reads as a calm "not switched on yet".
 //  - The debt report: "Debt report" (top right) opens the live report as its own view, read
@@ -85,6 +91,7 @@ async function openDebt(page, { fixture = buildDebtWorkshopFixture(), drop = [],
   if (show) await expect(page.locator('#viewDebt')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__dwPosts);
+const fixtureCasey = () => { const f = buildDebtWorkshopFixture(); return f.jobs[f.ids.casey]; };
 function rowByName(page, name) { return page.locator('#dwList .dw-row').filter({ hasText: name }); }
 async function openJob(page, name, cat) {
   if (cat) await page.locator('#dwLegend .dw-lg', { hasText: cat }).click();
@@ -269,6 +276,12 @@ test('W2: the job screen shows the strip, ladder, story, conversation, notice, s
   await expect(page.locator('#dwLadder .dw-stp.due')).toContainText('ready now');
   await expect(page.locator('#dwStory')).toContainText('walkthrough done');
   await expect(page.locator('#dwMoney')).toContainText('Owing on this job');
+  // The chat bar: who we are texting, from 771, the invoice, amount and day; the payer chip on.
+  await expect(page.locator('#dwChatWho')).toHaveText('Casey Morgan · 0400 000 003');
+  await expect(page.locator('#dwChatSub')).toHaveText('Texts go from 771 · INV-9003 · $1,420.37 · day 12');
+  await expect(page.locator('#dwChipPayer')).toHaveText('Casey only');
+  await expect(page.locator('#dwChipPayer')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#dwChipAll')).toHaveText('Everyone on this job');
   // Conversation: oldest first, newest at the bottom, transcript folded away.
   const msgs = page.locator('#dwThread .dw-msg');
   await expect(msgs.first()).toContainText('Fence looks great');
@@ -278,18 +291,36 @@ test('W2: the job screen shows the strip, ladder, story, conversation, notice, s
   await expect(call).not.toContainText('Voicemail greeting');
   await call.locator('[data-dw="transcript"]').click();
   await expect(page.locator('#dwThread .dw-msg.call')).toContainText('Voicemail greeting');
-  // The agent notice, the suggestion, sending off.
+  // Our texts on the right, theirs on the left; an email is marked read only.
+  await expect(page.locator('#dwThread .dw-msg.out').first()).toContainText('enjoying the new fence');
+  await expect(page.locator('#dwThread .dw-msg.in').first()).toContainText('Fence looks great');
+  await expect(page.locator('#dwThread .dw-msg.mail')).toContainText('Email, read only. Reply in Outlook.');
+  // The Debt log's note is a yellow line at its own time; the auto records stay out of the thread.
+  const noteLine = page.locator('#dwThread .dw-msg.dlog');
+  await expect(noteLine).toHaveCount(1);
+  await expect(noteLine).toContainText('Note by Shaun: Called at lunch, voicemail. Try later in the day.');
+  // The agent notice, the proposed text in the reply box, sending off.
   await expect(page.locator('.dw-notice')).toContainText('call rather than text');
-  await expect(page.locator('#dwSuggestion .dw-lab')).toContainText('Suggested day 12 text');
+  await expect(page.locator('#dwProposed')).toContainText('Proposed: day 12 reminder');
+  await expect(page.locator('#dwProposed')).toContainText('From the template');
+  const J = fixtureCasey();
+  await expect(page.locator('#dwReply')).toHaveValue(J.suggestion.text); // the template, word for word
+  await expect(page.locator('#dwRevert')).toBeDisabled();
+  await expect(page.locator('#dwAddNote')).toBeVisible();
   await expect(page.locator('#dwSend')).toBeDisabled();
   await expect(page.locator('#dwSend')).toHaveText('Sending is off until you switch it on');
-  await page.locator('#dwSuggestion [data-dw="why"]').click();
+  await page.locator('#dwCompose [data-dw="why"]').click();
   await expect(page.locator('#dwWhy')).toContainText('No reply to the day 1, 3 or 7 texts');
   // Notes: human notes plain, auto rows muted.
   await expect(page.locator('#dwNotes .dw-note:not(.auto)')).toHaveCount(1);
   await expect(page.locator('#dwNotes .dw-note.auto').first()).toContainText('Day 7 text + call sent');
   await page.locator('[data-dw="why"]').click();
+  await page.locator('#dwThread').evaluate((el) => { el.scrollTop = el.scrollHeight; }); // evidence: newest at the bottom
   await shot(page, '02-job.png');
+  await shot(page, '12-chat-window.png', '#dwChat');
+  // Add a note brings the note box into view, cursor in it.
+  await page.locator('#dwAddNote').click();
+  await expect(page.locator('#dwNoteIn')).toBeFocused();
   // Next and Back.
   await expect(page.locator('.dw-crumb .pos')).toHaveText('1 of 3');
   await page.locator('#dwNext').click();
@@ -302,11 +333,15 @@ test('W2: edit and send, a refusal in plain words, notice dismissed, a note with
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
   await openDebt(page, { fixture });
   await openJob(page, 'Casey Morgan', 'Escalating');
-  await page.locator('#dwEdit').click();
-  await page.locator('#dwDraftEdit').fill('Hi Casey, a quick note about the invoice.\n\nCheers,\nShaun');
-  await page.locator('#dwEdit').click();
-  await expect(page.locator('#dwDraftText')).toContainText('a quick note');
-  await expect(page.locator('#dwSuggestion .src')).toContainText('edited');
+  // The box is the editor: type over the proposed text, then put it back, then edit again.
+  const proposed = fixture.jobs[fixture.ids.casey].suggestion.text;
+  await page.locator('#dwReply').fill('Hi Casey, a quick note about the invoice.\n\nCheers,\nShaun');
+  await expect(page.locator('#dwProposed .src')).toContainText('edited');
+  await expect(page.locator('#dwRevert')).toBeEnabled();
+  await page.locator('#dwRevert').click();
+  await expect(page.locator('#dwReply')).toHaveValue(proposed);
+  await expect(page.locator('#dwProposed .src')).not.toContainText('edited');
+  await page.locator('#dwReply').fill('Hi Casey, a quick note about the invoice.\n\nCheers,\nShaun');
   // First try refused: part paid since the draft was written.
   await page.evaluate(() => { window.__dwPostAnswers.debt_ws_decide = { reject: { message: 'Part paid since the draft', status: 409, code: 'part_paid' } }; });
   await page.locator('#dwSend').click();
@@ -367,7 +402,7 @@ test('W2: no GHL contact shows Link contact with candidates', async ({ page }) =
   await openJob(page, 'Avery Lin');
   await expect(page.locator('#dwLinkCard .dw-cand')).toHaveCount(2);
   await expect(page.locator('#dwSend')).toBeDisabled();
-  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link Avery\'s contact first');
+  await expect(page.locator('#dwCompose .dw-gate')).toContainText('Link Avery\'s contact first');
   await page.locator('#dwLinkCard .dw-cand', { hasText: 'phone matches' }).locator('[data-dw="link"]').click();
   await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.ghl_contact_id, p.body.xero_invoice_id])).toEqual([['debt_ws_link_contact', fixture.ids.averyContact, fixture.ids.avery]]);
 });
@@ -380,6 +415,8 @@ test('W2: a shared fence is the neighbour\'s own: their phone, the shares, no bo
   await expect(page.locator('#dwShares')).toHaveText('Shared fence: Riley (B) owes $1,025.06 · Taylor (A) paid');
   // The neighbour's own phone, never the job's (Taylor's).
   await expect(page.locator('#dwPayerPhone')).toHaveText('0400 000 404');
+  await expect(page.locator('#dwChatWho')).toHaveText('Riley Shaw (B) · 0400 000 404');
+  await expect(page.locator('#dwChipPayer')).toHaveText('Riley only');
   await expect(page.locator('#dwMiddle')).not.toContainText('0400 000 004');
   // Not linked: no conversation with Riley, and never Taylor's thread in its place.
   await expect(page.locator('#dwThread')).toHaveCount(0);
@@ -387,17 +424,18 @@ test('W2: a shared fence is the neighbour\'s own: their phone, the shares, no bo
   await expect(page.locator('#dwMiddle')).not.toContainText('I have paid my half');
   // Send is off until Riley is linked, and says so.
   await expect(page.locator('#dwSend')).toBeDisabled();
-  await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link Riley\'s contact first');
+  await expect(page.locator('#dwCompose .dw-gate')).toContainText('Link Riley\'s contact first');
   await expect(page.locator('#dwLinkCard')).toContainText('Riley has no GoHighLevel contact linked');
   await shot(page, '06-shared-fence.png', '#dwJob');
-  // The whole job's thread on request, other people's messages named.
-  await page.locator('#dwConvToggle').click();
+  // Everyone on this job on request, other people's messages named.
+  await page.locator('#dwChipAll').click();
   await expect(page.locator('#dwThread .dw-msg')).toHaveCount(3);
   await expect(page.locator('#dwThread .dw-msg.other').first()).toContainText('Shaun to Taylor Brooks');
   await expect(page.locator('#dwThread')).toContainText('Taylor Brooks · text');
   await expect.poll(async () => page.evaluate(() => window.__dwFetches.filter((f) => f.action === 'debt_ws_job').map((f) => (f.params || {}).conversation || 'payer'))).toEqual(['payer', 'all']);
-  await expect(page.locator('#dwConvToggle')).toHaveText('Show only Riley\'s messages');
-  await page.locator('#dwConvToggle').click();
+  await expect(page.locator('#dwChipAll')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#dwChipPayer')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('#dwChipPayer').click();
   await expect(page.locator('#dwThreadEmpty')).toBeVisible();
   // Link: the invoice decides whose contact this is (Riley's own row, never the job).
   await page.locator('#dwLinkCard [data-dw="link"]').click();
@@ -432,12 +470,12 @@ test('W2: a linked neighbour is texted from here, at their own contact', async (
   await expect(page.locator('#dwThread .dw-msg')).toHaveCount(1);
   await expect(page.locator('#dwThread')).toContainText('Will pay next week.');
   await expect(page.locator('#dwLinkCard')).toHaveCount(0);
-  await expect(page.locator('#dwSuggestion .dw-gate')).toHaveCount(0);
+  await expect(page.locator('#dwCompose .dw-gate')).toHaveCount(0);
   await expect(page.locator('#dwSend')).toBeEnabled();
   await page.locator('#dwSend').click();
   // The send names Riley's invoice only; the backend texts Riley's own contact and checks it is on the job.
   await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send').map((p) => p.body.xero_invoice_id)).toEqual([fixture.ids.riley]);
-  await expect(page.locator('#dwConvToggle')).toHaveText('Show the whole job\'s conversation (4 messages)');
+  await expect(page.locator('#dwChipAll')).toHaveText('Everyone on this job');
 });
 
 test('W2: documents and invoices open in a modal', async ({ page }) => {
@@ -531,6 +569,79 @@ test('phone: the donut shrinks, the list fits, the job columns stack', async ({ 
   const jobFit = await page.evaluate(() => { const r = document.getElementById('debtWorkshopRoot'); return r.scrollWidth <= r.clientWidth + 1; });
   expect(jobFit).toBe(true);
   await shot(page, '06-mobile-job.png');
+  // The chat window on a phone: the reply box and its buttons fit inside it.
+  const chat = await page.locator('#dwChat').boundingBox();
+  const send = await page.locator('#dwSend').boundingBox();
+  const reply = await page.locator('#dwReply').boundingBox();
+  expect(send.x + send.width).toBeLessThanOrEqual(chat.x + chat.width + 1);
+  expect(reply.x + reply.width).toBeLessThanOrEqual(chat.x + chat.width + 1);
+  await shot(page, '15-mobile-chat-window.png', '#dwChat');
+});
+
+test('chat window: Write my own text instead sends a manual text, never the step', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
+  await openDebt(page, { fixture, posts: { debt_ws_decide: { resolve: { ok: true, sent: true, manual: true, step: 'manual' } } } });
+  await openJob(page, 'Casey Morgan', 'Escalating');
+  await page.locator('#dwOwn').click();
+  await expect(page.locator('#dwProposed')).toContainText('Your own text');
+  await expect(page.locator('#dwProposed')).toContainText('not a planned step, so the follow-up days do not move');
+  await expect(page.locator('#dwReply')).toHaveValue('');
+  await expect(page.locator('#dwReply')).toBeFocused();
+  await expect(page.locator('#dwSkip')).toHaveCount(0);
+  await page.locator('#dwReply').fill('Thanks Casey, Friday is fine.\n\nCheers,\nShaun');
+  await shot(page, '13-own-text.png', '#dwChat');
+  // A long dash is refused on screen before anything is posted.
+  await page.locator('#dwReply').fill('Thanks Casey \u2014 Friday is fine'); // a long dash, written as an escape
+  await page.locator('#dwSend').click();
+  await expect(page.locator('#dwRefusal')).toHaveText('Take out the long dash or emoji before sending.');
+  expect((await posts(page)).filter((p) => p.action === 'debt_ws_decide')).toHaveLength(0);
+  await page.locator('#dwReply').fill('Thanks Casey, Friday is fine.\n\nCheers,\nShaun');
+  await page.locator('#dwSend').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide').length).toBe(1);
+  const body = (await posts(page)).find((p) => p.action === 'debt_ws_decide').body;
+  expect(body).toMatchObject({ xero_invoice_id: fixture.ids.casey, step: 'manual', action: 'send', channel: 'sms', amount: 1420.37, text: 'Thanks Casey, Friday is fine.\n\nCheers,\nShaun' });
+  expect(body.client_ref).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(body.suggestion_id).toBeUndefined();
+  // After the send the box is back on the proposed step (the day 12 text is still due).
+  await expect(page.locator('#dwProposed')).toContainText('Proposed: day 12 reminder');
+  await expect(page.locator('#dwReply')).toHaveValue(fixture.jobs[fixture.ids.casey].suggestion.text);
+  // Put the proposed text back leaves your own text.
+  await page.locator('#dwOwn').click();
+  await page.locator('#dwReply').fill('Another thought');
+  await page.locator('#dwRevert').click();
+  await expect(page.locator('#dwProposed')).toContainText('Proposed: day 12 reminder');
+});
+
+test('chat window: with no step due the box takes your own text; paused chasing says why above an empty box', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
+  await openDebt(page, { fixture });
+  // Jordan: nothing due today (day 7 is in a few days), so the box is for your own text.
+  await openJob(page, 'Jordan Pike');
+  await expect(page.locator('#dwProposed')).toContainText('Your own text');
+  await expect(page.locator('#dwNextLine')).toContainText('Nothing proposed today. Next: Day 7 text + call');
+  await expect(page.locator('#dwRevert')).toHaveCount(0);
+  await expect(page.locator('#dwReply')).toHaveAttribute('placeholder', 'Write a text to Jordan');
+  await expect(page.locator('#dwSend')).toBeEnabled();
+  await page.locator('#dwBack').click();
+  // Jamie says they have paid: the steps wait and the reason shows, with an empty box below it
+  // for a reply in Shaun's own words (Shaun, 16 Oct 2026). Nothing is proposed or pre-filled.
+  await openJob(page, 'Jamie Fox', 'Says paid');
+  await expect(page.locator('#dwNothing')).toHaveText('They say they have paid. Follow-ups are paused while Xero catches up. You can still reply in your own words.');
+  await expect(page.locator('#dwProposed')).toContainText('Your own text');
+  await expect(page.locator('#dwReply')).toHaveValue('');
+  await expect(page.locator('#dwRevert')).toHaveCount(0);
+  await expect(page.locator('#dwSkip')).toHaveCount(0);
+  await expect(page.locator('#dwCompose #dwAddNote')).toBeVisible();
+  await page.locator('#dwReply').fill('Thanks Jamie, we will keep an eye out for it.\n\nCheers,\nShaun');
+  await shot(page, '14-paused-own-text.png', '#dwChat');
+  await page.locator('#dwSend').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide').map((p) => [p.body.step, p.body.xero_invoice_id, p.body.amount])).toEqual([['manual', fixture.ids.jamie, 2433.75]]);
+  await page.locator('#dwBack').click();
+  // Quinn is on Jan's visit list: no more planned texts, but Shaun may still reply.
+  await openJob(page, 'Quinn Harper', 'Bad debt');
+  await expect(page.locator('#dwNothing')).toHaveText('On Jan\'s visit list. No more texts. You can still reply in your own words.');
+  await expect(page.locator('#dwReply')).toHaveValue('');
+  await expect(page.locator('#dwSend')).toBeEnabled();
 });
 
 test('Debt report: the button opens the live report as its own view; staff read and download, not send', async ({ page }) => {

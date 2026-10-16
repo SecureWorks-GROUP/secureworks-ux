@@ -4,8 +4,8 @@
 // What this guards:
 //  - every job line carries a 1px outline in a darker shade of its own colour,
 //    and every day cell a visible light grid line, in 1 Week and Month
-//  - the outline moves no line: every bar keeps the same box (drag and the
-//    overlap guards measure it)
+//  - the outline moves no line: every bar still spans exactly its start and
+//    end day cells (drag and the overlap guards measure that box)
 //
 // Static-fixture spec, same pattern as ops-calendar-v3.spec.js.
 // Every name here is made up; dates are pinned through window._calDate.
@@ -88,20 +88,25 @@ test('every job line is outlined in a darker shade of its colour and the day gri
   }
 });
 
-test('the outline moves no line: every bar keeps the box drag and the overlap guards measure', async ({ page }) => {
+test('the outline moves no line: every bar still spans exactly its start and end day cells', async ({ page }) => {
+  const spans = Object.fromEntries(EVENTS.map((e) => [e.job_id, [e.scheduled_date, e.scheduled_end]]));
   for (const range of ['1w', 'month']) {
     await open(page);
     await seedAndRender(page, { range });
-    const s = await snapshot(page);
-    const boxes = await page.evaluate(() => {
-      // Take the outline and grid off and measure again: the boxes must match.
-      const st = document.createElement('style');
-      st.textContent = '#viewCalendar.cal-v3 .cal-schedule-grid.v3, #viewCalendar.cal-v3 .cal-schedule-grid.v3 .cal-schedule-bar { box-shadow: none !important; }';
-      document.head.appendChild(st);
-      const out = [...document.querySelectorAll('#calendarBody .cal-schedule-bar[data-job-id]')].map((b) => { const r = b.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round).join(','); });
-      st.remove();
-      return out;
-    });
-    expect(s.bars.map((b) => b.box)).toEqual(boxes);
+    const edges = await page.evaluate((spans) => {
+      const cal = document.getElementById('calendarBody');
+      return [...cal.querySelectorAll('.cal-schedule-bar[data-job-id]')].map((b) => {
+        const [start, end] = spans[b.getAttribute('data-job-id')];
+        const r = b.getBoundingClientRect();
+        const s = cal.querySelector('.cal-schedule-cell[data-date="' + start + '"]').getBoundingClientRect();
+        const e = cal.querySelector('.cal-schedule-cell[data-date="' + end + '"]').getBoundingClientRect();
+        return { job: b.getAttribute('data-job-id'), left: r.left - s.left, right: r.right - e.right };
+      });
+    }, spans);
+    expect(edges.map((x) => x.job).sort()).toEqual(['j1', 'j2', 'j3', 'j4']);
+    for (const x of edges) {
+      expect(Math.abs(x.left), range + ' ' + x.job + ' left edge').toBeLessThanOrEqual(1);
+      expect(Math.abs(x.right), range + ' ' + x.job + ' right edge').toBeLessThanOrEqual(1);
+    }
   }
 });

@@ -217,6 +217,30 @@ test.describe('Holidays', () => {
     expect(s.crewBadges).toEqual([]);
   });
 
+  test('the Crew view holiday header is bright red with readable white text, today included', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-09-28T09:00:00+08:00'));
+    await seedAndRender(page, { view: 'crew', week: '2026-09-28', events: [], org: [] });
+    const header = await page.evaluate(() => {
+      const parse = (c) => c.match(/[\d.]+/g).map(Number);
+      const lum = ([r, g, b]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); })
+        .reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+      const h = document.querySelector('#calendarBody .cal-swimlane-day-header.holiday-col.today');
+      const bg = parse(getComputedStyle(h).backgroundColor);
+      const contrast = (el) => {
+        let fg = parse(getComputedStyle(el).color);
+        const a = fg.length > 3 ? fg[3] : 1;
+        fg = [0, 1, 2].map((i) => fg[i] * a + bg[i] * (1 - a));
+        const [hi, lo] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      return { bg: getComputedStyle(h).backgroundColor, name: contrast(h.querySelector('.day-name')), num: contrast(h.querySelector('.day-num')), cellBg: getComputedStyle(document.querySelector('#calendarBody .cal-swim-cell.holiday-col')).backgroundColor };
+    });
+    expect(header.bg).toBe('rgb(225, 29, 46)');
+    expect(header.name).toBeGreaterThanOrEqual(4.5);
+    expect(header.num).toBeGreaterThanOrEqual(4.5);
+    expect(header.cellBg).toBe('rgb(254, 244, 244)');
+  });
+
   test('an unticked Holidays is remembered across a reload', async ({ page }) => {
     await tick(page, 'show', 'holidays');
     await page.goto('/ops.html', { waitUntil: 'domcontentloaded' });

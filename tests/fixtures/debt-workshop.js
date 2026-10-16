@@ -96,9 +96,9 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
   function manualText(r) {
     const no = (code, reason) => ({ allowed: false, code, reason });
     if (r.lane === 'account') return no('not_chased_by_text', 'Company invoices go on the Monday statement, not a text');
-    if (r.category === 'says_paid') return no('chasing_paused', 'They say they have paid. Follow-ups are paused while Xero catches up');
-    if (r.category === 'rectification') return no('chasing_paused', 'In Rectification. Chasing stops until the fix is done');
-    if (r.on_jan_list || (r.step_due && r.step_due.step === 'd21')) return no('chasing_paused', 'Day 21 is Jan\'s visit list. No more texts');
+    if (r.not_chased) return no('not_chased_by_text', 'This contact is never chased');
+    // Paused chasing (says paid, rectification, a promise, Jan's list) still allows Shaun's own
+    // text (Shaun, 16 Oct 2026): only the planned steps wait.
     return { allowed: true, code: null, reason: null };
   }
 

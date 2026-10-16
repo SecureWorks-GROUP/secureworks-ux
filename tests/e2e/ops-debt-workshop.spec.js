@@ -612,7 +612,7 @@ test('chat window: Write my own text instead sends a manual text, never the step
   await expect(page.locator('#dwProposed')).toContainText('Proposed: day 12 reminder');
 });
 
-test('chat window: with no step due the box takes your own text; paused chasing says why instead', async ({ page }) => {
+test('chat window: with no step due the box takes your own text; paused chasing says why above an empty box', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
   await openDebt(page, { fixture });
   // Jordan: nothing due today (day 7 is in a few days), so the box is for your own text.
@@ -623,18 +623,25 @@ test('chat window: with no step due the box takes your own text; paused chasing 
   await expect(page.locator('#dwReply')).toHaveAttribute('placeholder', 'Write a text to Jordan');
   await expect(page.locator('#dwSend')).toBeEnabled();
   await page.locator('#dwBack').click();
-  // Jamie says they have paid: no box, the reason in its place, and a note can still be added.
+  // Jamie says they have paid: the steps wait and the reason shows, with an empty box below it
+  // for a reply in Shaun's own words (Shaun, 16 Oct 2026). Nothing is proposed or pre-filled.
   await openJob(page, 'Jamie Fox', 'Says paid');
-  await expect(page.locator('#dwReply')).toHaveCount(0);
-  await expect(page.locator('#dwSend')).toHaveCount(0);
-  await expect(page.locator('#dwNothing')).toHaveText('They say they have paid. Follow-ups are paused while Xero catches up.');
+  await expect(page.locator('#dwNothing')).toHaveText('They say they have paid. Follow-ups are paused while Xero catches up. You can still reply in your own words.');
+  await expect(page.locator('#dwProposed')).toContainText('Your own text');
+  await expect(page.locator('#dwReply')).toHaveValue('');
+  await expect(page.locator('#dwRevert')).toHaveCount(0);
+  await expect(page.locator('#dwSkip')).toHaveCount(0);
   await expect(page.locator('#dwCompose #dwAddNote')).toBeVisible();
-  await shot(page, '14-nothing-to-send.png', '#dwChat');
+  await page.locator('#dwReply').fill('Thanks Jamie, we will keep an eye out for it.\n\nCheers,\nShaun');
+  await shot(page, '14-paused-own-text.png', '#dwChat');
+  await page.locator('#dwSend').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide').map((p) => [p.body.step, p.body.xero_invoice_id, p.body.amount])).toEqual([['manual', fixture.ids.jamie, 2433.75]]);
   await page.locator('#dwBack').click();
-  // Quinn is on Jan's visit list: no more texts.
+  // Quinn is on Jan's visit list: no more planned texts, but Shaun may still reply.
   await openJob(page, 'Quinn Harper', 'Bad debt');
-  await expect(page.locator('#dwNothing')).toHaveText('On Jan\'s visit list. No more texts.');
-  await expect(page.locator('#dwReply')).toHaveCount(0);
+  await expect(page.locator('#dwNothing')).toHaveText('On Jan\'s visit list. No more texts. You can still reply in your own words.');
+  await expect(page.locator('#dwReply')).toHaveValue('');
+  await expect(page.locator('#dwSend')).toBeEnabled();
 });
 
 test('Debt report: the button opens the live report as its own view; staff read and download, not send', async ({ page }) => {

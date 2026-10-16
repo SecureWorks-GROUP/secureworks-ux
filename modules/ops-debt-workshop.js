@@ -103,7 +103,6 @@ var DebtWorkshopCore = (function () {
     send_refused_by_guard: 'The text was stopped before it went, so nothing was sent.',
     send_not_confirmed: 'The send could not be confirmed. Check the GoHighLevel conversation before trying again; it will not send twice.',
     not_chased_by_text: 'This invoice is not chased by text.',
-    chasing_paused: 'Chasing is paused for this invoice, so nothing was sent. Read the job again.',
     xero_unavailable: 'Xero could not be read for the last check, so nothing was sent. Try again shortly.',
     xero_rate_limited: 'Xero is busy right now, so nothing was sent. Try again shortly.',
     bank_check_unavailable: 'The bank feed could not be read, so nothing was sent. Try again shortly.',
@@ -558,10 +557,13 @@ var DebtWorkshopCore = (function () {
   }
   // What the bottom of the chat window holds. own: Shaun chose "Write my own text instead".
   //   step:   the proposed step's text typed into the reply box (the template, word for word);
-  //   manual: an empty reply box for Shaun's own text (no step due now, or he chose to);
+  //   manual: an empty reply box for Shaun's own text (no step due now, or he chose to). While
+  //           chasing is paused (says paid, rectification, a promise, Jan's list) the steps
+  //           stay paused but he may still reply in his own words (Shaun, 16 Oct 2026): the
+  //           reason shows (paused) above an empty box, never a proposed text;
   //   move:   the agent's move card; flag: the agent's note card (then the manual box if allowed);
-  //   none:   no box, and why in words (paid, says paid, rectification, paused, Jan's list,
-  //           a company invoice, not chased), as the screen said before the chat window.
+  //   none:   no box, and why in words: paid in Xero, a company invoice, a contact we never
+  //           chase (or, on an older backend without manual_text, any paused state).
   // manual_text (ops-api debt_ws_job) decides whether a manual text may go; without it (an
   // older backend) the box only ever holds the proposed step.
   function composeMode(J, today, own) {
@@ -572,16 +574,20 @@ var DebtWorkshopCore = (function () {
     if (sug && sug.kind === 'move') return { mode: 'move', reason: '' };
     if (sug && sug.kind === 'draft' && !(own && manualOk)) return { mode: 'step', reason: '' };
     if (sug && sug.kind === 'draft') return { mode: 'manual', reason: '', proposed: true };
+    var flag = !!(sug && sug.kind === 'flag');
+    // Never a text from here: a company invoice (the Monday statement) or a contact we never chase.
+    var block = row.lane === 'account' ? 'Company invoices go on the Monday statement, not a text.'
+      : row.not_chased ? 'This contact is never chased, so no texts go from here.' : '';
+    if (block) return { mode: flag ? 'flag' : 'none', reason: block };
+    // Paused chasing: the planned steps wait, and the screen says why.
     var why;
     if (row.category === 'says_paid') why = 'They say they have paid. Follow-ups are paused while Xero catches up.';
     else if (row.category === 'rectification') why = 'In Rectification. Chasing stops until the fix is done.';
     else if (isPaused(row, today)) why = 'Follow-ups paused until ' + dateWords(row.paused_until) + ', a promise to pay.';
     else if (row.on_jan_list) why = 'On Jan\'s visit list. No more texts.';
-    else if (row.lane === 'account') why = 'Company invoices go on the Monday statement, not a text.';
-    else if (row.not_chased) why = 'This contact is never chased, so no texts go from here.';
     var next = row.next_step && row.next_step.step ? stepLabel(row.next_step.step, row.kind) + ' ' + whenWords(row.next_step.date, today) : '';
-    if (!why && manualOk) return { mode: sug && sug.kind === 'flag' ? 'flag' : 'manual', reason: '', next: next };
-    if (sug && sug.kind === 'flag') return { mode: 'flag', reason: '' };
+    if (manualOk) return why ? { mode: flag ? 'flag' : 'manual', reason: '', paused: why } : { mode: flag ? 'flag' : 'manual', reason: '', next: next };
+    if (flag) return { mode: 'flag', reason: '' };
     if (!why && mt && mt.reason) why = String(mt.reason).replace(/\.?$/, '.');
     if (!why) why = next ? 'Nothing to send today. Next: ' + next + '.' : 'Nothing to send today.';
     return { mode: 'none', reason: why };
@@ -1621,7 +1627,9 @@ function dwComposeHtml(J, s, linked) {
     label = '<div class="dw-proposed" id="dwProposed"><span class="w">Proposed: ' + dwEsc(C.proposedWords(sug.step)) + ' <span class="hint">· edit it or send as is</span></span>' +
       '<span class="src">' + dwEsc(src) + '<span id="dwEdited">' + (edited ? ', edited' : '') + '</span></span></div>';
   } else {
-    label = '<div class="dw-proposed own" id="dwProposed"><span class="w">Your own text <span class="hint">· not a planned step, so the follow-up days do not move</span></span></div>' +
+    // Paused chasing: why the steps wait, then the empty box for a reply in his own words.
+    label = (cm.paused ? '<div class="dw-nothing" id="dwNothing">' + dwEsc(cm.paused) + ' You can still reply in your own words.</div>' : '') +
+      '<div class="dw-proposed own" id="dwProposed"><span class="w">Your own text <span class="hint">· not a planned step, so the follow-up days do not move</span></span></div>' +
       (!cm.proposed && cm.next ? '<div class="dw-gate" id="dwNextLine">Nothing proposed today. Next: ' + dwEsc(cm.next) + '.</div>' : '');
   }
   var who = C.firstName(C.payerOf(J).name);

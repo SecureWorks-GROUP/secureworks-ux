@@ -373,17 +373,21 @@ check('chat window: what the bottom holds, and why nothing goes when it cannot',
   assert.strictEqual(mode({ row: {}, suggestion: draft, manual_text: ok }).mode, 'step', 'the proposed step first');
   assert.deepStrictEqual(mode({ row: {}, suggestion: draft, manual_text: ok }, true), { mode: 'manual', reason: '', proposed: true }, 'own text, with the step to put back');
   assert.strictEqual(mode({ row: {}, suggestion: draft }, true).mode, 'step', 'an older backend: only the proposed step');
-  assert.strictEqual(mode({ row: {}, suggestion: draft, manual_text: { allowed: false, code: 'chasing_paused', reason: 'x' } }, true).mode, 'step');
+  assert.strictEqual(mode({ row: {}, suggestion: draft, manual_text: { allowed: false, code: 'not_chased_by_text', reason: 'x' } }, true).mode, 'step');
   const between = mode({ row: { next_step: { step: 'd17', date: '2026-10-13' } }, suggestion: null, manual_text: ok });
   assert.deepStrictEqual(between, { mode: 'manual', reason: '', next: 'Day 17 final text on Tue 13 Oct' }, 'no step today: your own text');
   assert.strictEqual(mode({ row: { next_step: { step: 'd17', date: '2026-10-13' } }, suggestion: null }).reason, 'Nothing to send today. Next: Day 17 final text on Tue 13 Oct.');
-  assert.strictEqual(mode({ row: { category: 'says_paid' }, manual_text: ok }).reason, 'They say they have paid. Follow-ups are paused while Xero catches up.');
-  assert.strictEqual(mode({ row: { category: 'rectification' } }).reason, 'In Rectification. Chasing stops until the fix is done.');
-  assert.strictEqual(mode({ row: { paused_until: '2026-10-10' } }).reason, 'Follow-ups paused until Sat 10 Oct, a promise to pay.');
-  assert.strictEqual(mode({ row: { on_jan_list: true } }).reason, 'On Jan\'s visit list. No more texts.');
-  assert.strictEqual(mode({ row: { lane: 'account' } }).reason, 'Company invoices go on the Monday statement, not a text.');
-  assert.strictEqual(mode({ row: { not_chased: true } }).reason, 'This contact is never chased, so no texts go from here.');
-  assert.strictEqual(mode({ row: {}, manual_text: { allowed: false, code: 'chasing_paused', reason: 'Day 21 is a hold for a progress payment. No more texts' } }).reason, 'Day 21 is a hold for a progress payment. No more texts.');
+  // Paused chasing (Shaun, 16 Oct 2026): the reason shows above an empty box for his own text.
+  assert.deepStrictEqual(mode({ row: { category: 'says_paid' }, manual_text: ok }), { mode: 'manual', reason: '', paused: 'They say they have paid. Follow-ups are paused while Xero catches up.' });
+  assert.strictEqual(mode({ row: { category: 'rectification' }, manual_text: ok }).paused, 'In Rectification. Chasing stops until the fix is done.');
+  assert.strictEqual(mode({ row: { paused_until: '2026-10-10' }, manual_text: ok }).paused, 'Follow-ups paused until Sat 10 Oct, a promise to pay.');
+  assert.deepStrictEqual(mode({ row: { on_jan_list: true }, manual_text: ok }), { mode: 'manual', reason: '', paused: 'On Jan\'s visit list. No more texts.' });
+  // An older backend without manual_text: the reason in place of the box, as before.
+  assert.deepStrictEqual(mode({ row: { category: 'rectification' } }), { mode: 'none', reason: 'In Rectification. Chasing stops until the fix is done.' });
+  // Still no text from here: a company invoice, a contact never chased, paid in Xero.
+  assert.deepStrictEqual(mode({ row: { lane: 'account' }, manual_text: ok }), { mode: 'none', reason: 'Company invoices go on the Monday statement, not a text.' });
+  assert.deepStrictEqual(mode({ row: { not_chased: true, category: 'says_paid' }, manual_text: ok }), { mode: 'none', reason: 'This contact is never chased, so no texts go from here.' });
+  assert.strictEqual(mode({ row: {}, manual_text: { allowed: false, code: 'not_chased_by_text', reason: 'This invoice is no longer open in our Xero copy' } }).reason, 'This invoice is no longer open in our Xero copy.');
   assert.strictEqual(mode({ row: { open: false }, suggestion: draft, manual_text: ok }).mode, 'none', 'paid in Xero: nothing to send');
   assert.strictEqual(mode({ row: {}, suggestion: { kind: 'move' }, manual_text: ok }).mode, 'move');
 });
@@ -402,7 +406,7 @@ check('chat window: what the bottom holds, and why nothing goes when it cannot',
 const path = require('path');
 const BACKEND_CODES = [
   'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
-  'chasing_paused', 'contact_belongs_to_other_payer', 'contact_row_not_found', 'conversation_unreadable',
+  'contact_belongs_to_other_payer', 'contact_row_not_found', 'conversation_unreadable',
   'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
   'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'no_recipients', 'not_chased_by_text', 'not_found',
   'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',

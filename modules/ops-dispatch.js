@@ -69,7 +69,8 @@
  * its rows are the deliveries block of slice 4's one dispatch_materials read,
  * and the rail's sightings line reads the list row's deliveries_orders_total /
  * deliveries_orders_sighted. Its three writes, each sent once on a person's
- * change or press, against the order's updated_at: ops-api
+ * press (the expected date only when its box is left or Enter is pressed),
+ * against the order's updated_at: ops-api
  * dispatch_delivery_set_expected, dispatch_delivery_set_confirmed (from the
  * row or a supplier thread) and dispatch_delivery_mark_sighted. Each writes one
  * purchase_orders row and one job_events row: never the order's status, a job

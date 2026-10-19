@@ -30475,6 +30475,11 @@
   var _wizRecordingStart = null;
   var _wizRecordTimer = null;
   var _wizSatisfaction = 0;
+  // DSP-11 client sign-off: the client's own answer to "happy with the work?"
+  // (null until asked) and the stored signature's job_media id, both sent to
+  // complete_my_job so the office record names exactly what was signed.
+  var _wizClientHappy = null;
+  var _wizSignatureMediaId = null;
 
   function getPhotoPrompts() {
     var job = _currentJob ? _currentJob.job : {};
@@ -30535,6 +30540,8 @@
     if (_wizNeighbourShots.length === 0) _wizNeighbourShots = [{ label: 'Neighbour', file: null }];
     _wizNeighbourWaiver = { on: false, reason: '' };
     _wizSatisfaction = 0;
+    _wizClientHappy = null;
+    _wizSignatureMediaId = null;
     _wizPhotos = {};
     _wizMarketingPhotos = [];
     _wizAudioBlob = null;
@@ -30759,6 +30766,14 @@
     if (!_wizClientNotOnSite) {
       html += '<input type="text" id="wizSigNameInput" placeholder="Client name" value="' + esc(_wizSigName) + '" oninput="wizSetSigName(this.value)" style="width:100%;padding:10px;border:1.5px solid var(--sw-border);border-radius:8px;font-size:15px;font-family:var(--sw-font);box-sizing:border-box;margin-bottom:8px">';
       html += '<canvas id="wizSigPad" width="320" height="150" style="width:100%;height:150px;border:2px solid var(--sw-border);border-radius:8px;background:#fff;touch-action:none;cursor:crosshair"></canvas>';
+      html += '<div style="font-size:14px;font-weight:600;margin:12px 0 6px">Is the client happy with the work?</div>';
+      html += '<div style="display:flex;gap:8px">';
+      html += '<button id="wizHappyYes" class="wiz-btn ' + (_wizClientHappy === true ? 'wiz-btn-primary' : 'wiz-btn-secondary') + '" style="flex:1;font-size:13px" onclick="wizSetClientHappy(true)">Yes, happy</button>';
+      html += '<button id="wizHappyNo" class="wiz-btn ' + (_wizClientHappy === false ? 'wiz-btn-primary' : 'wiz-btn-secondary') + '" style="flex:1;font-size:13px" onclick="wizSetClientHappy(false)">Not yet</button>';
+      html += '</div>';
+      if (_wizClientHappy === false) {
+        html += '<div style="font-size:12px;color:var(--sw-yellow);margin-top:4px">The office will follow up before this job is invoiced</div>';
+      }
       html += '<div style="display:flex;gap:8px;margin-top:8px">';
       html += '<button class="wiz-btn wiz-btn-secondary" style="flex:1;font-size:12px" onclick="wizClearSig()">Clear</button>';
       html += '<button class="wiz-btn wiz-btn-secondary" style="flex:1;font-size:12px" onclick="wizClientNotOnSite()">Client not on site</button>';
@@ -30797,6 +30812,7 @@
     if (!(_wizSatisfaction > 0)) missing.push('rating');
     if (!String(_wizSigName || '').trim()) missing.push('name');
     if (!(_wizSigCanvas && _wizSigCanvas._hasStrokes)) missing.push('signature');
+    if (_wizClientHappy === null) missing.push('answer on whether they are happy');
     return missing;
   }
   function wizSignoffCanProceed() { return wizSignoffMissing().length === 0; }
@@ -30815,6 +30831,11 @@
   window.wizSetSigName = function(v) {
     _wizSigName = String(v == null ? '' : v);
     wizCheckStep4();
+  };
+
+  window.wizSetClientHappy = function(v) {
+    _wizClientHappy = v === true ? true : (v === false ? false : null);
+    renderWizStep();
   };
 
   window.wizSetRating = function(n) {
@@ -31391,6 +31412,8 @@
       tick('Updating job status...');
       var completePayload = { jobId: jobId, signatureName: String(_wizSigName || '').trim() };
       if (_wizSatisfaction > 0) completePayload.satisfaction_rating = _wizSatisfaction;
+      if (!_wizClientNotOnSite && _wizClientHappy !== null) completePayload.client_happy = _wizClientHappy;
+      if (_wizSignatureMediaId) completePayload.signature_media_id = _wizSignatureMediaId;
       // complete_my_job is the trade door (assignment / vertical-manager
       // access + fencing evidence gate). Staff accounts keep complete_job.
       return api('complete_my_job', null, completePayload).catch(function(err) {
@@ -31506,6 +31529,9 @@
         path: urlData.path,
         label: 'Client signature — ' + String(_wizSigName || '').trim(),
         phase: 'signature'
+      }).then(function(res) {
+        _wizSignatureMediaId = (res && (res.id || (res.media && res.media.id))) || null;
+        return res;
       });
     });
   }

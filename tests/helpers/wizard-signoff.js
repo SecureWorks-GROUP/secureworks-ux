@@ -1,6 +1,7 @@
-// Completion wizard "Client Sign-Off" step: rate, type the client's name and
-// draw a signature with trusted pointer input. The step's Next stays disabled
-// until all three are present (trade.html wizSignoffMissing).
+// Completion wizard "Client Sign-Off" step: rate, answer "happy with the work?",
+// type the client's name and draw a signature with trusted pointer input. The
+// step's Next stays disabled until all four are present (trade.html
+// wizSignoffMissing).
 const { expect } = require('@playwright/test');
 
 async function drawSignature(page) {
@@ -15,8 +16,9 @@ async function drawSignature(page) {
   await page.mouse.up();
 }
 
-async function signOff(page, { name = 'Fixture Homeowner', stars = 5 } = {}) {
+async function signOff(page, { name = 'Fixture Homeowner', stars = 5, happy = true } = {}) {
   await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(stars - 1).click();
+  await page.locator(happy ? '#wizHappyYes' : '#wizHappyNo').click();
   await page.locator('#wizSigNameInput').fill(name);
   await drawSignature(page);
   await expect(page.locator('#wizSignoffNext')).toBeEnabled();

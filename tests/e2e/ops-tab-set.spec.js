@@ -2703,6 +2703,46 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     expect(of('dispatch_order_send').map((c) => c.body)).toEqual([expect.objectContaining({ draft_id: DRID(2), expected_draft_hash: hash })]);
   });
 
+  // ops-api lists the job's open orders made outside Dispatch (office Create PO,
+  // quote builder, Xero) as one line. It shows in Materials and in the send
+  // confirm, never blocks a press, and an older reply without it shows nothing.
+  const otherOrdersBoot = async (page, extra) => {
+    const h = {};
+    const booted = await bootOrders(page, ORDER_SEED(), {}, { api: {
+      dispatch_order_emails: (url) => Object.assign(h.fake ? h.fake.api.dispatch_order_emails(url)
+        : { job_id: url.searchParams.get('job_id'), drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }, h.extra),
+    } });
+    h.fake = booted.fake;
+    h.extra = extra;
+    return Object.assign(booted, { h });
+  };
+
+  test('other open orders on the job show in Materials and in the send confirm, and never block the send', async ({ page }) => {
+    const note = 'This job already has PO-0901 (Example Steel) from the old order screen or Xero, so check you are not ordering the same materials twice.';
+    const { mat, mail, of, h } = await otherOrdersBoot(page, { other_open_orders: [{ po_number: 'PO-0901', supplier_name: 'Example Steel', origin: 'office_or_xero', status: 'authorised', priced: true, in_committed: true }],
+      other_open_orders_note: note, other_open_orders_status: 'ok' });
+    h.extra = Object.assign({}, h.extra);
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();
+    await expect(mat.locator('.dpc-other-orders')).toHaveText(note);
+    await expect(mat.locator('.dpc-other-orders.dpc-mat-fail')).toHaveCount(0);
+    const view = mail.locator('.dpc-mail-view');
+    await expect(view.locator('.dpc-other-orders')).toHaveCount(0);
+    await view.locator('[data-dpc-mail="send"]').click();
+    await expect(view.locator('.dpc-other-orders')).toHaveText(note);
+    await view.locator('[data-dpc-mail="send-go"]').click();
+    await expect.poll(() => of('dispatch_order_send').length).toBe(1);
+  });
+
+  test('a failed other-orders check says so; a reply without the fields shows nothing', async ({ page }) => {
+    const { mat, h } = await otherOrdersBoot(page, { other_open_orders: null, other_open_orders_note: null, other_open_orders_status: 'failed' });
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();
+    await expect(mat.locator('.dpc-other-orders.dpc-mat-fail')).toHaveText("Could not check this job's other orders. Look at its purchase orders before you order or send.");
+    h.extra = {};
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="cancel"]').click();
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="cancel-go"]').click();
+    await expect(mat.locator('.dpc-other-orders')).toHaveCount(0);
+  });
+
   test('a send whose result is not confirmed says so and goes again only on Try the send again; a refused send keeps the draft', async ({ page }) => {
     const { mat, mail, of, fake } = await bootOrders(page, ORDER_SEED());
     await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();

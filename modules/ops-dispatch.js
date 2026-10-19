@@ -1893,8 +1893,31 @@
       drafts: resp.drafts.filter(function (d) { return d && d.id; }),
       threads: ok ? resp.threads.filter(function (t) { return t && t.key && Array.isArray(t.messages); }) : [],
       threadsOk: ok,
-      ordersForLink: Array.isArray(resp.orders_for_link) ? resp.orders_for_link.filter(function (o) { return o && o.id; }) : []
+      ordersForLink: Array.isArray(resp.orders_for_link) ? resp.orders_for_link.filter(function (o) { return o && o.id; }) : [],
+      otherOrders: otherOrdersFrom(resp)
     };
+  }
+
+  // The job's open orders made outside Dispatch (the office's Create PO, the
+  // quote builder, Xero), so nobody orders the same materials twice. ops-api
+  // sends a one-line note, or status failed when it could not check. A reply
+  // without the fields (an older ops-api) shows nothing. It never blocks a
+  // press.
+  var OTHER_ORDERS_FAILED = 'Could not check this job\'s other orders. Look at its purchase orders before you order or send.';
+  function otherOrdersFrom(resp) {
+    var st = resp.other_open_orders_status;
+    if (st === 'failed') return { text: OTHER_ORDERS_FAILED, failed: true };
+    if (st === 'ok' && typeof resp.other_open_orders_note === 'string' && resp.other_open_orders_note.trim()) {
+      return { text: resp.other_open_orders_note.trim(), failed: false };
+    }
+    return null;
+  }
+
+  function otherOrdersLine(jobId) {
+    var m = mailEntry(jobId);
+    var o = m && m.status === 'ok' ? m.otherOrders : null;
+    if (!o) return '';
+    return '<div class="dpc-mat-notice dpc-other-orders' + (o.failed ? ' dpc-mat-fail' : '') + '" role="status">' + esc(o.text) + '</div>';
   }
 
   function mailKeys(m) {
@@ -1906,6 +1929,7 @@
     m.threads = got.threads;
     m.threadsOk = got.threadsOk;
     m.ordersForLink = got.ordersForLink;
+    m.otherOrders = got.otherOrders;
     var keys = mailKeys(m);
     if (keys.indexOf(m.sel) < 0) { m.sel = keys[0] || null; m.ask = null; }
     // Typed text is kept only while it differs from what is stored.
@@ -1931,9 +1955,12 @@
     paintMailIf(jobId);
     return Promise.resolve().then(function () { return global.opsFetch('dispatch_order_emails', { job_id: jobId }); }).then(function (resp) {
       if (token !== m.token) return;
+      var before = m.status === 'ok' ? JSON.stringify(m.otherOrders || null) : null;
       mergeMail(m, mailFrom(resp));
       m.status = 'ok';
       paintMailIf(jobId);
+      // The other-orders line also shows in Materials by supplier.
+      if (JSON.stringify(m.otherOrders || null) !== before) paintMatIf(jobId);
     }).catch(function () {
       if (token !== m.token) return;
       m.status = 'error';
@@ -3381,7 +3408,7 @@
   function matBodyHtml(e) {
     if (!e || e.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading the materials...</div>';
     if (e.status === 'error') return matFail('Could not load the materials.', 'read');
-    var h = '';
+    var h = otherOrdersLine(e.jobId);
     if (e.notice) h += '<div class="dpc-mat-notice" role="status">' + esc(e.notice) + '</div>';
     if (e.addMsg) {
       h += '<div class="dpc-mat-notice dpc-mat-fail" role="alert">' + esc(e.addMsg.text) +
@@ -3681,6 +3708,7 @@
     h += msgHtml(m.msg['send:' + d.id]);
     h += msgHtml(m.msg['discard:' + d.id], 'data-dpc-mail="discard-go" ' + ref);
     if (ask === 'send' && !sendBlock(m, d)) {
+      h += otherOrdersLine(m.jobId);
       h += confirmHtml('Send ' + po + ' to ' + text(d.to.email) + ' with ' + file + '? It goes from ' + ORDERS_FROM + '.', ['send-go', 'Send now'], ['send-no', 'Not yet'], ref);
     } else if (ask === 'discard') {
       h += confirmHtml('Discard this email? The order stays.', ['discard-go', 'Discard'], ['discard-no', 'Keep'], ref);

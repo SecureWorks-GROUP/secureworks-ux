@@ -1505,7 +1505,11 @@
       var added = resp.lines.filter(function (l) { return l && l.id; }).map(lineFrom);
       added.forEach(function (l) { if (!matLine(e, l.id)) e.lines.push(l); });
       if (added.length) { e.canSuggest = false; e.touched = true; }
-      else e.card[supplierId] = { text: 'The scope has nothing to suggest.', retry: null };
+      // What the scope could not turn into a line (a fence's extra end post,
+      // concrete, fixings) comes back as notes; they never become lines here.
+      var held = (Array.isArray(resp.held) ? resp.held : []).map(text).filter(Boolean);
+      if (held.length) e.card[supplierId] = { text: 'Not added as lines, check these: ' + held.join(' '), retry: null };
+      else if (!added.length) e.card[supplierId] = { text: 'The scope has nothing to suggest.', retry: null };
       applyCounts(jobId, resp.counts);
       paintMatIf(jobId);
     }, function (err) {
@@ -1514,7 +1518,9 @@
       if (code === 'lines_exist') { matChanged(jobId); return; }
       e.card[supplierId] = code === 'scope_unreadable'
         ? { text: 'The scope could not be read, so no lines were added.', retry: null }
-        : { text: 'Lines not added.', retry: 'suggest' };
+        : code === 'no_frozen_scope'
+          ? { text: 'This job has no frozen scope yet, so there is nothing to suggest.', retry: null }
+          : { text: 'Lines not added.', retry: 'suggest' };
       paintMatIf(jobId);
     });
   }

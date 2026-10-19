@@ -1692,7 +1692,7 @@ function fakeMaterials(seed = {}) {
       return Object.assign({
         job_id: id, job_number: 'E2E', work_type: j.work_type, suppliers: j.suppliers.map((s) => Object.assign({}, s)),
         lines: j.lines.slice().sort((a, b) => a.position - b.position).map(project), counts: counts(j),
-        can_suggest: j.work_type === 'patio' && j.lines.length === 0, workings: Object.assign({}, j.workings),
+        can_suggest: (j.work_type === 'patio' || j.work_type === 'fencing') && j.lines.length === 0, workings: Object.assign({}, j.workings),
       }, j.orders_status === 'ok' ? { orders: j.orders, orders_status: 'ok' } : { orders_status: 'failed' });
     },
     dispatch_materials_add_supplier: (url, b) => {
@@ -1754,12 +1754,12 @@ function fakeMaterials(seed = {}) {
       const f = forced('dispatch_materials_suggest');
       if (f) return f;
       const j = job(b.job_id);
-      if (j.work_type !== 'patio') return refuse(409, 'no_suggestion_for_work_type');
+      if (j.work_type !== 'patio' && j.work_type !== 'fencing') return refuse(409, 'no_suggestion_for_work_type');
       if (j.lines.length) return refuse(409, 'lines_exist');
       if (!onJob(j, b.supplier_id)) return refuse(409, 'supplier_not_on_job');
       const rows = j.suggest.map((it, i) => ({ id: LID(900 + i), supplier_id: b.supplier_id, description: it[0], quantity: it[1], unit: null, status: 'not_reviewed', purchase_order_id: null, source: 'scope', position: i + 1, updated_at: stamp() }));
       j.lines.push(...rows);
-      return { success: true, added: rows.length, lines: rows.map(project), counts: counts(j) };
+      return Object.assign({ success: true, added: rows.length, lines: rows.map(project), counts: counts(j) }, j.held ? { held: j.held } : {});
     },
     dispatch_materials_save_workings: (url, b) => {
       const f = forced('dispatch_materials_save_workings');
@@ -2158,7 +2158,8 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
       'job-p1': { suppliers: [MSUP(1), MSUP(2)], suggest },
       'job-p2': { suppliers: [MSUP(2)] },
     });
-    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(0);
+    // A fencing job with no lines offers it too (ops-api suggests from its frozen scope).
+    await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(1);
     await openJob(root, 'SWP-900201');
     await expect(mat.locator('[data-dpc-mat-suggest]')).toHaveCount(2);
     await expect(mat.locator('[data-dpc-mat-suggest]').first()).toHaveText('Suggest lines from the scope');
@@ -2175,6 +2176,21 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('The scope has nothing to suggest.');
     expect(calls.some((c) => /scope_to_po/.test(c.action))).toBe(false);
+  });
+
+  test('a fencing scope suggestion shows what it held back, and a job with no frozen scope says so', async ({ page }) => {
+    const suggest = [['Ridgeside fence panel kit, Woodland Grey, 1800 mm sheet, 2700 mm post', 8], ['Retaining plinth 150 mm, Woodland Grey', 8]];
+    const held = ['One end post beyond the panel kits: confirm its length with the supplier.', 'Concrete is a crew buy: about 22 bags by the fence designer\'s rule.'];
+    const { root, mat, fake } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(2)], suggest, held }, 'job-p1': { suppliers: [MSUP(2)] } });
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-line-wrap')).toHaveCount(2);
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('Not added as lines, check these: ' + held.join(' '));
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-retry')).toHaveCount(0);
+    fake.fail.dispatch_materials_suggest = [{ status: 409, body: { error: 'no_frozen_scope', code: 'no_frozen_scope' } }];
+    await openJob(root, 'SWP-900201');
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('This job has no frozen scope yet, so there is nothing to suggest.');
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-retry')).toHaveCount(0);
   });
 
   test('a job saved with a line has no Suggest button', async ({ page }) => {

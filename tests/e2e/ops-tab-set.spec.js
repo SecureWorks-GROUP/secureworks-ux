@@ -2185,12 +2185,23 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-line-wrap')).toHaveCount(2);
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('Not added as lines, check these: ' + held.join(' '));
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-warn')).toHaveCount(0);
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-retry')).toHaveCount(0);
     fake.fail.dispatch_materials_suggest = [{ status: 409, body: { error: 'no_frozen_scope', code: 'no_frozen_scope' } }];
     await openJob(root, 'SWP-900201');
     await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg')).toHaveText('This job has no frozen scope yet, so there is nothing to suggest.');
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-retry')).toHaveCount(0);
+  });
+
+  test('a scope-changed warning from a suggestion shows on its own line, apart from the held-back items', async ({ page }) => {
+    const suggest = [['Ridgeside fence panel kit, Woodland Grey, 1800 mm sheet, 2700 mm post', 8]];
+    const warning = 'The scope was changed after it was frozen: check these lines against the latest scope.';
+    const item = 'Concrete is a crew buy: about 22 bags by the fence designer\'s rule.';
+    const { mat } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(2)], suggest, held: [item, warning] } });
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-warn')).toHaveText(warning);
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg:not(.dpc-card-warn)')).toHaveText('Not added as lines, check these: ' + item);
   });
 
   test('a job saved with a line has no Suggest button', async ({ page }) => {

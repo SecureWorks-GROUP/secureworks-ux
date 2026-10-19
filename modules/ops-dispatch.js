@@ -1508,7 +1508,11 @@
       // What the scope could not turn into a line (a fence's extra end post,
       // concrete, fixings) comes back as notes; they never become lines here.
       var held = (Array.isArray(resp.held) ? resp.held : []).map(text).filter(Boolean);
-      if (held.length) e.card[supplierId] = { text: 'Not added as lines, check these: ' + held.join(' '), retry: null };
+      // A warning about the scope itself (changed since frozen, not checked)
+      // gets its own line, so it never reads as one more held-back item.
+      var warn = held.filter(isScopeWarning);
+      var items = held.filter(function (t) { return !isScopeWarning(t); });
+      if (held.length) e.card[supplierId] = { warn: warn, text: items.length ? 'Not added as lines, check these: ' + items.join(' ') : '', retry: null };
       else if (!added.length) e.card[supplierId] = { text: 'The scope has nothing to suggest.', retry: null };
       applyCounts(jobId, resp.counts);
       paintMatIf(jobId);
@@ -1523,6 +1527,10 @@
           : { text: 'Lines not added.', retry: 'suggest' };
       paintMatIf(jobId);
     });
+  }
+
+  function isScopeWarning(t) {
+    return /^The (scope|quote) was (changed|reissued)|could not be checked/i.test(t);
   }
 
   function addLine(jobId, supplierId) {
@@ -3320,7 +3328,8 @@
     lines.forEach(function (l) { h += lineHtml(e, l); });
     h += '</div>';
     var msg = e.card[sid];
-    if (msg) {
+    if (msg && msg.warn && msg.warn.length) h += '<div class="dpc-card-msg dpc-card-warn" role="alert">' + esc(msg.warn.join(' ')) + '</div>';
+    if (msg && msg.text) {
       h += '<div class="dpc-card-msg' + (msg.retry ? ' dpc-mat-fail' : '') + '" role="' + (msg.retry ? 'alert' : 'status') + '">' + esc(msg.text) +
         (msg.retry ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="card:' + esc(sid) + '">Retry</button>' : '') + '</div>';
     }

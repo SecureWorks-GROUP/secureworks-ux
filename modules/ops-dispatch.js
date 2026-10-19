@@ -1529,8 +1529,10 @@
     });
   }
 
+  // The two sentences ops-api sends about the scope itself
+  // (dispatch_fence_scope_lines.ts): changed since frozen, or not checked.
   function isScopeWarning(t) {
-    return /^The (scope|quote) was (changed|reissued)|could not be checked/i.test(t);
+    return /^(The (scope|quote) was (changed|reissued)|Could not check whether the (scope|quote) was)/i.test(t);
   }
 
   function addLine(jobId, supplierId) {

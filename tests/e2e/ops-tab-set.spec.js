@@ -2204,6 +2204,15 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg:not(.dpc-card-warn)')).toHaveText('Not added as lines, check these: ' + item);
   });
 
+  test('a could-not-check warning with nothing held shows on its own line only', async ({ page }) => {
+    const suggest = [['Ridgeside fence panel kit, Woodland Grey, 1800 mm sheet, 2700 mm post', 8]];
+    const warning = 'Could not check whether the scope was changed after it was frozen: check these lines against the latest scope.';
+    const { mat } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(2)], suggest, held: [warning] } });
+    await card(mat, 'Banksia Roofing').locator('[data-dpc-mat-suggest]').click();
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-warn')).toHaveText(warning);
+    await expect(card(mat, 'Banksia Roofing').locator('.dpc-card-msg:not(.dpc-card-warn)')).toHaveCount(0);
+  });
+
   test('a job saved with a line has no Suggest button', async ({ page }) => {
     const { root, mat } = await bootMaterials(page, { 'job-p1': { suppliers: [MSUP(2)], lines: [MLINE(1, 2, 'Trimdek sheets')] } });
     await openJob(root, 'SWP-900201');

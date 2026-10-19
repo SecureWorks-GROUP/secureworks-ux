@@ -2741,6 +2741,10 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     await card(mat, 'Acacia Steel').locator('[data-dpc-order="cancel"]').click();
     await card(mat, 'Acacia Steel').locator('[data-dpc-order="cancel-go"]').click();
     await expect(mat.locator('.dpc-other-orders')).toHaveCount(0);
+    // The whole email read failing is never "no other orders".
+    h.fake.fail.dispatch_order_emails = [{ status: 500, body: { error: 'e2e' } }];
+    await card(mat, 'Acacia Steel').locator('[data-dpc-order="create"]').click();
+    await expect(mat.locator('.dpc-other-orders.dpc-mat-fail')).toHaveText("Could not check this job's other orders. Look at its purchase orders before you order or send.");
   });
 
   test('a send whose result is not confirmed says so and goes again only on Try the send again; a refused send keeps the draft', async ({ page }) => {

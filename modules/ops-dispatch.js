@@ -1915,7 +1915,8 @@
 
   function otherOrdersLine(jobId) {
     var m = mailEntry(jobId);
-    var o = m && m.status === 'ok' ? m.otherOrders : null;
+    // A failed email read has no answer about other orders either: say so.
+    var o = !m ? null : m.status === 'error' ? { text: OTHER_ORDERS_FAILED, failed: true } : m.status === 'ok' ? m.otherOrders : null;
     if (!o) return '';
     return '<div class="dpc-mat-notice dpc-other-orders' + (o.failed ? ' dpc-mat-fail' : '') + '" role="status">' + esc(o.text) + '</div>';
   }
@@ -1965,6 +1966,7 @@
       if (token !== m.token) return;
       m.status = 'error';
       paintMailIf(jobId);
+      paintMatIf(jobId);
     });
   }
 

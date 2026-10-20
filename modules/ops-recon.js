@@ -188,6 +188,7 @@ var ReconCore = (function () {
 })();
 // </recon-core>
 
+var RC_PAGE = 50;
 var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null,
   job: null /* { number, items, err, loading, gen } for Find by job */ };
 
@@ -249,13 +250,18 @@ async function rcRead(quiet) {
   var gen = ++RC.gen;
   if (!quiet || !RC.items) { RC.loading = true; rcRender(); }
   var res = null, err = null;
-  try { res = await opsFetch('recon_daily_list', { limit: 50 }); } catch (e) { err = e; }
+  try { res = await opsFetch('recon_daily_list', { limit: RC_PAGE }); } catch (e) { err = e; }
   if (gen !== RC.gen) return;
   RC.loading = false;
+  // An answer with no list is a failed read, never "nothing needs matching".
+  if (!err && (!res || !Array.isArray(res.items))) err = new Error('Unexpected answer reading the list');
   if (err) {
     if (!quiet || !RC.items) { RC.items = null; RC.err = err; }
   } else {
-    RC.items = (res && res.items) || []; RC.err = null;
+    RC.items = res.items; RC.err = null;
+    // more: true means the list was cut at its page. A back end that does not send more yet
+    // gives no answer either way, so a full page is shown as possibly cut.
+    RC.more = res.more === true ? true : (res.more === false ? false : (res.items.length >= RC_PAGE ? null : false));
   }
   rcRender();
 }
@@ -329,6 +335,8 @@ function rcRender() {
       h += '<div class="rc-band" data-rc-band="' + rcEsc(g.band) + '">' + rcEsc(b.title) + ' (' + g.items.length + ')<small>' + rcEsc(b.note) + '</small></div>';
       g.items.forEach(function (it) { h += rcCard(it); });
     });
+    if (RC.more === true) h += '<div class="rc-empty" data-rc-more>Showing the first ' + RC.items.length + ', most urgent first. There are more waiting; they show here as these are matched.</div>';
+    else if (RC.more === null) h += '<div class="rc-empty" data-rc-more>Showing ' + RC.items.length + '. There may be more waiting than this.</div>';
   }
   root.innerHTML = h + '</div>';
 }

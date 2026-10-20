@@ -46,7 +46,7 @@ const JOB_ITEMS = {
     shown_hash: '00112233445566778899aabbccddeeff', offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] }],
 };
 
-async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS } = {}) {
+async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS, data = list() } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
   await page.evaluate(({ data, jobItems, fetchAnswer, post, show }) => {
@@ -66,7 +66,7 @@ async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = tr
       return Promise.resolve({ recorded: true, decision_id: 1 });
     };
     if (show) showView('recon');
-  }, { data: list(), jobItems, fetchAnswer, post, show });
+  }, { data, jobItems, fetchAnswer, post, show });
   if (show) await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__rcPosts);
@@ -196,4 +196,15 @@ test('Find by job says when a job has more than it shows, and never reads a bad 
   await page.locator('#viewRecon [data-rc-find] button[type="submit"]').click();
   await expect(page.locator('#viewRecon [data-rc-joberr]')).toHaveText('Something went wrong. Please try again.');
   await expect(page.locator('#viewRecon [data-rc-jobempty]')).toHaveCount(0);
+});
+
+test('the daily list says when it was cut, and never reads a bad answer as nothing to match', async ({ page }) => {
+  await openRecon(page, { data: { ...list(), more: true } });
+  await expect(page.locator('#viewRecon [data-rc-more]')).toHaveText('Showing the first 3, most urgent first. There are more waiting; they show here as these are matched.');
+  await openRecon(page, { data: { ...list(), more: false } });
+  await expect(page.locator('#viewRecon [data-rc-band]').first()).toBeVisible();
+  await expect(page.locator('#viewRecon [data-rc-more]')).toHaveCount(0);
+  await openRecon(page, { data: { as_of: '2026-10-20T00:00:00.000Z', limit: 50 } });
+  await expect(page.locator('#viewRecon [data-rc-err]')).toHaveText('Something went wrong. Please try again.');
+  await expect(page.locator('#viewRecon')).not.toContainText('Nothing needs matching right now.');
 });

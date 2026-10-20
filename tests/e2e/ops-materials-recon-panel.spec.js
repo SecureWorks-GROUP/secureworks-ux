@@ -18,6 +18,10 @@
 //    in it. A null xero_project, or a failed job_detail read, says Xero Projects is not confirmed
 //    and Place needs a second confirming press; a project with zero expenses places in one press.
 //  - A refused write keeps the bill on the list and shows the server's message.
+//  - Split (CFO-17/18): shares plus overhead must equal the bill to the cent before Split opens; it
+//    takes two presses and posts materials_recon_split { xero_invoice_id, parts, overhead_ex,
+//    overhead_note }. An installer bill (account 306 or 301) says a person confirms it (JP-12) and
+//    its shares default to labour.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -121,6 +125,7 @@ async function openMaterials(page, { fixture = buildFixture(), refuse = {}, expe
       if (refuse[action]) return fail(refuse[action]);
       if (action === 'materials_recon_assign') return copy({ ok: true, action: body.use_suggestion ? 'accept-suggestion' : 'assign-to-job' });
       if (action === 'materials_recon_not_job_related') return copy({ ok: true, action: 'mark-not-job-related' });
+      if (action === 'materials_recon_split') return copy({ ok: true, action: 'split' });
       return fail('Unknown action', 400);
     };
     showView('financials');
@@ -349,4 +354,79 @@ test('a refused write keeps the bill on the list and shows the server message', 
   await expect(d.locator('[data-mrq-err]')).toHaveText('Not placed: ' + refusal);
   await expect(row(page, 'q-big')).toHaveCount(1);
   await expect(page.locator('#matReconSummary')).toContainText('3 open bills');
+});
+
+function installerFixture() {
+  const f = buildFixture();
+  f.invoices['xinv-q-small'] = {
+    ok: true,
+    invoice: {
+      xero_invoice_id: 'xinv-q-small', invoice_number: 'BN-77', status: 'AUTHORISED', reference: 'Week 31',
+      sub_total: 212.5, total: 233.75, amount_due: 233.75, line_amount_types: 'Exclusive',
+      line_items: [
+        { description: 'Install SWF-25010 and SWP-26050', quantity: 1, unit_amount: 212.5, line_amount: 212.5, account_code: '306',
+          tracking: [{ Name: 'Business Unit', Option: 'Fencing' }] },
+      ],
+    },
+  };
+  return f;
+}
+
+async function addSplitJob(d, id, query, jobId) {
+  await d.locator('[data-mrq-sq="' + id + '"]').fill(query);
+  await d.locator('[data-mrq-act="splitfind"]').click();
+  await d.locator('[data-mrq-act="splitadd"][data-mrq-job="' + jobId + '"]').click();
+}
+
+test('an installer bill split across two jobs and overhead posts only when the shares equal the bill', async ({ page }) => {
+  await openMaterials(page, { fixture: installerFixture() });
+  await row(page, 'q-small').click();
+  const d = detail(page, 'q-small');
+  await expect(d.locator('[data-mrq-installer]')).toContainText('A person confirms the job for every installer bill');
+  await d.locator('[data-mrq-act="splitopen"]').click();
+  await addSplitJob(d, 'q-small', 'Harper', 'job-plain');
+  await addSplitJob(d, 'q-small', 'Ellis', 'job-empty');
+  await expect(d.locator('[data-mrq-lane="q-small"]').first()).toHaveValue('labour');
+  const save = d.locator('[data-mrq-act="splitsave"]');
+  await expect(save).toBeDisabled();
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').fill('150');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').press('Tab');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="1"]').fill('50');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="1"]').press('Tab');
+  await expect(d.locator('[data-mrq-remain]')).toHaveText('$12.50 of the bill is not yet given to a job or overhead.');
+  await expect(save).toBeDisabled();
+  await d.locator('[data-mrq-oh="q-small"]').fill('12.50');
+  await d.locator('[data-mrq-oh="q-small"]').press('Tab');
+  await d.locator('[data-mrq-ohnote="q-small"]').fill('Yard tidy');
+  await d.locator('[data-mrq-ohnote="q-small"]').press('Tab');
+  await expect(d.locator('[data-mrq-remain]')).toHaveText('Shares add up to the bill: $212.50 ex GST.');
+  await save.click();
+  expect(await posts(page)).toEqual([]);
+  await page.waitForTimeout(ARM_GAP_MS);
+  await d.locator('[data-mrq-act="splitsave"]').click();
+  expect(await posts(page)).toEqual([{ action: 'materials_recon_split', body: {
+    xero_invoice_id: 'xinv-q-small',
+    parts: [{ job_id: 'job-plain', amount_ex: 150, lane: 'labour' }, { job_id: 'job-empty', amount_ex: 50, lane: 'labour' }],
+    overhead_ex: 12.5, overhead_note: 'Yard tidy',
+  } }]);
+  await expect(row(page, 'q-small')).toHaveCount(0);
+});
+
+test('a split the server refuses keeps the bill and shows why; shares over the bill never post', async ({ page }) => {
+  await openMaterials(page, { fixture: installerFixture(), refuse: { materials_recon_split: 'Split refused: SWF-25010 is a holding job' } });
+  await row(page, 'q-small').click();
+  const d = detail(page, 'q-small');
+  await d.locator('[data-mrq-act="splitopen"]').click();
+  await addSplitJob(d, 'q-small', 'Harper', 'job-plain');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').fill('300');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').press('Tab');
+  await expect(d.locator('[data-mrq-remain]')).toHaveText('$87.50 more than the bill. Reduce a share.');
+  await expect(d.locator('[data-mrq-act="splitsave"]')).toBeDisabled();
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').fill('212.50');
+  await d.locator('[data-mrq-amt="q-small"][data-mrq-i="0"]').press('Tab');
+  await d.locator('[data-mrq-act="splitsave"]').click();
+  await page.waitForTimeout(ARM_GAP_MS);
+  await d.locator('[data-mrq-act="splitsave"]').click();
+  await expect(d.locator('[data-mrq-err]')).toContainText('Not split: Split refused: SWF-25010 is a holding job');
+  await expect(row(page, 'q-small')).toHaveCount(1);
 });

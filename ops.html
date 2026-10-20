@@ -17199,7 +17199,8 @@ function renderKanbanCard(j, status) {
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
-  // <job-closeout-tags> fencing and patio close-out tags while ?closeout=preview is on
+  // <job-closeout-tags> fencing and patio close-out tags (while ?closeout=preview is on)
+  // and the live Review text switch
   if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
@@ -22642,7 +22643,8 @@ function renderOverviewView(data) {
     html += '<span style="font-size:13px;flex:1;">' + a.icon + ' ' + a.message + '</span>';
     html += '<span style="font-size:11px;color:var(--sw-mid);">&#8594;</span></div>';
   });
-  // <job-closeout-tags> the same close-out tags on the job page while ?closeout=preview is on
+  // <job-closeout-tags> the same close-out tags (preview only) and live Review text
+  // switch on the job page
   if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
   var nextStatuses = getNextStatuses(j.status, j.type);
   nextStatuses.forEach(function(s) {

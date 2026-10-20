@@ -101,5 +101,4 @@ under its own switches.
 
 Guards: `tests/e2e/ops-job-closeout-core.spec.js` (pure rules) and
 `tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on, the switch
-without the preview, with
-`set_review_opt_out` mocked).
+without the preview, with `set_review_opt_out` mocked).

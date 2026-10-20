@@ -70,7 +70,8 @@
  * as their own "Found by Context" group because they cannot be matched to the
  * order threads above them. Each row keeps Context's word on it: "Sure on this
  * job", or "May belong to another job" with the other jobs named. A failed
- * read is a failed line with Retry, never "No email". Read only: no write, no
+ * read is a failed line with Retry, never "No email", and a list the server
+ * cut at its page (more: true) says it is not complete. Read only: no write, no
  * reply, no move between jobs.
  *
  * Slice 6 adds the Schedule section (Deliveries) under Emails (never on a
@@ -1899,12 +1900,16 @@
   }
 
   // context_job_mail's answer. Throws on anything else, so the group shows its
-  // failed line.
+  // failed line. more is required: a list the server cut at its page must say
+  // so, and an answer that does not say either way is not read as complete.
   function ctxMailFrom(resp) {
-    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.mail)) throw new Error('Unexpected Context mail answer');
-    return resp.mail.filter(function (r) {
-      return r && r.event_id && (r.placement === 'certain' || r.placement === 'candidate');
-    });
+    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.mail) || typeof resp.more !== 'boolean') throw new Error('Unexpected Context mail answer');
+    return {
+      rows: resp.mail.filter(function (r) {
+        return r && r.event_id && (r.placement === 'certain' || r.placement === 'candidate');
+      }),
+      more: resp.more
+    };
   }
 
   function ctxRowById(m, id) {
@@ -1969,13 +1974,16 @@
     paintMailIf(jobId);
     return Promise.resolve().then(function () { return global.opsFetch('context_job_mail', { job_id: jobId, roles: 'supplier' }); }).then(function (resp) {
       if (token !== c.token) return;
-      c.rows = ctxMailFrom(resp);
+      var got = ctxMailFrom(resp);
+      c.rows = got.rows;
+      c.more = got.more;
       c.status = 'ok';
       if (!m.sel) m.sel = mailKeys(m)[0] || null;
       paintMailIf(jobId);
     }).catch(function () {
       if (token !== c.token) return;
       c.rows = [];
+      c.more = false;
       c.status = 'error';
       if (m.sel && m.sel.indexOf('c:') === 0) m.sel = mailKeys(m)[0] || null;
       paintMailIf(jobId);
@@ -3876,6 +3884,7 @@
       else if (ctx.status === 'error') h += '<div class="dpc-mail-listfail">' + mailFail('Could not load the email Context found.', 'context') + '</div>';
       else if (!ctx.rows.length) h += '<div class="dpc-mail-listfail dpc-muted">None found.</div>';
       else ctx.rows.forEach(function (r) { h += ctxItemHtml(m, r); });
+      if (ctx.status === 'ok' && ctx.more) h += '<div class="dpc-mail-listfail dpc-mail-ctx-more" role="status">Context found more email on this job than is listed here. Only the first ' + ctx.rows.length + ' are shown, so this list is not complete.</div>';
     }
     h += '</div><div class="dpc-mail-view">' + mailViewHtml(m) + '</div></div>';
     return h + foot;

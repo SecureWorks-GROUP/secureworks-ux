@@ -97,3 +97,145 @@ test('preview on: small tags from the closeout block, the new ladder, nothing wi
   expect(detail).toContain('Review sent');
   expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml({ job: { id: 'f1', type: 'patio', status: 'invoiced' } }))).toBe('');
 });
+
+// ── Review text switch: the real page, ops-api's set_review_opt_out mocked ──
+const { installOpsSessionStub, revealOpsStaticFixture } = require('../helpers/ops-auth');
+
+const OPT_OUT_ROUTE = '**/functions/v1/ops-api?action=set_review_opt_out*';
+
+// A signed-in operator, so opsPost reaches the mocked action. The CDN scripts are
+// stubbed so the real supabase-js never replaces the session stub.
+async function signIn(page) {
+  await installOpsSessionStub(page);
+  for (const pattern of [
+    'https://cdn.jsdelivr.net/npm/chart.js@4',
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+    'https://cdnjs.cloudflare.com/**',
+  ]) {
+    await page.route(pattern, (route) => route.fulfill({
+      status: 200, contentType: 'application/javascript',
+      body: 'window.jspdf = window.jspdf || {}; window.Chart = window.Chart || function () {};',
+    }));
+  }
+}
+
+// Draws real cards into the page and returns the toggle on the given card.
+async function drawCards(page, rows) {
+  await revealOpsStaticFixture(page);
+  await page.evaluate((list) => {
+    let host = document.getElementById('e2eCloseoutHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'e2eCloseoutHost';
+      host.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#fff;width:320px;';
+      document.body.appendChild(host);
+    }
+    host.innerHTML = list.map((r) => renderKanbanCard(r.job, r.status)).join('');
+  }, rows);
+}
+
+const reviewRow = (extra) => Object.assign({}, base, extra);
+
+test('review switch: hidden with the preview off, outside Complete to Get Review, and when the field is absent', async ({ page }) => {
+  await page.addInitScript(() => { try { localStorage.removeItem('sw_closeout_preview'); } catch (e) {} });
+  await openOps(page);
+  const [off] = await cards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  expect(off).not.toContain('closeout-review-toggle');
+
+  await page.goto('/ops.html?closeout=preview');
+  await page.waitForFunction(() => typeof window.renderKanbanCard === 'function' && !!window.JobCloseoutOps);
+  const [noField, early, makesafe, invoiced, complete, final, review] = await cards(page, [
+    { job: base, status: 'invoiced' },
+    { job: reviewRow({ review_opt_out: false }), status: 'scheduled' },
+    { job: reviewRow({ type: 'makesafe', review_opt_out: false }), status: 'invoiced' },
+    { job: reviewRow({ review_opt_out: false }), status: 'invoiced' },
+    { job: reviewRow({ review_opt_out: false }), status: 'complete' },
+    { job: reviewRow({ review_opt_out: false }), status: 'final_payment' },
+    { job: reviewRow({ type: 'patio', review_opt_out: false }), status: 'get_review' },
+  ]);
+  for (const html of [noField, early, makesafe]) expect(html).not.toContain('closeout-review-toggle');
+  for (const html of [invoiced, complete, final, review]) expect(html).toContain('data-review-toggle="f1"');
+});
+
+test('review switch: turning it off calls set_review_opt_out, then shows who and when', async ({ page }) => {
+  await signIn(page);
+  const calls = [];
+  await page.route(OPT_OUT_ROUTE, async (route) => {
+    const body = route.request().postDataJSON();
+    calls.push(body);
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        success: true, review_opt_out: body.opt_out,
+        review_opt_out_at: body.opt_out ? '2026-10-20T02:05:00Z' : null,
+        review_opt_out_by: body.opt_out ? 'ops-e2e@example.test' : null,
+      }),
+    });
+  });
+  await openOps(page, '?closeout=preview');
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+
+  const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await expect(toggle).toHaveText('Review text on');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await expect(toggle).toHaveText('Review text off');
+  await expect(toggle).toHaveAttribute('title', /Turned off by ops-e2e@example\.test on 20 Oct 2026, 10:05am/);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ job_id: 'f1', opt_out: true });
+  // The click stayed on the switch: the job page did not open.
+  await expect(page.locator('#e2eCloseoutHost .kanban-card')).toHaveCount(1);
+
+  // A board redraw from the old feed row keeps the answer until a read agrees.
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+  // The job page names who and when in words.
+  const detail = await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
+    job: { id: 'f1', type: 'fencing', status: 'invoiced', review_opt_out: true,
+      review_opt_out_at: '2026-10-20T02:05:00Z', review_opt_out_by: 'ops-e2e@example.test' },
+  }));
+  expect(detail).toContain('Turned off by ops-e2e@example.test on 20 Oct 2026, 10:05am');
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(calls[1]).toMatchObject({ job_id: 'f1', opt_out: false });
+});
+
+test('review switch: a claim locks it, and a 409 review_already_sent locks it the same way', async ({ page }) => {
+  await signIn(page);
+  let hits = 0;
+  await page.route(OPT_OUT_ROUTE, async (route) => {
+    hits += 1;
+    await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'review_already_sent' }) });
+  });
+  await openOps(page, '?closeout=preview');
+  await drawCards(page, [
+    { job: reviewRow({ id: 's1', review_opt_out: false, review_claim_status: 'sent' }), status: 'get_review' },
+    { job: reviewRow({ id: 'r1', review_opt_out: false }), status: 'get_review' },
+  ]);
+
+  const sent = page.locator('#e2eCloseoutHost [data-review-toggle="s1"]');
+  await expect(sent).toBeDisabled();
+  await expect(sent).toHaveText('Review text sent');
+
+  const racing = page.locator('#e2eCloseoutHost [data-review-toggle="r1"]');
+  await racing.click();
+  await expect(racing).toBeDisabled();
+  await expect(racing).toHaveText('Review text sent');
+  await expect(page.locator('#toastContainer')).toContainText('The review text has already gone out, so it can no longer be stopped.');
+  expect(hits).toBe(1);
+});
+
+test('review switch: any other failure leaves it as it was and says so', async ({ page }) => {
+  await signIn(page);
+  await page.route(OPT_OUT_ROUTE, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' }));
+  await openOps(page, '?closeout=preview');
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'complete' }]);
+  const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
+  await toggle.click();
+  await expect(page.locator('#toastContainer')).toContainText('could not be changed. Nothing was changed.');
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+});

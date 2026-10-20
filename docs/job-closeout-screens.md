@@ -50,6 +50,34 @@ and a job type other than fencing or patio gets no tags at all.
 
 The job page shows the same tags under Next Actions.
 
+## The Review text switch
+
+The review text always goes out once a fencing or patio job is fully paid, unless
+someone turns it off for that job first. With the preview on, fencing and patio cards
+in **Complete, Invoiced, Final Payment and Get Review** (and the job page, under Next
+Actions) carry a small on/off **Review text** switch. On is the default: the text
+sends. It must be turned off before the final payment lands, because the text goes
+out within about 15 minutes of the job showing fully paid.
+
+It reads, from the `pipeline` row (or `job_detail`'s job), at the top level or on the
+closeout block:
+
+```
+review_opt_out: boolean          // no boolean here = the back end has not shipped it: no switch
+review_opt_out_at: ISO time | null
+review_opt_out_by: text | null
+review_claim_status: text | null // the job's job_review_claims status
+```
+
+A press calls ops-api `set_review_opt_out` with `{ job_id, opt_out }` and draws only
+what it answers (`{ success, review_opt_out, review_opt_out_at, review_opt_out_by }`),
+never an optimistic flip; the answer stays on the card until a later read of the job
+agrees with it. Off shows "Review text off", and who turned it off and when (Perth
+time) in the tooltip and, on the job page, as a line under the switch. Once
+`review_claim_status` is set the switch is locked and reads "Review text sent" (or
+"sending"); a 409 `review_already_sent` locks it the same way and says so. Any other
+failure leaves the switch as it was and says nothing was changed.
+
 ## Get Review as a stage
 
 `modules/sw-state-machine.js` mirrors the backend state machine: `get_review` is in
@@ -62,4 +90,5 @@ backlog). Moving a card into Get Review by hand asks the backend's one review se
 under its own switches.
 
 Guards: `tests/e2e/ops-job-closeout-core.spec.js` (pure rules) and
-`tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on).
+`tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on, with
+`set_review_opt_out` mocked).

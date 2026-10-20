@@ -16,6 +16,15 @@
 //               get_review_entered_at, archive_due_at,
 //               held: 'rectification' | 'callback' | null }
 // No block, no tags: nothing is ever worked out in the browser.
+//
+// The Review text switch (same preview): fencing and patio cards in Complete,
+// Invoiced, Final Payment and Get Review carry a small on/off switch. On (the
+// default) means the review text sends; off calls ops-api `set_review_opt_out`.
+// It reads the row's top-level `review_opt_out`, `review_opt_out_at`,
+// `review_opt_out_by` and `review_claim_status` (or the same keys on the
+// closeout block). No `review_opt_out` boolean, no switch: the back end has not
+// shipped it. Once `review_claim_status` is set the text has gone (or is going)
+// and the switch is locked.
 // ════════════════════════════════════════════════════════════
 
 // <job-closeout-core>
@@ -196,6 +205,96 @@ var JobCloseoutCore = (function () {
     return row ? row.slice() : null;
   }
 
+  // ── Review text switch ──
+  var TOGGLE_STAGES = ['complete', 'invoiced', 'final_payment', 'get_review'];
+
+  // A review field on the row, else on its closeout block.
+  function reviewField(job, key) {
+    if (!job) return undefined;
+    if (job[key] !== undefined) return job[key];
+    var b = job.closeout;
+    return b && typeof b === 'object' ? b[key] : undefined;
+  }
+
+  function perthWhen(v) {
+    var t = timeOf(v);
+    if (!isFinite(t)) return '';
+    var d = new Date(t + 8 * HOUR);
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var h = d.getUTCHours();
+    var m = d.getUTCMinutes();
+    return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' +
+      ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m + (h < 12 ? 'am' : 'pm');
+  }
+
+  function claimWords(claim) {
+    var c = lower(claim);
+    if (c === 'claimed') return 'Review text sending';
+    if (c === 'unconfirmed') return 'Review text not confirmed';
+    return 'Review text sent';
+  }
+
+  // The switch for one job, or null when it is not drawn.
+  function reviewToggle(job, status) {
+    if (!job || !eligibleType(job.type)) return null;
+    var st = lower(status != null ? status : job.status);
+    if (TOGGLE_STAGES.indexOf(st) < 0) return null;
+    var optOut = reviewField(job, 'review_opt_out');
+    if (typeof optOut !== 'boolean') return null;
+    var claim = str(reviewField(job, 'review_claim_status')).trim();
+    var by = str(reviewField(job, 'review_opt_out_by')).trim();
+    var when = perthWhen(reviewField(job, 'review_opt_out_at'));
+    var offBy = optOut
+      ? 'Turned off' + (by ? ' by ' + by : '') + (when ? ' on ' + when : '')
+      : '';
+    if (claim) {
+      return {
+        on: !optOut, locked: true, claim: claim, offBy: offBy,
+        text: claimWords(claim),
+        title: claimWords(claim) + '. It can no longer be stopped.'
+      };
+    }
+    return {
+      on: !optOut, locked: false, claim: '', offBy: offBy,
+      text: optOut ? 'Review text off' : 'Review text on',
+      title: optOut
+        ? offBy + '. No review text goes out. Click to turn it back on.'
+        : 'The review text goes out once the job is fully paid. Click to turn it off for this job.'
+    };
+  }
+
+  function reviewToggleHtml(t, jobId, opts) {
+    if (!t) return '';
+    var detail = !!(opts && opts.detail);
+    var on = t.on && !t.locked;
+    var track = t.locked ? '#BDC3C7' : (t.on ? '#27AE60' : '#95A5A6');
+    var knob = '<span aria-hidden="true" style="display:inline-block;position:relative;width:22px;height:12px;border-radius:6px;background:' +
+      track + ';flex:none;"><span style="position:absolute;top:2px;' + (t.on ? 'left:12px' : 'left:2px') +
+      ';width:8px;height:8px;border-radius:50%;background:#fff;"></span></span>';
+    var html = '<div class="closeout-review-toggle-wrap" data-review-job="' + esc(jobId) + '" data-review-detail="' + (detail ? '1' : '0') + '" style="margin-top:4px;">' +
+      '<button type="button" class="closeout-review-toggle" role="switch" aria-checked="' + (on ? 'true' : 'false') + '"' +
+      ' data-review-toggle="' + esc(jobId) + '" data-review-state="' + (t.locked ? 'locked' : (t.on ? 'on' : 'off')) + '"' +
+      (t.locked ? ' disabled aria-disabled="true"' : '') +
+      ' title="' + esc(t.title) + '"' +
+      ' onclick="event.stopPropagation();JobCloseoutOps.toggleReview(this)" onmousedown="event.stopPropagation()"' +
+      ' style="display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;padding:0;font:inherit;font-size:11px;font-weight:600;color:' +
+      (t.locked ? '#7F8C8D' : (t.on ? '#1E8449' : '#7F8C8D')) + ';cursor:' + (t.locked ? 'default' : 'pointer') + ';">' +
+      knob + '<span>' + esc(t.text) + '</span></button>';
+    if (detail && t.offBy) {
+      html += '<div class="closeout-review-offby" style="font-size:11px;color:var(--sw-mid,#7F8C8D);margin-top:2px;">' + esc(t.offBy) + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  // A refusal from set_review_opt_out, in words.
+  function refusalWords(err) {
+    var code = lower(err && (err.code || (err.body && err.body.error) || err.message));
+    if ((err && err.status === 409) || code === 'review_already_sent') {
+      return 'The review text has already gone out, so it can no longer be stopped.';
+    }
+    return 'The review text switch could not be changed. Nothing was changed.';
+  }
+
   return {
     previewState: previewState,
     eligibleType: eligibleType,
@@ -203,7 +302,10 @@ var JobCloseoutCore = (function () {
     reasonWords: reasonWords,
     tags: tags,
     tagsHtml: tagsHtml,
-    nextStatuses: nextStatuses
+    nextStatuses: nextStatuses,
+    reviewToggle: reviewToggle,
+    reviewToggleHtml: reviewToggleHtml,
+    refusalWords: refusalWords
   };
 })();
 // </job-closeout-core>
@@ -229,11 +331,40 @@ var JobCloseoutOps = (function () {
     return _preview;
   }
 
+  // Answers from set_review_opt_out, by job id, laid over the feed until a read
+  // of the job agrees with them (the board is not re-read after a press).
+  var _review = {};
+  var REVIEW_KEYS = ['review_opt_out', 'review_opt_out_at', 'review_opt_out_by', 'review_claim_status'];
+
+  function withReview(job) {
+    var o = job && _review[job.id];
+    if (!o) return job;
+    if (job.review_opt_out === o.review_opt_out && !job.review_claim_status === !o.review_claim_status) {
+      delete _review[job.id];
+      return job;
+    }
+    var view = Object.assign({}, job);
+    REVIEW_KEYS.forEach(function (k) { if (o[k] !== undefined) view[k] = o[k]; });
+    if (job.review_claim_status) view.review_claim_status = job.review_claim_status;
+    return view;
+  }
+
+  // The last job each switch was drawn from, so a press can redraw it.
+  var _drawn = {};
+
+  function toggleHtml(job, status, opts) {
+    var view = withReview(job);
+    var t = JobCloseoutCore.reviewToggle(view, status);
+    if (!t) return '';
+    _drawn[job.id] = { job: job, status: status };
+    return JobCloseoutCore.reviewToggleHtml(t, job.id, opts);
+  }
+
   // A tag must never break a card: any throw draws nothing.
   function cardTagsHtml(job, status) {
     try {
       if (!previewOn()) return '';
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now()));
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, status);
     } catch (e) { return ''; }
   }
 
@@ -243,10 +374,66 @@ var JobCloseoutOps = (function () {
       if (!previewOn() || !data || !data.job) return '';
       var job = data.job;
       var block = data.closeout !== undefined ? data.closeout : job.closeout;
-      var view = { type: job.type, status: job.status, closeout: block };
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(view, job.status, Date.now()));
+      var view = { id: job.id, type: job.type, status: job.status, closeout: block };
+      REVIEW_KEYS.forEach(function (k) {
+        if (job[k] !== undefined) view[k] = job[k];
+        else if (data[k] !== undefined) view[k] = data[k];
+      });
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(view, job.status, Date.now())) +
+        toggleHtml(view, job.status, { detail: true });
     } catch (e) { return ''; }
   }
+
+  function redraw(jobId) {
+    var d = _drawn[jobId];
+    if (!d) return;
+    var t = JobCloseoutCore.reviewToggle(withReview(d.job), d.status);
+    document.querySelectorAll('.closeout-review-toggle-wrap').forEach(function (wrap) {
+      if (wrap.getAttribute('data-review-job') !== String(jobId)) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = JobCloseoutCore.reviewToggleHtml(t, jobId, { detail: wrap.getAttribute('data-review-detail') === '1' });
+      if (tmp.firstChild) wrap.replaceWith(tmp.firstChild); else wrap.remove();
+    });
+  }
+
+  function say(message, type) {
+    try { if (typeof showToast === 'function') showToast(message, type); } catch (e) { /* no toast host */ }
+  }
+
+  // One press: ask ops-api, then draw what it answered. Never optimistic.
+  function toggleReview(btn) {
+    try {
+      if (!btn || btn.disabled) return Promise.resolve(null);
+      var jobId = btn.getAttribute('data-review-toggle');
+      var optOut = btn.getAttribute('data-review-state') === 'on';
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      return Promise.resolve()
+        .then(function () { return opsPost('set_review_opt_out', { job_id: jobId, opt_out: optOut }); })
+        .then(function (res) {
+          if (!res || res.success !== true || typeof res.review_opt_out !== 'boolean') {
+            throw new Error('unexpected answer');
+          }
+          _review[jobId] = {
+            review_opt_out: res.review_opt_out,
+            review_opt_out_at: res.review_opt_out_at || null,
+            review_opt_out_by: res.review_opt_out_by || null
+          };
+          redraw(jobId);
+          say(res.review_opt_out ? 'Review text turned off for this job.' : 'Review text turned back on for this job.', 'success');
+          return res;
+        })
+        .catch(function (err) {
+          var sent = (err && err.status === 409) || lower(err && (err.code || (err.body && err.body.error) || err.message)) === 'review_already_sent';
+          if (sent) _review[jobId] = Object.assign({}, _review[jobId], { review_claim_status: 'sent' });
+          redraw(jobId);
+          say(JobCloseoutCore.refusalWords(err), 'warning');
+          return null;
+        });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
+  function lower(v) { return v == null ? '' : String(v).trim().toLowerCase(); }
 
   function nextStatuses(current, type) {
     try { return JobCloseoutCore.nextStatuses(current, type, previewOn()); } catch (e) { return null; }
@@ -256,7 +443,8 @@ var JobCloseoutOps = (function () {
     previewOn: previewOn,
     cardTagsHtml: cardTagsHtml,
     detailTagsHtml: detailTagsHtml,
-    nextStatuses: nextStatuses
+    nextStatuses: nextStatuses,
+    toggleReview: toggleReview
   };
 })();
 

@@ -140,4 +140,47 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(C.nextStatuses('invoiced', 'repair', true)).toBeNull();
     expect(C.nextStatuses('invoiced', 'fencing', false)).toBeNull();
   });
+  test('review switch: fencing and patio in Complete, Invoiced, Final Payment and Get Review only, and only with the field', () => {
+    const row = (extra) => Object.assign({ id: 'j1', type: 'fencing' }, extra);
+    for (const st of ['complete', 'invoiced', 'final_payment', 'get_review']) {
+      expect(C.reviewToggle(row({ review_opt_out: false }), st)).toMatchObject({ on: true, locked: false, text: 'Review text on' });
+    }
+    expect(C.reviewToggle(row({ type: 'patio', review_opt_out: false }), 'invoiced')).not.toBeNull();
+    // Earlier stages, other types, and a back end that has not shipped the field.
+    for (const st of ['scheduled', 'in_progress', 'rectification', 'archived']) {
+      expect(C.reviewToggle(row({ review_opt_out: false }), st)).toBeNull();
+    }
+    expect(C.reviewToggle(row({ type: 'makesafe', review_opt_out: false }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ type: 'decking', review_opt_out: false }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({}), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: null }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: 'false' }), 'invoiced')).toBeNull();
+    // The same keys on the closeout block count too.
+    expect(C.reviewToggle(row({ closeout: { review_opt_out: true } }), 'invoiced')).toMatchObject({ on: false });
+  });
+
+  test('review switch: off names who and when (Perth time); a claim locks it', () => {
+    const off = C.reviewToggle({ id: 'j1', type: 'fencing', review_opt_out: true,
+      review_opt_out_at: '2026-10-20T02:05:00Z', review_opt_out_by: 'shaun@example.test' }, 'invoiced');
+    expect(off).toMatchObject({ on: false, locked: false, text: 'Review text off' });
+    expect(off.offBy).toBe('Turned off by shaun@example.test on 20 Oct 2026, 10:05am');
+    expect(off.title).toContain('Turned off by shaun@example.test on 20 Oct 2026, 10:05am');
+    const html = C.reviewToggleHtml(off, 'j1', { detail: true });
+    expect(html).toContain('aria-checked="false"');
+    expect(html).toContain('class="closeout-review-offby"');
+    expect(C.reviewToggleHtml(off, 'j1')).not.toContain('closeout-review-offby');
+
+    const sent = C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: 'sent' }, 'get_review');
+    expect(sent).toMatchObject({ locked: true, text: 'Review text sent' });
+    expect(C.reviewToggleHtml(sent, 'j1')).toContain(' disabled ');
+    expect(C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: 'claimed' }, 'get_review').text)
+      .toBe('Review text sending');
+    expect(C.refusalWords({ status: 409, code: null, body: { error: 'review_already_sent' } }))
+      .toBe('The review text has already gone out, so it can no longer be stopped.');
+    expect(C.refusalWords({ status: 500 })).toBe('The review text switch could not be changed. Nothing was changed.');
+    const all = [off, sent].map((t) => t.text + t.title + t.offBy).join(' ') + C.refusalWords({ status: 409 }) + C.refusalWords({});
+    expect(all).not.toMatch(/[–—]/);
+    expect(C.reviewToggleHtml(C.reviewToggle({ id: 'j1', type: 'fencing', review_opt_out: true, review_opt_out_by: '<b>x</b>' }, 'invoiced'), 'j1', { detail: true }))
+      .not.toContain('<b>');
+  });
 });

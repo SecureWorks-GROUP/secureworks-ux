@@ -397,6 +397,46 @@ check('chat window: what the bottom holds, and why nothing goes when it cannot',
   assert.strictEqual(mode({ row: {}, suggestion: { kind: 'move' }, manual_text: ok }).mode, 'move');
 });
 
+// ── Total owed to us (approved 20 Oct 2026) ──
+check('total owed: the backend lines are shown as sent, add up to the total, and Debt is the chart\'s figure', () => {
+  const { buildDebtWorkshopFixture } = require('../tests/fixtures/debt-workshop');
+  const ov = buildDebtWorkshopFixture('2026-10-08').overview;
+  const o = C.owedView(ov);
+  assert.strictEqual(o.addsUp, true);
+  assert.deepStrictEqual(o.lines.map((l) => l.key), ['debt', 'not_due', 'progress', 'companies', 'deposits', 'not_chased', 'needs_a_look']);
+  const sum = o.lines.reduce((s, l) => s + Math.round(l.amount * 100), 0) / 100;
+  assert.strictEqual(sum, o.amount);
+  // The Debt line is exactly what the chart shows on All jobs.
+  const chart = C.totals(C.items(ov, 'all')).all;
+  const debt = o.lines[0];
+  assert.deepStrictEqual([debt.count, debt.amount], [chart.count, chart.amount]);
+  // Lines that do not add up are flagged, never hidden.
+  const bad = JSON.parse(JSON.stringify(ov)); bad.total_owed.amount += 1;
+  assert.strictEqual(C.owedView(bad).addsUp, false);
+  // An older backend sends no total_owed: no card.
+  assert.strictEqual(C.owedView({ rows: [] }), null);
+  assert.strictEqual(C.owedView(null), null);
+});
+check('total owed: with a job type filter the Debt line says it is all jobs', () => {
+  assert.strictEqual(C.owedDebtSub('Past due and followed up: the figure above', 'all', 'All jobs'), 'Past due and followed up: the figure above');
+  assert.strictEqual(C.owedDebtSub('Past due and followed up: the figure above', 'patio', 'Patio'), 'All jobs. The chart above shows patio only');
+});
+check('xero check line: matches, does not match (clickable), not checked, and an older backend', () => {
+  const today = '2026-10-08';
+  assert.deepStrictEqual(C.xeroCheckLine({ status: 'matches', checked_at: '2026-10-07T22:49:00Z' }, today), { cls: 'ok', text: 'Matches Xero', when: 'checked 6:49am', list: false });
+  const differs = C.xeroCheckLine({ status: 'differs', words: 'Does not match Xero: 2 invoices differ (INV-0034, INV-0177)', checked_at: '2026-10-06T22:49:00Z', stale: true, differences: [{ invoice_number: 'INV-0034' }, { invoice_number: 'INV-0177' }] }, today);
+  assert.deepStrictEqual(differs, { cls: 'warn', text: 'Does not match Xero: 2 invoices differ (INV-0034, INV-0177)', when: 'checked 6:49am on Wed 7 Oct, over 3 hours ago', list: true });
+  assert.deepStrictEqual(C.xeroCheckLine({ status: 'not_checked', words: 'Not checked against Xero yet', checked_at: null }, today), { cls: 'grey', text: 'Not checked against Xero yet', when: '', list: false });
+  assert.strictEqual(C.xeroCheckLine(undefined, today), null);
+});
+check('drafts line: shown only when Xero has drafts, and never in the total', () => {
+  assert.strictEqual(C.draftsLine({ drafts: { count: 3, amount: 4120 } }), 'Drafts not sent: 3 invoices, $4,120.00. Not in the total.');
+  assert.strictEqual(C.draftsLine({ drafts: { count: 1, amount: 99.5 } }), 'Drafts not sent: 1 invoice, $99.50. Not in the total.');
+  assert.strictEqual(C.draftsLine({ drafts: { count: 0, amount: 0 } }), '');
+  assert.strictEqual(C.draftsLine({ drafts: null }), '');
+  assert.strictEqual(C.draftsLine(null), '');
+});
+
 // ════════════════════════════════════════════════════════════
 // CONTRACT WITH THE BACKEND
 // The screen must only word codes ops-api really throws, and only post fields ops-api accepts

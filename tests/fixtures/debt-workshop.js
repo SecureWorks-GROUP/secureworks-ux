@@ -71,6 +71,35 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     jan_list: { visit_date: d(4), status: 'open', count: 2 },
   };
 
+  // "Total owed to us" (debt_ws_overview.total_owed, backend debt_ws_report.ts totalOwedFrom):
+  // every open invoice, broken down so the lines add up to the total. Debt is the chart's own
+  // figure (the categories above); the rest come from the same fixture's footer figures.
+  const inv = (n, payer, amount, detail, o = {}) => Object.assign({ xero_invoice_id: uuid(n), invoice_number: 'INV-' + n, payer, job_number: null, amount, detail }, o);
+  const debtInvoices = rows.filter((r) => r.category).map((r) => inv(Number(String(r.invoice_number).slice(4)), r.payer_label, r.amount_due, r.category.replace('_', ' ') + ', day ' + r.day, { xero_invoice_id: r.xero_invoice_id, job_number: r.job_number }))
+    .concat([inv(9301, 'Harbour Restoration Pty Ltd', 1000, 'Bad debt, day 31'), inv(9302, 'Harbour Restoration Pty Ltd', 800, 'Bad debt, day 22'), inv(9303, 'Harbour Restoration Pty Ltd', 613.1, 'Escalating, day 9'), inv(9311, 'Coastline Building Group', 583, 'Escalating, day 12')]);
+  const owedLine = (key, name, sub, invoices) => ({ key, name, sub, count: invoices.length, amount: Math.round(invoices.reduce((s, i) => s + Math.round(i.amount * 100), 0)) / 100, invoices });
+  const owedLines = [
+    owedLine('debt', 'Debt', 'Past due and followed up: the figure above', debtInvoices),
+    owedLine('not_due', 'Not due yet', 'Before the tab\'s due date', [inv(9010, 'Lee Park', 5900, 'Due ' + d(6))]),
+    owedLine('progress', 'Progress payments', 'Not due yet', []),
+    owedLine('companies', 'Companies on statements', 'Not due yet', [inv(9304, 'Harbour Restoration Pty Ltd', 561, 'Due ' + d(4)), inv(9321, 'Northside Strata Services', 300, 'Due ' + d(8))]),
+    owedLine('deposits', 'Deposits', 'Go-ahead payments: the job starts when paid', [inv(9401, 'Kim Taylor', 2500, 'Invoiced ' + d(-3))]),
+    owedLine('not_chased', 'Not chased', 'Example Trade Services', [inv(9501, 'Example Trade Services', 305.25, 'On the not-chased list: never chased or put on a statement')]),
+    owedLine('needs_a_look', 'Needs a look', 'The rules could not place it', [inv(9201, 'Robin Vale', 880, 'Needs a look: looks like a duplicate'), inv(9202, 'Pat Kim', 412.5, 'Needs a look: not linked to a job')]),
+  ];
+  overview.total_owed = {
+    count: owedLines.reduce((s, l) => s + l.count, 0),
+    amount: Math.round(owedLines.reduce((s, l) => s + Math.round(l.amount * 100), 0)) / 100,
+    lines: owedLines, adds_up: true,
+  };
+  // Whether our Xero copy matched Xero at the last hourly check (debt_ws_xero_check.ts).
+  overview.xero_check = Object.assign({
+    status: 'matches', words: 'Matches Xero', checked_at: at(0, '06:49'), stale: false,
+    xero: { count: overview.total_owed.count, amount: overview.total_owed.amount },
+    copy: { count: overview.total_owed.count, amount: overview.total_owed.amount },
+    differ_count: 0, differences: [], drafts: { count: 3, amount: 4120 }, last_failed: null,
+  }, opts.xeroCheck || {});
+
   const findRow = (n) => rows.find((r) => r.xero_invoice_id === uuid(9000 + n));
   // debt_ws_job. A single-payer job's payer is the job's client (payer_contact mirrors the job);
   // a shared fence's neighbour gets their own payer_contact (see Riley below).
@@ -241,10 +270,10 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
   const owner = !!settings.viewer_is_owner, sendingOn = !!settings.sending_on;
   const report = {
     ok: true, version: 'debt-ws/v1', perth_date: today, read_at: at(0, '09:15'),
-    report: { version: 'debt-report/v1', today, as_at: '9:15am Perth time, today', debt: { count: 12, amount: 21456.82 }, xero_open: { count: 20, amount: 41890.4 }, tie: { ok: true } },
+    report: { version: 'debt-report/v1', today, as_at: '9:15am Perth time, today', debt: { count: 12, amount: 21456.82 }, xero_open: { count: 20, amount: 41890.4 }, total_owed: { count: 20, amount: 41890.4 }, tie: { ok: true } },
     html: '<!doctype html><html><head><meta charset="utf-8"><title>Debt position</title></head><body style="font-family:Helvetica,Arial,sans-serif;padding:20px">' +
       '<h1>Debt position</h1><p>As at 9:15am Perth time, today</p><table><tr><td>Total debt</td><td>$21,456.82</td></tr>' +
-      '<tr><td>Adds up to total open in Xero</td><td>$41,890.40</td></tr></table><p>Check: $41,890.40 equals Xero\'s open total to the cent.</p></body></html>',
+      '<tr><td>Adds up to total owed to us</td><td>$41,890.40</td></tr></table><p>Check: $41,890.40 equals the total owed in our Xero copy to the cent.</p><p>Check against Xero: our Xero copy matched Xero.</p></body></html>',
     delivery: {
       from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], auto_send: !!settings.report_auto_send,
       sending_on: sendingOn, viewer_is_owner: owner, can_send: owner && sendingOn,

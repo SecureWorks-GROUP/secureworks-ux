@@ -12,6 +12,9 @@
 //  - Insurance shows company rows with statement status, Preview (statement in a modal) and
 //    Approve (disabled with the reason when sending is off or there is no email).
 //  - Bad debt shows Jan's visit list with Remove; the footer opens Paid this week and Needs a look.
+//  - Total owed to us (20 Oct 2026) sits under the chart: the backend's lines, which add up to
+//    it, each opening its invoices; "Matches Xero" or which invoices differ; drafts not in the
+//    total. It posts nothing, and an older backend shows no card.
 //  - W2: status strip with the ladder; story, money and documents (opened in a modal); agent
 //    notices with Dismiss; a move card; a Link contact card; notes with a promise date.
 //  - The chat window (approved 16 Oct 2026): a bar with who we text, "Texts go from 771", the
@@ -180,6 +183,78 @@ test('W1 footer: paid this week, needs a look with reasons, not due yet greyed',
   await expect(page.locator('#dwNotDue')).toContainText('$6,200.00 from 2 invoices');
   await page.locator('#dwNotChased .dw-link').click();
   await expect(page.locator('#dwModal')).toContainText('Example Trade Services');
+});
+
+test('W1: Total owed to us sits under the chart; its lines add up, open their invoices, and say Matches Xero', async ({ page }) => {
+  await openDebt(page);
+  const owed = page.locator('#dwOwed');
+  await expect(owed).toBeVisible();
+  // Directly under the chart, before the list.
+  const chart = await page.locator('.dw-ov').boundingBox();
+  const card = await owed.boundingBox();
+  const list = await page.locator('#dwList').boundingBox();
+  expect(card.y).toBeGreaterThanOrEqual(chart.y + chart.height - 1);
+  expect(list.y).toBeGreaterThanOrEqual(card.y + card.height - 1);
+  // The chart and its figure are unchanged.
+  await expect(page.locator('#dwTotal')).toHaveText('$20,140');
+  await expect(page.locator('#dwOwedTotal')).toHaveText('$30,998.60');
+  await expect(owed).toContainText('20 open invoices');
+  const line = (k) => page.locator('#dwOwedLines [data-dw="owed"][data-k="' + k + '"]');
+  await expect(line('debt')).toContainText('$20,139.85');
+  await expect(line('debt')).toContainText('13 invoices');
+  await expect(line('not_due')).toContainText('$5,900.00');
+  await expect(line('companies')).toContainText('Companies on statements');
+  await expect(line('deposits')).toContainText('$2,500.00');
+  await expect(line('not_chased')).toContainText('Example Trade Services');
+  await expect(line('needs_a_look')).toContainText('$1,292.50');
+  // A line with nothing in it is shown at $0.00 and does not open.
+  await expect(line('progress')).toBeDisabled();
+  // Each line opens the invoices in it.
+  await line('companies').click();
+  await expect(page.locator('#dwModal')).toContainText('Northside Strata Services');
+  await expect(page.locator('#dwModal')).toContainText('INV-9304');
+  await page.locator('#dwModal [data-dw="modal-close"]').click();
+  await line('debt').click();
+  await expect(page.locator('#dwModal li')).toHaveCount(13);
+  await page.keyboard.press('Escape');
+  // The check against Xero, and the drafts that are not in the total.
+  await expect(page.locator('#dwXeroCheck')).toHaveClass(/ok/);
+  await expect(page.locator('#dwXeroCheck')).toContainText('Matches Xero');
+  await expect(page.locator('#dwXeroCheck')).toContainText('checked 6:49am');
+  await expect(page.locator('#dwDrafts')).toHaveText('Drafts not sent: 3 invoices, $4,120.00. Not in the total.');
+  // With a job type filter, the chart narrows but the total stays all jobs, and says so.
+  await page.locator('[data-dw="jt"][data-k="patio"]').click();
+  await expect(page.locator('#dwOwedTotal')).toHaveText('$30,998.60');
+  await expect(line('debt')).toContainText('All jobs. The chart above shows patio only');
+  await shot(page, '20-total-owed.png', '#dwOwed');
+  // Nothing was posted: the card only reads.
+  expect(await posts(page)).toEqual([]);
+});
+
+test('W1: Does not match Xero names the invoices and lists them; an older backend shows no card', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { xeroCheck: {
+    status: 'differs', words: 'Does not match Xero: 2 invoices differ (INV-0034, INV-0177)', differ_count: 2,
+    xero: { count: 22, amount: 32085.08 },
+    differences: [
+      { invoice_number: 'INV-0034', contact_name: 'Sample Client', xero_amount_due: 734.48, copy_amount_due: null, words: 'Xero says $734.48 is owed; our copy says deleted' },
+      { invoice_number: 'INV-0177', contact_name: 'Another Client', xero_amount_due: 352, copy_amount_due: null, words: 'Xero says $352.00 is owed; our copy says deleted' },
+    ],
+  } });
+  await openDebt(page, { fixture });
+  const check = page.locator('#dwXeroCheck');
+  await expect(check).toHaveClass(/warn/);
+  await expect(check).toContainText('Does not match Xero: 2 invoices differ (INV-0034, INV-0177)');
+  await check.click();
+  await expect(page.locator('#dwModal')).toContainText('INV-0034');
+  await expect(page.locator('#dwModal')).toContainText('our copy says deleted');
+  await expect(page.locator('#dwModal')).toContainText('Xero says $32,085.08 across 22 invoices');
+  await page.locator('#dwModal [data-dw="modal-close"]').click();
+  // An older backend sends no total_owed: the tab reads exactly as before.
+  const old = buildDebtWorkshopFixture();
+  delete old.overview.total_owed; delete old.overview.xero_check;
+  await openDebt(page, { fixture: old });
+  await expect(page.locator('#dwTotal')).toHaveText('$20,140');
+  await expect(page.locator('#dwOwed')).toHaveCount(0);
 });
 
 test('Insurance: company statements with Preview and Approve, each refusal said plainly', async ({ page }) => {
@@ -559,6 +634,10 @@ test('phone: the donut shrinks, the list fits, the job columns stack', async ({ 
   expect(fit).toBe(true);
   const donut = await page.locator('#dwDonut').boundingBox();
   expect(donut.width).toBeLessThanOrEqual(180);
+  // Total owed to us fits a phone: one column of lines, every amount inside the card.
+  const owed = await page.locator('#dwOwed').boundingBox();
+  const amounts = await page.locator('#dwOwedLines .am').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
+  amounts.forEach((right) => expect(right).toBeLessThanOrEqual(owed.x + owed.width + 1));
   await shot(page, '05-mobile-overview.png');
   await openJob(page, 'Casey Morgan', 'Escalating');
   const left = await page.locator('#dwLeft').boundingBox();

@@ -4,6 +4,10 @@
 //   1. owed invoices with no job, largest first;
 //   2. messages from a contact who owes us money;
 //   3. recent customer messages from someone with a live job.
+// Find by job reads ops-api recon_job_items (secureworks-backend 20261020165000): every
+// queued message that offers one job, including the ones the daily list leaves out (no
+// identity, never asked), so a person who knows the job can still answer them. A message that
+// belongs to more than one of its suggested jobs can be recorded on all of them (split).
 // Each card is answered by a person's tap, confirmed once, then recorded against the
 // evidence the card was shown with (shown_hash). A choice says which job something belongs
 // to. It never moves money, sends anything, changes an invoice or writes a job.
@@ -32,7 +36,9 @@ var ReconCore = (function () {
     action_not_allowed: 'That choice is not available for this item.',
     decision_not_recorded: 'The match was not recorded. Please try again.',
     daily_list_unreadable: 'The list could not be read just now.',
-    invalid_request: 'The match was not recorded. Please reload and try again.'
+    invalid_request: 'The match was not recorded. Please reload and try again.',
+    job_number_ambiguous: 'More than one job carries that number.',
+    read_failed: 'That job could not be read just now.'
   };
 
   function tabVisible(search, stored) {
@@ -66,6 +72,7 @@ var ReconCore = (function () {
   function teamWords(team) { return team === 'finance' ? 'Finance' : team === 'sales' ? 'Sales' : team === 'owner' ? 'the owner' : String(team || ''); }
   // A choice is { kind: 'job', job_id } | { kind: 'unrelated' } | { kind: 'unresolved' } | { kind: 'escalate', to }.
   function actionFor(item, choice) {
+    if (choice.kind === 'split') return 'split';
     if (choice.kind === 'job') {
       if (item.subject_kind === 'invoice') return 'correct';
       return isOffered(item, choice.job_id) ? 'confirm' : 'correct';
@@ -79,11 +86,18 @@ var ReconCore = (function () {
       subject_id: item.subject_id,
       shown_hash: item.evidence_hash,
       action: action,
-      job_ids: choice.kind === 'job' ? [choice.job_id] : [],
+      job_ids: choice.kind === 'job' ? [choice.job_id] : choice.kind === 'split' ? splitIds(item) : [],
       cause: item.cause
     };
     if (action === 'escalate') body.escalate_to = passTargets(item).indexOf(choice.to) >= 0 ? choice.to : escalateTo(item);
     return body;
+  }
+  // A split records every suggested job, never a job the card did not offer.
+  function splitIds(item) { return (item.offered_jobs || []).map(function (j) { return j.job_id; }); }
+  function canSplit(item) { return item.subject_kind === 'event' && splitIds(item).length > 1; }
+  function splitLabel(item) {
+    var nums = (item.offered_jobs || []).map(function (j) { return j.job_number || 'Job'; });
+    return nums.length === 2 ? 'It is both ' + nums[0] + ' and ' + nums[1] : 'It is all of ' + nums.join(', ');
   }
   function findJob(item, jobId) {
     return (item.offered_jobs || []).concat(item.other_jobs || []).filter(function (j) { return j.job_id === jobId; })[0] || null;
@@ -94,6 +108,9 @@ var ReconCore = (function () {
     if (choice.kind === 'job') {
       if (invoice) return 'Record that this invoice is for ' + jobWords(findJob(item, choice.job_id)) + '? Finance will link it in Xero. Nothing changes in Xero from here.';
       return 'Record that this message belongs to ' + jobWords(findJob(item, choice.job_id)) + '?';
+    }
+    if (choice.kind === 'split') {
+      return 'Record that this message belongs to ' + (item.offered_jobs || []).map(jobWords).join(' and ') + '? It will show on each of them.';
     }
     if (choice.kind === 'unrelated') {
       if (invoice) return 'Record that this invoice is not for any job? Finance will confirm. The money stays owed.';
@@ -137,18 +154,43 @@ var ReconCore = (function () {
     });
     return out;
   }
+  // Find by job: a job number is matched whole by the server; the screen only trims it.
+  function jobNumberOk(s) { return /^[A-Za-z0-9-]{1,40}$/.test(String(s || '').trim()); }
+  // One recon_job_items row as a list card. The cause words stay the server's.
+  function fromJobItem(it) {
+    return {
+      band: null, subject_kind: 'event', subject_id: it.event_id, evidence_hash: it.shown_hash,
+      cause: it.cause, decision_state: it.decision_state || 'none', last_action: it.last_action || null,
+      owner: 'context_resolver', waiting_days: null,
+      offered_jobs: (it.offered || []).map(function (j) { return { job_id: j.job_id, job_number: j.job_number }; }),
+      other_jobs: [],
+      summary: { channel: it.channel, direction: it.direction, occurred_at: it.occurred_at, from: it.from_address, subject: it.subject, preview: it.preview }
+    };
+  }
+  function causeWords(cause) {
+    return {
+      'defect:no_identity': 'No contact on this message, so it was never matched',
+      'defect:backfill_never_asked': 'Loaded from history and never matched',
+      'ambiguity:several_candidates': 'Could be more than one job',
+      'ambiguity:one_candidate': 'One likely job, not confirmed',
+      'ambiguity:no_candidate': 'No likely job'
+    }[cause] || '';
+  }
   function hasBanned(s) { return /[\u2013\u2014]/.test(String(s)) || /\p{Extended_Pictographic}/u.test(String(s)); }
   return {
     tabVisible: tabVisible, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
     refusalWords: refusalWords, mustReread: mustReread, grouped: grouped, escalateTo: escalateTo,
     passTargets: passTargets, teamWords: teamWords,
+    canSplit: canSplit, splitLabel: splitLabel, jobNumberOk: jobNumberOk, fromJobItem: fromJobItem, causeWords: causeWords,
     hasBanned: hasBanned
   };
 })();
 // </recon-core>
 
-var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null };
+var RC_PAGE = 50;
+var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null,
+  job: null /* { number, items, err, loading, gen } for Find by job */ };
 
 function rcEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function rcRoot() { return document.getElementById('reconRoot'); }
@@ -188,7 +230,10 @@ function rcCss() {
     '#viewRecon .rc-confirm button{margin:8px 6px 0 0;font-size:13px;padding:6px 12px;border-radius:8px;border:1px solid #9bb8e6;background:#fff;cursor:pointer;}',
     '#viewRecon .rc-confirm .rc-yes{background:#1f5fbf;color:#fff;border-color:#1f5fbf;}',
     '#viewRecon .rc-msg{margin:10px 0;padding:10px;border-radius:8px;background:#fdecec;color:#8a1c1c;font-size:13px;}',
-    '#viewRecon .rc-empty{color:var(--sw-text-sec);padding:24px 0;}'
+    '#viewRecon .rc-empty{color:var(--sw-text-sec);padding:24px 0;}',
+    '#viewRecon .rc-find{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 8px;font-size:13px;}',
+    '#viewRecon .rc-find input{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);min-width:0;flex:1 1 180px;max-width:260px;}',
+    '#viewRecon .rc-find button{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);background:var(--sw-bg,#fafafa);cursor:pointer;}'
   ].join('\n');
   document.head.appendChild(st);
 }
@@ -205,13 +250,18 @@ async function rcRead(quiet) {
   var gen = ++RC.gen;
   if (!quiet || !RC.items) { RC.loading = true; rcRender(); }
   var res = null, err = null;
-  try { res = await opsFetch('recon_daily_list', { limit: 50 }); } catch (e) { err = e; }
+  try { res = await opsFetch('recon_daily_list', { limit: RC_PAGE }); } catch (e) { err = e; }
   if (gen !== RC.gen) return;
   RC.loading = false;
+  // An answer with no list is a failed read, never "nothing needs matching".
+  if (!err && (!res || !Array.isArray(res.items))) err = new Error('Unexpected answer reading the list');
   if (err) {
     if (!quiet || !RC.items) { RC.items = null; RC.err = err; }
   } else {
-    RC.items = (res && res.items) || []; RC.err = null;
+    RC.items = res.items; RC.err = null;
+    // more: true means the list was cut at its page. A back end that does not send more yet
+    // gives no answer either way, so a full page is shown as possibly cut.
+    RC.more = res.more === true ? true : (res.more === false ? false : (res.items.length >= RC_PAGE ? null : false));
   }
   rcRender();
 }
@@ -231,7 +281,8 @@ function rcCard(item) {
     h += '<div class="rc-top"><span>' + rcEsc((s.channel || 'Message') + (s.from ? ' from ' + s.from : '')) +
       (held ? '<span class="rc-held">' + rcEsc(held) + '</span>' : '') + '</span>' +
       (band === 2 ? '<span>They owe ' + rcEsc(ReconCore.money(item.amount)) + '</span>' : '') + '</div>';
-    h += '<div class="rc-meta">' + rcEsc([s.occurred_at ? String(s.occurred_at).slice(0, 10) : '', 'Waiting ' + ReconCore.waitWords(item.waiting_days)].filter(Boolean).join(' · ')) + '</div>';
+    h += '<div class="rc-meta">' + rcEsc([s.occurred_at ? String(s.occurred_at).slice(0, 10) : '', item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
+      item.band == null ? ReconCore.causeWords(item.cause) : ''].filter(Boolean).join(' · ')) + '</div>';
     if (s.subject) h += '<div class="rc-preview"><strong>' + rcEsc(s.subject) + '</strong></div>';
     if (s.preview) h += '<div class="rc-preview">' + rcEsc(s.preview) + '</div>';
   }
@@ -245,6 +296,9 @@ function rcCard(item) {
     (item.offered_jobs || []).forEach(function (j) {
       h += '<button type="button" class="rc-job" data-rc-job="' + rcEsc(j.job_id) + '">It is ' + rcEsc(ReconCore.jobWords(j)) + '</button>';
     });
+    if (ReconCore.canSplit(item)) {
+      h += '<button type="button" class="rc-job" data-rc-kind="split">' + rcEsc(ReconCore.splitLabel(item)) + '</button>';
+    }
     var others = item.other_jobs || [];
     if (others.length) {
       h += '<select data-rc-other aria-label="Another job of theirs"><option value="">Another job of theirs...</option>' +
@@ -268,6 +322,7 @@ function rcRender() {
     '<div class="rc-lede">What needs a person to say which job it belongs to, most at stake first. ' +
     'A choice here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
   if (RC.msg) h += '<div class="rc-msg" data-rc-msg>' + rcEsc(RC.msg) + '</div>';
+  h += rcJobSection();
   if (RC.loading && !RC.items) {
     h += '<div class="rc-empty">Reading the list...</div>';
   } else if (RC.err) {
@@ -280,11 +335,48 @@ function rcRender() {
       h += '<div class="rc-band" data-rc-band="' + rcEsc(g.band) + '">' + rcEsc(b.title) + ' (' + g.items.length + ')<small>' + rcEsc(b.note) + '</small></div>';
       g.items.forEach(function (it) { h += rcCard(it); });
     });
+    if (RC.more === true) h += '<div class="rc-empty" data-rc-more>Showing the first ' + RC.items.length + ', most urgent first. There are more waiting; they show here as these are matched.</div>';
+    else if (RC.more === null) h += '<div class="rc-empty" data-rc-more>Showing ' + RC.items.length + '. There may be more waiting than this.</div>';
   }
   root.innerHTML = h + '</div>';
 }
 
-function rcItem(id) { return (RC.items || []).filter(function (i) { return i.subject_id === id; })[0] || null; }
+function rcJobSection() {
+  var j = RC.job;
+  var h = '<form class="rc-find" data-rc-find><label for="rcJobNo">Find by job</label> ' +
+    '<input id="rcJobNo" name="job" autocomplete="off" placeholder="Job number, e.g. SWP-26376" value="' + rcEsc(j ? j.number : '') + '"> ' +
+    '<button type="submit">Find</button>' + (j ? ' <button type="button" data-rc-clear>Clear</button>' : '') + '</form>';
+  if (!j) return h;
+  h += '<div class="rc-band" data-rc-jobband>Waiting on ' + rcEsc(j.number) + (j.items ? ' (' + j.items.length + ')' : '') +
+    '<small>Every message that could belong to this job and still needs a person, including ones the list below leaves out.</small></div>';
+  if (j.loading && !j.items) h += '<div class="rc-empty">Reading that job...</div>';
+  else if (j.err) h += '<div class="rc-msg" data-rc-joberr>' + rcEsc(ReconCore.refusalWords(j.err)) + '</div>';
+  else if (!j.items.length) h += '<div class="rc-empty" data-rc-jobempty>Nothing on ' + rcEsc(j.number) + ' needs matching.</div>';
+  else {
+    j.items.forEach(function (it) { h += rcCard(it); });
+    if (j.more) h += '<div class="rc-empty" data-rc-jobmore>Showing the newest ' + j.items.length + '. Older ones on ' + rcEsc(j.number) + ' are not shown here yet.</div>';
+  }
+  return h;
+}
+
+async function rcReadJob(number, quiet) {
+  if (!RC.job || RC.job.number !== number) RC.job = { number: number, items: null, err: null, loading: false, gen: 0 };
+  var j = RC.job, gen = ++j.gen;
+  if (!quiet || !j.items) { j.loading = true; rcRender(); }
+  var res = null, err = null;
+  try { res = await opsFetch('recon_job_items', { job_number: number }); } catch (e) { err = e; }
+  if (RC.job !== j || gen !== j.gen) return;
+  j.loading = false;
+  if (err) { if (!quiet || !j.items) { j.items = null; j.err = err; } }
+  else if (!res || !Array.isArray(res.items)) { if (!quiet || !j.items) { j.items = null; j.err = new Error('Unexpected answer reading that job'); } }
+  else { j.items = res.items.map(ReconCore.fromJobItem); j.more = !!res.more; j.err = null; }
+  rcRender();
+}
+
+function rcItem(id) {
+  var all = (RC.job && RC.job.items || []).concat(RC.items || []);
+  return all.filter(function (i) { return i.subject_id === id; })[0] || null;
+}
 
 function rcChoose(subjectId, choice) {
   RC.pick = { subject_id: subjectId, choice: choice };
@@ -301,11 +393,12 @@ async function rcRecord() {
     await opsPost('recon_record_decision', ReconCore.bodyFor(item, RC.pick.choice));
     RC.saving = false; RC.pick = null; RC.msg = null;
     rcToast('Recorded', 'success');
+    if (RC.job) await rcReadJob(RC.job.number, true);
     await rcRead(true);
   } catch (e) {
     RC.saving = false;
     RC.msg = ReconCore.refusalWords(e);
-    if (ReconCore.mustReread(e)) { RC.pick = null; await rcRead(true); return; }
+    if (ReconCore.mustReread(e)) { RC.pick = null; if (RC.job) await rcReadJob(RC.job.number, true); await rcRead(true); return; }
     rcRender();
   }
 }
@@ -322,6 +415,7 @@ function rcBind() {
     if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); return; }
     if (t.hasAttribute('data-rc-yes')) { rcRecord(); return; }
     if (t.hasAttribute('data-rc-back')) { RC.pick = null; rcRender(); return; }
+    if (t.hasAttribute('data-rc-clear')) { RC.job = null; RC.pick = null; rcRender(); return; }
     if (!id) return;
     if (t.hasAttribute('data-rc-job')) { rcChoose(id, { kind: 'job', job_id: t.getAttribute('data-rc-job') }); return; }
     if (t.hasAttribute('data-rc-kind')) {
@@ -329,6 +423,16 @@ function rcBind() {
       if (t.hasAttribute('data-rc-to')) choice.to = t.getAttribute('data-rc-to');
       rcChoose(id, choice);
     }
+  });
+  root.addEventListener('submit', function (ev) {
+    var f = ev.target;
+    if (!f || !f.hasAttribute || !f.hasAttribute('data-rc-find')) return;
+    ev.preventDefault();
+    var input = f.querySelector('input[name="job"]');
+    var number = String(input ? input.value : '').trim().toUpperCase();
+    if (!ReconCore.jobNumberOk(number)) { RC.msg = 'Type a job number, for example SWP-26376.'; rcRender(); return; }
+    RC.msg = null; RC.pick = null;
+    rcReadJob(number, false);
   });
   root.addEventListener('change', function (ev) {
     var sel = ev.target;

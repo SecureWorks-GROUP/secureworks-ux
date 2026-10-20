@@ -103,5 +103,37 @@ check('held items say who has them', () => {
   assert.strictEqual(C.heldWith({ decision_state: 'undecided', owner: 'context_resolver' }), '');
 });
 
+const jobItem = { event_id: 'ffffffff-0000-4000-8000-000000000009', channel: 'email', direction: 'inbound', occurred_at: '2026-10-08T09:10:21Z',
+  from_address: 'orders@supplier.example', subject: 'Material Order Ref SWF-1001 & SWP-2002', preview: 'Delivery moved', counterpart_role: 'supplier',
+  cause: 'defect:no_identity', decision_state: 'none', last_action: null, shown_hash: '00112233445566778899aabbccddeeff',
+  offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] };
+check('a Find by job row becomes a card with the hash and cause the server gave', () => {
+  const c = C.fromJobItem(jobItem);
+  assert.strictEqual(c.subject_kind, 'event');
+  assert.strictEqual(c.subject_id, jobItem.event_id);
+  assert.strictEqual(c.evidence_hash, jobItem.shown_hash);
+  assert.strictEqual(c.cause, 'defect:no_identity');
+  assert.deepStrictEqual(c.offered_jobs.map((j) => j.job_number), ['SWF-1001', 'SWP-2002']);
+  assert.strictEqual(c.summary.from, 'orders@supplier.example');
+  assert.strictEqual(C.causeWords('defect:no_identity'), 'No contact on this message, so it was never matched');
+});
+check('a message with several suggested jobs can be split onto all of them, and only them', () => {
+  const c = C.fromJobItem(jobItem);
+  assert.strictEqual(C.canSplit(c), true);
+  assert.strictEqual(C.canSplit(message), false);
+  assert.strictEqual(C.canSplit(Object.assign({}, invoice, { offered_jobs: [JOB_A, JOB_B] })), false);
+  assert.strictEqual(C.splitLabel(c), 'It is both SWF-1001 and SWP-2002');
+  assert.deepStrictEqual(C.bodyFor(c, { kind: 'split' }), { subject_kind: 'event', subject_id: jobItem.event_id, shown_hash: jobItem.shown_hash,
+    action: 'split', job_ids: [JOB_A.job_id, JOB_B.job_id], cause: 'defect:no_identity' });
+  assert.strictEqual(C.confirmWords(c, { kind: 'split' }), 'Record that this message belongs to SWF-1001 and SWP-2002? It will show on each of them.');
+});
+check('a job number is checked before it is asked for', () => {
+  assert.strictEqual(C.jobNumberOk('SWP-26376'), true);
+  assert.strictEqual(C.jobNumberOk(' SW1346 '), true);
+  assert.strictEqual(C.jobNumberOk(''), false);
+  assert.strictEqual(C.jobNumberOk('SWP 26376'), false);
+  assert.strictEqual(C.refusalWords({ code: 'job_not_found' }), 'That job was not found.');
+});
+
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
-console.log('PASS recon: tab flag, actions, body, escalate, refusals, words');
+console.log('PASS recon: tab flag, actions, body, escalate, split, find by job, refusals, words');

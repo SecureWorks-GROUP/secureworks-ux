@@ -59,25 +59,28 @@ Actions) carry a small on/off **Review text** switch. On is the default: the tex
 sends. It must be turned off before the final payment lands, because the text goes
 out within about 15 minutes of the job showing fully paid.
 
-It reads, from the top level of the `pipeline` row (or of `job_detail`'s job) only,
-never the closeout block:
+Whether it is off, and any claim, come ONLY from the closeout block (the same block
+as the tags: the `pipeline` row's, or `job_detail`'s beside `job`, else on it); top-level
+copies are never read. Who and when come from the row (or `job_detail`'s job), where
+they are the job's own columns:
 
 ```
-review_opt_out: boolean          // no boolean here = the back end has not shipped it: no switch
-review_opt_out_at: ISO time | null
-review_opt_out_by: text | null
-review_claim_status: text | null // the job's job_review_claims status
+closeout.review_opt_out: boolean          // no boolean here = the back end has not shipped it: no switch
+closeout.review_claim_status: text | null // the job's job_review_claims status
+review_opt_out_at: ISO time | null        // on the row / job
+review_opt_out_by: text | null            // on the row / job
 ```
 
 A press calls ops-api `set_review_opt_out` with `{ job_id, opt_out }` and draws only
 what it answers (`{ success, review_opt_out, review_opt_out_at, review_opt_out_by }`),
 never an optimistic flip; the answer stays on the card until a later read of the job
-agrees with it. Off shows "Review text off", and who turned it off and when (Perth
+agrees with it, compared through the same closeout-block lookup the switch reads. Off shows "Review text off", and who turned it off and when (Perth
 time) in the tooltip and, on the job page, as a line under the switch. Once
 `review_claim_status` is set the switch is locked: `sent` reads "Review text sent",
 `claimed` "Review text sending", `unconfirmed` "Review text not confirmed", and any
 other status names itself ("Review text: skipped") without saying it was sent. A
-refusal whose `code` or `error` is `review_already_sent` locks it as sent and says so.
+refusal whose `code` or `error` is `review_already_sent` locks it and says so, drawn
+with the refusal's own `review_claim_status` (else as sent).
 Any other failure, another 409 included, leaves the switch as it was and says nothing
 was changed.
 

@@ -134,7 +134,8 @@ async function drawCards(page, rows) {
   }, rows);
 }
 
-const reviewRow = (extra) => Object.assign({}, base, extra);
+// The switch's state rides the closeout block; who and when ride the row.
+const reviewRow = (closeout, extra) => Object.assign({}, base, extra, { closeout });
 
 test('review switch: hidden with the preview off, outside Complete to Get Review, and when the field is absent', async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.removeItem('sw_closeout_preview'); } catch (e) {} });
@@ -147,11 +148,11 @@ test('review switch: hidden with the preview off, outside Complete to Get Review
   const [noField, early, makesafe, invoiced, complete, final, review] = await cards(page, [
     { job: base, status: 'invoiced' },
     { job: reviewRow({ review_opt_out: false }), status: 'scheduled' },
-    { job: reviewRow({ type: 'makesafe', review_opt_out: false }), status: 'invoiced' },
+    { job: reviewRow({ review_opt_out: false }, { type: 'makesafe' }), status: 'invoiced' },
     { job: reviewRow({ review_opt_out: false }), status: 'invoiced' },
     { job: reviewRow({ review_opt_out: false }), status: 'complete' },
     { job: reviewRow({ review_opt_out: false }), status: 'final_payment' },
-    { job: reviewRow({ type: 'patio', review_opt_out: false }), status: 'get_review' },
+    { job: reviewRow({ review_opt_out: false }, { type: 'patio' }), status: 'get_review' },
   ]);
   for (const html of [noField, early, makesafe]) expect(html).not.toContain('closeout-review-toggle');
   for (const html of [invoiced, complete, final, review]) expect(html).toContain('data-review-toggle="f1"');
@@ -198,15 +199,23 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await drawCards(page, [{ job: reviewRow({ review_opt_out: true }), status: 'invoiced' }]);
 
-  // The job page names who and when in words.
+  // The job page names who and when in words, from job_detail's closeout block
+  // and the job's own columns.
   const detail = await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
-    job: { id: 'f1', type: 'fencing', status: 'invoiced', review_opt_out: true,
+    job: { id: 'f1', type: 'fencing', status: 'invoiced',
       review_opt_out_at: '2026-10-20T02:05:00Z', review_opt_out_by: 'ops-e2e@example.test' },
+    closeout: { review_opt_out: true, review_claim_status: null },
   }));
   expect(detail).toContain('Turned off by ops-e2e@example.test on 20 Oct 2026, 10:05am');
-  // Review keys beside the job, not on it, are not read.
+  // A text that has gone locks the job page too; top-level copies are not read.
+  const detailSent = await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
+    job: { id: 'd2', type: 'fencing', status: 'get_review', review_opt_out: true },
+    closeout: { review_opt_out: false, review_claim_status: 'sent' },
+  }));
+  expect(detailSent).toContain('data-review-state="locked"');
+  expect(detailSent).toContain('Review text sent');
   expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
-    job: { id: 'd2', type: 'fencing', status: 'invoiced' }, review_opt_out: true,
+    job: { id: 'd3', type: 'fencing', status: 'invoiced', review_opt_out: true }, review_opt_out: true,
   }))).not.toContain('closeout-review-toggle');
 
   await toggle.click();
@@ -219,12 +228,14 @@ test('review switch: a claim locks it, and a 409 review_already_sent locks it th
   let hits = 0;
   await page.route(OPT_OUT_ROUTE, async (route) => {
     hits += 1;
-    await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'review_already_sent' }) });
+    const claim = route.request().postDataJSON().job_id === 'c1' ? { review_claim_status: 'claimed' } : {};
+    await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify(Object.assign({ error: 'review_already_sent' }, claim)) });
   });
   await openOps(page, '?closeout=preview');
   await drawCards(page, [
-    { job: reviewRow({ id: 's1', review_opt_out: false, review_claim_status: 'sent' }), status: 'get_review' },
-    { job: reviewRow({ id: 'r1', review_opt_out: false }), status: 'get_review' },
+    { job: reviewRow({ review_opt_out: false, review_claim_status: 'sent' }, { id: 's1' }), status: 'get_review' },
+    { job: reviewRow({ review_opt_out: false }, { id: 'r1' }), status: 'get_review' },
+    { job: reviewRow({ review_opt_out: false }, { id: 'c1' }), status: 'get_review' },
   ]);
 
   const sent = page.locator('#e2eCloseoutHost [data-review-toggle="s1"]');
@@ -237,6 +248,13 @@ test('review switch: a claim locks it, and a 409 review_already_sent locks it th
   await expect(racing).toHaveText('Review text sent');
   await expect(page.locator('#toastContainer')).toContainText('The review text has already gone out, so it can no longer be stopped.');
   expect(hits).toBe(1);
+
+  // The refusal's own claim status is drawn: a text still sending says so.
+  const sending = page.locator('#e2eCloseoutHost [data-review-toggle="c1"]');
+  await sending.click();
+  await expect(sending).toBeDisabled();
+  await expect(sending).toHaveText('Review text sending');
+  expect(hits).toBe(2);
 });
 
 test('review switch: a 409 for any other conflict leaves it as it was', async ({ page }) => {

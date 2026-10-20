@@ -141,28 +141,29 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(C.nextStatuses('invoiced', 'fencing', false)).toBeNull();
   });
   test('review switch: fencing and patio in Complete, Invoiced, Final Payment and Get Review only, and only with the field', () => {
-    const row = (extra) => Object.assign({ id: 'j1', type: 'fencing' }, extra);
+    const row = (closeout, extra) => Object.assign({ id: 'j1', type: 'fencing' }, extra, { closeout });
     for (const st of ['complete', 'invoiced', 'final_payment', 'get_review']) {
       expect(C.reviewToggle(row({ review_opt_out: false }), st)).toMatchObject({ on: true, locked: false, text: 'Review text on' });
     }
-    expect(C.reviewToggle(row({ type: 'patio', review_opt_out: false }), 'invoiced')).not.toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: false }, { type: 'patio' }), 'invoiced')).not.toBeNull();
     // Earlier stages, other types, and a back end that has not shipped the field.
     for (const st of ['scheduled', 'in_progress', 'rectification', 'archived']) {
       expect(C.reviewToggle(row({ review_opt_out: false }), st)).toBeNull();
     }
-    expect(C.reviewToggle(row({ type: 'makesafe', review_opt_out: false }), 'invoiced')).toBeNull();
-    expect(C.reviewToggle(row({ type: 'decking', review_opt_out: false }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: false }, { type: 'makesafe' }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: false }, { type: 'decking' }), 'invoiced')).toBeNull();
     expect(C.reviewToggle(row({}), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row(undefined), 'invoiced')).toBeNull();
     expect(C.reviewToggle(row({ review_opt_out: null }), 'invoiced')).toBeNull();
     expect(C.reviewToggle(row({ review_opt_out: 'false' }), 'invoiced')).toBeNull();
-    // Only the top-level keys count, never the closeout block.
-    expect(C.reviewToggle(row({ closeout: { review_opt_out: true } }), 'invoiced')).toBeNull();
-    expect(C.reviewToggle(row({ review_opt_out: false, closeout: { review_opt_out: true, review_claim_status: 'sent' } }), 'invoiced'))
+    // Off and the claim come from the closeout block only, never the top of the row.
+    expect(C.reviewToggle(row(undefined, { review_opt_out: true }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: false }, { review_opt_out: true, review_claim_status: 'sent' }), 'invoiced'))
       .toMatchObject({ on: true, locked: false });
   });
 
   test('review switch: off names who and when (Perth time); a claim locks it', () => {
-    const off = C.reviewToggle({ id: 'j1', type: 'fencing', review_opt_out: true,
+    const off = C.reviewToggle({ id: 'j1', type: 'fencing', closeout: { review_opt_out: true },
       review_opt_out_at: '2026-10-20T02:05:00Z', review_opt_out_by: 'shaun@example.test' }, 'invoiced');
     expect(off).toMatchObject({ on: false, locked: false, text: 'Review text off' });
     expect(off.offBy).toBe('Turned off by shaun@example.test on 20 Oct 2026, 10:05am');
@@ -172,14 +173,15 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(html).toContain('class="closeout-review-offby"');
     expect(C.reviewToggleHtml(off, 'j1')).not.toContain('closeout-review-offby');
 
-    const sent = C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: 'sent' }, 'get_review');
+    const claimed = (claim) => C.reviewToggle({ id: 'j1', type: 'patio',
+      closeout: { review_opt_out: false, review_claim_status: claim } }, 'get_review');
+    const sent = claimed('sent');
     expect(sent).toMatchObject({ locked: true, text: 'Review text sent' });
     expect(C.reviewToggleHtml(sent, 'j1')).toContain(' disabled ');
-    expect(C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: 'claimed' }, 'get_review').text)
-      .toBe('Review text sending');
+    expect(claimed('claimed').text).toBe('Review text sending');
     // Only an exact sent reads as sent; any other claim locks it in neutral words.
     for (const claim of ['skipped', 'failed', 'refused']) {
-      const t = C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: claim }, 'get_review');
+      const t = claimed(claim);
       expect(t).toMatchObject({ locked: true, text: 'Review text: ' + claim });
       expect(t.text + t.title).not.toMatch(/sent|no longer be stopped/);
     }
@@ -192,7 +194,7 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(C.refusalWords({ status: 500 })).toBe('The review text switch could not be changed. Nothing was changed.');
     const all = [off, sent].map((t) => t.text + t.title + t.offBy).join(' ') + C.refusalWords({ status: 409 }) + C.refusalWords({});
     expect(all).not.toMatch(/[–—]/);
-    expect(C.reviewToggleHtml(C.reviewToggle({ id: 'j1', type: 'fencing', review_opt_out: true, review_opt_out_by: '<b>x</b>' }, 'invoiced'), 'j1', { detail: true }))
+    expect(C.reviewToggleHtml(C.reviewToggle({ id: 'j1', type: 'fencing', closeout: { review_opt_out: true }, review_opt_out_by: '<b>x</b>' }, 'invoiced'), 'j1', { detail: true }))
       .not.toContain('<b>');
   });
 });

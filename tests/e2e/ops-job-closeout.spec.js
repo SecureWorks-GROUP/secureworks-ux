@@ -139,14 +139,18 @@ async function drawCards(page, rows) {
 // The switch's state rides the closeout block; who and when ride the row.
 const reviewRow = (closeout, extra) => Object.assign({}, base, extra, { closeout });
 
-test('review switch: hidden with the preview off, outside Complete to Get Review, and when the field is absent', async ({ page }) => {
+test('review switch: live with the preview off (tags still need the preview), hidden outside Complete to Get Review and when the field is absent', async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.removeItem('sw_closeout_preview'); } catch (e) {} });
   await openOps(page);
-  const [off] = await cards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
-  expect(off).not.toContain('closeout-review-toggle');
+  const tagged = { review_opt_out: false, paid_less_than_quoted: true, shortfall_inc: 10, archive_due_at: FUTURE() };
+  const [live] = await cards(page, [{ job: reviewRow(tagged), status: 'get_review' }]);
+  expect(live).toContain('data-review-toggle="f1"');
+  expect(live).not.toContain('closeout-tag');
+  const detail = await page.evaluate((b) => JobCloseoutOps.detailTagsHtml({ job: { id: 'f1', type: 'patio', status: 'invoiced' }, closeout: b }), tagged);
+  expect(detail).toContain('data-review-toggle="f1"');
+  expect(detail).not.toContain('closeout-tag');
+  expect(await page.evaluate(() => getNextStatuses('invoiced', 'patio'))).toEqual([]);
 
-  await page.goto('/ops.html?closeout=preview');
-  await page.waitForFunction(() => typeof window.renderKanbanCard === 'function' && !!window.JobCloseoutOps);
   const [noField, early, makesafe, invoiced, complete, final, review] = await cards(page, [
     { job: base, status: 'invoiced' },
     { job: reviewRow({ review_opt_out: false }), status: 'scheduled' },
@@ -175,7 +179,7 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
       }),
     });
   });
-  await openOps(page, '?closeout=preview');
+  await openOps(page);
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
 
   const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
@@ -253,7 +257,7 @@ test('review switch: a press on the job page or the board holds when the other i
       body: JSON.stringify({ success: true, review_opt_out: body.opt_out, review_opt_out_at: null, review_opt_out_by: null }),
     });
   });
-  await openOps(page, '?closeout=preview');
+  await openOps(page);
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
   await page.evaluate(() => {
     window.__e2eDetail = { job: { id: 'f1', type: 'fencing', status: 'invoiced' }, closeout: { review_opt_out: false } };
@@ -297,7 +301,7 @@ test('review switch: a claim locks it, and a 409 review_already_sent locks it th
     const claim = route.request().postDataJSON().job_id === 'c1' ? { review_claim_status: 'claimed' } : {};
     await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify(Object.assign({ error: 'review_already_sent' }, claim)) });
   });
-  await openOps(page, '?closeout=preview');
+  await openOps(page);
   await drawCards(page, [
     { job: reviewRow({ review_opt_out: false, review_claim_status: 'sent' }, { id: 's1' }), status: 'get_review' },
     { job: reviewRow({ review_opt_out: false }, { id: 'r1' }), status: 'get_review' },
@@ -326,7 +330,7 @@ test('review switch: a claim locks it, and a 409 review_already_sent locks it th
 test('review switch: a 409 for any other conflict leaves it as it was', async ({ page }) => {
   await signIn(page);
   await page.route(OPT_OUT_ROUTE, (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"some_other_conflict"}' }));
-  await openOps(page, '?closeout=preview');
+  await openOps(page);
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
   const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
   await toggle.click();
@@ -338,7 +342,7 @@ test('review switch: a 409 for any other conflict leaves it as it was', async ({
 test('review switch: any other failure leaves it as it was and says so', async ({ page }) => {
   await signIn(page);
   await page.route(OPT_OUT_ROUTE, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' }));
-  await openOps(page, '?closeout=preview');
+  await openOps(page);
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'complete' }]);
   const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
   await toggle.click();

@@ -59,8 +59,8 @@ Actions) carry a small on/off **Review text** switch. On is the default: the tex
 sends. It must be turned off before the final payment lands, because the text goes
 out within about 15 minutes of the job showing fully paid.
 
-It reads, from the `pipeline` row (or `job_detail`'s job), at the top level or on the
-closeout block:
+It reads, from the top level of the `pipeline` row (or of `job_detail`'s job) only,
+never the closeout block:
 
 ```
 review_opt_out: boolean          // no boolean here = the back end has not shipped it: no switch
@@ -74,9 +74,12 @@ what it answers (`{ success, review_opt_out, review_opt_out_at, review_opt_out_b
 never an optimistic flip; the answer stays on the card until a later read of the job
 agrees with it. Off shows "Review text off", and who turned it off and when (Perth
 time) in the tooltip and, on the job page, as a line under the switch. Once
-`review_claim_status` is set the switch is locked and reads "Review text sent" (or
-"sending"); a 409 `review_already_sent` locks it the same way and says so. Any other
-failure leaves the switch as it was and says nothing was changed.
+`review_claim_status` is set the switch is locked: `sent` reads "Review text sent",
+`claimed` "Review text sending", `unconfirmed` "Review text not confirmed", and any
+other status names itself ("Review text: skipped") without saying it was sent. A
+refusal whose `code` or `error` is `review_already_sent` locks it as sent and says so.
+Any other failure, another 409 included, leaves the switch as it was and says nothing
+was changed.
 
 ## Get Review as a stage
 

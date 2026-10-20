@@ -191,12 +191,23 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
 
+  // A later read that agrees drops the answer, so the next read from another
+  // operator's change shows through.
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: true }), status: 'invoiced' }]);
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: true }), status: 'invoiced' }]);
+
   // The job page names who and when in words.
   const detail = await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
     job: { id: 'f1', type: 'fencing', status: 'invoiced', review_opt_out: true,
       review_opt_out_at: '2026-10-20T02:05:00Z', review_opt_out_by: 'ops-e2e@example.test' },
   }));
   expect(detail).toContain('Turned off by ops-e2e@example.test on 20 Oct 2026, 10:05am');
+  // Review keys beside the job, not on it, are not read.
+  expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
+    job: { id: 'd2', type: 'fencing', status: 'invoiced' }, review_opt_out: true,
+  }))).not.toContain('closeout-review-toggle');
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
@@ -226,6 +237,18 @@ test('review switch: a claim locks it, and a 409 review_already_sent locks it th
   await expect(racing).toHaveText('Review text sent');
   await expect(page.locator('#toastContainer')).toContainText('The review text has already gone out, so it can no longer be stopped.');
   expect(hits).toBe(1);
+});
+
+test('review switch: a 409 for any other conflict leaves it as it was', async ({ page }) => {
+  await signIn(page);
+  await page.route(OPT_OUT_ROUTE, (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"some_other_conflict"}' }));
+  await openOps(page, '?closeout=preview');
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  const toggle = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
+  await toggle.click();
+  await expect(page.locator('#toastContainer')).toContainText('could not be changed. Nothing was changed.');
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveText('Review text on');
 });
 
 test('review switch: any other failure leaves it as it was and says so', async ({ page }) => {

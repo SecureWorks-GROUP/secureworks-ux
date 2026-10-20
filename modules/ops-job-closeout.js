@@ -21,8 +21,8 @@
 // Invoiced, Final Payment and Get Review carry a small on/off switch. On (the
 // default) means the review text sends; off calls ops-api `set_review_opt_out`.
 // It reads the row's top-level `review_opt_out`, `review_opt_out_at`,
-// `review_opt_out_by` and `review_claim_status` (or the same keys on the
-// closeout block). No `review_opt_out` boolean, no switch: the back end has not
+// `review_opt_out_by` and `review_claim_status` (on `job_detail`, the same keys
+// on its job). No `review_opt_out` boolean, no switch: the back end has not
 // shipped it. Once `review_claim_status` is set the text has gone (or is going)
 // and the switch is locked.
 // ════════════════════════════════════════════════════════════
@@ -208,14 +208,6 @@ var JobCloseoutCore = (function () {
   // ── Review text switch ──
   var TOGGLE_STAGES = ['complete', 'invoiced', 'final_payment', 'get_review'];
 
-  // A review field on the row, else on its closeout block.
-  function reviewField(job, key) {
-    if (!job) return undefined;
-    if (job[key] !== undefined) return job[key];
-    var b = job.closeout;
-    return b && typeof b === 'object' ? b[key] : undefined;
-  }
-
   function perthWhen(v) {
     var t = timeOf(v);
     if (!isFinite(t)) return '';
@@ -229,9 +221,10 @@ var JobCloseoutCore = (function () {
 
   function claimWords(claim) {
     var c = lower(claim);
+    if (c === 'sent') return 'Review text sent';
     if (c === 'claimed') return 'Review text sending';
     if (c === 'unconfirmed') return 'Review text not confirmed';
-    return 'Review text sent';
+    return '';
   }
 
   // The switch for one job, or null when it is not drawn.
@@ -239,19 +232,22 @@ var JobCloseoutCore = (function () {
     if (!job || !eligibleType(job.type)) return null;
     var st = lower(status != null ? status : job.status);
     if (TOGGLE_STAGES.indexOf(st) < 0) return null;
-    var optOut = reviewField(job, 'review_opt_out');
+    var optOut = job.review_opt_out;
     if (typeof optOut !== 'boolean') return null;
-    var claim = str(reviewField(job, 'review_claim_status')).trim();
-    var by = str(reviewField(job, 'review_opt_out_by')).trim();
-    var when = perthWhen(reviewField(job, 'review_opt_out_at'));
+    var claim = str(job.review_claim_status).trim();
+    var by = str(job.review_opt_out_by).trim();
+    var when = perthWhen(job.review_opt_out_at);
     var offBy = optOut
       ? 'Turned off' + (by ? ' by ' + by : '') + (when ? ' on ' + when : '')
       : '';
     if (claim) {
+      var words = claimWords(claim);
       return {
         on: !optOut, locked: true, claim: claim, offBy: offBy,
-        text: claimWords(claim),
-        title: claimWords(claim) + '. It can no longer be stopped.'
+        text: words || 'Review text: ' + lower(claim).replace(/_+/g, ' '),
+        title: words
+          ? words + '. It can no longer be stopped.'
+          : 'Review text: ' + lower(claim).replace(/_+/g, ' ') + '. The switch is locked.'
       };
     }
     return {
@@ -286,10 +282,16 @@ var JobCloseoutCore = (function () {
     return html + '</div>';
   }
 
+  // set_review_opt_out refused because the review text has already gone.
+  function isAlreadySent(err) {
+    if (!err) return false;
+    return lower(err.code) === 'review_already_sent' ||
+      lower(err.body && err.body.error) === 'review_already_sent';
+  }
+
   // A refusal from set_review_opt_out, in words.
   function refusalWords(err) {
-    var code = lower(err && (err.code || (err.body && err.body.error) || err.message));
-    if ((err && err.status === 409) || code === 'review_already_sent') {
+    if (isAlreadySent(err)) {
       return 'The review text has already gone out, so it can no longer be stopped.';
     }
     return 'The review text switch could not be changed. Nothing was changed.';
@@ -305,6 +307,7 @@ var JobCloseoutCore = (function () {
     nextStatuses: nextStatuses,
     reviewToggle: reviewToggle,
     reviewToggleHtml: reviewToggleHtml,
+    isAlreadySent: isAlreadySent,
     refusalWords: refusalWords
   };
 })();
@@ -375,10 +378,7 @@ var JobCloseoutOps = (function () {
       var job = data.job;
       var block = data.closeout !== undefined ? data.closeout : job.closeout;
       var view = { id: job.id, type: job.type, status: job.status, closeout: block };
-      REVIEW_KEYS.forEach(function (k) {
-        if (job[k] !== undefined) view[k] = job[k];
-        else if (data[k] !== undefined) view[k] = data[k];
-      });
+      REVIEW_KEYS.forEach(function (k) { if (job[k] !== undefined) view[k] = job[k]; });
       return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(view, job.status, Date.now())) +
         toggleHtml(view, job.status, { detail: true });
     } catch (e) { return ''; }
@@ -424,16 +424,13 @@ var JobCloseoutOps = (function () {
           return res;
         })
         .catch(function (err) {
-          var sent = (err && err.status === 409) || lower(err && (err.code || (err.body && err.body.error) || err.message)) === 'review_already_sent';
-          if (sent) _review[jobId] = Object.assign({}, _review[jobId], { review_claim_status: 'sent' });
+          if (JobCloseoutCore.isAlreadySent(err)) _review[jobId] = Object.assign({}, _review[jobId], { review_claim_status: 'sent' });
           redraw(jobId);
           say(JobCloseoutCore.refusalWords(err), 'warning');
           return null;
         });
     } catch (e) { return Promise.resolve(null); }
   }
-
-  function lower(v) { return v == null ? '' : String(v).trim().toLowerCase(); }
 
   function nextStatuses(current, type) {
     try { return JobCloseoutCore.nextStatuses(current, type, previewOn()); } catch (e) { return null; }

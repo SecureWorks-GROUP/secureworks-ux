@@ -155,8 +155,10 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(C.reviewToggle(row({}), 'invoiced')).toBeNull();
     expect(C.reviewToggle(row({ review_opt_out: null }), 'invoiced')).toBeNull();
     expect(C.reviewToggle(row({ review_opt_out: 'false' }), 'invoiced')).toBeNull();
-    // The same keys on the closeout block count too.
-    expect(C.reviewToggle(row({ closeout: { review_opt_out: true } }), 'invoiced')).toMatchObject({ on: false });
+    // Only the top-level keys count, never the closeout block.
+    expect(C.reviewToggle(row({ closeout: { review_opt_out: true } }), 'invoiced')).toBeNull();
+    expect(C.reviewToggle(row({ review_opt_out: false, closeout: { review_opt_out: true, review_claim_status: 'sent' } }), 'invoiced'))
+      .toMatchObject({ on: true, locked: false });
   });
 
   test('review switch: off names who and when (Perth time); a claim locks it', () => {
@@ -175,8 +177,18 @@ test.describe('Job close-out core (extracted from modules/ops-job-closeout.js)',
     expect(C.reviewToggleHtml(sent, 'j1')).toContain(' disabled ');
     expect(C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: 'claimed' }, 'get_review').text)
       .toBe('Review text sending');
+    // Only an exact sent reads as sent; any other claim locks it in neutral words.
+    for (const claim of ['skipped', 'failed', 'refused']) {
+      const t = C.reviewToggle({ id: 'j1', type: 'patio', review_opt_out: false, review_claim_status: claim }, 'get_review');
+      expect(t).toMatchObject({ locked: true, text: 'Review text: ' + claim });
+      expect(t.text + t.title).not.toMatch(/sent|no longer be stopped/);
+    }
     expect(C.refusalWords({ status: 409, code: null, body: { error: 'review_already_sent' } }))
       .toBe('The review text has already gone out, so it can no longer be stopped.');
+    expect(C.isAlreadySent({ status: 409, code: 'review_already_sent', body: {} })).toBe(true);
+    expect(C.isAlreadySent({ status: 409, code: null, body: { error: 'some_other_conflict' } })).toBe(false);
+    expect(C.refusalWords({ status: 409, code: null, body: { error: 'some_other_conflict' } }))
+      .toBe('The review text switch could not be changed. Nothing was changed.');
     expect(C.refusalWords({ status: 500 })).toBe('The review text switch could not be changed. Nothing was changed.');
     const all = [off, sent].map((t) => t.text + t.title + t.offBy).join(' ') + C.refusalWords({ status: 409 }) + C.refusalWords({});
     expect(all).not.toMatch(/[–—]/);

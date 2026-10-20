@@ -318,7 +318,6 @@ var JobCloseoutCore = (function () {
     tags: tags,
     tagsHtml: tagsHtml,
     nextStatuses: nextStatuses,
-    reviewState: reviewState,
     reviewToggle: reviewToggle,
     reviewToggleHtml: reviewToggleHtml,
     isAlreadySent: isAlreadySent,
@@ -348,34 +347,21 @@ var JobCloseoutOps = (function () {
     return _preview;
   }
 
-  // Answers from set_review_opt_out, by job id, laid over the read the switch
-  // was pressed on (the board is not re-read after a press). Any other read of
-  // the job is newer and is drawn as it is.
-  var _review = {};
-
-  function withReview(job, source) {
-    var o = job && _review[job.id];
-    if (!o || o.source !== source) return job;
-    var rs = JobCloseoutCore.reviewState(job);
-    var block = Object.assign({}, JobCloseoutCore.blockOf(job));
-    var view = Object.assign({}, job, { closeout: block });
-    if (o.optOut !== undefined) {
-      block.review_opt_out = o.optOut;
-      view.review_opt_out_at = o.at;
-      view.review_opt_out_by = o.by;
-    }
-    if (!rs.claim && o.claim) block.review_claim_status = o.claim;
-    return view;
-  }
-
-  // The last job each switch was drawn from, so a press can redraw it.
+  // Every read each job's switch has been drawn from (the row and its closeout
+  // block), so a press's answer is written into each of them: the board is not
+  // re-read after a press. A read made after the press is drawn as it is.
+  var _seen = {};
+  // The last read each switch was drawn from, so a press can redraw it.
   var _drawn = {};
 
-  function toggleHtml(job, status, opts, source) {
-    var view = withReview(job, source);
-    var t = JobCloseoutCore.reviewToggle(view, status);
+  function viewOf(job, block) { return Object.assign({}, job, { closeout: block }); }
+
+  function toggleHtml(job, block, status, opts) {
+    var t = JobCloseoutCore.reviewToggle(viewOf(job, block), status);
     if (!t) return '';
-    _drawn[job.id] = { job: job, status: status, source: source };
+    var list = _seen[job.id] || (_seen[job.id] = []);
+    if (!list.some(function (r) { return r.job === job && r.block === block; })) list.push({ job: job, block: block });
+    _drawn[job.id] = { job: job, block: block, status: status };
     return JobCloseoutCore.reviewToggleHtml(t, job.id, opts);
   }
 
@@ -383,7 +369,7 @@ var JobCloseoutOps = (function () {
   function cardTagsHtml(job, status) {
     try {
       if (!previewOn()) return '';
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, status, null, job);
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, job.closeout, status);
     } catch (e) { return ''; }
   }
 
@@ -393,19 +379,15 @@ var JobCloseoutOps = (function () {
       if (!previewOn() || !data || !data.job) return '';
       var job = data.job;
       var block = data.closeout !== undefined ? data.closeout : job.closeout;
-      var view = {
-        id: job.id, type: job.type, status: job.status, closeout: block,
-        review_opt_out_at: job.review_opt_out_at, review_opt_out_by: job.review_opt_out_by
-      };
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(view, job.status, Date.now())) +
-        toggleHtml(view, job.status, { detail: true }, job);
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(viewOf(job, block), job.status, Date.now())) +
+        toggleHtml(job, block, job.status, { detail: true });
     } catch (e) { return ''; }
   }
 
   function redraw(jobId) {
     var d = _drawn[jobId];
     if (!d) return;
-    var t = JobCloseoutCore.reviewToggle(withReview(d.job, d.source), d.status);
+    var t = JobCloseoutCore.reviewToggle(viewOf(d.job, d.block), d.status);
     document.querySelectorAll('.closeout-review-toggle-wrap').forEach(function (wrap) {
       if (wrap.getAttribute('data-review-job') !== String(jobId)) return;
       var tmp = document.createElement('div');
@@ -423,7 +405,6 @@ var JobCloseoutOps = (function () {
     try {
       if (!btn || btn.disabled) return Promise.resolve(null);
       var jobId = btn.getAttribute('data-review-toggle');
-      var source = _drawn[jobId] && _drawn[jobId].source;
       var optOut = btn.getAttribute('data-review-state') === 'on';
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
@@ -433,12 +414,11 @@ var JobCloseoutOps = (function () {
           if (!res || res.success !== true || typeof res.review_opt_out !== 'boolean') {
             throw new Error('unexpected answer');
           }
-          _review[jobId] = {
-            source: source,
-            optOut: res.review_opt_out,
-            at: res.review_opt_out_at || null,
-            by: res.review_opt_out_by || null
-          };
+          (_seen[jobId] || []).forEach(function (r) {
+            r.block.review_opt_out = res.review_opt_out;
+            r.job.review_opt_out_at = res.review_opt_out_at || null;
+            r.job.review_opt_out_by = res.review_opt_out_by || null;
+          });
           redraw(jobId);
           say(res.review_opt_out ? 'Review text turned off for this job.' : 'Review text turned back on for this job.', 'success');
           return res;
@@ -446,8 +426,7 @@ var JobCloseoutOps = (function () {
         .catch(function (err) {
           if (JobCloseoutCore.isAlreadySent(err)) {
             var claim = err.body && typeof err.body.review_claim_status === 'string' ? err.body.review_claim_status.trim() : '';
-            var kept = _review[jobId] && _review[jobId].source === source ? _review[jobId] : {};
-            _review[jobId] = Object.assign({}, kept, { source: source, claim: claim || 'sent' });
+            (_seen[jobId] || []).forEach(function (r) { r.block.review_claim_status = claim || 'sent'; });
           }
           redraw(jobId);
           say(JobCloseoutCore.refusalWords(err), 'warning');

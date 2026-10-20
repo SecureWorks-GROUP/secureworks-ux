@@ -225,20 +225,68 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(calls[1]).toMatchObject({ job_id: 'f1', opt_out: false });
 
-  // The job page: a press holds over a repaint of the same job_detail answer,
-  // and a fresh job_detail answer is drawn as it is.
+});
+
+// Paints the job page's close-out section from window.__e2eDetail (the same
+// job_detail answer each time, as a repaint of the open job page does).
+async function paintDetail(page) {
   await page.evaluate(() => {
-    window.__e2eDetail = { job: { id: 'p1', type: 'patio', status: 'complete' }, closeout: { review_opt_out: false } };
-    document.getElementById('e2eCloseoutHost').innerHTML = JobCloseoutOps.detailTagsHtml(window.__e2eDetail);
+    let host = document.getElementById('e2eDetailHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'e2eDetailHost';
+      host.style.cssText = 'position:fixed;top:0;right:0;z-index:99999;background:#fff;width:320px;';
+      document.body.appendChild(host);
+    }
+    host.innerHTML = JobCloseoutOps.detailTagsHtml(window.__e2eDetail);
   });
-  const onPage = page.locator('#e2eCloseoutHost [data-review-toggle="p1"]');
+}
+
+test('review switch: a press on the job page or the board holds when the other is redrawn from its cache', async ({ page }) => {
+  await signIn(page);
+  const calls = [];
+  await page.route(OPT_OUT_ROUTE, async (route) => {
+    const body = route.request().postDataJSON();
+    calls.push(body);
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ success: true, review_opt_out: body.opt_out, review_opt_out_at: null, review_opt_out_by: null }),
+    });
+  });
+  await openOps(page, '?closeout=preview');
+  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  await page.evaluate(() => {
+    window.__e2eDetail = { job: { id: 'f1', type: 'fencing', status: 'invoiced' }, closeout: { review_opt_out: false } };
+  });
+  await paintDetail(page);
+
+  const onBoard = page.locator('#e2eCloseoutHost [data-review-toggle="f1"]');
+  const onPage = page.locator('#e2eDetailHost [data-review-toggle="f1"]');
+
+  // Pressed on the job page, then the board redrawn from its cached row.
   await onPage.click();
   await expect(onPage).toHaveAttribute('aria-checked', 'false');
-  expect(calls[2]).toMatchObject({ job_id: 'p1', opt_out: true });
-  expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml(window.__e2eDetail))).toContain('Review text off');
-  expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
-    job: { id: 'p1', type: 'patio', status: 'complete' }, closeout: { review_opt_out: false },
-  }))).toContain('Review text on');
+  expect(calls[0]).toMatchObject({ job_id: 'f1', opt_out: true });
+  await drawCards(page);
+  await expect(onBoard).toHaveAttribute('aria-checked', 'false');
+  await paintDetail(page);
+  await expect(onPage).toHaveAttribute('aria-checked', 'false');
+
+  // Pressed on the board, then the job page repainted from the same answer.
+  await onBoard.click();
+  await expect(onBoard).toHaveAttribute('aria-checked', 'true');
+  expect(calls[1]).toMatchObject({ job_id: 'f1', opt_out: false });
+  await paintDetail(page);
+  await expect(onPage).toHaveAttribute('aria-checked', 'true');
+  await drawCards(page);
+  await expect(onBoard).toHaveAttribute('aria-checked', 'true');
+
+  // A fresh job_detail answer made after the press is drawn as it is.
+  await page.evaluate(() => {
+    window.__e2eDetail = { job: { id: 'f1', type: 'fencing', status: 'invoiced' }, closeout: { review_opt_out: true } };
+  });
+  await paintDetail(page);
+  await expect(onPage).toHaveAttribute('aria-checked', 'false');
 });
 
 test('review switch: a claim locks it, and a 409 review_already_sent locks it the same way', async ({ page }) => {

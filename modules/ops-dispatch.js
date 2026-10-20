@@ -63,6 +63,16 @@
  * push_po_to_xero, send-po-email, update_supplier_email, sync_suppliers,
  * update_job_status.
  *
+ * Context job mail adds one read to the Emails section, only while the
+ * ctxmail switch is on (?ctxmail=1, or localStorage sw_dispatch_ctxmail = 1):
+ * ops-api context_job_mail (job_id, roles=supplier) once per job open and on
+ * its own Retry. Its rows are supplier email Context placed on this job, drawn
+ * as their own "Found by Context" group because they cannot be matched to the
+ * order threads above them. Each row keeps Context's word on it: "Sure on this
+ * job", or "May belong to another job" with the other jobs named. A failed
+ * read is a failed line with Retry, never "No email". Read only: no write, no
+ * reply, no move between jobs.
+ *
  * Slice 6 adds the Schedule section (Deliveries) under Emails (never on a
  * make-safe job): one row per purchase order per chosen supplier, each from
  * expected, to confirmed by the supplier, to sighted on site. It adds no read:
@@ -1876,8 +1886,31 @@
   function newMail(jobId) {
     return {
       jobId: jobId, status: 'loading', token: 0, drafts: [], threads: [], threadsOk: true, ordersForLink: [],
-      sel: null, edits: {}, ask: null, busy: {}, msg: {}, replies: {}, link: {}, notice: '', released: {}
+      sel: null, edits: {}, ask: null, busy: {}, msg: {}, replies: {}, link: {}, notice: '', released: {},
+      ctx: { status: 'off', token: 0, rows: [] }
     };
+  }
+
+  // Context job mail is shown only while its switch is on, until the read is
+  // live everywhere.
+  function ctxMailOn() {
+    try { if (/[?&]ctxmail=1(&|$)/.test(String(global.location && global.location.search || ''))) return true; } catch (e) { /* no location */ }
+    return readStore('localStorage', 'sw_dispatch_ctxmail') === '1';
+  }
+
+  // context_job_mail's answer. Throws on anything else, so the group shows its
+  // failed line.
+  function ctxMailFrom(resp) {
+    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.mail)) throw new Error('Unexpected Context mail answer');
+    return resp.mail.filter(function (r) {
+      return r && r.event_id && (r.placement === 'certain' || r.placement === 'candidate');
+    });
+  }
+
+  function ctxRowById(m, id) {
+    var rows = (m.ctx && m.ctx.rows) || [];
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].event_id) === id) return rows[i];
+    return null;
   }
 
   // dispatch_order_emails' answer. Throws on anything else, so the section
@@ -1898,7 +1931,9 @@
   }
 
   function mailKeys(m) {
-    return m.drafts.map(function (d) { return 'd:' + d.id; }).concat(m.threads.map(function (t) { return 't:' + t.key; }));
+    var ctx = (m.ctx && m.ctx.status === 'ok') ? m.ctx.rows : [];
+    return m.drafts.map(function (d) { return 'd:' + d.id; }).concat(m.threads.map(function (t) { return 't:' + t.key; }))
+      .concat(ctx.map(function (r) { return 'c:' + r.event_id; }));
   }
 
   function mergeMail(m, got) {
@@ -1924,8 +1959,32 @@
     readMail(row.id, false);
   }
 
+  function readCtxMail(jobId) {
+    var m = mailEntry(jobId);
+    if (!m) return Promise.resolve();
+    if (!ctxMailOn()) { m.ctx = { status: 'off', token: m.ctx ? m.ctx.token : 0, rows: [] }; return Promise.resolve(); }
+    var c = m.ctx || (m.ctx = { status: 'off', token: 0, rows: [] });
+    var token = ++c.token;
+    c.status = 'loading';
+    paintMailIf(jobId);
+    return Promise.resolve().then(function () { return global.opsFetch('context_job_mail', { job_id: jobId, roles: 'supplier' }); }).then(function (resp) {
+      if (token !== c.token) return;
+      c.rows = ctxMailFrom(resp);
+      c.status = 'ok';
+      if (!m.sel) m.sel = mailKeys(m)[0] || null;
+      paintMailIf(jobId);
+    }).catch(function () {
+      if (token !== c.token) return;
+      c.rows = [];
+      c.status = 'error';
+      if (m.sel && m.sel.indexOf('c:') === 0) m.sel = mailKeys(m)[0] || null;
+      paintMailIf(jobId);
+    });
+  }
+
   function readMail(jobId, quiet) {
     var m = mailEntry(jobId) || (state.mail.jobs[jobId] = newMail(jobId));
+    if (!quiet) readCtxMail(jobId);
     var token = ++m.token;
     if (!quiet || m.status !== 'ok') m.status = 'loading';
     paintMailIf(jobId);
@@ -3585,6 +3644,41 @@
     return h + '<span class="dpc-mail-tags"><span class="dpc-type">' + tagWord(t) + '</span></span></button>';
   }
 
+  function ctxPlaceWord(r) { return r.placement === 'certain' ? 'Sure on this job' : 'May belong to another job'; }
+
+  function ctxOtherJobs(r) {
+    return (Array.isArray(r.other_jobs) ? r.other_jobs : []).map(function (o) { return text(o && o.job_number); }).filter(Boolean);
+  }
+
+  function ctxItemHtml(m, r) {
+    var key = 'c:' + r.event_id;
+    var h = '<button type="button" class="dpc-mail-item dpc-mail-ctx" data-dpc-mail="pick" data-dpc-mail-key="' + esc(key) + '" aria-pressed="' + (m.sel === key) + '">';
+    h += '<span class="dpc-mail-top"><strong>' + esc(text(r.from_address) || 'Sender not recorded') + '</strong><small>' + esc(stampText(r.occurred_at)) + '</small></span>';
+    h += '<span class="dpc-mail-subj">' + esc(text(r.subject) || 'No subject') + '</span>';
+    if (text(r.preview)) h += '<span class="dpc-muted dpc-mail-prev">' + esc(text(r.preview)) + '</span>';
+    var others = ctxOtherJobs(r);
+    h += '<span class="dpc-mail-tags"><span class="dpc-type">Supplier</span><span class="dpc-status ' + (r.placement === 'certain' ? 'dpc-tone-ok' : 'dpc-tone-warn') + '">' + esc(ctxPlaceWord(r)) + '</span></span>';
+    if (others.length) h += '<span class="dpc-muted dpc-mail-also">Also on ' + esc(others.join(', ')) + '</span>';
+    return h + '</button>';
+  }
+
+  function ctxViewHtml(m, r) {
+    var out = r.direction === 'outbound';
+    var when = stampText(r.occurred_at);
+    var others = ctxOtherJobs(r);
+    var h = '<div class="dpc-mail-head"><strong>' + esc(text(r.subject) || 'No subject') + '</strong><span class="dpc-mail-tags"><span class="dpc-type">Supplier</span>' +
+      '<span class="dpc-status ' + (r.placement === 'certain' ? 'dpc-tone-ok' : 'dpc-tone-warn') + '">' + esc(ctxPlaceWord(r)) + '</span></span></div>';
+    h += '<div class="dpc-chat dpc-mail-chat"><div class="dpc-bubble ' + (out ? 'us' : 'them') + '">' + esc(text(r.preview) || 'No message text recorded.') +
+      '<small>' + esc(out ? 'SecureWorks' : (text(r.from_address) || 'Sender not recorded')) + (when ? ', ' + esc(when) : '') + '</small></div></div>';
+    var why = r.placement === 'certain'
+      ? 'Context is sure this email belongs to this job.'
+      : 'Context could not tell which job this email belongs to, so it is shown on each job it may belong to.';
+    if (others.length) why += ' It is also on ' + others.join(', ') + '.';
+    h += '<p class="dpc-mail-msg">' + esc(why) + '</p>';
+    if (text(r.reason)) h += '<p class="dpc-mail-msg">Why: ' + esc(text(r.reason)) + (text(r.by) ? ' (' + esc(text(r.by)) + ')' : '') + '</p>';
+    return h + '<p class="dpc-mail-msg">Shown from the mailbox. Reply from the order thread or your mailbox.</p>';
+  }
+
   // Row 19: the address is fixed text from the supplier's contact, never a box.
   function toHtml(d) {
     var name = text(d.supplier_name) || 'this supplier';
@@ -3760,6 +3854,7 @@
     var sel = m.sel || '';
     if (sel.indexOf('d:') === 0) { var d = draftById(m, sel.slice(2)); if (d) return draftViewHtml(m, d); }
     if (sel.indexOf('t:') === 0) { var t = threadByKey(m, sel.slice(2)); if (t) return threadViewHtml(m, t); }
+    if (sel.indexOf('c:') === 0) { var r = ctxRowById(m, sel.slice(2)); if (r) return ctxViewHtml(m, r); }
     return '<div class="dpc-empty dpc-empty-tight">Nothing open.</div>';
   }
 
@@ -3768,11 +3863,20 @@
     if (!m || m.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading email...</div>';
     if (m.status === 'error') return mailFail('Could not load email.', 'read');
     var h = m.notice ? '<div class="dpc-mat-notice" role="status">' + esc(m.notice) + '</div>' : '';
-    if (!mailKeys(m).length && m.threadsOk) return h + '<div class="dpc-empty dpc-empty-tight">No email on this job yet.</div>' + foot;
+    var ctx = m.ctx || { status: 'off', rows: [] };
+    var ctxOn = ctx.status !== 'off';
+    if (!mailKeys(m).length && m.threadsOk && (!ctxOn || ctx.status === 'ok')) return h + '<div class="dpc-empty dpc-empty-tight">No email on this job yet.</div>' + foot;
     h += '<div class="dpc-mail"><div class="dpc-mail-list">';
     m.drafts.forEach(function (d) { h += draftItemHtml(m, d); });
     if (!m.threadsOk) h += '<div class="dpc-mail-listfail">' + mailFail('Could not load the email threads.', 'threads') + '</div>';
     m.threads.forEach(function (t) { h += threadItemHtml(m, t); });
+    if (ctxOn) {
+      h += '<div class="dpc-mail-group">Found by Context</div>';
+      if (ctx.status === 'loading') h += '<div class="dpc-mail-listfail dpc-muted">Loading...</div>';
+      else if (ctx.status === 'error') h += '<div class="dpc-mail-listfail">' + mailFail('Could not load the email Context found.', 'context') + '</div>';
+      else if (!ctx.rows.length) h += '<div class="dpc-mail-listfail dpc-muted">None found.</div>';
+      else ctx.rows.forEach(function (r) { h += ctxItemHtml(m, r); });
+    }
     h += '</div><div class="dpc-mail-view">' + mailViewHtml(m) + '</div></div>';
     return h + foot;
   }
@@ -4366,7 +4470,7 @@
     if (!jobId || !m) return true;
     var ask = function (kind, focus) { m.ask = { kind: kind, id: key }; paintMail(); refocus('[data-dpc-mail="' + focus + '"]'); };
     var unask = function (focus) { m.ask = null; paintMail(); refocus('[data-dpc-mail="' + focus + '"][data-dpc-mail-key="' + key + '"]'); };
-    if (act === 'retry') readMail(jobId, key === 'threads');
+    if (act === 'retry') { if (key === 'context') readCtxMail(jobId); else readMail(jobId, key === 'threads'); }
     else if (act === 'pick') {
       if (m.sel !== key) { m.sel = key; m.ask = null; m.notice = ''; paintMail(); refocus('[data-dpc-mail="pick"][data-dpc-mail-key="' + key + '"]'); }
     }

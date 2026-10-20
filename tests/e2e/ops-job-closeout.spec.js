@@ -119,7 +119,8 @@ async function signIn(page) {
   }
 }
 
-// Draws real cards into the page and returns the toggle on the given card.
+// Draws real cards into the page from a fresh read (new row objects), or with no
+// rows redraws the same row objects again, as a board redraw from its cache does.
 async function drawCards(page, rows) {
   await revealOpsStaticFixture(page);
   await page.evaluate((list) => {
@@ -130,8 +131,9 @@ async function drawCards(page, rows) {
       host.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#fff;width:320px;';
       document.body.appendChild(host);
     }
-    host.innerHTML = list.map((r) => renderKanbanCard(r.job, r.status)).join('');
-  }, rows);
+    if (list) window.__e2eRows = list;
+    host.innerHTML = window.__e2eRows.map((r) => renderKanbanCard(r.job, r.status)).join('');
+  }, rows || null);
 }
 
 // The switch's state rides the closeout block; who and when ride the row.
@@ -188,16 +190,17 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
   // The click stayed on the switch: the job page did not open.
   await expect(page.locator('#e2eCloseoutHost .kanban-card')).toHaveCount(1);
 
-  // A board redraw from the old feed row keeps the answer until a read agrees.
-  await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
+  // A board redraw of the same, pre-press row keeps the answer.
+  await drawCards(page);
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
 
-  // A later read that agrees drops the answer, so the next read from another
-  // operator's change shows through.
-  await drawCards(page, [{ job: reviewRow({ review_opt_out: true }), status: 'invoiced' }]);
+  // A newer read wins as it is, even one that disagrees with the press (another
+  // operator turned it back on first).
   await drawCards(page, [{ job: reviewRow({ review_opt_out: false }), status: 'invoiced' }]);
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await expect(toggle).toHaveText('Review text on');
   await drawCards(page, [{ job: reviewRow({ review_opt_out: true }), status: 'invoiced' }]);
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
 
   // The job page names who and when in words, from job_detail's closeout block
   // and the job's own columns.
@@ -221,6 +224,21 @@ test('review switch: turning it off calls set_review_opt_out, then shows who and
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(calls[1]).toMatchObject({ job_id: 'f1', opt_out: false });
+
+  // The job page: a press holds over a repaint of the same job_detail answer,
+  // and a fresh job_detail answer is drawn as it is.
+  await page.evaluate(() => {
+    window.__e2eDetail = { job: { id: 'p1', type: 'patio', status: 'complete' }, closeout: { review_opt_out: false } };
+    document.getElementById('e2eCloseoutHost').innerHTML = JobCloseoutOps.detailTagsHtml(window.__e2eDetail);
+  });
+  const onPage = page.locator('#e2eCloseoutHost [data-review-toggle="p1"]');
+  await onPage.click();
+  await expect(onPage).toHaveAttribute('aria-checked', 'false');
+  expect(calls[2]).toMatchObject({ job_id: 'p1', opt_out: true });
+  expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml(window.__e2eDetail))).toContain('Review text off');
+  expect(await page.evaluate(() => JobCloseoutOps.detailTagsHtml({
+    job: { id: 'p1', type: 'patio', status: 'complete' }, closeout: { review_opt_out: false },
+  }))).toContain('Review text on');
 });
 
 test('review switch: a claim locks it, and a 409 review_already_sent locks it the same way', async ({ page }) => {

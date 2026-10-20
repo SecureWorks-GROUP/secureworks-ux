@@ -348,18 +348,15 @@ var JobCloseoutOps = (function () {
     return _preview;
   }
 
-  // Answers from set_review_opt_out, by job id, laid over the feed until a read
-  // of the job agrees with them (the board is not re-read after a press).
+  // Answers from set_review_opt_out, by job id, laid over the read the switch
+  // was pressed on (the board is not re-read after a press). Any other read of
+  // the job is newer and is drawn as it is.
   var _review = {};
 
-  function withReview(job) {
+  function withReview(job, source) {
     var o = job && _review[job.id];
-    if (!o) return job;
+    if (!o || o.source !== source) return job;
     var rs = JobCloseoutCore.reviewState(job);
-    if (rs.optOut === o.optOut && !rs.claim === !o.claim) {
-      delete _review[job.id];
-      return job;
-    }
     var block = Object.assign({}, JobCloseoutCore.blockOf(job));
     var view = Object.assign({}, job, { closeout: block });
     if (o.optOut !== undefined) {
@@ -374,11 +371,11 @@ var JobCloseoutOps = (function () {
   // The last job each switch was drawn from, so a press can redraw it.
   var _drawn = {};
 
-  function toggleHtml(job, status, opts) {
-    var view = withReview(job);
+  function toggleHtml(job, status, opts, source) {
+    var view = withReview(job, source);
     var t = JobCloseoutCore.reviewToggle(view, status);
     if (!t) return '';
-    _drawn[job.id] = { job: job, status: status };
+    _drawn[job.id] = { job: job, status: status, source: source };
     return JobCloseoutCore.reviewToggleHtml(t, job.id, opts);
   }
 
@@ -386,7 +383,7 @@ var JobCloseoutOps = (function () {
   function cardTagsHtml(job, status) {
     try {
       if (!previewOn()) return '';
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, status);
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, status, null, job);
     } catch (e) { return ''; }
   }
 
@@ -401,14 +398,14 @@ var JobCloseoutOps = (function () {
         review_opt_out_at: job.review_opt_out_at, review_opt_out_by: job.review_opt_out_by
       };
       return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(view, job.status, Date.now())) +
-        toggleHtml(view, job.status, { detail: true });
+        toggleHtml(view, job.status, { detail: true }, job);
     } catch (e) { return ''; }
   }
 
   function redraw(jobId) {
     var d = _drawn[jobId];
     if (!d) return;
-    var t = JobCloseoutCore.reviewToggle(withReview(d.job), d.status);
+    var t = JobCloseoutCore.reviewToggle(withReview(d.job, d.source), d.status);
     document.querySelectorAll('.closeout-review-toggle-wrap').forEach(function (wrap) {
       if (wrap.getAttribute('data-review-job') !== String(jobId)) return;
       var tmp = document.createElement('div');
@@ -426,6 +423,7 @@ var JobCloseoutOps = (function () {
     try {
       if (!btn || btn.disabled) return Promise.resolve(null);
       var jobId = btn.getAttribute('data-review-toggle');
+      var source = _drawn[jobId] && _drawn[jobId].source;
       var optOut = btn.getAttribute('data-review-state') === 'on';
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
@@ -436,6 +434,7 @@ var JobCloseoutOps = (function () {
             throw new Error('unexpected answer');
           }
           _review[jobId] = {
+            source: source,
             optOut: res.review_opt_out,
             at: res.review_opt_out_at || null,
             by: res.review_opt_out_by || null
@@ -447,7 +446,8 @@ var JobCloseoutOps = (function () {
         .catch(function (err) {
           if (JobCloseoutCore.isAlreadySent(err)) {
             var claim = err.body && typeof err.body.review_claim_status === 'string' ? err.body.review_claim_status.trim() : '';
-            _review[jobId] = Object.assign({}, _review[jobId], { claim: claim || 'sent' });
+            var kept = _review[jobId] && _review[jobId].source === source ? _review[jobId] : {};
+            _review[jobId] = Object.assign({}, kept, { source: source, claim: claim || 'sent' });
           }
           redraw(jobId);
           say(JobCloseoutCore.refusalWords(err), 'warning');

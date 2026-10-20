@@ -73,8 +73,10 @@ review_opt_out_by: text | null            // on the row / job
 
 A press calls ops-api `set_review_opt_out` with `{ job_id, opt_out }` and draws only
 what it answers (`{ success, review_opt_out, review_opt_out_at, review_opt_out_by }`),
-never an optimistic flip; the answer stays on the card until a later read of the job
-agrees with it, compared through the same closeout-block lookup the switch reads. Off shows "Review text off", and who turned it off and when (Perth
+never an optimistic flip. The answer is laid over the read the switch was pressed on
+(the same `pipeline` row, or the same `job_detail` answer) for as long as that read
+is redrawn; any other read of the job is newer and is drawn as it is, so another
+operator's change always shows. Off shows "Review text off", and who turned it off and when (Perth
 time) in the tooltip and, on the job page, as a line under the switch. Once
 `review_claim_status` is set the switch is locked: `sent` reads "Review text sent",
 `claimed` "Review text sending", `unconfirmed` "Review text not confirmed", and any

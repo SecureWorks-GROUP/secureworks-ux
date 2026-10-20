@@ -67,9 +67,18 @@ check('escalate goes to finance for money, sales otherwise', () => {
   assert.strictEqual(C.bodyFor(owing, { kind: 'escalate' }).escalate_to, 'finance');
   assert.strictEqual(C.bodyFor(message, { kind: 'escalate' }).escalate_to, 'sales');
   assert(!('escalate_to' in C.bodyFor(message, { kind: 'unrelated' })));
+  assert.strictEqual(C.bodyFor(owing, { kind: 'escalate', to: 'sales' }).escalate_to, 'sales');
+  assert.strictEqual(C.bodyFor(message, { kind: 'escalate', to: 'finance' }).escalate_to, 'finance');
+  assert.strictEqual(C.bodyFor(invoice, { kind: 'escalate', to: 'sales' }).escalate_to, 'finance');
+});
+check('an invoice passes only to Finance; a message to Finance or Sales', () => {
+  assert.deepStrictEqual(C.passTargets(invoice), ['finance']);
+  assert.deepStrictEqual(C.passTargets(message), ['finance', 'sales']);
+  assert.deepStrictEqual(C.passTargets(owing), ['finance', 'sales']);
+  assert.strictEqual(C.confirmWords(message, { kind: 'escalate', to: 'finance' }), 'Pass this message to Finance? It stays on the list with them.');
 });
 check('the confirm line names the job and what happens', () => {
-  assert.strictEqual(C.confirmWords(invoice, { kind: 'job', job_id: JOB_A.job_id }), 'Record that this invoice belongs to SWF-1001 (Sampleton, accepted)?');
+  assert.strictEqual(C.confirmWords(invoice, { kind: 'job', job_id: JOB_A.job_id }), 'Record that this invoice is for SWF-1001 (Sampleton, accepted)? Finance will link it in Xero. Nothing changes in Xero from here.');
   assert(/stays on the list/.test(C.confirmWords(message, { kind: 'unresolved' })));
 });
 check('refusals are words, never codes', () => {
@@ -88,7 +97,9 @@ check('money, waits and groups', () => {
   assert.deepStrictEqual(C.grouped([invoice, owing, message]).map((g) => [g.band, g.items.length]), [[1, 1], [2, 1], [3, 1]]);
 });
 check('held items say who has them', () => {
-  assert.strictEqual(C.heldWith({ decision_state: 'decided', last_action: 'escalate', owner: 'finance' }), 'With finance');
+  assert.strictEqual(C.heldWith({ decision_state: 'decided', last_action: 'escalate', owner: 'finance' }), 'With Finance');
+  assert.strictEqual(C.heldWith({ subject_kind: 'invoice', decision_state: 'decided', last_action: 'correct', owner: 'finance', summary: { decided_jobs: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }] } }), 'With Finance: SWF-1001');
+  assert.strictEqual(C.heldWith({ subject_kind: 'invoice', decision_state: 'decided', last_action: 'unrelated', owner: 'finance' }), 'With Finance, not for any job');
   assert.strictEqual(C.heldWith({ decision_state: 'undecided', owner: 'context_resolver' }), '');
 });
 

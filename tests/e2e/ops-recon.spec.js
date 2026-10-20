@@ -81,7 +81,7 @@ test('the list shows the three bands, most at stake first', async ({ page }) => 
   await expect(inv).toContainText('Waiting 21 days');
   await expect(inv.locator('[data-rc-job]')).toHaveText('It is SWF-1001 (Sampleton, accepted)');
   await expect(card(page, '22222222-0000-4000-8000-000000000002')).toContainText('They owe $400.00');
-  await expect(card(page, '33333333-0000-4000-8000-000000000003')).toContainText('With sales');
+  await expect(card(page, '33333333-0000-4000-8000-000000000003')).toContainText('With Sales');
   await expect(card(page, '33333333-0000-4000-8000-000000000003')).toContainText('Is the gate going to match the fence');
 });
 
@@ -89,7 +89,7 @@ test('an invoice tap asks once, then records correct with the hash shown', async
   await openRecon(page);
   const inv = card(page, '11111111-0000-4000-8000-000000000001');
   await inv.locator('[data-rc-job]').click();
-  await expect(inv.locator('.rc-confirm')).toContainText('Record that this invoice belongs to SWF-1001 (Sampleton, accepted)?');
+  await expect(inv.locator('.rc-confirm')).toContainText('Record that this invoice is for SWF-1001 (Sampleton, accepted)? Finance will link it in Xero. Nothing changes in Xero from here.');
   expect(await posts(page)).toEqual([]);
   await inv.locator('[data-rc-back]').click();
   await expect(inv.locator('.rc-confirm')).toHaveCount(0);
@@ -103,7 +103,7 @@ test('an invoice tap asks once, then records correct with the hash shown', async
   } }]);
 });
 
-test('a message: a suggested job is confirm, another job is correct, escalate goes to finance', async ({ page }) => {
+test('a message: a suggested job is confirm, another job is correct, Pass to Finance escalates to finance', async ({ page }) => {
   await openRecon(page);
   const msg = card(page, '22222222-0000-4000-8000-000000000002');
   await msg.locator('[data-rc-job]').click();
@@ -113,12 +113,27 @@ test('a message: a suggested job is confirm, another job is correct, escalate go
   await expect(msg.locator('.rc-confirm')).toContainText('belongs to SWP-2002 (Exampleby, complete)?');
   await msg.locator('[data-rc-yes]').click();
   await expect.poll(async () => (await posts(page)).length).toBe(2);
-  await msg.locator('[data-rc-kind="escalate"]').click();
-  await expect(msg.locator('.rc-confirm')).toContainText('Send this message to finance?');
+  await msg.locator('[data-rc-kind="escalate"][data-rc-to="finance"]').click();
+  await expect(msg.locator('.rc-confirm')).toContainText('Pass this message to Finance?');
   await msg.locator('[data-rc-yes]').click();
   await expect.poll(async () => (await posts(page)).length).toBe(3);
   const p = (await posts(page)).map((x) => [x.body.action, x.body.job_ids, x.body.escalate_to]);
   expect(p).toEqual([['confirm', [JOB_A.job_id], undefined], ['correct', [JOB_B.job_id], undefined], ['escalate', [], 'finance']]);
+});
+
+test('an invoice passes only to Finance; a recent message can pass to Finance too', async ({ page }) => {
+  await openRecon(page);
+  const inv = card(page, '11111111-0000-4000-8000-000000000001');
+  await expect(inv.locator('[data-rc-kind="escalate"]')).toHaveText(['Pass to Finance']);
+  await expect(inv.locator('[data-rc-to="sales"]')).toHaveCount(0);
+  const recent = card(page, '33333333-0000-4000-8000-000000000003');
+  await expect(recent.locator('[data-rc-kind="escalate"]')).toHaveText(['Pass to Finance', 'Pass to Sales']);
+  await recent.locator('[data-rc-to="finance"]').click();
+  await expect(recent.locator('.rc-confirm')).toContainText('Pass this message to Finance?');
+  await recent.locator('[data-rc-yes]').click();
+  await expect.poll(async () => (await posts(page)).length).toBe(1);
+  const b = (await posts(page))[0].body;
+  expect([b.subject_id, b.action, b.escalate_to, b.shown_hash]).toEqual(['33333333-0000-4000-8000-000000000003', 'escalate', 'finance', 'aaaabbbbccccddddaaaabbbbccccdddd']);
 });
 
 test('a changed item is refused in words and the list is read again', async ({ page }) => {

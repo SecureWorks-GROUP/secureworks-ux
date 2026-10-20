@@ -59,9 +59,12 @@ var ReconCore = (function () {
   function isOffered(item, jobId) {
     return (item.offered_jobs || []).some(function (j) { return j.job_id === jobId; });
   }
-  // Where escalate goes: money questions to finance, the rest to sales.
+  // Who a card can be passed to. An invoice only to Finance; a message to Finance or Sales.
+  function passTargets(item) { return item.subject_kind === 'invoice' ? ['finance'] : ['finance', 'sales']; }
+  // The default when a pass names no one: money questions to Finance, the rest to Sales.
   function escalateTo(item) { return item.subject_kind === 'invoice' || item.band === 2 ? 'finance' : 'sales'; }
-  // A choice is { kind: 'job', job_id } | { kind: 'unrelated' } | { kind: 'unresolved' } | { kind: 'escalate' }.
+  function teamWords(team) { return team === 'finance' ? 'Finance' : team === 'sales' ? 'Sales' : team === 'owner' ? 'the owner' : String(team || ''); }
+  // A choice is { kind: 'job', job_id } | { kind: 'unrelated' } | { kind: 'unresolved' } | { kind: 'escalate', to }.
   function actionFor(item, choice) {
     if (choice.kind === 'job') {
       if (item.subject_kind === 'invoice') return 'correct';
@@ -79,22 +82,37 @@ var ReconCore = (function () {
       job_ids: choice.kind === 'job' ? [choice.job_id] : [],
       cause: item.cause
     };
-    if (action === 'escalate') body.escalate_to = escalateTo(item);
+    if (action === 'escalate') body.escalate_to = passTargets(item).indexOf(choice.to) >= 0 ? choice.to : escalateTo(item);
     return body;
   }
   function findJob(item, jobId) {
     return (item.offered_jobs || []).concat(item.other_jobs || []).filter(function (j) { return j.job_id === jobId; })[0] || null;
   }
   function confirmWords(item, choice) {
-    var what = item.subject_kind === 'invoice' ? 'this invoice' : 'this message';
-    if (choice.kind === 'job') return 'Record that ' + what + ' belongs to ' + jobWords(findJob(item, choice.job_id)) + '?';
-    if (choice.kind === 'unrelated') return 'Record that ' + what + ' is not for any job?';
+    var invoice = item.subject_kind === 'invoice';
+    var what = invoice ? 'this invoice' : 'this message';
+    if (choice.kind === 'job') {
+      if (invoice) return 'Record that this invoice is for ' + jobWords(findJob(item, choice.job_id)) + '? Finance will link it in Xero. Nothing changes in Xero from here.';
+      return 'Record that this message belongs to ' + jobWords(findJob(item, choice.job_id)) + '?';
+    }
+    if (choice.kind === 'unrelated') {
+      if (invoice) return 'Record that this invoice is not for any job? Finance will confirm. The money stays owed.';
+      return 'Record that this message is not for any job?';
+    }
     if (choice.kind === 'unresolved') return 'Record that you cannot tell yet? It stays on the list.';
-    return 'Send ' + what + ' to ' + escalateTo(item) + '? It stays on the list with them.';
+    var to = passTargets(item).indexOf(choice.to) >= 0 ? choice.to : escalateTo(item);
+    return 'Pass ' + what + ' to ' + teamWords(to) + '? It stays on the list with them.';
   }
   function heldWith(item) {
     if (item.decision_state === 'decided' && item.last_action === 'escalate' && item.owner && item.owner !== 'context_resolver') {
-      return 'With ' + item.owner;
+      return 'With ' + teamWords(item.owner);
+    }
+    if (item.subject_kind === 'invoice' && item.decision_state === 'decided' && item.owner === 'finance') {
+      if (item.last_action === 'unrelated') return 'With Finance, not for any job';
+      if (item.last_action === 'correct') {
+        var nums = ((item.summary && item.summary.decided_jobs) || []).map(function (j) { return j && j.job_number; }).filter(Boolean);
+        return 'With Finance' + (nums.length ? ': ' + nums.join(', ') : '');
+      }
     }
     if (item.decision_state === 'decided' && item.last_action === 'unresolved') return 'Could not tell last time';
     if (item.decision_state === 'evidence_changed') return 'Changed since the last choice';
@@ -124,6 +142,7 @@ var ReconCore = (function () {
     tabVisible: tabVisible, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
     refusalWords: refusalWords, mustReread: mustReread, grouped: grouped, escalateTo: escalateTo,
+    passTargets: passTargets, teamWords: teamWords,
     hasBanned: hasBanned
   };
 })();
@@ -233,7 +252,9 @@ function rcCard(item) {
     }
     h += '<button type="button" data-rc-kind="unrelated">Not for any job</button>';
     h += '<button type="button" data-rc-kind="unresolved">Cannot tell yet</button>';
-    h += '<button type="button" data-rc-kind="escalate">Send to ' + rcEsc(ReconCore.escalateTo(item)) + '</button>';
+    ReconCore.passTargets(item).forEach(function (to) {
+      h += '<button type="button" data-rc-kind="escalate" data-rc-to="' + rcEsc(to) + '">Pass to ' + rcEsc(ReconCore.teamWords(to)) + '</button>';
+    });
     h += '</div>';
   }
   return h + '</div>';
@@ -303,7 +324,11 @@ function rcBind() {
     if (t.hasAttribute('data-rc-back')) { RC.pick = null; rcRender(); return; }
     if (!id) return;
     if (t.hasAttribute('data-rc-job')) { rcChoose(id, { kind: 'job', job_id: t.getAttribute('data-rc-job') }); return; }
-    if (t.hasAttribute('data-rc-kind')) { rcChoose(id, { kind: t.getAttribute('data-rc-kind') }); }
+    if (t.hasAttribute('data-rc-kind')) {
+      var choice = { kind: t.getAttribute('data-rc-kind') };
+      if (t.hasAttribute('data-rc-to')) choice.to = t.getAttribute('data-rc-to');
+      rcChoose(id, choice);
+    }
   });
   root.addEventListener('change', function (ev) {
     var sel = ev.target;

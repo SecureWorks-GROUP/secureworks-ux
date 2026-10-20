@@ -11,6 +11,8 @@
 //  - A message picks a suggested job as confirm and another job (the dropdown) as correct.
 //  - A changed item is refused in words and the list is read again; a non-staff read shows why.
 //  - An undeployed backend reads as "not switched on yet".
+//  - Find by job reads recon_job_items for a typed job number, shows rows the list leaves
+//    out, and a message with two suggested jobs can be recorded on both (split).
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -36,15 +38,24 @@ function list() {
   };
 }
 
+const JOB_ITEMS = {
+  job_id: JOB_A.job_id, job_number: 'SWF-1001',
+  items: [{ event_id: '44444444-0000-4000-8000-000000000004', channel: 'email', direction: 'inbound', occurred_at: '2026-10-08T09:10:21Z',
+    from_address: 'orders@supplier.example', subject: 'Material Order Ref SWF-1001 & SWP-2002', preview: 'Delivery moved to Friday',
+    counterpart_role: 'supplier', cause: 'defect:no_identity', decision_state: 'none', last_action: null,
+    shown_hash: '00112233445566778899aabbccddeeff', offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] }],
+};
+
 async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
-  await page.evaluate(({ data, fetchAnswer, post, show }) => {
+  await page.evaluate(({ data, jobItems, fetchAnswer, post, show }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
     window.__rcFetches = []; window.__rcPosts = [];
     window.opsFetch = (action, params) => {
       window.__rcFetches.push({ action, params });
+      if (action === 'recon_job_items') return Promise.resolve(JSON.parse(JSON.stringify(jobItems)));
       if (action !== 'recon_daily_list') return Promise.reject(Object.assign(new Error('Unknown action'), { status: 400 }));
       if (fetchAnswer && fetchAnswer.reject) return Promise.reject(Object.assign(new Error(fetchAnswer.reject.message || ''), fetchAnswer.reject));
       return Promise.resolve(JSON.parse(JSON.stringify(data)));
@@ -55,7 +66,7 @@ async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = tr
       return Promise.resolve({ recorded: true, decision_id: 1 });
     };
     if (show) showView('recon');
-  }, { data: list(), fetchAnswer, post, show });
+  }, { data: list(), jobItems: JOB_ITEMS, fetchAnswer, post, show });
   if (show) await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__rcPosts);
@@ -151,4 +162,26 @@ test('a non-staff read and an undeployed backend are shown in words', async ({ p
   await expect(page.locator('#viewRecon [data-rc-err]')).toHaveText('Only an admin, owner or ops manager can use this list.');
   await openRecon(page, { fetchAnswer: { reject: { status: 400, message: 'Unknown action' } } });
   await expect(page.locator('#viewRecon [data-rc-err]')).toHaveText('This list is not switched on yet.');
+});
+
+test('Find by job shows a message the list leaves out and records it on both jobs', async ({ page }) => {
+  await openRecon(page);
+  await page.locator('#viewRecon #rcJobNo').fill('swf-1001');
+  await page.locator('#viewRecon [data-rc-find] button[type="submit"]').click();
+  await expect(page.locator('#viewRecon [data-rc-jobband]')).toContainText('Waiting on SWF-1001 (1)');
+  const fetched = await page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'recon_job_items'));
+  expect(fetched).toEqual([{ action: 'recon_job_items', params: { job_number: 'SWF-1001' } }]);
+  const row = card(page, '44444444-0000-4000-8000-000000000004');
+  await expect(row).toContainText('No contact on this message, so it was never matched');
+  await expect(row).toContainText('Delivery moved to Friday');
+  await row.locator('[data-rc-kind="split"]').click();
+  await expect(row.locator('.rc-confirm')).toContainText('Record that this message belongs to SWF-1001 and SWP-2002? It will show on each of them.');
+  await row.locator('[data-rc-yes]').click();
+  await expect.poll(async () => (await posts(page)).length).toBe(1);
+  expect((await posts(page))[0]).toEqual({ action: 'recon_record_decision', body: {
+    subject_kind: 'event', subject_id: '44444444-0000-4000-8000-000000000004', shown_hash: '00112233445566778899aabbccddeeff',
+    action: 'split', job_ids: [JOB_A.job_id, JOB_B.job_id], cause: 'defect:no_identity',
+  } });
+  await page.locator('#viewRecon [data-rc-clear]').click();
+  await expect(page.locator('#viewRecon [data-rc-jobband]')).toHaveCount(0);
 });

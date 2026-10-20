@@ -12,9 +12,9 @@ the Ops Dash shows about that. Code: `modules/ops-job-closeout.js` (pure rules b
 Off unless `?closeout=preview` (remembered as `localStorage.sw_closeout_preview = '1'`);
 `?closeout=live` turns it off again. It is a sibling of the work order screens'
 `?wo=preview`, not the same switch, because this has nothing to do with work orders
-and the captain may make one live without the other. With it off, every card, the job
-page and the status buttons are exactly as before, even when the feed carries the
-close-out block.
+and the captain may make one live without the other. With it off, the tags and the
+status buttons are exactly as before, even when the feed carries the close-out block.
+The Review text switch (below) is live for every staff user and does not need it.
 
 ## The read-only block it draws from
 
@@ -53,7 +53,7 @@ The job page shows the same tags under Next Actions.
 ## The Review text switch
 
 The review text always goes out once a fencing or patio job is fully paid, unless
-someone turns it off for that job first. With the preview on, fencing and patio cards
+someone turns it off for that job first. Live (no preview needed), fencing and patio cards
 in **Complete, Invoiced, Final Payment and Get Review** (and the job page, under Next
 Actions) carry a small on/off **Review text** switch. On is the default: the text
 sends. It must be turned off before the final payment lands, because the text goes
@@ -100,5 +100,6 @@ backlog). Moving a card into Get Review by hand asks the backend's one review se
 under its own switches.
 
 Guards: `tests/e2e/ops-job-closeout-core.spec.js` (pure rules) and
-`tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on, with
+`tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on, the switch
+without the preview, with
 `set_review_opt_out` mocked).

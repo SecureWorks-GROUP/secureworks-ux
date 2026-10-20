@@ -6,8 +6,9 @@
 // review text goes out, and the card archives 24 hours later).
 //
 // Preview: off unless ?closeout=preview or localStorage sw_closeout_preview = '1'
-// (?closeout=live turns it off again). With it off, the board, the job page and
-// the status buttons stay exactly as they were.
+// (?closeout=live turns it off again). With it off, the tags and the status
+// buttons stay exactly as they were. The Review text switch below is live and
+// does not need the preview.
 //
 // Reads only. Each fencing and patio row of `pipeline` (and `job_detail`) may
 // carry one read-only block:
@@ -17,7 +18,7 @@
 //               held: 'rectification' | 'callback' | null }
 // No block, no tags: nothing is ever worked out in the browser.
 //
-// The Review text switch (same preview): fencing and patio cards in Complete,
+// The Review text switch (live, no preview): fencing and patio cards in Complete,
 // Invoiced, Final Payment and Get Review carry a small on/off switch. On (the
 // default) means the review text sends; off calls ops-api `set_review_opt_out`.
 // It reads `review_opt_out` and `review_claim_status` off the closeout block,
@@ -368,18 +369,19 @@ var JobCloseoutOps = (function () {
   // A tag must never break a card: any throw draws nothing.
   function cardTagsHtml(job, status) {
     try {
-      if (!previewOn()) return '';
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) + toggleHtml(job, job.closeout, status);
+      var tags = previewOn() ? JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) : '';
+      return tags + toggleHtml(job, job.closeout, status);
     } catch (e) { return ''; }
   }
 
   // job_detail: the block beside the job, or on it.
   function detailTagsHtml(data) {
     try {
-      if (!previewOn() || !data || !data.job) return '';
+      if (!data || !data.job) return '';
       var job = data.job;
       var block = data.closeout !== undefined ? data.closeout : job.closeout;
-      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(viewOf(job, block), job.status, Date.now())) +
+      var tags = previewOn() ? JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(viewOf(job, block), job.status, Date.now())) : '';
+      return tags +
         toggleHtml(job, block, job.status, { detail: true });
     } catch (e) { return ''; }
   }

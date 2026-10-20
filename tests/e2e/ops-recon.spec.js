@@ -46,7 +46,7 @@ const JOB_ITEMS = {
     shown_hash: '00112233445566778899aabbccddeeff', offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] }],
 };
 
-async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true } = {}) {
+async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
   await page.evaluate(({ data, jobItems, fetchAnswer, post, show }) => {
@@ -66,7 +66,7 @@ async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = tr
       return Promise.resolve({ recorded: true, decision_id: 1 });
     };
     if (show) showView('recon');
-  }, { data: list(), jobItems: JOB_ITEMS, fetchAnswer, post, show });
+  }, { data: list(), jobItems, fetchAnswer, post, show });
   if (show) await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__rcPosts);
@@ -184,4 +184,16 @@ test('Find by job shows a message the list leaves out and records it on both job
   } });
   await page.locator('#viewRecon [data-rc-clear]').click();
   await expect(page.locator('#viewRecon [data-rc-jobband]')).toHaveCount(0);
+});
+
+test('Find by job says when a job has more than it shows, and never reads a bad answer as empty', async ({ page }) => {
+  await openRecon(page, { jobItems: { ...JOB_ITEMS, more: true } });
+  await page.locator('#viewRecon #rcJobNo').fill('SWF-1001');
+  await page.locator('#viewRecon [data-rc-find] button[type="submit"]').click();
+  await expect(page.locator('#viewRecon [data-rc-jobmore]')).toHaveText('Showing the newest 1. Older ones on SWF-1001 are not shown here yet.');
+  await openRecon(page, { jobItems: { job_number: 'SWF-1001' } });
+  await page.locator('#viewRecon #rcJobNo').fill('SWF-1001');
+  await page.locator('#viewRecon [data-rc-find] button[type="submit"]').click();
+  await expect(page.locator('#viewRecon [data-rc-joberr]')).toHaveText('Something went wrong. Please try again.');
+  await expect(page.locator('#viewRecon [data-rc-jobempty]')).toHaveCount(0);
 });

@@ -344,7 +344,10 @@ function rcJobSection() {
   if (j.loading && !j.items) h += '<div class="rc-empty">Reading that job...</div>';
   else if (j.err) h += '<div class="rc-msg" data-rc-joberr>' + rcEsc(ReconCore.refusalWords(j.err)) + '</div>';
   else if (!j.items.length) h += '<div class="rc-empty" data-rc-jobempty>Nothing on ' + rcEsc(j.number) + ' needs matching.</div>';
-  else j.items.forEach(function (it) { h += rcCard(it); });
+  else {
+    j.items.forEach(function (it) { h += rcCard(it); });
+    if (j.more) h += '<div class="rc-empty" data-rc-jobmore>Showing the newest ' + j.items.length + '. Older ones on ' + rcEsc(j.number) + ' are not shown here yet.</div>';
+  }
   return h;
 }
 
@@ -357,7 +360,8 @@ async function rcReadJob(number, quiet) {
   if (RC.job !== j || gen !== j.gen) return;
   j.loading = false;
   if (err) { if (!quiet || !j.items) { j.items = null; j.err = err; } }
-  else { j.items = ((res && res.items) || []).map(ReconCore.fromJobItem); j.err = null; }
+  else if (!res || !Array.isArray(res.items)) { if (!quiet || !j.items) { j.items = null; j.err = new Error('Unexpected answer reading that job'); } }
+  else { j.items = res.items.map(ReconCore.fromJobItem); j.more = !!res.more; j.err = null; }
   rcRender();
 }
 

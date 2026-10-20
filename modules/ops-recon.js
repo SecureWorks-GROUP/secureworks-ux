@@ -4,7 +4,7 @@
 //   1. owed invoices with no job, largest first;
 //   2. messages from a contact who owes us money;
 //   3. recent customer messages from someone with a live job.
-// Find by job reads ops-api recon_job_items (secureworks-backend 20261020170000): every
+// Find by job reads ops-api recon_job_items (secureworks-backend 20261020165000): every
 // queued message that offers one job, including the ones the daily list leaves out (no
 // identity, never asked), so a person who knows the job can still answer them. A message that
 // belongs to more than one of its suggested jobs can be recorded on all of them (split).

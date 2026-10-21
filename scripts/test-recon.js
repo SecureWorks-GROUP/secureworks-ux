@@ -194,5 +194,49 @@ check('AC-M1: an empty list never says nothing needs matching while rows are lef
   assert.strictEqual(C.leftOutWords(absent, true), '');
 });
 
+check('AC-M6: a call original shows length and where to listen, and never words', () => {
+  const v = C.originalView({ kind: 'call', direction: 'inbound', at: '2026-10-20T01:00:00Z',
+    call: { duration_seconds: 184, status: 'completed', line: '+61489267771', words_shown: false,
+      words_note: 'Call words are not shown here.', where_to_listen: 'In GoHighLevel: open this contact\'s conversation.' } });
+  assert.strictEqual(v.callNote, 'Call words are not shown here.');
+  assert(/GoHighLevel/.test(v.listen));
+  assert.deepStrictEqual(v.rows.find((r) => r[0] === 'Length'), ['Length', '3 min 4 s']);
+  assert.strictEqual(v.body, null);
+  const unknown = C.originalView({ kind: 'call', call: {} });
+  assert.strictEqual(unknown.callNote, 'Call words are not shown here.');
+  assert.deepStrictEqual(unknown.rows.find((r) => r[0] === 'Length'), ['Length', 'Not recorded']);
+});
+check('AC-M6: an email original shows its fields, words and every file with why', () => {
+  const v = C.originalView({ kind: 'email', direction: 'inbound', at: '2026-10-20T01:00:00Z',
+    email: { from: 'a@example.com', to: ['fencing@secureworkswa.com.au'], cc: [], subject: 'Plans', body: 'Subject: Plans\n\nSee attached', body_source: 'message', body_truncated: true },
+    attachments: { read: 'ok', items: [{ file_name: 'plans.pdf', size_bytes: 2048, status_words: 'Saved' }, { file_name: 'logo.png', size_bytes: 20, status_words: 'Not saved: a picture in the email itself, such as a signature' }],
+      files: 'not_available', files_note: 'Opening the file itself is not available yet: the files are kept private.', on_message: 2 } });
+  assert.deepStrictEqual(v.rows.find((r) => r[0] === 'Subject'), ['Subject', 'Plans']);
+  assert.strictEqual(v.body, 'Subject: Plans\n\nSee attached');
+  assert(/only the first part/.test(v.bodyNote));
+  assert.deepStrictEqual(v.files, [{ name: 'plans.pdf', words: '2 KB, Saved' }, { name: 'logo.png', words: '20 bytes, Not saved: a picture in the email itself, such as a signature' }]);
+  assert(/kept private/.test(v.filesNote));
+});
+check('AC-M6: a file list that was not read is never shown as no files', () => {
+  const failedList = C.originalView({ kind: 'email', email: {}, attachments: { read: 'failed', items: null } });
+  assert.strictEqual(failedList.files, null);
+  assert(/could not be read/.test(failedList.filesNote));
+  assert(!/No files/.test(failedList.filesNote));
+  const kept = C.originalView({ kind: 'email', email: {}, attachments: { read: 'ok', items: [], on_message: 2 } });
+  assert(/no file list was kept/.test(kept.filesNote));
+  const none = C.originalView({ kind: 'email', email: {}, attachments: { read: 'ok', items: [], on_message: 0 } });
+  assert.strictEqual(none.filesNote, 'No files.');
+  const cut = C.originalView({ kind: 'email', email: {}, attachments: { read: 'ok', items: [{ file_name: 'a.pdf', status_words: 'Saved' }], more_not_listed: true } });
+  assert(/More files than shown here/.test(cut.filesNote));
+});
+check('AC-M6: a text original shows the whole text; a bad answer and errors are in words', () => {
+  const v = C.originalView({ kind: 'text', direction: 'outbound', text: { body: 'On our way', body_source: 'message', line: '+61489267771' } });
+  assert.strictEqual(v.body, 'On our way');
+  assert(C.originalView(null).error);
+  assert.strictEqual(C.originalErrorWords({ code: 'message_not_found' }), 'That message is no longer there.');
+  assert(/not switched on/.test(C.originalErrorWords(new Error('Unknown action: context_message_original'))));
+  assert(/Only an admin/.test(C.originalErrorWords({ code: 'operator_access_required' })));
+});
+
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
-console.log('PASS recon: tab flag, actions, body, escalate, split, find by job, refusals, words');
+console.log('PASS recon: tab flag, actions, body, escalate, split, find by job, refusals, words, open the original');

@@ -245,3 +245,55 @@ test('the daily list says when it was cut, and never reads a bad answer as nothi
   await expect(page.locator('#viewRecon [data-rc-err]')).toHaveText('Something went wrong. Please try again.');
   await expect(page.locator('#viewRecon')).not.toContainText('Nothing needs matching right now.');
 });
+
+test('AC-M6: Open the original shows an email with its files, a call with no words, and a refusal in words', async ({ page }) => {
+  await openRecon(page);
+  await page.evaluate(() => {
+    const before = window.opsFetch;
+    window.opsFetch = (action, params) => {
+      if (action !== 'context_message_original') return before(action, params);
+      window.__rcFetches.push({ action, params });
+      const id = params && params.event_id;
+      if (id === '33333333-0000-4000-8000-000000000003') {
+        return Promise.resolve({ event_id: id, kind: 'email', direction: 'inbound', at: '2026-10-19T02:00:00Z', read_only: true,
+          email: { subject: 'Gate height', from: 'lee@example.test', to: ['fencing@secureworkswa.com.au'], cc: [], mailbox: 'fencing@secureworkswa.com.au',
+            body: 'Subject: Gate height\n\nIs the gate going to match the fence height out the back?', body_source: 'message' },
+          attachments: { read: 'ok', items: [{ file_name: 'plans.pdf', size_bytes: 120000, saved: true, status: 'stored', status_words: 'Saved' }],
+            copies_not_listed: 0, more_not_listed: false, on_message: 1, files: 'not_available',
+            files_note: 'Opening the file itself is not available yet: the files are kept private.' } });
+      }
+      return Promise.resolve({ event_id: id, kind: 'call', direction: 'inbound', at: '2026-10-17T02:00:00Z', read_only: true,
+        call: { duration_seconds: 184, status: 'completed', line: '+61489267771', words_shown: false, words_note: 'Call words are not shown here.',
+          where_to_listen: 'In GoHighLevel: open this contact\'s conversation and play the call at this time.' } });
+    };
+  });
+  const email = card(page, '33333333-0000-4000-8000-000000000003');
+  await email.getByRole('button', { name: 'Open the original' }).click();
+  const panel = email.locator('[data-rc-orig]');
+  await expect(panel.locator('[data-rc-orig-body]')).toContainText('match the fence height out the back');
+  await expect(panel).toContainText('lee@example.test');
+  await expect(panel.locator('[data-rc-orig-files]')).toContainText('plans.pdf');
+  await expect(panel.locator('[data-rc-orig-files]')).toContainText('Opening the file itself is not available yet');
+  await expect(panel.locator('a')).toHaveCount(0);
+  await expect(email.getByRole('button', { name: 'Close the original' })).toBeVisible();
+
+  const call = card(page, '22222222-0000-4000-8000-000000000002');
+  await call.getByRole('button', { name: 'Open the original' }).click();
+  const cp = call.locator('[data-rc-orig]');
+  await expect(cp.locator('[data-rc-orig-callnote]')).toHaveText('Call words are not shown here.');
+  await expect(cp).toContainText('3 min 4 s');
+  await expect(cp.locator('[data-rc-orig-listen]')).toContainText('In GoHighLevel');
+  await expect(cp.locator('[data-rc-orig-body]')).toHaveCount(0);
+
+  // Close, then a refusal from the staff-only door reads in words.
+  await call.getByRole('button', { name: 'Close the original' }).click();
+  await expect(call.locator('[data-rc-orig]')).toHaveCount(0);
+  await page.evaluate(() => {
+    window.opsFetch = (action) => action === 'context_message_original'
+      ? Promise.reject(Object.assign(new Error('Forbidden'), { status: 403, code: 'operator_access_required' }))
+      : Promise.reject(new Error('no'));
+  });
+  await call.getByRole('button', { name: 'Open the original' }).click();
+  await expect(call.locator('[data-rc-orig-err]')).toHaveText('Only an admin, owner or ops manager can use this list.');
+  expect(await posts(page)).toEqual([]);
+});

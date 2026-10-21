@@ -257,6 +257,72 @@ var ReconCore = (function () {
     }[cause] || '';
   }
   function hasBanned(s) { return /[\u2013\u2014]/.test(String(s)) || /\p{Extended_Pictographic}/u.test(String(s)); }
+  // AC-M6: Open the original (ops-api context_message_original, CTX-T23). The answer as the
+  // screen shows it, read only. A call never shows words; a file list that was not read says so
+  // and is never shown as "no files"; files themselves cannot be opened yet (kept private).
+  function sizeWords(n) {
+    if (typeof n !== 'number' || !isFinite(n) || n < 0) return '';
+    if (n < 1024) return n + ' bytes';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (Math.round(n / 104857.6) / 10) + ' MB';
+  }
+  function originalErrorWords(err) {
+    var code = err && (err.code || (err.body && err.body.code));
+    if (code === 'message_not_found') return 'That message is no longer there.';
+    if (code === 'operator_access_required') return REFUSALS.operator_access_required;
+    if (code === 'user_jwt_required') return REFUSALS.user_jwt_required;
+    if (err && /unknown action/i.test(String(err.message || ''))) return 'Opening the original is not switched on yet.';
+    return 'The original could not be read just now.';
+  }
+  function originalView(res) {
+    if (!res || typeof res !== 'object' || !res.kind) return { error: 'The original could not be read just now.' };
+    var v = { kind: res.kind, rows: [], body: null, bodyNote: '', files: null, filesNote: '', callNote: '', listen: '' };
+    var at = perthWhen(res.at);
+    if (res.kind === 'call') {
+      var c = res.call || {};
+      var mins = typeof c.duration_seconds === 'number' && isFinite(c.duration_seconds) ? c.duration_seconds : null;
+      v.rows.push(['Call', [res.direction === 'inbound' ? 'Incoming' : res.direction === 'outbound' ? 'Outgoing' : '', at].filter(Boolean).join(', ')]);
+      v.rows.push(['Length', mins == null ? 'Not recorded' : (mins >= 60 ? Math.floor(mins / 60) + ' min ' + (mins % 60) + ' s' : mins + ' s')]);
+      if (c.status) v.rows.push(['Status', plainWord(c.status)]);
+      if (c.line) v.rows.push(['Our line', String(c.line)]);
+      v.callNote = c.words_note || 'Call words are not shown here.';
+      v.listen = c.where_to_listen || '';
+      return v;
+    }
+    if (res.kind === 'email') {
+      var e = res.email || {};
+      v.rows.push(['From', e.from || 'Not recorded']);
+      v.rows.push(['To', (e.to || []).join(', ') || 'Not recorded']);
+      if ((e.cc || []).length) v.rows.push(['Cc', e.cc.join(', ')]);
+      v.rows.push(['When', at || 'Not recorded']);
+      if (e.mailbox) v.rows.push(['Read from', e.mailbox]);
+      v.rows.push(['Subject', e.subject || 'No subject']);
+      v.body = e.body || null;
+      if (e.body_source === 'preview_only') v.bodyNote = 'Only the start of this email was kept.';
+      else if (e.body_truncated) v.bodyNote = 'The email was longer than this; only the first part was kept.';
+      if (e.forwarded_correspondence) v.forwarded = e.forwarded_correspondence;
+      var a = res.attachments || {};
+      var notes = [];
+      if (a.read === 'failed') notes.push('The file list could not be read just now.');
+      else if (a.read === 'none') notes.push(a.reason || 'This email has no file list.');
+      else {
+        v.files = (a.items || []).map(function (f) {
+          return { name: f.file_name || 'Unnamed file', words: [sizeWords(f.size_bytes), f.status_words || ''].filter(Boolean).join(', ') };
+        });
+        if (!v.files.length) notes.push(a.on_message > 0 ? 'The email had files, but no file list was kept for it.' : 'No files.');
+        if (a.more_not_listed) notes.push('More files than shown here.');
+        if (v.files.length) notes.push(a.files_note || 'Opening the file itself is not available yet.');
+      }
+      v.filesNote = notes.join(' ');
+      return v;
+    }
+    var t = res.text || res.other || {};
+    v.rows.push([res.kind === 'text' ? 'Text' : 'Message', [res.direction === 'inbound' ? 'Incoming' : res.direction === 'outbound' ? 'Outgoing' : '', at].filter(Boolean).join(', ')]);
+    if (t.line) v.rows.push(['Our line', String(t.line)]);
+    v.body = t.body || null;
+    if (t.body_source === 'preview_only') v.bodyNote = 'Only the start of this message was kept.';
+    return v;
+  }
   return {
     tabVisible: tabVisible, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
@@ -264,14 +330,16 @@ var ReconCore = (function () {
     passTargets: passTargets, teamWords: teamWords,
     canSplit: canSplit, splitLabel: splitLabel, jobNumberOk: jobNumberOk, fromJobItem: fromJobItem, causeWords: causeWords,
     hasBanned: hasBanned, plainWord: plainWord, reasonWords: reasonWords, senderWords: senderWords, perthWhen: perthWhen,
-    recordedWords: recordedWords, leftOut: leftOut, leftOutWords: leftOutWords
+    recordedWords: recordedWords, leftOut: leftOut, leftOutWords: leftOutWords,
+    originalView: originalView, originalErrorWords: originalErrorWords, sizeWords: sizeWords
   };
 })();
 // </recon-core>
 
 var RC_PAGE = 50;
 var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null, leftOut: null, recorded: [],
-  job: null /* { number, items, err, loading, gen } for Find by job */ };
+  job: null /* { number, items, err, loading, gen } for Find by job */,
+  orig: {} /* subject_id -> { loading, res, err } for Open the original */ };
 
 function rcEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function rcRoot() { return document.getElementById('reconRoot'); }
@@ -315,7 +383,14 @@ function rcCss() {
     '#viewRecon .rc-done{margin:8px 0;padding:8px 10px;border-radius:8px;background:#eaf6ee;color:#1d5b33;font-size:13px;}',
     '#viewRecon .rc-find{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 8px;font-size:13px;}',
     '#viewRecon .rc-find input{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);min-width:0;flex:1 1 180px;max-width:260px;}',
-    '#viewRecon .rc-find button{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);background:var(--sw-bg,#fafafa);cursor:pointer;}'
+    '#viewRecon .rc-find button{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);background:var(--sw-bg,#fafafa);cursor:pointer;}',
+    '#viewRecon .rc-orig{margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid var(--sw-border,#e3e3e3);background:var(--sw-bg,#fafafa);font-size:13px;}',
+    '#viewRecon .rc-orig dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0 0 8px;}',
+    '#viewRecon .rc-orig dt{color:var(--sw-text-sec);}',
+    '#viewRecon .rc-orig dd{margin:0;overflow-wrap:anywhere;}',
+    '#viewRecon .rc-orig-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;background:var(--sw-card,#fff);border-radius:6px;padding:8px;}',
+    '#viewRecon .rc-orig ul{margin:6px 0 0;padding-left:18px;}',
+    '#viewRecon .rc-orig-note{color:var(--sw-text-sec);margin-top:6px;}'
   ].join('\n');
   document.head.appendChild(st);
 }
@@ -386,6 +461,10 @@ function rcCard(item) {
       h += '<select data-rc-other aria-label="Another job of theirs"><option value="">Another job of theirs...</option>' +
         others.map(function (j) { return '<option value="' + rcEsc(j.job_id) + '">' + rcEsc(ReconCore.jobWords(j)) + '</option>'; }).join('') + '</select>';
     }
+    if (item.subject_kind === 'event') {
+      h += '<button type="button" data-rc-original aria-expanded="' + (RC.orig[item.subject_id] ? 'true' : 'false') + '">' +
+        (RC.orig[item.subject_id] ? 'Close the original' : 'Open the original') + '</button>';
+    }
     h += '<button type="button" data-rc-kind="unrelated">Not for any job</button>';
     h += '<button type="button" data-rc-kind="unresolved">Cannot tell yet</button>';
     ReconCore.passTargets(item).forEach(function (to) {
@@ -395,7 +474,42 @@ function rcCard(item) {
     var why = (item.offered_jobs || []).map(ReconCore.reasonWords).filter(Boolean);
     if (why.length) h += '<div class="rc-meta" data-rc-why>Why these jobs: ' + rcEsc(why.join('. ')) + '.</div>';
   }
+  if (item.subject_kind === 'event' && RC.orig[item.subject_id]) h += rcOriginalHtml(RC.orig[item.subject_id]);
   return h + '</div>';
+}
+
+// AC-M6: the original, read only, under its card.
+function rcOriginalHtml(o) {
+  var h = '<div class="rc-orig" data-rc-orig role="region" aria-label="The original message">';
+  if (o.loading) return h + 'Reading the original...</div>';
+  var v = o.err ? null : ReconCore.originalView(o.res);
+  if (!v || v.error) return h + '<div data-rc-orig-err>' + rcEsc(o.err ? ReconCore.originalErrorWords(o.err) : v.error) + '</div></div>';
+  h += '<dl>' + v.rows.map(function (r) { return '<dt>' + rcEsc(r[0]) + '</dt><dd>' + rcEsc(r[1]) + '</dd>'; }).join('') + '</dl>';
+  if (v.kind === 'call') {
+    h += '<div data-rc-orig-callnote>' + rcEsc(v.callNote) + '</div>';
+    if (v.listen) h += '<div class="rc-orig-note" data-rc-orig-listen>Where to listen: ' + rcEsc(v.listen) + '</div>';
+    return h + '</div>';
+  }
+  h += v.body ? '<div class="rc-orig-body" data-rc-orig-body>' + rcEsc(v.body) + '</div>' : '<div class="rc-orig-note">No words were kept for this message.</div>';
+  if (v.bodyNote) h += '<div class="rc-orig-note">' + rcEsc(v.bodyNote) + '</div>';
+  if (v.forwarded) h += '<div class="rc-orig-note">Forwarded mail inside it:</div><div class="rc-orig-body">' + rcEsc(v.forwarded) + '</div>';
+  if (v.kind === 'email') {
+    h += '<div data-rc-orig-files><strong>Files</strong>';
+    if (v.files && v.files.length) h += '<ul>' + v.files.map(function (f) { return '<li>' + rcEsc(f.name) + (f.words ? ' (' + rcEsc(f.words) + ')' : '') + '</li>'; }).join('') + '</ul>';
+    if (v.filesNote) h += '<div class="rc-orig-note">' + rcEsc(v.filesNote) + '</div>';
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+
+async function rcToggleOriginal(id) {
+  if (RC.orig[id]) { delete RC.orig[id]; rcRender(); return; }
+  var o = RC.orig[id] = { loading: true, res: null, err: null };
+  rcRender();
+  try { o.res = await opsFetch('context_message_original', { event_id: id }); } catch (e) { o.err = e; }
+  if (RC.orig[id] !== o) return;
+  o.loading = false;
+  rcRender();
 }
 
 function rcRender() {
@@ -509,6 +623,7 @@ function rcBind() {
     if (t.hasAttribute('data-rc-back')) { RC.pick = null; rcRender(); return; }
     if (t.hasAttribute('data-rc-clear')) { RC.job = null; RC.pick = null; rcRender(); return; }
     if (!id) return;
+    if (t.hasAttribute('data-rc-original')) { rcToggleOriginal(id); return; }
     if (t.hasAttribute('data-rc-job')) { rcChoose(id, { kind: 'job', job_id: t.getAttribute('data-rc-job') }); return; }
     if (t.hasAttribute('data-rc-kind')) {
       var choice = { kind: t.getAttribute('data-rc-kind') };
@@ -533,6 +648,16 @@ function rcBind() {
     if (card) rcChoose(card.getAttribute('data-rc-subject'), { kind: 'job', job_id: sel.value });
   });
 }
+
+// AC-J3: the job page links here. Opens Matching on Find by job for that job number.
+function reconOpenJob(number) {
+  number = String(number || '').trim().toUpperCase();
+  if (typeof showView === 'function') showView('recon');
+  if (!ReconCore.jobNumberOk(number)) return;
+  RC.msg = null; RC.pick = null;
+  rcReadJob(number, false);
+}
+if (typeof window !== 'undefined') window.reconOpenJob = reconOpenJob;
 
 if (typeof document !== 'undefined' && document.addEventListener) {
   var rcStart = function () { if (rcRoot()) rcBind(); reconProbeVisibility(); };

@@ -124,10 +124,12 @@ test('L10: status, how a record was placed and the definitions read in staff wor
   ];
   const text = await render(page, { job: job(), cost_events: costs, labels: ENGINE_LABELS });
   expect(text).not.toContain('in_progress');
-  expect(text).toContain('Placed by a person in Bills to place on SWP-26376');
+  expect(text).toContain('Placed in Bills to place on SWP-26376');
+  // The profit read carries no placed-by, so a Bills to place row never names a person (W7a/W7b).
+  expect(text).not.toContain('by a person');
   expect(text).toContain('Placed by a machine: the bill\'s Xero reference names SWP-26376');
   expect(text).toContain('Placed by a machine: matched to purchase order PO-640 by amount and date');
-  expect(text).toContain('Split by a person across 3 jobs, with $120.50 to overhead');
+  expect(text).toContain('Split in Bills to place across 3 jobs, with $120.50 to overhead');
   for (const code of ['manual_queue:', 'quoted_source', 'expected_labour_ex', 'job_financials', 'xero_project_linked_by_contact_only', 'frozen_at_acceptance']) expect(text).not.toContain(code);
   await expect(page.locator('[data-jp-label]')).toHaveCount(5);
   await expect(page.locator('[data-jp-label="committed_open_ex"]')).toContainText('An order with no price is never counted here as $0.00.');

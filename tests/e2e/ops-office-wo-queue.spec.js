@@ -109,6 +109,61 @@ test('an open queue shows the allowance, saves it, and approves, with no Send', 
   expect(approve.body.agreed_labour_ex).toBeUndefined();
 });
 
+test('a 403 before the switch is on paints nothing', async ({ page }) => {
+  await boot(page, `const e = new Error('An authorised operator session is required.'); e.status = 403; e.code = 'access_denied'; e.body = { code: 'operator_access_required', error: e.message }; throw e;`);
+  await page.evaluate(() => OfficeWoFill.paint());
+  await expect(page.locator('#officeWoFill')).toBeEmpty();
+  await expect(page.locator('[data-office-wo-fill-error]')).toHaveCount(0);
+  await expect(page.locator('#officeWoFill')).not.toContainText('could not be read');
+  await expect(page.locator('#officeWoFill')).not.toContainText('An authorised operator session is required.');
+});
+
+test('a 500 before the switch is on paints nothing, and after it is on the queue clears', async ({ page }) => {
+  await boot(page, 'return {};');
+  await page.evaluate((row) => {
+    window.__mode = '500';
+    window.opsFetch = async function () {
+      if (window.__mode === '500') {
+        const e = new Error('Internal Server Error');
+        e.status = 500;
+        throw e;
+      }
+      if (window.__mode === 'timeout') {
+        const e = new Error('The request timed out');
+        e.status = 0;
+        throw e;
+      }
+      return { enabled: true, work_orders: [row] };
+    };
+    return OfficeWoFill.paint();
+  }, ROW);
+  await expect(page.locator('#officeWoFill')).toBeEmpty();
+  await expect(page.locator('[data-office-wo-fill-error]')).toHaveCount(0);
+  await expect(page.locator('#officeWoFill')).not.toContainText('could not be read');
+
+  await page.evaluate(() => {
+    window.__mode = 'timeout';
+    return OfficeWoFill.paint();
+  });
+  await expect(page.locator('#officeWoFill')).toBeEmpty();
+  await expect(page.locator('[data-office-wo-fill-error]')).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.__mode = 'on';
+    return OfficeWoFill.paint();
+  });
+  await expect(page.locator('[data-office-wo-fill-queue]')).toContainText('WO-100');
+
+  await page.evaluate(() => {
+    window.__mode = '500';
+    return OfficeWoFill.paint();
+  });
+  await expect(page.locator('[data-office-wo-fill-queue]')).toHaveCount(0);
+  await expect(page.locator('[data-office-wo-fill]')).toHaveCount(0);
+  await expect(page.locator('[data-office-wo-fill-error]')).toHaveText('Work orders to fill could not be read.');
+  await expect(page.locator('#officeWoFill')).not.toContainText('WO-100');
+});
+
 test('a draft with no allowance has no Approve until one is saved', async ({ page }) => {
   const blank = Object.assign({}, ROW, { agreed_labour_ex: null, needs_allowance: true });
   await boot(page, `if (action === 'list_office_job_work_orders') return { enabled: true, work_orders: ${JSON.stringify([blank])} }; return {};`);

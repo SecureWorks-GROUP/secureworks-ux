@@ -2,6 +2,8 @@
 // list_office_job_work_orders, fill_job_work_order_allowance,
 // approve_office_job_work_order). Flag job_work_order_office_fill_v1.
 // While that flag is off, or the action is not deployed, this paints nothing.
+// A failed read always clears the queue. The error line is shown only after
+// a successful read has said the switch is on.
 // No send control: a job work order is approved, not sent.
 //
 // <office-wo-fill-core>
@@ -111,6 +113,15 @@ var OfficeWoFillCore = (function () {
   'use strict';
   var C = OfficeWoFillCore;
   var bound = false;
+  var switchOn = false;
+
+  function noteSwitch(res) {
+    if (res && (res.enabled === true || (res.enabled !== false && Array.isArray(res.work_orders)))) {
+      switchOn = true;
+      return;
+    }
+    switchOn = false;
+  }
 
   function role() {
     try {
@@ -156,7 +167,7 @@ var OfficeWoFillCore = (function () {
       }
       await paint();
     } catch (e) {
-      if (C.isOff(null, e)) { clear(); return; }
+      if (C.isOff(null, e)) { switchOn = false; clear(); return; }
       showMsg(rowEl, (e && e.message) || 'That could not be saved.');
     }
   }
@@ -186,10 +197,13 @@ var OfficeWoFillCore = (function () {
       var res = await opsFetch('list_office_job_work_orders');
       var el = host();
       if (!el) return;
-      if (C.isOff(res)) { el.innerHTML = ''; return; }
+      if (C.isOff(res)) { switchOn = false; el.innerHTML = ''; return; }
+      noteSwitch(res);
       el.innerHTML = C.queueHtml(res && res.work_orders);
     } catch (e) {
-      if (C.isOff(null, e)) { clear(); return; }
+      clear();
+      if (C.isOff(null, e)) { switchOn = false; return; }
+      if (!switchOn) return;
       var elFail = host();
       if (elFail) elFail.innerHTML = '<div data-office-wo-fill-error>Work orders to fill could not be read.</div>';
     }

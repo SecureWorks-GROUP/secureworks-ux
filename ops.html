@@ -5061,7 +5061,7 @@ __swOpsStampAssets([
           <input type="text" class="filter-search" id="matReconSearch" placeholder="Search supplier / bill #" oninput="matReconFilter(this.value)" style="width:200px;">
           <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
         </div>
-        <div class="mrq-basis">Supplier bills that sit on no job yet, largest first. Amounts are ex GST. Xero Projects stays where the bookkeeper puts supplier bills against a job; this list only catches bills that are on no job at all. Placing a bill records it as a materials cost on that job.</div>
+        <div class="mrq-basis">Bills waiting for a person to place them, largest first. Amounts are ex GST. A bill is here because it sits on no job yet, or because a person must confirm where it goes (the bill says which when you open it). Xero Projects stays where the bookkeeper puts supplier bills against a job. Placing a bill puts it on that job as a cost.</div>
         <div id="matReconCapNote" class="mrq-note mrq-cap" style="display:none;"></div>
         <div id="matReconJustDone" class="mrq-note mrq-done" style="display:none;"></div>
         <div id="matReconBody"><div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div></div>
@@ -5123,7 +5123,7 @@ __swOpsStampAssets([
           <div style="flex:1;"></div>
           <input type="text" class="filter-search" id="jpJobNumber" placeholder="Open job # (e.g. SWF-26041)" style="width:190px;" onkeydown="if(event.key==='Enter')jpOpenByNumber()">
           <button class="btn btn-secondary btn-sm" onclick="jpOpenByNumber()">Open</button>
-          <button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job yet: place them in Financials > Bill Reconciliation, then Reread profit here">Bills to place</button>
+          <button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: place them in Financials > Bill Reconciliation, then Reread profit here">Bills to place</button>
           <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()" title="Re-read the profit engine (after placing bills)">&#8635; Reread profit</button>
         </div>
         <div class="jp-basis">Gross profit on direct costs (trade labour, materials, commission, other), ex GST, no overhead share. Blank evidence shows as Unknown, never $0. Paid means Xero recorded the payment.</div>
@@ -18544,6 +18544,9 @@ var JP_BILL_PLACED_BY = {
   po_deterministic: 'placed whole by a machine from a purchase order',
   agent_prematch: 'placed whole by the agent',
 };
+// A held bill a machine placed has no queue row, and confirming it in place is not
+// built (JP-15), so the note says so rather than implying a path.
+var JP_HELD_NO_CONFIRM_SCREEN = 'If it is not in Bills to place, no screen can confirm it yet.';
 // A bill placed whole that names any other job is not confirmed for this job.
 function swBillPlacedWholeElsewhere(br, ownRef) {
   return br.refs.some(function(x) { return x.ref !== ownRef; });
@@ -18708,7 +18711,7 @@ function _jpRenderDetail(data) {
     + '<div class="jp-sub">' + _jpTypeLabel(j) + ' &middot; ' + _jpEsc(_jpStatusText(j.status)) + (j.created_at ? ' &middot; created ' + _jpDate(j.created_at) : '') + '</div>'
     + '<div style="margin-top:4px;">' + _jpConfidence(j) + '</div></div>'
     + (j.job_id ? '<button class="btn btn-secondary btn-sm" onclick="openJobDetail(\'' + _jpEsc(j.job_id) + '\')">Open job</button>' : '')
-    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job: Financials > Bill Reconciliation">Place bills</button>' : '')
+    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: Financials > Bill Reconciliation">Place bills</button>' : '')
     + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
 
   var inDelivery = JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
@@ -18840,7 +18843,7 @@ function _jpRenderDetail(data) {
       : (JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')');
     var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
     var counts = held
-      ? '. Its labour is waiting for a person to confirm it and is not counted as cost on any job until then.'
+      ? '. Its labour is waiting for a person to confirm it and is not counted as cost on any job until then. ' + JP_HELD_NO_CONFIRM_SCREEN
       : '. It counts here in full until a person moves, splits or unplaces it.';
     if (b.rows.length > 1) {
       // Line detail is here: read the job numbers from the line text.
@@ -18852,7 +18855,7 @@ function _jpRenderDetail(data) {
     } else {
       // One row: the lines are not in the engine read. Offer a read-only check.
       wholeHtml += '<div class="jp-note" data-jp-whole-bill="' + _jpEsc(b.id) + '"><b>' + label + '</b>, ' + _jpEsc(fmt$(amount)) + ', is ' + how
-        + '. <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(b.id) + '\', \'' + _jpEsc(j.job_number || '') + '\', ' + (held ? 'true' : 'false') + ')">Check which jobs its lines name</button>'
+        + (held ? counts : '.') + ' <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(b.id) + '\', \'' + _jpEsc(j.job_number || '') + '\', ' + (held ? 'true' : 'false') + ')">Check which jobs its lines name</button>'
         + '<div data-jp-bill-check="' + _jpEsc(b.id) + '"></div></div>';
     }
   });
@@ -19434,8 +19437,15 @@ var MAT_RECON_REASON_LABELS = {
   ref_no_job:             'Reference found, no matching job',
   no_po_match:            'Supplier PO exists, no amount/date match',
   ambiguous_po_competitor: 'Multiple POs matched — pick one',
-  ambiguous_po:           'Ambiguous PO match'
+  ambiguous_po:           'Ambiguous PO match',
+  // Held for a person (xero-sync HELD_QUEUE_REASONS): the bill may already be linked
+  // to a job in Xero, so these never say "on no job".
+  installer_confirm:      'Installer bill: a person confirms where it goes',
+  xero_link_conflict:     'Xero links it to a job its own job number does not name',
+  duplicate_document:     'Same supplier document entered more than once in Xero',
+  fact_contradicted:      'An automatic placement was taken back because the bill changed'
 };
+var MAT_RECON_HELD_REASONS = { installer_confirm: true, xero_link_conflict: true, duplicate_document: true, fact_contradicted: true };
 
 function _mrqEx(r) { return Number(r && r.sub_total != null ? r.sub_total : 0) || 0; }
 function _mrqErrText(e) { return (e && e.message) ? e.message : 'unknown error'; }
@@ -19573,7 +19583,7 @@ function renderMaterialsRecon() {
   if (cnt) cnt.textContent = c.open + (c.openLowerBound ? '+' : '');
   var sum = document.getElementById('matReconSummary');
   if (sum) {
-    sum.innerHTML = '<b>' + lb + c.open + ' open bill' + (c.open === 1 ? '' : 's') + '</b> · <b>' + lb + fmt$(c.openEx) + '</b> ex GST on no job'
+    sum.innerHTML = '<b>' + lb + c.open + ' open bill' + (c.open === 1 ? '' : 's') + '</b> · <b>' + lb + fmt$(c.openEx) + '</b> ex GST waiting to be placed'
       + (c.s.assigned != null ? ' · ' + slb + c.s.assigned + ' placed' : '')
       + (c.s.not_job_related != null ? ' · ' + slb + c.s.not_job_related + ' not job related' : '');
   }
@@ -19668,6 +19678,8 @@ function _mrqDetailHtml(r) {
   h += '</div><div>';
 
   h += '<div class="mrq-sec-title">Place it on a job</div>';
+  // A held bill says why it is here even with no suggestion: it may already sit on a job in Xero.
+  if (MAT_RECON_HELD_REASONS[r.suggestion_reason]) h += '<div class="mrq-muted" style="margin-bottom:6px;" data-mrq-held-reason>Why it is here: ' + escapeAttr(MAT_RECON_REASON_LABELS[r.suggestion_reason]) + '.</div>';
   if (r.suggested_job_id && !(p.job && p.job.id === r.suggested_job_id)) {
     h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + escapeAttr(r.suggested_job_number || 'a job') + '</b>'
       + (r.suggestion_reason ? ' <span class="mrq-muted">(' + escapeAttr(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
@@ -19727,7 +19739,7 @@ function _mrqDetailHtml(r) {
     + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + escapeAttr(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>'
     + (_matRecon.notjobArmed[id] ? 'Confirm: not job related' : 'Not job related') + '</button>'
     + '</div>';
-  if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. No cost goes on any job.</div>';
+  if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. Bills to place will put no cost on any job. If Xero links this bill to a job, Job profit may still count it there until that rule is settled.</div>';
   if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
   if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>'
     + (_matRecon.errNext[id] ? '<div class="mrq-muted" style="margin-top:4px;" data-mrq-err-next>' + escapeAttr(_matRecon.errNext[id]) + '</div>' : '');

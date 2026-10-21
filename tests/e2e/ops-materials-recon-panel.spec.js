@@ -22,6 +22,10 @@
 //    never as a split. When they name a job other than the picked one, or the lines were not read,
 //    Place warns that all of the bill goes on the picked job and needs a second confirming press. It
 //    never refuses, and nothing is split for the operator.
+//  - The list never claims every bill is on no job: a bill held for a person (an installer bill, a
+//    Xero link its job number does not name, a duplicate, a withdrawn automatic placement) may
+//    already be linked to a job in Xero, says why it is here, and the not-job-related warning never
+//    promises the cost leaves a job Xero links the bill to (staff walk W1/W2, 21 Oct; JP-21 open).
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -177,7 +181,7 @@ test('the list is largest first, with the exact open count and dollars and no ca
   await expect(row(page, 'q-big')).toContainText(/20 Sept? 2026/);
   await expect(row(page, 'q-mid')).toContainText('SWF-25500');
   await expect(page.locator('#matReconOpenCount')).toHaveText('3');
-  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST on no job · 4 placed · 2 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST waiting to be placed · 4 placed · 2 not job related');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
@@ -187,7 +191,7 @@ test('a well-worked queue (300 open of 1,200 rows ever) reads its open bills exa
   fixture.queue.stats = { open: 300, assigned: 850, not_job_related: 50, total_rows: 1200, open_total_ex: 25472.5 };
   await openMaterials(page, { fixture });
   await expect(page.locator('#matReconOpenCount')).toHaveText('300');
-  await expect(page.locator('#matReconSummary')).toHaveText('300 open bills · $25,472.50 ex GST on no job · at least 850 placed · at least 50 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('300 open bills · $25,472.50 ex GST waiting to be placed · at least 850 placed · at least 50 not job related');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
@@ -198,7 +202,7 @@ test('a full 1,000-row list reads "at least" for the open figures and says the l
   fixture.queue.stats = { open: 940, assigned: 400, not_job_related: 60, total_rows: 1400, open_total_ex: 40000 };
   await openMaterials(page, { fixture });
   await expect(page.locator('#matReconOpenCount')).toHaveText('1000+');
-  await expect(page.locator('#matReconSummary')).toHaveText('at least 1000 open bills · at least $60,472.50 ex GST on no job · at least 400 placed · at least 60 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('at least 1000 open bills · at least $60,472.50 ex GST waiting to be placed · at least 400 placed · at least 60 not job related');
   await expect(page.locator('#matReconCapNote')).toHaveText('This list holds the 1,000 newest open bills, largest first. There may be more open bills than it counts; older ones come in on Refresh as these are placed.');
 });
 
@@ -206,7 +210,7 @@ test('missing stats fall back to the loaded rows', async ({ page }) => {
   const fixture = buildFixture();
   delete fixture.queue.stats;
   await openMaterials(page, { fixture });
-  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST on no job');
+  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST waiting to be placed');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
@@ -279,7 +283,7 @@ test('a job with a zero-expense Xero Project places in one press with { queue_id
   await d.locator('[data-mrq-act="place"]').click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
   await expect(row(page, 'q-big')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $2,172.50 ex GST on no job · 5 placed · 2 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $2,172.50 ex GST waiting to be placed · 5 placed · 2 not job related');
   await expect(page.locator('#matReconJustDone [data-mrq-done]')).toHaveText(['$8,450.00 Westside Steel WS-1001 placed on SWP-26050']);
 });
 
@@ -355,7 +359,7 @@ test('Not job related takes two presses, then posts materials_recon_not_job_rela
   await notjob.click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_not_job_related', body: { queue_id: 'q-small' } }]);
   await expect(row(page, 'q-small')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST on no job · 4 placed · 3 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST waiting to be placed · 4 placed · 3 not job related');
 });
 
 test('a refused write keeps the bill on the list and shows the server message', async ({ page }) => {
@@ -464,4 +468,23 @@ test('phone width: each bill is a card with its amount on screen, and the page i
   const place = await d.locator('[data-mrq-act="place"]').boundingBox();
   expect(place.x + place.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('a bill held for a person says why it is here, and not job related never promises the cost leaves its Xero job', async ({ page }) => {
+  const fixture = buildFixture();
+  fixture.queue.rows[0] = Object.assign(fixture.queue.rows[0], { suggestion_reason: 'installer_confirm' });
+  await openMaterials(page, { fixture });
+  const basis = page.locator('#matReconPanel .mrq-basis');
+  await expect(basis).toContainText('or because a person must confirm where it goes (the bill says which when you open it)');
+  await expect(basis).not.toContainText('only catches bills that are on no job');
+  await expect(basis).not.toContainText('materials cost');
+  await row(page, 'q-small').click();
+  await expect(detail(page, 'q-small').locator('[data-mrq-held-reason]')).toHaveText('Why it is here: Installer bill: a person confirms where it goes.');
+  await detail(page, 'q-small').locator('[data-mrq-act="notjob"]').click();
+  const armed = detail(page, 'q-small').locator('[data-mrq-notjob-armed]');
+  await expect(armed).toHaveText('Press again to file this bill as not job related. Bills to place will put no cost on any job. If Xero links this bill to a job, Job profit may still count it there until that rule is settled.');
+  await expect(armed).not.toContainText('No cost goes on any job');
+  expect(await posts(page)).toEqual([]);
+  await row(page, 'q-big').click();
+  await expect(detail(page, 'q-big').locator('[data-mrq-held-reason]')).toHaveCount(0);
 });

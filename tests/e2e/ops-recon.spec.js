@@ -90,7 +90,7 @@ test('the list shows the three bands, most at stake first', async ({ page }) => 
   await expect(inv).toContainText('Pat Example');
   await expect(inv).toContainText('$1,650.00 owed');
   await expect(inv).toContainText('Waiting 21 days');
-  await expect(inv.locator('[data-rc-job]')).toHaveText('It is SWF-1001 (Sampleton, accepted)');
+  await expect(inv.locator('[data-rc-job]')).toHaveText('It is SWF-1001 \u00b7 fencing \u00b7 Sampleton \u00b7 accepted');
   await expect(card(page, '22222222-0000-4000-8000-000000000002')).toContainText('They owe $400.00');
   await expect(card(page, '33333333-0000-4000-8000-000000000003')).toContainText('With Sales');
   await expect(card(page, '33333333-0000-4000-8000-000000000003')).toContainText('Is the gate going to match the fence');
@@ -100,7 +100,7 @@ test('an invoice tap asks once, then records correct with the hash shown', async
   await openRecon(page);
   const inv = card(page, '11111111-0000-4000-8000-000000000001');
   await inv.locator('[data-rc-job]').click();
-  await expect(inv.locator('.rc-confirm')).toContainText('Record that this invoice is for SWF-1001 (Sampleton, accepted)? Finance will link it in Xero. Nothing changes in Xero from here.');
+  await expect(inv.locator('.rc-confirm')).toContainText('Record that this invoice is for SWF-1001 \u00b7 fencing \u00b7 Sampleton \u00b7 accepted? Finance will link it in Xero. Nothing changes in Xero from here.');
   expect(await posts(page)).toEqual([]);
   await inv.locator('[data-rc-back]').click();
   await expect(inv.locator('.rc-confirm')).toHaveCount(0);
@@ -121,7 +121,7 @@ test('a message: a suggested job is confirm, another job is correct, Pass to Fin
   await msg.locator('[data-rc-yes]').click();
   await expect.poll(async () => (await posts(page)).length).toBe(1);
   await msg.locator('[data-rc-other]').selectOption(JOB_B.job_id);
-  await expect(msg.locator('.rc-confirm')).toContainText('belongs to SWP-2002 (Exampleby, complete)?');
+  await expect(msg.locator('.rc-confirm')).toContainText('belongs to SWP-2002 \u00b7 patio \u00b7 Exampleby \u00b7 complete?');
   await msg.locator('[data-rc-yes]').click();
   await expect.poll(async () => (await posts(page)).length).toBe(2);
   await msg.locator('[data-rc-kind="escalate"][data-rc-to="finance"]').click();
@@ -175,15 +175,52 @@ test('Find by job shows a message the list leaves out and records it on both job
   await expect(row).toContainText('No contact on this message, so it was never matched');
   await expect(row).toContainText('Delivery moved to Friday');
   await row.locator('[data-rc-kind="split"]').click();
-  await expect(row.locator('.rc-confirm')).toContainText('Record that this message belongs to SWF-1001 and SWP-2002? It will show on each of them.');
+  await expect(row.locator('.rc-confirm')).toContainText('Record that this message belongs to SWF-1001 and SWP-2002? Any amount in it is unknown for each job: money is read from Xero only, and how a bill shared between jobs is split is on hold for Finance.');
   await row.locator('[data-rc-yes]').click();
   await expect.poll(async () => (await posts(page)).length).toBe(1);
   expect((await posts(page))[0]).toEqual({ action: 'recon_record_decision', body: {
     subject_kind: 'event', subject_id: '44444444-0000-4000-8000-000000000004', shown_hash: '00112233445566778899aabbccddeeff',
     action: 'split', job_ids: [JOB_A.job_id, JOB_B.job_id], cause: 'defect:no_identity',
   } });
+  await expect(page.locator('#viewRecon [data-rc-recorded]')).toHaveText(/^Recorded by you at \d{1,2}:\d{2}(am|pm): on SWF-1001 and SWP-2002\.$/);
+  await expect(page.locator('#viewRecon [data-rc-todayband]')).toHaveText(/^Today's list/);
   await page.locator('#viewRecon [data-rc-clear]').click();
   await expect(page.locator('#viewRecon [data-rc-jobband]')).toHaveCount(0);
+  await expect(page.locator('#viewRecon [data-rc-todayband]')).toHaveCount(0);
+  // The recorded line stays after Find by job is cleared.
+  await expect(page.locator('#viewRecon [data-rc-recorded]')).toHaveCount(1);
+});
+
+test('AC-M1: an empty daily list names what it leaves out and points to Find by job', async ({ page }) => {
+  const empty = { as_of: '2026-10-20T00:00:00.000Z', limit: 50, count: 0, more: false, items: [] };
+  await openRecon(page, { data: { ...empty, left_out: { no_identity: 3, never_asked: 0, not_ranked: 1, backlog: 0 }, left_out_unreadable: false } });
+  const lo = page.locator('#viewRecon [data-rc-leftout]');
+  await expect(lo).toHaveText("Nothing is on today's list, but 4 messages are left off it: 3 with no contact to match them by, 1 that fit no group here (nothing owed, no live job, or older than 30 days). Find by job lists everything waiting on a job you know.");
+  await expect(page.locator('#viewRecon')).not.toContainText('Nothing needs matching right now.');
+  await openRecon(page, { data: { ...empty, left_out: null, left_out_unreadable: true } });
+  await expect(lo).toContainText('what it leaves out could not be read');
+  await expect(page.locator('#viewRecon')).not.toContainText('Nothing needs matching right now.');
+  await openRecon(page, { data: { ...empty, left_out: { no_identity: 0, never_asked: 0, not_ranked: 0, backlog: 0 }, left_out_unreadable: false } });
+  await expect(lo).toHaveText('Nothing needs matching right now.');
+  await openRecon(page, { data: { ...list(), more: false, left_out: { no_identity: 0, never_asked: 2, not_ranked: 0, backlog: 5 }, left_out_unreadable: false } });
+  await expect(lo).toHaveText("Also waiting, left off today's list: 2 loaded from history and never matched, 5 captured before matching started. Find by job lists everything waiting on a job you know.");
+});
+
+test('AC-M3 to M5 and M7: Find by job shows each job in words, why it is offered, the sender and Perth time', async ({ page }) => {
+  const items = JSON.parse(JSON.stringify(JOB_ITEMS));
+  items.items[0].offered = [
+    { job_id: JOB_A.job_id, job_number: 'SWF-1001', type: 'fencing', suburb: 'Sampleton', status: 'in_progress', reasons: ['candidate', 'job_number_in_message'] },
+    { job_id: JOB_B.job_id, job_number: 'SWP-2002', type: 'patio', suburb: 'Exampleby', status: 'complete', reasons: ['job_number_in_message'] },
+  ];
+  await openRecon(page, { jobItems: items });
+  await page.locator('#viewRecon #rcJobNo').fill('SWF-1001');
+  await page.locator('#viewRecon [data-rc-find] button[type="submit"]').click();
+  const row = card(page, '44444444-0000-4000-8000-000000000004');
+  await expect(row.locator('[data-rc-job]').first()).toHaveText('It is SWF-1001 \u00b7 fencing \u00b7 Sampleton \u00b7 in progress');
+  await expect(row.locator('[data-rc-why]')).toHaveText('Why these jobs: SWF-1001: the system listed this job as possible; the job number is in the message. SWP-2002: the job number is in the message.');
+  await expect(row.locator('.rc-meta').first()).toContainText('Supplier');
+  await expect(row.locator('.rc-meta').first()).toContainText('8 Oct 2026, 5:10pm');
+  await expect(row).not.toContainText('in_progress');
 });
 
 test('Find by job says when a job has more than it shows, and never reads a bad answer as empty', async ({ page }) => {

@@ -78,7 +78,7 @@ check('an invoice passes only to Finance; a message to Finance or Sales', () => 
   assert.strictEqual(C.confirmWords(message, { kind: 'escalate', to: 'finance' }), 'Pass this message to Finance? It stays on the list with them.');
 });
 check('the confirm line names the job and what happens', () => {
-  assert.strictEqual(C.confirmWords(invoice, { kind: 'job', job_id: JOB_A.job_id }), 'Record that this invoice is for SWF-1001 (Sampleton, accepted)? Finance will link it in Xero. Nothing changes in Xero from here.');
+  assert.strictEqual(C.confirmWords(invoice, { kind: 'job', job_id: JOB_A.job_id }), 'Record that this invoice is for SWF-1001 \u00b7 Sampleton \u00b7 accepted? Finance will link it in Xero. Nothing changes in Xero from here.');
   assert(/stays on the list/.test(C.confirmWords(message, { kind: 'unresolved' })));
 });
 check('refusals are words, never codes', () => {
@@ -125,7 +125,7 @@ check('a message with several suggested jobs can be split onto all of them, and 
   assert.strictEqual(C.splitLabel(c), 'It is both SWF-1001 and SWP-2002');
   assert.deepStrictEqual(C.bodyFor(c, { kind: 'split' }), { subject_kind: 'event', subject_id: jobItem.event_id, shown_hash: jobItem.shown_hash,
     action: 'split', job_ids: [JOB_A.job_id, JOB_B.job_id], cause: 'defect:no_identity' });
-  assert.strictEqual(C.confirmWords(c, { kind: 'split' }), 'Record that this message belongs to SWF-1001 and SWP-2002? It will show on each of them.');
+  assert.strictEqual(C.confirmWords(c, { kind: 'split' }), 'Record that this message belongs to SWF-1001 and SWP-2002? Any amount in it is unknown for each job: money is read from Xero only, and how a bill shared between jobs is split is on hold for Finance.');
 });
 check('a job number is checked before it is asked for', () => {
   assert.strictEqual(C.jobNumberOk('SWP-26376'), true);
@@ -133,6 +133,65 @@ check('a job number is checked before it is asked for', () => {
   assert.strictEqual(C.jobNumberOk(''), false);
   assert.strictEqual(C.jobNumberOk('SWP 26376'), false);
   assert.strictEqual(C.refusalWords({ code: 'job_not_found' }), 'That job was not found.');
+});
+
+check('AC-M3: an offered job reads number, type, suburb and status in words', () => {
+  assert.strictEqual(C.jobWords({ job_number: 'SWP-26376', type: 'patio', suburb: 'Synthville', status: 'in_progress' }), 'SWP-26376 · patio · Synthville · in progress');
+  assert.strictEqual(C.jobWords({ job_number: 'SWP-26376' }), 'SWP-26376');
+  assert(!/_/.test(C.jobWords({ job_number: 'X-1', type: 'insurance_repair', status: 'trade_report_in' })));
+});
+check('AC-M4: why a job is offered comes only from the server reasons', () => {
+  assert.strictEqual(C.reasonWords({ job_number: 'SWF-1001', reasons: ['candidate', 'job_number_in_message'] }), 'SWF-1001: the system listed this job as possible; the job number is in the message');
+  assert.strictEqual(C.reasonWords({ job_number: 'SWF-1001', reasons: ['made_up'] }), '');
+  assert.strictEqual(C.reasonWords({ job_number: 'SWF-1001' }), '');
+  const it = C.fromJobItem({ event_id: 'e', shown_hash: 'h', cause: 'ambiguity:one_candidate', counterpart_role: 'supplier',
+    offered: [{ job_id: 'j', job_number: 'SWF-1001', type: 'fencing', suburb: 'S', status: 'accepted', reasons: ['ladder_job'] }] });
+  assert.deepStrictEqual(it.offered_jobs[0].reasons, ['ladder_job']);
+  assert.strictEqual(it.offered_jobs[0].type, 'fencing');
+  assert.strictEqual(it.summary.counterpart_role, 'supplier');
+});
+check('AC-M5: the sender is named from the role, else said to be not known', () => {
+  assert.strictEqual(C.senderWords('supplier'), 'Supplier');
+  assert.strictEqual(C.senderWords('job_customer'), 'Customer');
+  assert.strictEqual(C.senderWords('builder'), 'Builder');
+  assert.strictEqual(C.senderWords('staff'), 'Us');
+  assert.strictEqual(C.senderWords(null), 'Sender not known');
+  assert.strictEqual(C.senderWords('lead'), 'Sender not known');
+});
+check('AC-M7: dates read in Perth time', () => {
+  assert.strictEqual(C.perthWhen('2026-10-08T09:10:21Z'), '8 Oct 2026, 5:10pm');
+  assert.strictEqual(C.perthWhen('2026-10-20T16:30:00Z'), '21 Oct 2026, 12:30am');
+  assert.strictEqual(C.perthWhen('2026-10-21T01:52:00Z'), '21 Oct 2026, 9:52am');
+  assert.strictEqual(C.perthWhen(null), '');
+});
+check('AC-M8: the recorded line says what, by you, and when', () => {
+  const c = Object.assign({}, message, { offered_jobs: [JOB_A, JOB_B] });
+  assert.strictEqual(C.recordedWords(c, { kind: 'split' }, '2026-10-21T01:52:00Z'), 'Recorded by you at 9:52am: on SWF-1001 and SWP-2002.');
+  assert.strictEqual(C.recordedWords(message, { kind: 'job', job_id: JOB_B.job_id }, '2026-10-21T01:52:00Z'), 'Recorded by you at 9:52am: on SWP-2002.');
+  assert.strictEqual(C.recordedWords(invoice, { kind: 'unrelated' }, '2026-10-21T01:52:00Z'), 'Recorded by you at 9:52am: this invoice is not for any job.');
+  assert.strictEqual(C.recordedWords(message, { kind: 'escalate', to: 'sales' }, '2026-10-21T01:52:00Z'), 'Recorded by you at 9:52am: passed to Sales.');
+});
+check('AC-M1: an empty list never says nothing needs matching while rows are left out or unread', () => {
+  const lo = C.leftOut({ left_out: { no_identity: 2, never_asked: 1, not_ranked: 0, backlog: 0 }, left_out_unreadable: false });
+  assert.strictEqual(lo.state, 'ok'); assert.strictEqual(lo.total, 3);
+  const empty = C.leftOutWords(lo, false);
+  assert(!/Nothing needs matching/.test(empty));
+  assert(/3 messages are left off it: 2 with no contact to match them by, 1 loaded from history and never matched\./.test(empty));
+  assert(/Find by job/.test(empty));
+  assert(/^Also waiting, left off today's list: 2 with no contact/.test(C.leftOutWords(lo, true)));
+  const none = C.leftOut({ left_out: { no_identity: 0, never_asked: 0, not_ranked: 0, backlog: 0 }, left_out_unreadable: false });
+  assert.strictEqual(C.leftOutWords(none, false), 'Nothing needs matching right now.');
+  assert.strictEqual(C.leftOutWords(none, true), '');
+  for (const res of [{ left_out: null, left_out_unreadable: true }, { left_out: { no_identity: 1 }, left_out_unreadable: false }]) {
+    const u = C.leftOut(res);
+    assert.strictEqual(u.state, 'unreadable');
+    assert(!/Nothing needs matching/.test(C.leftOutWords(u, false)));
+    assert(/could not be read/.test(C.leftOutWords(u, true)));
+  }
+  const absent = C.leftOut({ items: [] });
+  assert.strictEqual(absent.state, 'absent');
+  assert(!/Nothing needs matching/.test(C.leftOutWords(absent, false)));
+  assert.strictEqual(C.leftOutWords(absent, true), '');
 });
 
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }

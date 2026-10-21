@@ -57,11 +57,46 @@ var ReconCore = (function () {
     if (d === 0) return 'under a day';
     return d === 1 ? '1 day' : d + ' days';
   }
+  // A stored word as people read it: in_progress reads "in progress".
+  function plainWord(s) { return String(s == null ? '' : s).replace(/_+/g, ' ').trim(); }
+  // AC-M3: "SWP-26376 · patio · Ellenbrook · in progress", the parts the server sends.
   function jobWords(job) {
     if (!job) return '';
-    var bits = [job.suburb, job.status].filter(function (x) { return x; });
-    return (job.job_number || 'Job') + (bits.length ? ' (' + bits.join(', ') + ')' : '');
+    var bits = [job.type, job.suburb, job.status].map(plainWord).filter(function (x) { return x; });
+    return [job.job_number || 'Job'].concat(bits).join(' \u00b7 ');
   }
+  // AC-M4: why a job is offered, from the facts the server read off the row, never a guess here.
+  var REASONS = {
+    ladder_job: 'the system put it on this job',
+    candidate: 'the system listed this job as possible',
+    customer_job: 'the sender is this job\'s customer contact',
+    job_number_in_message: 'the job number is in the message'
+  };
+  function reasonWords(job) {
+    var rs = (job && job.reasons || []).map(function (r) { return REASONS[r]; }).filter(Boolean);
+    if (!rs.length) return '';
+    return (job.job_number || 'Job') + ': ' + rs.join('; ');
+  }
+  // AC-M5: who sent it, from the server's party role. Anything else says it is not known.
+  function senderWords(role) {
+    var r = String(role || '').toLowerCase();
+    if (/customer/.test(r)) return 'Customer';
+    if (/supplier/.test(r)) return 'Supplier';
+    if (/builder/.test(r)) return 'Builder';
+    if (/^(staff|crew|ours|us|our_staff|internal)$/.test(r)) return 'Us';
+    return 'Sender not known';
+  }
+  // AC-M7: Perth date and time (Perth keeps UTC+8 all year). Null when there is no instant.
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function perthParts(at) {
+    var t = Date.parse(at);
+    if (!isFinite(t)) return null;
+    var d = new Date(t + 8 * 3600 * 1000);
+    var h = d.getUTCHours(), m = d.getUTCMinutes();
+    return { day: d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(),
+      time: ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m + (h < 12 ? 'am' : 'pm') };
+  }
+  function perthWhen(at) { var p = perthParts(at); return p ? p.day + ', ' + p.time : ''; }
   function isOffered(item, jobId) {
     return (item.offered_jobs || []).some(function (j) { return j.job_id === jobId; });
   }
@@ -110,7 +145,8 @@ var ReconCore = (function () {
       return 'Record that this message belongs to ' + jobWords(findJob(item, choice.job_id)) + '?';
     }
     if (choice.kind === 'split') {
-      return 'Record that this message belongs to ' + (item.offered_jobs || []).map(jobWords).join(' and ') + '? It will show on each of them.';
+      return 'Record that this message belongs to ' + (item.offered_jobs || []).map(jobWords).join(' and ') + '? ' +
+        'Any amount in it is unknown for each job: money is read from Xero only, and how a bill shared between jobs is split is on hold for Finance.';
     }
     if (choice.kind === 'unrelated') {
       if (invoice) return 'Record that this invoice is not for any job? Finance will confirm. The money stays owed.';
@@ -119,6 +155,47 @@ var ReconCore = (function () {
     if (choice.kind === 'unresolved') return 'Record that you cannot tell yet? It stays on the list.';
     var to = passTargets(item).indexOf(choice.to) >= 0 ? choice.to : escalateTo(item);
     return 'Pass ' + what + ' to ' + teamWords(to) + '? It stays on the list with them.';
+  }
+  function recordedWords(item, choice, at) {
+    var p = perthParts(at);
+    var when = p ? ' at ' + p.time : '';
+    var invoice = item.subject_kind === 'invoice';
+    var nums = function (ids) { return ids.map(function (id) { var j = findJob(item, id); return j ? j.job_number || 'Job' : 'Job'; }); };
+    if (choice.kind === 'job') return 'Recorded by you' + when + ': on ' + nums([choice.job_id])[0] + '.';
+    if (choice.kind === 'split') return 'Recorded by you' + when + ': on ' + nums(splitIds(item)).join(' and ') + '.';
+    if (choice.kind === 'unrelated') return 'Recorded by you' + when + ': ' + (invoice ? 'this invoice' : 'this message') + ' is not for any job.';
+    if (choice.kind === 'unresolved') return 'Recorded by you' + when + ': you cannot tell yet. It stays on the list.';
+    var to = passTargets(item).indexOf(choice.to) >= 0 ? choice.to : escalateTo(item);
+    return 'Recorded by you' + when + ': passed to ' + teamWords(to) + '.';
+  }
+  // AC-M1: what the daily list leaves out. absent: the server does not say yet; unreadable: it
+  // tried and failed. Neither is ever zero.
+  var LEFT_OUT = [
+    ['no_identity', 'with no contact to match them by'],
+    ['never_asked', 'loaded from history and never matched'],
+    ['not_ranked', 'that fit no group here (nothing owed, no live job, or older than 30 days)'],
+    ['backlog', 'captured before matching started']
+  ];
+  function leftOut(res) {
+    if (!res || (res.left_out === undefined && res.left_out_unreadable === undefined)) return { state: 'absent', total: null, parts: [] };
+    var lo = res.left_out;
+    if (res.left_out_unreadable === true || !lo || typeof lo !== 'object') return { state: 'unreadable', total: null, parts: [] };
+    var parts = [], total = 0;
+    for (var i = 0; i < LEFT_OUT.length; i++) {
+      var n = lo[LEFT_OUT[i][0]];
+      if (typeof n !== 'number' || !isFinite(n) || n < 0 || Math.floor(n) !== n) return { state: 'unreadable', total: null, parts: [] };
+      total += n;
+      if (n > 0) parts.push(n + ' ' + LEFT_OUT[i][1]);
+    }
+    return { state: 'ok', total: total, parts: parts };
+  }
+  function leftOutWords(lo, listed) {
+    var find = 'Find by job lists everything waiting on a job you know.';
+    if (lo.state === 'absent') return listed ? '' : 'Nothing is on today\'s list. It does not say yet what it leaves out. ' + find;
+    if (lo.state === 'unreadable') return (listed ? 'What today\'s list leaves out could not be read. ' : 'Nothing is on today\'s list, but what it leaves out could not be read. ') + find;
+    if (!lo.total) return listed ? '' : 'Nothing needs matching right now.';
+    return (listed ? 'Also waiting, left off today\'s list: ' : 'Nothing is on today\'s list, but ' + lo.total + ' ' + (lo.total === 1 ? 'message is' : 'messages are') + ' left off it: ') +
+      lo.parts.join(', ') + '. ' + find;
   }
   function heldWith(item) {
     if (item.decision_state === 'decided' && item.last_action === 'escalate' && item.owner && item.owner !== 'context_resolver') {
@@ -162,9 +239,12 @@ var ReconCore = (function () {
       band: null, subject_kind: 'event', subject_id: it.event_id, evidence_hash: it.shown_hash,
       cause: it.cause, decision_state: it.decision_state || 'none', last_action: it.last_action || null,
       owner: 'context_resolver', waiting_days: null,
-      offered_jobs: (it.offered || []).map(function (j) { return { job_id: j.job_id, job_number: j.job_number }; }),
+      offered_jobs: (it.offered || []).map(function (j) {
+        return { job_id: j.job_id, job_number: j.job_number, type: j.type, suburb: j.suburb, status: j.status, reasons: j.reasons || [] };
+      }),
       other_jobs: [],
-      summary: { channel: it.channel, direction: it.direction, occurred_at: it.occurred_at, from: it.from_address, subject: it.subject, preview: it.preview }
+      summary: { channel: it.channel, direction: it.direction, occurred_at: it.occurred_at, from: it.from_address, subject: it.subject, preview: it.preview,
+        counterpart_role: it.counterpart_role }
     };
   }
   function causeWords(cause) {
@@ -183,13 +263,14 @@ var ReconCore = (function () {
     refusalWords: refusalWords, mustReread: mustReread, grouped: grouped, escalateTo: escalateTo,
     passTargets: passTargets, teamWords: teamWords,
     canSplit: canSplit, splitLabel: splitLabel, jobNumberOk: jobNumberOk, fromJobItem: fromJobItem, causeWords: causeWords,
-    hasBanned: hasBanned
+    hasBanned: hasBanned, plainWord: plainWord, reasonWords: reasonWords, senderWords: senderWords, perthWhen: perthWhen,
+    recordedWords: recordedWords, leftOut: leftOut, leftOutWords: leftOutWords
   };
 })();
 // </recon-core>
 
 var RC_PAGE = 50;
-var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null,
+var RC = { items: null, err: null, loading: false, gen: 0, pick: null, saving: false, msg: null, leftOut: null, recorded: [],
   job: null /* { number, items, err, loading, gen } for Find by job */ };
 
 function rcEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -231,6 +312,7 @@ function rcCss() {
     '#viewRecon .rc-confirm .rc-yes{background:#1f5fbf;color:#fff;border-color:#1f5fbf;}',
     '#viewRecon .rc-msg{margin:10px 0;padding:10px;border-radius:8px;background:#fdecec;color:#8a1c1c;font-size:13px;}',
     '#viewRecon .rc-empty{color:var(--sw-text-sec);padding:24px 0;}',
+    '#viewRecon .rc-done{margin:8px 0;padding:8px 10px;border-radius:8px;background:#eaf6ee;color:#1d5b33;font-size:13px;}',
     '#viewRecon .rc-find{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 8px;font-size:13px;}',
     '#viewRecon .rc-find input{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);min-width:0;flex:1 1 180px;max-width:260px;}',
     '#viewRecon .rc-find button{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--sw-border,#d0d0d0);background:var(--sw-bg,#fafafa);cursor:pointer;}'
@@ -258,7 +340,7 @@ async function rcRead(quiet) {
   if (err) {
     if (!quiet || !RC.items) { RC.items = null; RC.err = err; }
   } else {
-    RC.items = res.items; RC.err = null;
+    RC.items = res.items; RC.err = null; RC.leftOut = ReconCore.leftOut(res);
     // more: true means the list was cut at its page. A back end that does not send more yet
     // gives no answer either way, so a full page is shown as possibly cut.
     RC.more = res.more === true ? true : (res.more === false ? false : (res.items.length >= RC_PAGE ? null : false));
@@ -281,7 +363,7 @@ function rcCard(item) {
     h += '<div class="rc-top"><span>' + rcEsc((s.channel || 'Message') + (s.from ? ' from ' + s.from : '')) +
       (held ? '<span class="rc-held">' + rcEsc(held) + '</span>' : '') + '</span>' +
       (band === 2 ? '<span>They owe ' + rcEsc(ReconCore.money(item.amount)) + '</span>' : '') + '</div>';
-    h += '<div class="rc-meta">' + rcEsc([s.occurred_at ? String(s.occurred_at).slice(0, 10) : '', item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
+    h += '<div class="rc-meta">' + rcEsc([ReconCore.senderWords(s.counterpart_role), ReconCore.perthWhen(s.occurred_at), item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
       item.band == null ? ReconCore.causeWords(item.cause) : ''].filter(Boolean).join(' · ')) + '</div>';
     if (s.subject) h += '<div class="rc-preview"><strong>' + rcEsc(s.subject) + '</strong></div>';
     if (s.preview) h += '<div class="rc-preview">' + rcEsc(s.preview) + '</div>';
@@ -310,6 +392,8 @@ function rcCard(item) {
       h += '<button type="button" data-rc-kind="escalate" data-rc-to="' + rcEsc(to) + '">Pass to ' + rcEsc(ReconCore.teamWords(to)) + '</button>';
     });
     h += '</div>';
+    var why = (item.offered_jobs || []).map(ReconCore.reasonWords).filter(Boolean);
+    if (why.length) h += '<div class="rc-meta" data-rc-why>Why these jobs: ' + rcEsc(why.join('. ')) + '.</div>';
   }
   return h + '</div>';
 }
@@ -322,13 +406,17 @@ function rcRender() {
     '<div class="rc-lede">What needs a person to say which job it belongs to, most at stake first. ' +
     'A choice here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
   if (RC.msg) h += '<div class="rc-msg" data-rc-msg>' + rcEsc(RC.msg) + '</div>';
+  RC.recorded.forEach(function (line) { h += '<div class="rc-done" data-rc-recorded>' + rcEsc(line) + '</div>'; });
   h += rcJobSection();
+  // AC-M2: with Find by job showing, the daily list has its own heading.
+  if (RC.job) h += '<div class="rc-band" data-rc-todayband>Today\'s list<small>The daily list, most at stake first.</small></div>';
+  var lo = RC.leftOut || ReconCore.leftOut(null);
   if (RC.loading && !RC.items) {
     h += '<div class="rc-empty">Reading the list...</div>';
   } else if (RC.err) {
     h += '<div class="rc-msg" data-rc-err>' + rcEsc(ReconCore.refusalWords(RC.err)) + '</div>';
   } else if (!RC.items || !RC.items.length) {
-    h += '<div class="rc-empty">Nothing needs matching right now.</div>';
+    h += '<div class="rc-empty" data-rc-leftout>' + rcEsc(ReconCore.leftOutWords(lo, false)) + '</div>';
   } else {
     ReconCore.grouped(RC.items).forEach(function (g) {
       var b = ReconCore.bandOf(g.items[0]);
@@ -337,6 +425,8 @@ function rcRender() {
     });
     if (RC.more === true) h += '<div class="rc-empty" data-rc-more>Showing the first ' + RC.items.length + ', most urgent first. There are more waiting; they show here as these are matched.</div>';
     else if (RC.more === null) h += '<div class="rc-empty" data-rc-more>Showing ' + RC.items.length + '. There may be more waiting than this.</div>';
+    var also = ReconCore.leftOutWords(lo, true);
+    if (also) h += '<div class="rc-empty" data-rc-leftout>' + rcEsc(also) + '</div>';
   }
   root.innerHTML = h + '</div>';
 }
@@ -391,6 +481,8 @@ async function rcRecord() {
   RC.saving = true; rcRender();
   try {
     await opsPost('recon_record_decision', ReconCore.bodyFor(item, RC.pick.choice));
+    // AC-M8: a line stays on screen saying what was recorded, by whom and when.
+    RC.recorded = [ReconCore.recordedWords(item, RC.pick.choice, new Date().toISOString())].concat(RC.recorded).slice(0, 5);
     RC.saving = false; RC.pick = null; RC.msg = null;
     rcToast('Recorded', 'success');
     if (RC.job) await rcReadJob(RC.job.number, true);

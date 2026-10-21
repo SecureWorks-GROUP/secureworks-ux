@@ -7,6 +7,11 @@
 //    job", says how it was placed and that it counts here in full until a person moves, splits
 //    or unplaces it, and lists the named jobs as evidence (inferred from the line text), never
 //    as a split. How it was placed reads from match_method: a person, a machine or Xero's reference.
+//    The Xero-link line never denies a person (a person's confirmation keeps that match_method),
+//    and "by a person" is said only for a row the engine counts.
+//  - Labour the engine holds (source installer_bill_unconfirmed) reads as labour waiting for a
+//    person to confirm it, not as an installer bill: the engine holds any labour part no recorded
+//    person confirmed, e.g. a labour-hire bill on account 310.
 //  - A bill whose lines name only this job, and the parts of a person's split, show no note.
 //  - A bill placed whole as one row offers a read-only check of its lines; a failed read says
 //    so with Try again.
@@ -49,7 +54,7 @@ test('a bill linked whole whose lines name ten jobs reads not confirmed, with th
   const text = await render(page, Object.assign({}, JOB, { job_number: 'SBX-HOLD' }), costs);
   const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
   await expect(note).toContainText('Not confirmed for this job');
-  await expect(note).toContainText("Installer EH 31, $1,742.08, is linked whole by the bill's job in Xero (Xero's reference, not a person), but its lines name 3 jobs. It counts here in full until a person moves, splits or unplaces it.");
+  await expect(note).toContainText("Installer EH 31, $1,742.08, is linked whole by the bill's job in Xero, but its lines name 3 jobs. It counts here in full until a person moves, splits or unplaces it.");
   await expect(note).toContainText("Jobs named on the bill's lines (inferred from the line text; evidence, not a split)");
   await expect(note.locator('[data-bill-ref="SWF-26824"]')).toHaveText('SWF-26824: $217.00 on 2 lines');
   await expect(note).toContainText('No single job named: $65.08');
@@ -94,10 +99,21 @@ test('a held installer bill whose lines name other jobs says it is not counted, 
   const job = Object.assign({}, JOB, { job_number: 'SBX-HOLD', actual_cost_ex: 0, actual_labour_ex: 0, completeness: ['installer_bill_unconfirmed', 'holding_job'] });
   const text = await render(page, job, costs);
   const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
-  await expect(note).toContainText('It is held as an unconfirmed installer bill and not counted as cost on any job until a person places it.');
+  await expect(note).toContainText('Its labour is waiting for a person to confirm it and is not counted as cost on any job until then.');
   await expect(note).not.toContainText('counts here in full');
-  await expect(page.locator('#wholeBillHost [data-jp-installer-unconfirmed]')).toHaveText('plus an unconfirmed installer bill, not counted');
-  expect(text).toContain('Installer bill waiting for a person to confirm it (not counted as cost yet)');
+  await expect(page.locator('#wholeBillHost [data-jp-installer-unconfirmed]')).toHaveText('plus labour waiting for a person to confirm it, not counted');
+  expect(text).toContain('Labour waiting for a person to confirm it (not counted as cost yet)');
+  expect(text).not.toMatch(/installer bill/i);
+});
+
+test('held labour placed in Bills to place by no recorded person never reads as placed by a person', async ({ page }) => {
+  const costs = [line('manual_queue:assign-to-job SWF-27001', 500, { source: 'installer_bill_unconfirmed', match_method: 'manual_queue', party: 'Labour Hire Co', document_number: 'LG-1' })];
+  const text = await render(page, Object.assign({}, JOB, { completeness: ['installer_bill_unconfirmed'] }), costs);
+  const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
+  await expect(note).toContainText('Labour Hire Co LG-1, $500.00, is placed whole in Bills to place.');
+  await expect(note).not.toContainText('by a person');
+  expect(text).toContain('Labour on this bill waiting for a person to confirm it (not counted)');
+  expect(text).not.toMatch(/installer bill/i);
 });
 
 test('a failed line read says so and offers Try again', async ({ page }) => {

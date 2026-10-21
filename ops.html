@@ -18268,7 +18268,7 @@ var JP_FLAG_LABELS = {
   open_purchase_orders: 'Open purchase orders (committed, not actual)',
   draft_revenue: 'Draft client invoice not counted',
   holding_job: 'Holding job (costs parked here)',
-  installer_bill_unconfirmed: 'Installer bill waiting for a person to confirm it (not counted as cost yet)'
+  installer_bill_unconfirmed: 'Labour waiting for a person to confirm it (not counted as cost yet)'
 };
 var JP_KIND_LABELS = {
   trade_charge: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials',
@@ -18277,7 +18277,7 @@ var JP_KIND_LABELS = {
 };
 var JP_SOURCE_LABELS = {
   trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)',
-  supplier_credit: 'Supplier credit', installer_bill_unconfirmed: 'Installer bill, unconfirmed (not counted)'
+  supplier_credit: 'Supplier credit', installer_bill_unconfirmed: 'Labour on this bill waiting for a person to confirm it (not counted)'
 };
 // Where the quoted and expected figures came from, in staff words (the engine's
 // codes stay in the read contract).
@@ -18538,7 +18538,7 @@ function swBillJobRefsHtml(br, ownRef) {
 }
 // Who placed a bill, from v_job_cost_events.match_method (CFO allocation contract, 21 Oct).
 var JP_BILL_PLACED_BY = {
-  'xero_invoices.job_id': 'linked whole by the bill\'s job in Xero (Xero\'s reference, not a person)',
+  'xero_invoices.job_id': 'linked whole by the bill\'s job in Xero',
   manual_queue: 'placed whole by a person in Bills to place',
   xero_ref_link: 'placed whole by a machine from its Xero reference',
   po_deterministic: 'placed whole by a machine from a purchase order',
@@ -18561,7 +18561,7 @@ async function jpCheckBillLines(xeroInvoiceId, ownRef, held) {
     var br = swBillJobRefs(items.map(function(li) { return { description: li.description, amount: li.line_amount }; }));
     if (!br.refs.length) { host.innerHTML = '<div class="jp-sub">Its lines name no job.</div>'; return; }
     host.innerHTML = (swBillPlacedWholeElsewhere(br, ownRef)
-      ? '<div class="jp-sub"><span class="jp-tag bad">Not confirmed for this job</span> Its lines name other jobs. ' + (held ? 'It is held as an unconfirmed installer bill and not counted as cost until a person places it.' : 'It counts here in full until a person moves, splits or unplaces it.') + '</div>'
+      ? '<div class="jp-sub"><span class="jp-tag bad">Not confirmed for this job</span> Its lines name other jobs. ' + (held ? 'Its labour is waiting for a person to confirm it and is not counted as cost until then.' : 'It counts here in full until a person moves, splits or unplaces it.') + '</div>'
       : '<div class="jp-sub">Its lines name only this job.</div>') + swBillJobRefsHtml(br, ownRef);
   } catch (e) {
     host.innerHTML = '<div class="jp-note err">Could not read the bill\'s lines: ' + _jpEsc((e && e.message) || String(e))
@@ -18757,7 +18757,7 @@ function _jpRenderDetail(data) {
       : withheld && diff <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
       : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(diff)) + '</span>';
     h += '<tr><td>' + l[0] + '</td><td class="num" data-label="Expected">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num" data-label="' + (withheld ? 'Actual so far' : 'Actual') + '">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2]))
-      + (l[0] === 'Labour' && installerUnconfirmed ? '<div class="jp-sub" data-jp-installer-unconfirmed>plus an unconfirmed installer bill, not counted</div>' : '') + '</td>'
+      + (l[0] === 'Labour' && installerUnconfirmed ? '<div class="jp-sub" data-jp-installer-unconfirmed>plus labour waiting for a person to confirm it, not counted</div>' : '') + '</td>'
       + '<td class="num" data-label="Actual minus expected">' + cell + '</td></tr>';
   });
   var te = _jpExpected(j, j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
@@ -18831,12 +18831,16 @@ function _jpRenderDetail(data) {
   billOrder.forEach(function(k) {
     var b = bills[k];
     var amount = b.rows.reduce(function(t, c) { return t + (_jpNum(c.amount_ex) || 0); }, 0);
-    var how = JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')';
-    var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
-    // An installer bill nobody confirmed is held out of cost (JP-12, PR 1107 proposal).
+    // Labour no recorded person confirmed is held out of cost (JP-12, #1140). The engine
+    // names every held labour row installer_bill_unconfirmed, whatever the account.
     var held = b.rows.some(function(c) { return c.source === 'installer_bill_unconfirmed'; });
+    // match_method stays the Xero link after a person confirms, so that line never
+    // denies a person; "by a person" is said only for a row the engine counts.
+    var how = (held && b.how === 'manual_queue') ? 'placed whole in Bills to place'
+      : (JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')');
+    var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
     var counts = held
-      ? '. It is held as an unconfirmed installer bill and not counted as cost on any job until a person places it.'
+      ? '. Its labour is waiting for a person to confirm it and is not counted as cost on any job until then.'
       : '. It counts here in full until a person moves, splits or unplaces it.';
     if (b.rows.length > 1) {
       // Line detail is here: read the job numbers from the line text.

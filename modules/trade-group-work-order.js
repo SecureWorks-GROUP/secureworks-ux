@@ -1,13 +1,21 @@
 // Trade group work order: create, join, save hours, see Total and Your share.
-// Paints nothing while the action is unknown or the server says enabled: false.
+// Paints nothing on any error, or until the server has said the switch is on.
+// The share read is not requested on a job open unless that switch is on.
 // Never posts a client send. Loaded by trade.html.
 (function () {
   'use strict';
   var C = function () { return window.GroupWorkOrderCore; };
   var transport = null;
   var bound = false;
+  var armed = false;
 
   function use(fn) { transport = fn; }
+
+  function arm(data) {
+    var core = C();
+    armed = !!(core && core.switchOn(data));
+    return armed;
+  }
 
   function slot(jobId) {
     var nodes = document.querySelectorAll('[data-group-wo-slot]');
@@ -37,32 +45,29 @@
   function paint(jobId) {
     var core = C();
     var el = slot(jobId);
-    if (!core || !el) return Promise.resolve();
+    if (!core || !el || !armed) {
+      if (el) el.innerHTML = '';
+      return Promise.resolve();
+    }
     css();
     return call('group_work_order_my_share', null, { job_id: jobId }).then(function (res) {
-      if (core.isOff(res)) { el.innerHTML = ''; return; }
-      el.setAttribute('data-group-id', (res && res.group_id) || '');
-      el.innerHTML = core.tradeHtml(res && res.needs_hours ? 'hours' : 'share', res);
-    }).catch(function (e) {
       if (!slot(jobId)) return;
-      if (core.isOff(null, e)) { el.innerHTML = ''; return; }
-      var code = core.errCode(e);
-      if (code === 'group_work_order_not_found' || e.status === 404) {
-        el.innerHTML = core.tradeHtml('create');
-        return;
-      }
-      if (code === 'group_work_order_not_participant') {
-        el.innerHTML = core.tradeHtml('join');
-        return;
-      }
-      el.innerHTML = core.tradeHtml('error', null, (e && e.message) || 'That could not be read.');
+      if (core.isOff(res)) { armed = false; el.innerHTML = ''; return; }
+      var mode = core.tradeMode(res);
+      if (mode === 'off') { armed = false; el.innerHTML = ''; return; }
+      el.setAttribute('data-group-id', (res && res.group_id) || '');
+      el.innerHTML = core.tradeHtml(mode, res);
+    }).catch(function (e) {
+      armed = false;
+      var box = slot(jobId);
+      if (box) box.innerHTML = '';
     });
   }
 
   function slotHtml(jobId) {
     var id = String(jobId || '');
     if (!id) return '';
-    Promise.resolve().then(function () { paint(id); });
+    if (armed) Promise.resolve().then(function () { paint(id); });
     return '<div data-group-wo-slot="' + id.replace(/"/g, '') + '"></div>';
   }
 
@@ -87,17 +92,17 @@
     var core = C();
     if (!core) return;
     if (action === 'create') {
-      call('create_group_work_order', null, { job_id: jobId }).then(function () { return paint(jobId); }).catch(function (e) {
-        if (core.isOff(null, e)) { el.innerHTML = ''; return; }
-        showMsg(el, (e && e.message) || 'That could not be created.');
-      });
+      call('create_group_work_order', null, { job_id: jobId }).then(function () {
+        armed = true;
+        return paint(jobId);
+      }).catch(function () { el.innerHTML = ''; });
       return;
     }
     if (action === 'join') {
-      call('join_group_work_order', null, { job_id: jobId }).then(function () { return paint(jobId); }).catch(function (e) {
-        if (core.isOff(null, e)) { el.innerHTML = ''; return; }
-        showMsg(el, (e && e.message) || 'That could not be joined.');
-      });
+      call('join_group_work_order', null, { job_id: jobId }).then(function () {
+        armed = true;
+        return paint(jobId);
+      }).catch(function () { el.innerHTML = ''; });
       return;
     }
     if (action === 'save-hours') {
@@ -110,13 +115,10 @@
       if (parsed.error) { showMsg(el, parsed.error); return; }
       var groupId = el.getAttribute('data-group-id') || '';
       call('submit_group_work_order_hours', null, core.hoursBody(groupId, parsed)).then(function (res) {
-        if (core.isOff(res)) { el.innerHTML = ''; return; }
+        if (core.isOff(res) || core.tradeMode(res) === 'off') { el.innerHTML = ''; return; }
         el.setAttribute('data-group-id', (res && res.group_id) || groupId);
-        el.innerHTML = core.tradeHtml(res && res.needs_hours ? 'hours' : 'share', res);
-      }).catch(function (e) {
-        if (core.isOff(null, e)) { el.innerHTML = ''; return; }
-        showMsg(el, (e && e.message) || 'Those hours could not be saved.');
-      });
+        el.innerHTML = core.tradeHtml(core.tradeMode(res), res);
+      }).catch(function () { el.innerHTML = ''; });
     }
   }
 
@@ -125,5 +127,5 @@
     document.addEventListener('click', onClick);
   }
 
-  window.GroupWorkOrderTrade = { use: use, slotHtml: slotHtml, paint: paint };
+  window.GroupWorkOrderTrade = { use: use, arm: arm, slotHtml: slotHtml, paint: paint };
 })();

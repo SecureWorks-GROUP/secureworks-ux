@@ -30,12 +30,32 @@ var GroupWorkOrderCore = (function () {
     });
   }
 
+  // The server has said the switch is on. A 401, 403, 404 or any other error
+  // is not that, so those stay off.
+  function switchOn(data) {
+    if (!data || typeof data !== 'object') return false;
+    if (data.group_work_order_enabled === true || data.enabled === true) return true;
+    if (data.job && data.job.group_work_order_enabled === true) return true;
+    if (data.group_work_order && data.group_work_order.enabled === true) return true;
+    return false;
+  }
+
   function isOff(res, err) {
+    if (err) return true;
     if (res && res.enabled === false) return true;
-    if (!err) return false;
-    var code = String(err.code || (err.body && err.body.code) || '');
-    var msg = String(err.message || '');
-    return code === 'unknown_action' || /unknown action/i.test(msg);
+    return false;
+  }
+
+  // Create and Join only from a successful read that says the switch is on.
+  // A share payload (group id or the two amounts) is that read. A bare
+  // not-found is an error and never reaches here.
+  function tradeMode(res) {
+    if (!res || res.enabled === false) return 'off';
+    if (res.enabled === true && !res.group_id) return res.participant === false ? 'join' : 'create';
+    if (res.group_id || res.needs_hours === true || res.pot_total != null || res.my_share != null) {
+      return res.needs_hours ? 'hours' : 'share';
+    }
+    return 'off';
   }
 
   function errCode(err) {
@@ -219,7 +239,9 @@ var GroupWorkOrderCore = (function () {
     NOTICE: NOTICE,
     money: money,
     esc: esc,
+    switchOn: switchOn,
     isOff: isOff,
+    tradeMode: tradeMode,
     errCode: errCode,
     closedShare: closedShare,
     tradeHtml: tradeHtml,

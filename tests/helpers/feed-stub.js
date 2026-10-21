@@ -92,9 +92,12 @@ async function installFeedStubs(page, {
     if (handler === undefined) {
       if (POST_READ_ACTIONS.has(action)) {
         await route.fulfill({
-          status: 200,
+          status: 403,
           contentType: 'application/json',
-          body: JSON.stringify({ enabled: false })
+          body: JSON.stringify({
+            code: 'operator_access_required',
+            error: 'An authorised operator session is required.'
+          })
         });
         return;
       }

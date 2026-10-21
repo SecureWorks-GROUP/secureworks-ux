@@ -42,13 +42,14 @@ test('a trade sees only the total and their share, and nothing while the action 
         e.status = 404;
         throw e;
       }
-      if (window.__mode === 'join') {
-        const e = new Error('You are not on this group work order.');
-        e.code = 'group_work_order_not_participant';
+      if (window.__mode === 'refused') {
+        const e = new Error('An authorised operator session is required.');
         e.status = 403;
-        e.body = { code: 'group_work_order_not_participant' };
+        e.code = 'access_denied';
+        e.body = { code: 'operator_access_required', error: e.message };
         throw e;
       }
+      if (window.__mode === 'join') return { enabled: true, participant: false };
       if (action === 'join_group_work_order') {
         window.__mode = 'share';
         return { ok: true, group_id: 'group-1', client_signed: false };
@@ -66,14 +67,44 @@ test('a trade sees only the total and their share, and nothing while the action 
     host.innerHTML = GroupWorkOrderTrade.slotHtml('job-1');
   }, FAT_SHARE);
 
+  expect(await page.evaluate(() => window.__posts.length)).toBe(0);
+  await expect(page.locator('#gwoMount')).toBeEmpty();
+
+  await page.evaluate(() => {
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
+    return GroupWorkOrderTrade.paint('job-1');
+  });
   await expect.poll(() => page.evaluate(() => window.__posts.length)).toBe(1);
   await expect(page.locator('#gwoMount')).toBeEmpty();
   await expect(page.locator('#gwoMount')).not.toContainText('$');
+  await expect(page.locator('#gwoMount')).not.toContainText('authorised operator');
   await expect(page.locator('#gwoMount')).not.toContainText('Send');
+
+  await page.evaluate(() => {
+    window.__mode = 'refused';
+    window.__posts = [];
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
+    return GroupWorkOrderTrade.paint('job-1');
+  });
+  await expect(page.locator('#gwoMount')).toBeEmpty();
+  await expect(page.locator('#gwoMount')).not.toContainText('An authorised operator session is required.');
+  expect(await page.evaluate(() => {
+    window.__posts = [];
+    return GroupWorkOrderTrade.paint('job-1').then(function () { return window.__posts.length; });
+  })).toBe(0);
+
+  await page.evaluate(() => {
+    window.__mode = 'missing';
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
+    return GroupWorkOrderTrade.paint('job-1');
+  });
+  await expect(page.locator('#gwoMount')).toBeEmpty();
+  await expect(page.locator('[data-group-wo-action="create"]')).toHaveCount(0);
 
   await page.evaluate(() => {
     window.__mode = 'disabled';
     window.__posts = [];
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
     return GroupWorkOrderTrade.paint('job-1');
   });
   await expect(page.locator('#gwoMount')).toBeEmpty();
@@ -81,6 +112,7 @@ test('a trade sees only the total and their share, and nothing while the action 
   await page.evaluate(() => {
     window.__mode = 'share';
     window.__posts = [];
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
     return GroupWorkOrderTrade.paint('job-1');
   });
   const card = page.locator('#gwoMount');
@@ -107,6 +139,7 @@ test('a trade sees only the total and their share, and nothing while the action 
   await page.evaluate(() => {
     window.__mode = 'join';
     window.__posts = [];
+    GroupWorkOrderTrade.arm({ enabled: true });
     return GroupWorkOrderTrade.paint('job-1');
   });
   await page.locator('[data-group-wo-action="join"]').click();
@@ -126,10 +159,7 @@ test('create, join and save hours post those actions and never a send', async ({
     GroupWorkOrderTrade.use(async function (action, params, body) {
       window.__posts.push({ action: action, body: body });
       if (action === 'group_work_order_my_share' && !window.__joined) {
-        const e = new Error('There is no group work order for that job.');
-        e.code = 'group_work_order_not_found';
-        e.status = 404;
-        throw e;
+        return { enabled: true };
       }
       if (action === 'create_group_work_order') {
         window.__joined = true;
@@ -143,6 +173,7 @@ test('create, join and save hours post those actions and never a send', async ({
       }
       return {};
     });
+    GroupWorkOrderTrade.arm({ group_work_order_enabled: true });
     host.innerHTML = GroupWorkOrderTrade.slotHtml('job-1');
   });
   await expect(page.locator('[data-group-wo-action="create"]')).toBeVisible();
@@ -189,12 +220,19 @@ test('the client page stays empty when the action is unknown and never shows pay
       });
       return;
     }
-    await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    await route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'operator_access_required', error: 'An authorised operator session is required.' }),
+    });
   });
   await page.goto('/group-sign.html?token=abc');
   await expect(page.locator('#groupSign')).toBeEmpty();
   await expect(page.locator('body')).not.toContainText('$');
   await expect(page.locator('body')).not.toContainText('Send');
+  await page.goto('/group-sign.html?token=abc');
+  await expect(page.locator('#groupSign')).toBeEmpty();
+  await expect(page.locator('body')).not.toContainText('An authorised operator session is required.');
 });
 
 test('the client signs and rates, and the page shows no crew pay', async ({ page }) => {
@@ -321,6 +359,13 @@ test('the office sees every share, and a trade role or an unknown action sees no
     window.__mode = 'off';
     GroupWorkOrderOffice.paint({ job: { id: 'job-1' } });
   });
+  expect(await page.evaluate(() => window.__posts.length)).toBe(0);
+  await expect(page.locator('[data-office-group-wo]')).toBeEmpty();
+
+  await page.evaluate(() => {
+    window.__posts = [];
+    GroupWorkOrderOffice.paint({ job: { id: 'job-1' }, group_work_order_enabled: true });
+  });
   await expect.poll(() => page.evaluate(() => window.__posts.length)).toBe(1);
   await expect(page.locator('[data-office-group-wo]')).toBeEmpty();
   await expect(page.locator('[data-office-group-wo]')).not.toContainText('$');
@@ -329,7 +374,7 @@ test('the office sees every share, and a trade role or an unknown action sees no
     window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return 'installer'; } } };
     window.__posts = [];
     window.__mode = 'on';
-    GroupWorkOrderOffice.paint({ job: { id: 'job-1' } });
+    GroupWorkOrderOffice.paint({ job: { id: 'job-1' }, group_work_order_enabled: true });
   });
   expect(await page.evaluate(() => window.__posts.length)).toBe(0);
   await expect(page.locator('[data-office-group-wo]')).toBeEmpty();
@@ -338,7 +383,7 @@ test('the office sees every share, and a trade role or an unknown action sees no
   await page.evaluate(() => {
     window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return ''; } } };
     window.__posts = [];
-    GroupWorkOrderOffice.paint({ job: { id: 'job-1' } });
+    GroupWorkOrderOffice.paint({ job: { id: 'job-1' }, group_work_order_enabled: true });
   });
   const office = page.locator('[data-office-group-wo-card]');
   await expect(office).toContainText('Total $1,000.00');

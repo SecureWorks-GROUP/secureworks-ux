@@ -1,10 +1,12 @@
 // Office view of a group work order: the pot, every share, and the client's
-// ratings. Paints nothing for a trade role, an unknown action, or enabled: false.
+// ratings. Paints nothing for a trade role, and nothing on any error.
+// The office read runs only after the server has said the switch is on.
 // Reopen the split is the only write. Nothing here sends.
 (function () {
   'use strict';
   var TRADE_ROLES = { installer: 1, lead_installer: 1, crew: 1, trade: 1, subcontractor: 1 };
   var bound = false;
+  var shownJobId = '';
 
   function core() { return window.GroupWorkOrderCore; }
 
@@ -45,24 +47,21 @@
       el.innerHTML = '';
       return;
     }
+    if (!C.switchOn(data)) {
+      if (!data || !data.job || String(data.job.id) !== shownJobId) { el.innerHTML = ''; return; }
+    } else {
+      shownJobId = String(data.job.id);
+    }
     css();
     var jobId = data.job.id;
     opsFetch('group_work_order_office', { job_id: jobId }).then(function (res) {
       if (!host() || (data.job && data.job.id !== jobId)) return;
-      // A catch-all stub answers {}. A real group always carries group_id.
       if (C.isOff(res) || !res || !res.group_id) { host().innerHTML = ''; return; }
       host().innerHTML = C.officeHtml(res);
       host().setAttribute('data-group-id', res.group_id);
-    }).catch(function (e) {
+    }).catch(function () {
       var box = host();
-      if (!box) return;
-      if (C.isOff(null, e) || (e && e.status === 403)) { box.innerHTML = ''; return; }
-      if (C.errCode(e) === 'group_work_order_not_found') {
-        box.innerHTML = '<p data-office-group-empty>No group work order on this job.</p>';
-        return;
-      }
-      if (e && e.status === 404) { box.innerHTML = ''; return; }
-      box.innerHTML = '<p data-office-group-error>The group work order could not be read.</p>';
+      if (box) box.innerHTML = '';
     });
   }
 
@@ -76,13 +75,7 @@
     opsPost('unfreeze_group_work_order', { group_id: groupId }).then(function () {
       var data = (typeof _currentJobData !== 'undefined' && _currentJobData) || null;
       paint(data);
-    }).catch(function (e) {
-      if (C.isOff(null, e)) { box.innerHTML = ''; return; }
-      var msg = document.createElement('p');
-      msg.setAttribute('data-office-group-msg', '');
-      msg.textContent = (e && e.message) || 'The split could not be reopened.';
-      box.appendChild(msg);
-    });
+    }).catch(function () { box.innerHTML = ''; });
   }
 
   if (!bound) {

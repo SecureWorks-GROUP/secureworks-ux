@@ -18306,9 +18306,9 @@ function _jpStatusText(s) {
 // Any other text is shown as it is.
 function _jpCostDescription(text) {
   var s = String(text == null ? '' : text), m;
-  if ((m = /^manual_queue:assign-to-job(?: (\S+))?$/.exec(s))) return 'Placed by a person in Bills to place' + (m[1] ? ' on ' + m[1] : '');
-  if ((m = /^manual_queue:accept-suggestion(?: (\S+))?$/.exec(s))) return 'Suggested job accepted by a person in Bills to place' + (m[1] ? ' (' + m[1] + ')' : '');
-  if ((m = /^manual_split:(\d+) jobs(?: \+ overhead ([\d.]+))?$/.exec(s))) return 'Split by a person across ' + m[1] + ' job' + (m[1] === '1' ? '' : 's') + (m[2] ? ', with ' + fmt$(Number(m[2])) + ' to overhead' : '');
+  if ((m = /^manual_queue:assign-to-job(?: (\S+))?$/.exec(s))) return 'Placed in Bills to place' + (m[1] ? ' on ' + m[1] : '');
+  if ((m = /^manual_queue:accept-suggestion(?: (\S+))?$/.exec(s))) return 'Suggested job accepted in Bills to place' + (m[1] ? ' (' + m[1] + ')' : '');
+  if ((m = /^manual_split:(\d+) jobs(?: \+ overhead ([\d.]+))?$/.exec(s))) return 'Split in Bills to place across ' + m[1] + ' job' + (m[1] === '1' ? '' : 's') + (m[2] ? ', with ' + fmt$(Number(m[2])) + ' to overhead' : '');
   if ((m = /^ref:(\S+)$/.exec(s))) return 'Placed by a machine: the bill\'s Xero reference names ' + m[1];
   if ((m = /^po:(\S+) unique\b/.exec(s))) return 'Placed by a machine: matched to purchase order ' + m[1] + ' by amount and date';
   if ((m = /^agent_prematch:\s*(.*)$/.exec(s))) return 'Placed by the agent' + (m[1] ? ' (its reason: ' + m[1] + ')' : '');
@@ -18539,7 +18539,7 @@ function swBillJobRefsHtml(br, ownRef) {
 // Who placed a bill, from v_job_cost_events.match_method (CFO allocation contract, 21 Oct).
 var JP_BILL_PLACED_BY = {
   'xero_invoices.job_id': 'linked whole by the bill\'s job in Xero',
-  manual_queue: 'placed whole by a person in Bills to place',
+  manual_queue: 'placed whole in Bills to place',
   xero_ref_link: 'placed whole by a machine from its Xero reference',
   po_deterministic: 'placed whole by a machine from a purchase order',
   agent_prematch: 'placed whole by the agent',
@@ -18838,9 +18838,9 @@ function _jpRenderDetail(data) {
     // names every held labour row installer_bill_unconfirmed, whatever the account.
     var held = b.rows.some(function(c) { return c.source === 'installer_bill_unconfirmed'; });
     // match_method stays the Xero link after a person confirms, so that line never
-    // denies a person; "by a person" is said only for a row the engine counts.
-    var how = (held && b.how === 'manual_queue') ? 'placed whole in Bills to place'
-      : (JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')');
+    // denies a person. The profit read carries no placed-by, and a Bills to place
+    // row may be a legacy one with no recorded person, so none of these names one.
+    var how = JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')';
     var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
     var counts = held
       ? '. Its labour is waiting for a person to confirm it and is not counted as cost on any job until then. ' + JP_HELD_NO_CONFIRM_SCREEN

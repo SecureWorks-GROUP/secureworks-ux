@@ -56,6 +56,15 @@ with a different work order is left out. `review_state` wins; otherwise
 `acknowledgment_status` maps onto the same four words (`acknowledged` and
 `approved` are Approved, `queried` is Queried).
 
+Office review before the Xero bill is a separate fact, `office_review_status`
+(`awaiting`, `approved`, `queried`, `rejected`). It is drawn only when the
+list says `office_review_enabled: true` or a line already has that status.
+A missing or blank status paints no Approve, Query or Reject control. Those
+three post `review_crew_invoice_line` with `line_id`, `decision` and an
+optional note. An unknown action removes the controls. There is no Send.
+The block does not repeat the agreed labour figure. A trade role still sees
+none of the card.
+
 Billed labour uses the server's `counted` flag when a line has one. Otherwise
 a line counts only when its invoice status is billed (pending acknowledgment,
 queried, acknowledged, pending ops review, approved, pushed to Xero, paid) and

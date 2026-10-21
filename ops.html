@@ -4649,6 +4649,13 @@
     .mrq-results { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
     .mrq-pickbtn { text-align: left; background: #fff; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
     .mrq-pickbtn:hover { border-color: var(--sw-orange); }
+    .mrq-split-open { margin-top: 12px; }
+    .mrq-split { margin-top: 12px; border-top: 1px dashed var(--sw-border, #e2e8f0); padding-top: 10px; font-size: 12px; }
+    .mrq-split-part { margin-top: 6px; }
+    .mrq-split-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 8px; align-items: center; }
+    .mrq-amt { font-size: 12px; padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+    .mrq-split-left { margin-top: 8px; font-weight: 600; color: #b9770e; }
+    .mrq-split-left.ok { color: #1e8449; }
     .mrq-job { margin-top: 8px; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
     .mrq-job a { color: var(--sw-orange); }
     .mrq-proj { margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
@@ -19430,7 +19437,7 @@ var MAT_RECON_STATS_CAP = 1000;
 var MAT_RECON_PAGE = 100;
 var MAT_RECON_ARM_GAP_MS = 700;
 var MAT_RECON_UNCONFIRMED = 'Xero Projects not confirmed for this job: check Xero before placing';
-var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, errNext: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {} };
+var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, errNext: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {}, split: {} };
 
 var MAT_RECON_REASON_LABELS = {
   no_ref_no_po:            'No reference, no matching PO',
@@ -19485,6 +19492,112 @@ function _mrqProjectState(project) {
   if (exp === 0) return 'empty';
   return 'unconfirmed';
 }
+// Installer bills (CFO-17, JP-12, owner 20 Oct 2026): a bill with a money line
+// on subcontractor labour (306 or 301) is an installer's bill. It lands in the
+// labour lane and a person confirms each placement; nothing places it for them.
+// Unknown until its lines are read: the label says so rather than guessing.
+var MAT_RECON_INSTALLER_ACCOUNTS = { '306': true, '301': true };
+function _mrqIsInstaller(id) {
+  var L = _matRecon.lines[id];
+  if (!L || !L.invoice) return null;
+  return (L.invoice.line_items || []).some(function(li) {
+    var amt = li.line_amount != null ? Number(li.line_amount) : Number(li.quantity || 0) * Number(li.unit_amount || 0);
+    return amt !== 0 && MAT_RECON_INSTALLER_ACCOUNTS[String(li.account_code || '')] === true;
+  });
+}
+
+// Split (CFO-17/18): one bill across several jobs, with any overhead part.
+// Money is worked in whole cents so the remainder is exact; Save opens only at
+// a remainder of $0.00 with every part above zero, and it arms on the first
+// press. The server function allocate_bill_split re-checks all of it.
+function _mrqCents(v) {
+  var t = String(v == null ? '' : v).replace(/[$,\s]/g, '');
+  if (t === '') return null;
+  if (!/^-?\d+(\.\d{0,2})?$/.test(t)) return NaN;
+  return Math.round(Number(t) * 100);
+}
+function _mrqSplitState(id) {
+  var r = _mrqRow(id), sp = _matRecon.split[id];
+  if (!r || !sp) return null;
+  var bill = Math.round(_mrqEx(r) * 100), sum = 0, bad = false;
+  sp.parts.forEach(function(pt) {
+    var c = _mrqCents(pt.amount);
+    if (c == null || isNaN(c) || c <= 0) bad = true; else sum += c;
+  });
+  var oh = _mrqCents(sp.overhead);
+  if (oh == null) oh = 0;
+  if (isNaN(oh) || oh < 0) { bad = true; oh = 0; }
+  var needAck = sp.parts.some(function(pt) { return pt.project === 'costed' && !pt.ack; });
+  var loading = sp.parts.some(function(pt) { return pt.projectLoading; });
+  var left = bill - sum - oh;
+  return { bill: bill, sum: sum, overhead: oh, left: left, bad: bad,
+    ok: sp.parts.length > 0 && !bad && left === 0 && !needAck && !loading && !_matRecon.busy[id] };
+}
+function _mrqSplitLeftText(st) {
+  if (st.bad) return 'Every part needs an amount above $0.00, in dollars and cents.';
+  if (st.left === 0) return 'Balanced: the parts' + (st.overhead ? ' and overhead' : '') + ' add up to the bill.';
+  return (st.left > 0 ? 'Left to place: ' : 'Over the bill by: ') + fmt$(Math.abs(st.left) / 100);
+}
+
+function _mrqSplitHtml(r) {
+  var id = r.id, sp = _matRecon.split[id];
+  if (!sp) {
+    return '<div class="mrq-split-open"><button class="btn btn-secondary btn-sm" data-mrq-act="splitopen" data-mrq-id="' + escapeAttr(id) + '">Split across jobs</button>'
+      + ' <span class="mrq-muted">One bill on several jobs, with any overhead part.</span></div>';
+  }
+  var st = _mrqSplitState(id), inst = _mrqIsInstaller(id);
+  var h = '<div class="mrq-split" data-mrq-split="' + escapeAttr(id) + '">';
+  h += '<div class="mrq-sec-title">Split across jobs <a href="#" data-mrq-act="splitclose" data-mrq-id="' + escapeAttr(id) + '" style="font-size:11px;margin-left:6px;text-transform:none;">cancel</a></div>';
+  if (!sp.parts.length) h += '<div class="mrq-muted">Add each job this bill covers, then give each its share ex GST.</div>';
+  sp.parts.forEach(function(pt, i) {
+    var j = pt.job;
+    h += '<div class="mrq-split-part" data-mrq-part="' + i + '">'
+      + '<div class="mrq-split-row"><span><b>' + escapeAttr(j.job_number || 'No number') + '</b> ' + escapeAttr(j.client_name || '') + '</span>'
+      + '<input class="form-input mrq-amt" inputmode="decimal" data-mrq-amt="' + escapeAttr(id) + '" data-mrq-i="' + i + '" placeholder="0.00" value="' + escapeAttr(pt.amount || '') + '">'
+      + '<a href="#" data-mrq-act="splitdrop" data-mrq-id="' + escapeAttr(id) + '" data-mrq-i="' + i + '" style="font-size:11px;">remove</a></div>';
+    if (pt.projectLoading) h += '<div class="mrq-muted">Checking Xero Projects for this job…</div>';
+    else if (pt.project === 'costed') {
+      h += '<div class="mrq-proj warn" data-mrq-project="costed"><b>Already costed in Xero Projects</b>: ' + escapeAttr((pt.projectInfo && pt.projectInfo.project_name) || 'project')
+        + ', ' + fmt$(pt.projectInfo.total_expenses) + ' of expenses. If this bill is already in that project, splitting it here counts it twice.</div>'
+        + '<label class="mrq-ack"><input type="checkbox" data-mrq-sack="' + escapeAttr(id) + '" data-mrq-i="' + i + '"' + (pt.ack ? ' checked' : '') + '>'
+        + '<span>I have checked this bill is not in that job\'s Xero Project</span></label>';
+    } else if (pt.project === 'unconfirmed') {
+      h += '<div class="mrq-proj warn" data-mrq-project="unconfirmed">' + escapeAttr(MAT_RECON_UNCONFIRMED) + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '<div class="mrq-find" style="margin-top:6px;"><input class="form-input" data-mrq-sq="' + escapeAttr(id) + '" placeholder="Add a job: job #, client or address" value="' + escapeAttr(sp.query || '') + '">'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="splitfind" data-mrq-id="' + escapeAttr(id) + '">Find</button></div>';
+  if (sp.searching) h += '<div class="mrq-muted" style="margin-top:6px;">Searching…</div>';
+  else if (sp.searchHint) h += '<div class="mrq-muted" style="margin-top:6px;">' + escapeAttr(sp.searchHint) + '</div>';
+  else if (sp.searchErr) h += '<div class="mrq-err">Search failed: ' + escapeAttr(sp.searchErr) + '</div>';
+  else if (sp.results) {
+    var taken = {};
+    sp.parts.forEach(function(pt) { taken[pt.job.id] = true; });
+    var res = sp.results.filter(function(j) { return !taken[j.id]; });
+    if (!res.length) h += '<div class="mrq-muted" style="margin-top:6px;">No other job matches that.</div>';
+    else {
+      h += '<div class="mrq-results">';
+      res.forEach(function(j) {
+        h += '<button class="mrq-pickbtn" data-mrq-act="splitpick" data-mrq-id="' + escapeAttr(id) + '" data-mrq-job="' + escapeAttr(j.id) + '">'
+          + '<b>' + escapeAttr(j.job_number || 'No number') + '</b> ' + escapeAttr(j.client_name || '')
+          + ' <span class="mrq-muted">' + escapeAttr([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
+      });
+      h += '</div>';
+    }
+  }
+  h += '<div class="mrq-split-row" style="margin-top:8px;"><span>Overhead (on no job)</span>'
+    + '<input class="form-input mrq-amt" inputmode="decimal" data-mrq-oh="' + escapeAttr(id) + '" placeholder="0.00" value="' + escapeAttr(sp.overhead || '') + '"><span></span></div>';
+  h += '<input class="form-input" data-mrq-ohnote="' + escapeAttr(id) + '" placeholder="What the overhead part is (optional)" value="' + escapeAttr(sp.note || '') + '" style="margin-top:4px;width:100%;font-size:12px;">';
+  h += '<div class="mrq-split-left' + (st.ok ? ' ok' : '') + '" data-mrq-left="' + escapeAttr(id) + '">' + escapeAttr(_mrqSplitLeftText(st)) + '</div>';
+  var label = sp.armed ? 'Confirm: split ' + fmt$(st.bill / 100) + ' across ' + sp.parts.length + ' job' + (sp.parts.length === 1 ? '' : 's')
+    : (inst ? 'Confirm and save the split' : 'Save the split');
+  h += '<div class="mrq-actions"><button class="btn btn-primary btn-sm" data-mrq-act="splitsave" data-mrq-id="' + escapeAttr(id) + '"' + (st.ok ? '' : ' disabled') + '>' + escapeAttr(label) + '</button></div>';
+  if (sp.armed && st.ok) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-split-armed>Press again to save. Each job gets its share' + (inst ? ' as installer labour' : '') + (st.overhead ? '; the overhead part goes on no job' : '') + '.</div>';
+  h += '</div>';
+  return h;
+}
+
 function _mrqCanPress(id) {
   var p = _matRecon.pick[id];
   if (!p || !p.job || p.projectLoading || _matRecon.busy[id]) return false;
@@ -19723,6 +19836,8 @@ function _mrqDetailHtml(r) {
     }
     h += '</div>';
   }
+  var inst = _mrqIsInstaller(id);
+  if (inst) h += '<div class="mrq-proj warn" data-mrq-installer>Installer bill (subcontractor labour). It goes on the job as labour, and a person confirms each placement.</div>';
   var whole = _mrqWholeRisk(id);
   if (whole) {
     h += '<div class="mrq-proj warn" data-mrq-whole="' + whole.kind + '">' + (whole.kind === 'unread'
@@ -19733,7 +19848,7 @@ function _mrqDetailHtml(r) {
   }
   var placeText = !p.job ? 'Place on a job'
     : (whole && p.armed ? 'Confirm: place all ' + fmt$(_mrqEx(r)) + ' on ' + jobLabel
-    : p.project === 'unconfirmed' && p.armed ? 'Confirm: place on ' + jobLabel + ' without Xero Projects' : 'Place on ' + jobLabel);
+    : p.project === 'unconfirmed' && p.armed ? 'Confirm: place on ' + jobLabel + ' without Xero Projects' : (inst ? 'Confirm and place on ' : 'Place on ') + jobLabel);
   h += '<div class="mrq-actions">'
     + '<button class="btn btn-primary btn-sm" data-mrq-act="place" data-mrq-id="' + escapeAttr(id) + '"' + (_mrqCanPress(id) ? '' : ' disabled') + '>' + placeText + '</button>'
     + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + escapeAttr(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>'
@@ -19741,6 +19856,7 @@ function _mrqDetailHtml(r) {
     + '</div>';
   if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. Bills to place will put no cost on any job. If Xero links this bill to a job, Job profit may still count it there until that rule is settled.</div>';
   if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
+  h += _mrqSplitHtml(r);
   if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>'
     + (_matRecon.errNext[id] ? '<div class="mrq-muted" style="margin-top:4px;" data-mrq-err-next>' + escapeAttr(_matRecon.errNext[id]) + '</div>' : '');
   h += '</div></div>';
@@ -19911,6 +20027,83 @@ function _mrqNotJob(id) {
     _mrqBillLabel(r) + ' marked not job related', { not_job_related: 1 }, 'Not saved: ');
 }
 
+async function _mrqSplitFind(id) {
+  var sp = _matRecon.split[id];
+  if (!sp) return;
+  var input = document.querySelector('[data-mrq-sq="' + id + '"]');
+  var q = String(input ? input.value : '').trim();
+  sp.query = q; delete sp.results; delete sp.searchErr; delete sp.searchHint;
+  if (q.length < 2) { sp.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderMaterialsRecon(); return; }
+  sp.searching = true;
+  var tok = sp.searchTok = {};
+  renderMaterialsRecon();
+  try {
+    var res = await opsFetch('search_jobs', { q: q });
+    if (_matRecon.split[id] !== sp || sp.searchTok !== tok) return;
+    sp.results = (res && res.results) || [];
+  } catch (e) {
+    if (_matRecon.split[id] !== sp || sp.searchTok !== tok) return;
+    sp.searchErr = _mrqErrText(e);
+  }
+  sp.searching = false;
+  renderMaterialsRecon();
+}
+
+// Add a job to the split and read its Xero Project for the double-count hint.
+async function _mrqSplitPick(id, jobId) {
+  var sp = _matRecon.split[id];
+  if (!sp || sp.parts.some(function(pt) { return pt.job.id === jobId; })) return;
+  var known = (sp.results || []).filter(function(j) { return j.id === jobId; })[0] || { id: jobId };
+  var pt = { job: known, amount: '', projectLoading: true, ack: false };
+  sp.parts.push(pt); sp.armed = 0;
+  delete sp.results; sp.query = '';
+  renderMaterialsRecon();
+  var info = null;
+  try {
+    var d = await opsFetch('job_detail', { jobId: jobId, slim: '1' });
+    info = (d && d.xero_project) || null;
+  } catch (e) {
+    console.warn('materials recon split: job_detail read failed', e);
+  }
+  if (_matRecon.split[id] !== sp) return;
+  pt.projectInfo = info; pt.project = _mrqProjectState(info); pt.projectLoading = false;
+  renderMaterialsRecon();
+}
+
+// Save the split: the first press arms, the second posts materials_recon_split.
+// The lane is labour for an installer bill, materials otherwise.
+function _mrqSplitSave(id) {
+  var r = _mrqRow(id), sp = _matRecon.split[id], st = _mrqSplitState(id);
+  if (!r || !sp || !st || !st.ok) return;
+  if (!sp.armed) { sp.armed = Date.now(); renderMaterialsRecon(); return; }
+  if (!_mrqArmSettled(sp.armed)) return;
+  var lane = _mrqIsInstaller(id) ? 'labour' : 'materials';
+  var body = {
+    xero_invoice_id: r.xero_invoice_id,
+    parts: sp.parts.map(function(pt) { return { job_id: pt.job.id, amount_ex: _mrqCents(pt.amount) / 100, lane: lane }; }),
+    overhead_ex: st.overhead / 100,
+    overhead_note: String(sp.note || '').trim() || null,
+  };
+  var jobs = sp.parts.map(function(pt) { return pt.job.job_number || 'a job'; }).join(', ');
+  _matReconAction(id, 'materials_recon_split', body,
+    _mrqBillLabel(r) + ' split across ' + jobs + (st.overhead ? ' + ' + fmt$(st.overhead / 100) + ' overhead' : ''),
+    { assigned: 1 }, 'Not split: ');
+}
+
+// Typing an amount repaints only the remainder line and the Save button, so
+// the field keeps focus.
+function _mrqSplitTyped(id) {
+  var st = _mrqSplitState(id), sp = _matRecon.split[id];
+  if (!st || !sp) return;
+  sp.armed = 0;
+  var left = document.querySelector('[data-mrq-left="' + CSS.escape(id) + '"]');
+  if (left) { left.textContent = _mrqSplitLeftText(st); left.classList.toggle('ok', st.ok); }
+  var btn = document.querySelector('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-act="splitsave"]');
+  if (btn) { btn.disabled = !st.ok; btn.textContent = _mrqIsInstaller(id) ? 'Confirm and save the split' : 'Save the split'; }
+  var armedNote = document.querySelector('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-split-armed]');
+  if (armedNote) armedNote.remove();
+}
+
 (function wireMaterialsRecon() {
   function onReady() {
     var host = document.getElementById('matReconPanel');
@@ -19945,8 +20138,35 @@ function _mrqNotJob(id) {
         renderMaterialsRecon();
       } else if (act === 'place') _mrqPlace(id);
       else if (act === 'notjob') _mrqNotJob(id);
+      else if (act === 'splitopen') { _matRecon.split[id] = { parts: [], overhead: '', note: '', query: '', armed: 0 }; renderMaterialsRecon(); }
+      else if (act === 'splitclose') { delete _matRecon.split[id]; renderMaterialsRecon(); }
+      else if (act === 'splitfind') _mrqSplitFind(id);
+      else if (act === 'splitpick') _mrqSplitPick(id, el.getAttribute('data-mrq-job'));
+      else if (act === 'splitdrop') {
+        var sp0 = _matRecon.split[id];
+        if (sp0) { sp0.parts.splice(Number(el.getAttribute('data-mrq-i')), 1); sp0.armed = 0; }
+        renderMaterialsRecon();
+      } else if (act === 'splitsave') _mrqSplitSave(id);
+    });
+    host.addEventListener('input', function(ev) {
+      var t = ev.target, g = function(a) { return t.getAttribute && t.getAttribute(a); };
+      var sid = g('data-mrq-amt') || g('data-mrq-oh') || g('data-mrq-ohnote') || g('data-mrq-sq');
+      var sp = sid && _matRecon.split[sid];
+      if (!sp) return;
+      if (g('data-mrq-amt')) { var pt = sp.parts[Number(g('data-mrq-i'))]; if (pt) pt.amount = t.value; }
+      else if (g('data-mrq-oh')) sp.overhead = t.value;
+      else if (g('data-mrq-ohnote')) { sp.note = t.value; return; }
+      else { sp.query = t.value; return; }
+      _mrqSplitTyped(sid);
     });
     host.addEventListener('change', function(ev) {
+      var sackId = ev.target.getAttribute && ev.target.getAttribute('data-mrq-sack');
+      if (sackId && _matRecon.split[sackId]) {
+        var spt = _matRecon.split[sackId].parts[Number(ev.target.getAttribute('data-mrq-i'))];
+        if (spt) { spt.ack = !!ev.target.checked; _matRecon.split[sackId].armed = 0; }
+        renderMaterialsRecon();
+        return;
+      }
       var id = ev.target.getAttribute && ev.target.getAttribute('data-mrq-ack');
       if (!id || !_matRecon.pick[id]) return;
       _matRecon.pick[id].ack = !!ev.target.checked;
@@ -19955,6 +20175,8 @@ function _mrqNotJob(id) {
     host.addEventListener('keydown', function(ev) {
       var id = ev.target.getAttribute && ev.target.getAttribute('data-mrq-q');
       if (id && ev.key === 'Enter') { ev.preventDefault(); _mrqFind(id); }
+      var sq = ev.target.getAttribute && ev.target.getAttribute('data-mrq-sq');
+      if (sq && ev.key === 'Enter') { ev.preventDefault(); _mrqSplitFind(sq); }
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady); else onReady();

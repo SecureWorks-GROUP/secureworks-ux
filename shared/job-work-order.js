@@ -1334,6 +1334,32 @@ var JobWorkOrderCore = (function () {
     return null;
   }
 
+  // Office review before the Xero bill. Only office_review_status counts.
+  // review_state is the older acknowledgement chip and is not this.
+  // A missing or blank status is the flag off: no controls.
+  var OFFICE_REVIEW_LABELS = {
+    awaiting: 'Awaiting office review',
+    approved: 'Approved for the bill',
+    queried: 'Queried',
+    rejected: 'Rejected'
+  };
+  function idText(v) {
+    if (v == null || v === '') return '';
+    return String(v).trim();
+  }
+  function officeLineId(raw) {
+    var it = obj(raw) || {};
+    return idText(it.trade_invoice_line_id) || idText(it.id);
+  }
+  function officeReviewOf(raw) {
+    var it = obj(raw) || {};
+    var key = lower(it.office_review_status);
+    if (!OFFICE_REVIEW_LABELS[key]) return null;
+    var id = officeLineId(it);
+    if (!id) return null;
+    return { key: key, label: OFFICE_REVIEW_LABELS[key], lineId: id };
+  }
+
   function reviewOf(raw) {
     var it = obj(raw) || {};
     var direct = lower(it.review_state);
@@ -1437,7 +1463,7 @@ var JobWorkOrderCore = (function () {
   function enrichCrewLine(wo, inv) {
     var out = {};
     Object.keys(wo).forEach(function (k) { out[k] = wo[k]; });
-    ['review_state', 'acknowledgment_status', 'invoice_status', 'trade_invoice_status', 'counted', 'line_type', 'cost_lane', 'override_amount', 'line_total_ex', 'amount_ex', 'trade_name', 'description', 'total_hours', 'hours', 'work_date', 'week_label'].forEach(function (k) {
+    ['review_state', 'acknowledgment_status', 'invoice_status', 'trade_invoice_status', 'counted', 'line_type', 'cost_lane', 'override_amount', 'line_total_ex', 'amount_ex', 'trade_name', 'description', 'total_hours', 'hours', 'work_date', 'week_label', 'office_review_status', 'office_review_note'].forEach(function (k) {
       if (lineBlank(out[k]) && !lineBlank(inv[k])) out[k] = inv[k];
     });
     if (!out.invoice && inv.invoice) out.invoice = inv.invoice;
@@ -1498,6 +1524,8 @@ var JobWorkOrderCore = (function () {
       invoiceStatus: invoiceStatusOf(it),
       counted: countedFlag(it),
       review: reviewOf(it),
+      officeReview: officeReviewOf(it),
+      lineId: officeLineId(it),
       woIds: ids
     };
     line.counts = countsAsBilledLabour(line);
@@ -1640,6 +1668,20 @@ var JobWorkOrderCore = (function () {
         if (showMoney) h += '<td class="r">' + esc(l.amount != null ? moneyWords(l.amount) : '') + '</td>';
         h += '<td><span class="jwo-chip jwo-chip-' + esc(l.review.key) + '" data-job-wo-review="' + esc(l.review.key) + '" data-review-source="' + esc(l.review.source) + '">' + esc(l.review.label) + '</span></td>';
         h += '</tr>';
+        // Office approve / query / reject, one line at a time, before the
+        // Xero bill. Absent unless this card was asked and this line has a
+        // status. No send, and no agreed-labour figure in this block.
+        if (opts.officeReview && l.officeReview) {
+          h += '<tr data-office-line-review="' + esc(l.officeReview.lineId) + '" data-office-line-status="' + esc(l.officeReview.key) + '"><td colspan="' + (showMoney ? 4 : 3) + '">';
+          h += '<div class="jwo-office-review">';
+          h += '<div>' + esc(l.officeReview.label) + '</div>';
+          h += '<label class="jwo-line-note">Note <input data-office-line-note aria-label="Review note"></label>';
+          h += '<div class="jwo-office-review-actions">';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="approve">Approve</button>';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="query">Query</button>';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="reject">Reject</button>';
+          h += '</div></div></td></tr>';
+        }
       });
       h += '</tbody></table>';
       if (packed.unstamped === packed.lines.length) {

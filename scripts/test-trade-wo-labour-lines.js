@@ -394,6 +394,17 @@ function hoursCard(overrides) {
   assert(built.error.indexOf('travel amount') !== -1, 'error asks for the amount: ' + built.error)
 }
 
+for (const badAmount of [-30, '-30', 'abc', 0, '0']) {
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+    travel_amount: badAmount,
+  })])
+  assert(built.error, 'a travel amount of ' + JSON.stringify(badAmount) + ' must block')
+  assert(built.error.indexOf('Travel amount must be more than $0') !== -1, 'keeps a typed bad amount as an error: ' + built.error)
+  assert.strictEqual(built.cardExtraItems, undefined, 'a bad travel amount is not dropped and then invoiced')
+}
+
 {
   const built = context._buildJobCentricPayload([woCard({
     wo_mode: false,

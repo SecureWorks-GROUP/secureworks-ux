@@ -28,6 +28,19 @@ test('a work-order line can add travel without asking for times; hourly still do
   await card.locator('[data-cardwoalloc]').press('Tab');
   await expect(card.locator('[data-cardamt]')).toHaveText('$400.00');
 
+  // A negative amount stays in the field, stays off the total, and blocks submit.
+  await card.getByLabel('Travel allowance amount').fill('-30');
+  await card.getByLabel('Travel allowance amount').press('Tab');
+  await expect(card.getByLabel('Travel allowance amount')).toHaveValue('-30');
+  await expect(card.locator('[data-cardtravelwarn]')).toHaveText('Travel amount must be more than $0');
+  await expect(page.locator('#jcRunningTotal')).toHaveText('Subtotal: $400.00');
+  await page.locator('#invSubmitBtn').click();
+  await expect(page.locator('#toast')).toContainText('Travel amount must be more than $0');
+  await expect(page.locator('#confirmOverlay')).toBeHidden();
+  await card.getByLabel('Travel allowance amount').fill('');
+  await card.getByLabel('Travel allowance amount').press('Tab');
+  await expect(card.locator('[data-cardtravelwarn]')).toBeHidden();
+
   // Kilometres and a note without an amount stay off the total and say so.
   await card.getByLabel('Travel kilometres').fill('42');
   await card.getByLabel('Travel kilometres').press('Tab');

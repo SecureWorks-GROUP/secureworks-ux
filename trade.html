@@ -25094,13 +25094,7 @@
           }
         }
         var travelAmtEl = document.querySelector('[data-cardtravelamt="' + idx + '"]');
-        if (travelAmtEl) {
-          if (travelAmtEl.value === '') c.travel_amount = null;
-          else {
-            var travelAmt = parseFloat(travelAmtEl.value);
-            c.travel_amount = (isNaN(travelAmt) || travelAmt < 0) ? null : Math.round(travelAmt * 100) / 100;
-          }
-        }
+        if (travelAmtEl) c.travel_amount = _woTravelAmountStored(travelAmtEl);
         var travelKmEl = document.querySelector('[data-cardtravelkm="' + idx + '"]');
         if (travelKmEl) {
           if (travelKmEl.value === '') c.travel_km = null;
@@ -25340,6 +25334,17 @@
     _refreshJobCardLine(idx);
   };
   // Travel allowance on a work-order card. Empty means none.
+  // A typed amount that is not more than $0 is kept as typed. Submit blocks
+  // on it. It is never turned into "no travel" while the field still shows it.
+  function _woTravelAmountStored(source) {
+    var el = source && source.value != null && source.tagName ? source : null;
+    var raw = el ? el.value : source;
+    if (el && el.validity && el.validity.badInput && String(raw || '') === '') return 'invalid';
+    if (raw == null || String(raw).trim() === '') return null;
+    var n = Number(String(raw).trim());
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100) / 100;
+    return String(raw);
+  }
   window.setJobCardTravel = function(idx, field, val) {
     var c = _jobCards[idx]; if (!c) return;
     if (field === 'note') {
@@ -25350,11 +25355,9 @@
         var km = parseFloat(val);
         c.travel_km = (isNaN(km) || km < 0) ? null : km;
       }
-    } else if (val === '' || val == null) {
-      c.travel_amount = null;
     } else {
-      var n = parseFloat(val);
-      c.travel_amount = (isNaN(n) || n < 0) ? null : Math.round(n * 100) / 100;
+      var amountEl = document.querySelector('[data-cardtravelamt="' + idx + '"]');
+      c.travel_amount = _woTravelAmountStored(amountEl || val);
     }
     _refreshJobCardLine(idx);
   };
@@ -25877,8 +25880,8 @@
   // the one existing super split runs on that total.
   function _woTravelState(c) {
     c = c || {};
-    var amountBlank = c.travel_amount == null || c.travel_amount === '';
-    var amountNum = amountBlank ? null : Number(c.travel_amount);
+    var amountBlank = c.travel_amount == null || String(c.travel_amount).trim() === '';
+    var amountNum = amountBlank ? null : Number(String(c.travel_amount).trim());
     var amountOk = amountNum != null && Number.isFinite(amountNum) && amountNum > 0;
     var amount = amountOk ? Math.round(amountNum * 100) / 100 : 0;
     var kmBlank = c.travel_km == null || c.travel_km === '';
@@ -25886,10 +25889,11 @@
     var kmOk = kmNum != null && Number.isFinite(kmNum) && kmNum >= 0;
     var km = kmOk ? Math.round(kmNum * 10) / 10 : null;
     var note = String(c.travel_note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-    var started = (!amountBlank && amountNum !== 0) || (!kmBlank && kmNum !== 0) || note.length > 0;
+    var started = !amountBlank || (!kmBlank && kmNum !== 0) || note.length > 0;
     var error = '';
     if (started) {
-      if (!amountOk) error = 'Enter the travel amount.';
+      if (!amountBlank && !amountOk) error = 'Travel amount must be more than $0';
+      else if (!amountOk) error = 'Enter the travel amount.';
       else if (!kmBlank && !kmOk) error = 'Kilometres cannot be negative.';
       else if (!String(c.job_number || '').replace(/\s+/g, ' ').trim()) {
         error = 'This travel line needs a job number so the cost stays on the job.';

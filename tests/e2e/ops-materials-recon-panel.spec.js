@@ -132,6 +132,8 @@ async function openMaterials(page, { fixture = buildFixture(), refuse = {}, expe
     };
     window.opsPost = (action, body) => {
       window.__mrqPosts.push({ action, body });
+      // { noAnswer: 'text' } stands in for a request that got no HTTP answer at all.
+      if (refuse[action] && refuse[action].noAnswer) return Promise.reject(new TypeError(refuse[action].noAnswer));
       if (refuse[action]) return fail(refuse[action]);
       if (action === 'materials_recon_assign') return copy({ ok: true, action: body.use_suggestion ? 'accept-suggestion' : 'assign-to-job' });
       if (action === 'materials_recon_not_job_related') return copy({ ok: true, action: 'mark-not-job-related' });
@@ -363,6 +365,7 @@ test('a refused write keeps the bill on the list and shows the server message', 
   const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
   await d.locator('[data-mrq-act="place"]').click();
   await expect(d.locator('[data-mrq-err]')).toHaveText('Not placed: ' + refusal);
+  await expect(d.locator('[data-mrq-err-next]')).toHaveText('The bill is still on this list. Fix what the message says, or pick another job, then press again.');
   await expect(row(page, 'q-big')).toHaveCount(1);
   await expect(page.locator('#matReconSummary')).toContainText('3 open bills');
 });
@@ -433,4 +436,32 @@ test('lines that name no job, or only the picked job, place without the whole-bi
   await expect(d.locator('[data-mrq-whole]')).toHaveCount(0);
   await d.locator('[data-mrq-act="place"]').click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
+});
+
+test('a place that got no answer does not say "Not placed" and asks for a reload first', async ({ page }) => {
+  await openMaterials(page, { refuse: { materials_recon_assign: { noAnswer: 'Failed to fetch' } } });
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
+  await d.locator('[data-mrq-act="place"]').click();
+  await expect(d.locator('[data-mrq-err]')).toHaveText('Not known if it saved: Failed to fetch');
+  await expect(d.locator('[data-mrq-err-next]')).toHaveText('Reload the list before pressing again. If it saved, the bill will no longer be on the list.');
+  await expect(row(page, 'q-big')).toHaveCount(1);
+});
+
+test('phone width: each bill is a card with its amount on screen, and the page is no wider than the screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 860 });
+  await openMaterials(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expect(page.locator('.mrq-table thead')).toBeHidden();
+  for (const id of ['q-big', 'q-small', 'q-mid']) {
+    const amount = row(page, id).locator('td.num');
+    await expect(amount).toBeVisible();
+    const box = await amount.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
+  const place = await d.locator('[data-mrq-act="place"]').boundingBox();
+  expect(place.x + place.width).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

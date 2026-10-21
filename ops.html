@@ -1374,7 +1374,27 @@
     .jp-bar-cell { width: 30%; min-width: 80px; }
     .jp-barfill { height: 8px; border-radius: 4px; background: var(--sw-mid, #4C6A7C); opacity: 0.55; }
     .jp-labels { font-size: 11px; color: var(--sw-text-sec); margin-top: 14px; line-height: 1.5; }
+    .jp-lines-btn { margin-left: 6px; padding: 1px 8px; font-size: 11px; }
+    .jp-trade-lines > td { background: var(--sw-light, #f6f8fa); }
+    .jp-line-list { list-style: none; margin: 0; padding: 0; }
+    .jp-line-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; padding: 4px 0; border-bottom: 1px solid var(--sw-border, #eee); }
+    .jp-line-list li:last-child { border-bottom: none; }
+    .jp-line-list .jp-sub { grid-column: 1 / -1; }
+    .jp-line-amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .jp-labels div + div { margin-top: 4px; }
+    /* Phone: the lane and trade tables stack into one card per row (L13). */
+    @media (max-width: 600px) {
+      .jp-table.jp-stack thead { display: none; }
+      .jp-table.jp-stack, .jp-table.jp-stack tbody { display: block; }
+      .jp-table.jp-stack tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--sw-border, #eee); }
+      .jp-table.jp-stack tr[hidden] { display: none; }
+      .jp-table.jp-stack td { border: none; padding: 0; text-align: left; white-space: normal; }
+      .jp-table.jp-stack td:first-child { grid-column: 1 / -1; font-weight: 700; }
+      .jp-table.jp-stack tr.jp-total td { border-top: none; }
+      .jp-table.jp-stack td[data-label]:empty { display: none; }
+      .jp-table.jp-stack td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); }
+      .jp-table.jp-stack tr.jp-trade-lines > td { font-weight: 400; padding: 4px 8px; }
+    }
     @media (max-width: 640px) {
       .jp-detail { padding: 10px; }
       #jpListTable th:nth-child(n+5):not(:nth-child(8)):not(:nth-child(9)),
@@ -4605,8 +4625,19 @@
     .mrq-detail > td { background: #fff; padding: 12px 14px 16px; border-bottom: 2px solid var(--sw-border, #eee); }
     .mrq-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 18px; }
     @media (max-width: 860px) { .mrq-grid { grid-template-columns: 1fr; } }
-    /* Phone: the bill list scrolls sideways, so the open bill's detail stays pinned to the screen's width. */
-    @media (max-width: 600px) { .mrq-detail > td > .mrq-grid { position: sticky; left: 0; width: calc(100vw - 60px); } }
+    /* Phone: each bill is a card (supplier and amount first), and the open bill's detail takes the card's width. */
+    @media (max-width: 600px) {
+      .mrq-table thead { display: none; }
+      .mrq-table, .mrq-table tbody { display: block; }
+      .mrq-table tr.mrq-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 8px 10px; border-bottom: 1px solid var(--sw-border, #eee); }
+      .mrq-table tr.mrq-row td { border: none; padding: 0; white-space: normal; }
+      .mrq-table tr.mrq-row td[data-label]::before { content: attr(data-label) ': '; color: var(--sw-text-sec); font-size: 11px; font-weight: 400; }
+      .mrq-table tr.mrq-row td.num { grid-column: 2; grid-row: 1; text-align: right; }
+      .mrq-table tr.mrq-row td:first-child { grid-column: 1; grid-row: 1; font-weight: 600; }
+      .mrq-table tr.mrq-detail { display: block; }
+      .mrq-table tr.mrq-detail > td { display: block; padding: 10px; }
+      .mrq-lines { display: block; overflow-x: auto; }
+    }
     .mrq-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); margin-bottom: 6px; }
     .mrq-lines { width: 100%; border-collapse: collapse; font-size: 12px; }
     .mrq-lines td, .mrq-lines th { padding: 4px 6px; border-bottom: 1px solid var(--sw-border, #eee); text-align: left; vertical-align: top; }
@@ -18260,6 +18291,52 @@ function _jpExpectedSourceText(src) {
   return ({ frozen_at_acceptance: 'fixed when the quote was accepted', accepted_quote_revision: 'from the accepted quote',
     sent_quote_revision: 'from a sent quote, not accepted' })[String(src || '')] || String(src || '').replace(/_/g, ' ');
 }
+// A job status in staff words: the shared label when the state machine has one,
+// else the code with its underscores spaced and the first letter capitalised.
+function _jpStatusText(s) {
+  var k = String(s || '');
+  if (!k) return '';
+  if (typeof STATUS_LABELS === 'object' && STATUS_LABELS && STATUS_LABELS[k]) return STATUS_LABELS[k];
+  var t = k.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+// How a materials record came to be on the job, from the audit crumb the
+// placing code writes (materials_recon.ts manualQueueMatchReason,
+// materials_ingest.ts matchReason, allocate_bill_split, bill_prematch_run).
+// Any other text is shown as it is.
+function _jpCostDescription(text) {
+  var s = String(text == null ? '' : text), m;
+  if ((m = /^manual_queue:assign-to-job(?: (\S+))?$/.exec(s))) return 'Placed by a person in Bills to place' + (m[1] ? ' on ' + m[1] : '');
+  if ((m = /^manual_queue:accept-suggestion(?: (\S+))?$/.exec(s))) return 'Suggested job accepted by a person in Bills to place' + (m[1] ? ' (' + m[1] + ')' : '');
+  if ((m = /^manual_split:(\d+) jobs(?: \+ overhead ([\d.]+))?$/.exec(s))) return 'Split by a person across ' + m[1] + ' job' + (m[1] === '1' ? '' : 's') + (m[2] ? ', with ' + fmt$(Number(m[2])) + ' to overhead' : '');
+  if ((m = /^ref:(\S+)$/.exec(s))) return 'Placed by a machine: the bill\'s Xero reference names ' + m[1];
+  if ((m = /^po:(\S+) unique\b/.exec(s))) return 'Placed by a machine: matched to purchase order ' + m[1] + ' by amount and date';
+  if ((m = /^agent_prematch:\s*(.*)$/.exec(s))) return 'Placed by the agent' + (m[1] ? ' (its reason: ' + m[1] + ')' : '');
+  return s;
+}
+// The definitions under a job, in staff words. Each says what the engine's own
+// label for the same key says (job_profit labels); the engine stays the source
+// of truth, so a key with no staff text here shows the engine's words.
+var JP_LABEL_TEXT = {
+  profit: 'Gross profit counts direct costs only: trade labour, materials, commission and other direct lines, ex GST. No share of overheads. Trade labour is what the trade charged; the company\'s share of super is not added.',
+  quoted_ex: 'Quoted is the value of a sent or accepted quote, ex GST. It is blank when no quote was sent and is never the live price. The Quoted card says which quote it came from.',
+  expected_cost_ex: 'Expected cost is the cost fixed at the quote, ex GST, split into labour, materials and commission. It comes from the figures fixed when the quote was accepted, from the accepted quote, or from a sent quote; the Expected cost card says which. It is blank when no cost was fixed at a quote (including a quote sent with no cost figures) and is never a live pricing estimate.',
+  committed_open_ex: 'Committed is priced open purchase orders with no supplier invoice emailed and no bill placed yet, ex GST. It is not actual cost. An order with no price is never counted here as $0.00.',
+  actual_cost_ex: 'Actual cost comes from this job\'s own lines only: trade charges, supplier bills and materials placed on the job. It is never a Xero Project total.',
+  xero_project_expenses_ex: 'Xero Project expenses are evidence only, not the job\'s full cost: trade labour may sit outside the Project. They are never added to actual cost, profit, margin or any company, work-type or month total. A Project counts only when its name carries this job\'s number; a Project linked by client only gives no figure, and the job is flagged.',
+  verified_paid: 'Paid means Xero recorded the payment (for trades, their invoices are marked paid). It is not a bank reconciliation.',
+  margin: 'Profit and margin stay blank when there is no client invoice, no cost or no trade labour linked, when trade invoice lines are incomplete or not classified, when the Xero Project has more expenses than the costs linked here, or when materials are owed but none is linked.'
+};
+// Open or close a trade's lines under its row (display only).
+function jpToggleTradeLines(btn, key) {
+  var host = btn && btn.closest ? btn.closest('.jp-detail') : document;
+  var row = host && host.querySelector('[data-jp-trade-lines="' + key + '"]');
+  if (!row) return;
+  var open = row.hasAttribute('hidden');
+  if (open) row.removeAttribute('hidden'); else row.setAttribute('hidden', '');
+  btn.textContent = (open ? 'Hide ' : 'Show ') + btn.getAttribute('data-jp-lines-label');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
 var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
 
 // Owner only (approved MVP visibility). Client-side gate; ops-api enforces admin/owner.
@@ -18423,7 +18500,7 @@ async function _jpLoadPage(reset) {
   } catch (e) {
     if (seq !== _jp.listSeq) return;
     var m = (e && e.message) || 'unknown error';
-    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load job profit: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner/admin sign-in required)' : '') + ' <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()">Retry</button></div></td></tr>';
+    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load the job list, so no job here is known: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner/admin sign-in required)' : '') + '. Press Retry; if it keeps failing, narrow the filters and try again. <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()">Retry</button></div></td></tr>';
     if (more) more.innerHTML = reset ? '' : '<div class="jp-note err">Could not load more: ' + _jpEsc(m) + ' <button class="btn btn-secondary btn-sm" onclick="jpLoadMore()">Retry</button></div>';
     if (status && reset) status.textContent = '';
   }
@@ -18518,7 +18595,7 @@ function _jpRenderList() {
     body.innerHTML = _jp.rows.map(function(j) {
       return '<tr class="jp-row" onclick="openJobProfitDetail(\'' + _jpEsc(j.job_id) + '\')">'
         + '<td><strong>' + _jpEsc(j.job_number || 'No job #') + '</strong><div class="jp-sub">' + _jpEsc(j.client_name || '') + '</div><div class="jp-sub">' + _jpTypeLabel(j) + '</div></td>'
-        + '<td>' + _jpEsc(j.status || '') + '</td>'
+        + '<td>' + _jpEsc(_jpStatusText(j.status)) + '</td>'
         + '<td class="num">' + _jpMoney(_jpQuoted(j), 'No quote sent') + '</td>'
         + '<td class="num">' + _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote') + '</td>'
         + '<td class="num">' + _jpLinkedMoney(j, j.actual_cost_ex, 'no_cost_linked') + '</td>'
@@ -18577,6 +18654,18 @@ async function openJobProfitDetail(jobId, jobNumber, quiet) {
   }
 }
 
+// Committed (open orders) sits beside the lanes as its own figure (L8). It
+// reads committed_open_ex only and is never added to actual cost; unpriced
+// orders and emailed invoices are counts from the engine, never dollars.
+function _jpCommittedCard(j) {
+  var has = Object.prototype.hasOwnProperty.call(j, 'committed_open_ex');
+  var v = !has ? '<span class="jp-unk">Not in this read</span>' : _jpMoney(j.committed_open_ex, 'Not known');
+  var s = [_jpNum(j.committed_open_ex) === 0 ? 'no priced open orders' : 'open orders; not in actual cost'];
+  var unpriced = _jpNum(j.ordered_not_billed_count), emailed = _jpNum(j.invoice_emailed_count);
+  if (unpriced) s.push('plus ' + unpriced + ' order' + (unpriced === 1 ? '' : 's') + ' with no price, amount not known');
+  if (emailed) s.push(emailed + ' supplier invoice' + (emailed === 1 ? '' : 's') + ' emailed, no bill matched yet');
+  return '<div class="jp-card" data-jp-committed><div class="k">Committed (open orders)</div><div class="v">' + v + '</div><div class="s">' + _jpEsc(s.join('; ')) + '</div></div>';
+}
 function _jpCard(k, v, s) {
   return '<div class="jp-card"><div class="k">' + _jpEsc(k) + '</div><div class="v">' + v + '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>';
 }
@@ -18598,7 +18687,7 @@ async function _jpFillTypeAverage(seq, workType) {
       : _jpEsc(workType) + ' average unknown';
   } catch (e) {
     delete _jp.typeAvg[workType];
-    text = _jpEsc(workType) + ' average could not load';
+    text = _jpEsc(workType) + ' average could not load; close and reopen the job to try again';
   }
   if (seq !== _jp.detailSeq) return;
   var el = document.getElementById('jpTypeAvg');
@@ -18616,7 +18705,7 @@ function _jpRenderDetail(data) {
   var h = '<div class="jp-detail">';
 
   h += '<div class="jp-detail-head"><div style="flex:1;min-width:200px;"><h3>' + _jpEsc(j.job_number || 'No job #') + ' &middot; ' + _jpEsc(j.client_name || '') + '</h3>'
-    + '<div class="jp-sub">' + _jpTypeLabel(j) + ' &middot; ' + _jpEsc(j.status || '') + (j.created_at ? ' &middot; created ' + _jpDate(j.created_at) : '') + '</div>'
+    + '<div class="jp-sub">' + _jpTypeLabel(j) + ' &middot; ' + _jpEsc(_jpStatusText(j.status)) + (j.created_at ? ' &middot; created ' + _jpDate(j.created_at) : '') + '</div>'
     + '<div style="margin-top:4px;">' + _jpConfidence(j) + '</div></div>'
     + (j.job_id ? '<button class="btn btn-secondary btn-sm" onclick="openJobDetail(\'' + _jpEsc(j.job_id) + '\')">Open job</button>' : '')
     + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job: Financials > Bill Reconciliation">Place bills</button>' : '')
@@ -18641,6 +18730,7 @@ function _jpRenderDetail(data) {
     + _jpCard('Quoted', _jpMoney(_jpQuoted(j), 'No quote sent'), _jpQuoted(j) != null ? _jpEsc(_jpQuotedSourceText(j.quoted_source)) : 'never a live price')
     + _jpCard('Expected cost', _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote'), _jpExpected(j, j.expected_cost_ex) != null ? _jpEsc(_jpExpectedSourceText(j.expected_source)) : 'no cost fixed at a quote; never a live estimate')
     + _jpCard(withheld ? 'Actual cost so far' : 'Actual cost', _jpMoney(j.actual_cost_ex), withheld ? 'linked so far; not the full cost yet' : 'costs linked line by line')
+    + _jpCommittedCard(j)
     + _jpCard('Invoiced', _jpMoney(j.invoiced_ex), j.invoice_count != null ? _jpEsc(j.invoice_count + ' invoice' + (Number(j.invoice_count) === 1 ? '' : 's')) : '')
     + _jpCard('Collected', _jpMoney(j.collected_ex), j.revenue_verified_paid ? 'paid in Xero' + (j.revenue_last_paid_on ? ' ' + _jpDate(j.revenue_last_paid_on) : '') : 'not verified paid')
     + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j)), '')
@@ -18656,7 +18746,7 @@ function _jpRenderDetail(data) {
   ];
   var materialsMissing = flags.indexOf('materials_not_linked') !== -1;
   var installerUnconfirmed = flags.indexOf('installer_bill_unconfirmed') !== -1;
-  h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table" data-jp-lanes' + (withheld ? ' data-jp-withheld' : '') + '><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">' + (withheld ? 'Actual so far' : 'Actual') + '</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
+  h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table jp-stack" data-jp-lanes' + (withheld ? ' data-jp-withheld' : '') + '><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">' + (withheld ? 'Actual so far' : 'Actual') + '</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
   lanes.forEach(function(l) {
     var e = _jpNum(l[1]), a = _jpNum(l[2]);
     var noneLinked = l[0] === 'Materials' && materialsMissing && !a;
@@ -18666,12 +18756,12 @@ function _jpRenderDetail(data) {
     var cell = diff == null ? '<span class="jp-unk">n/a</span>'
       : withheld && diff <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
       : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(diff)) + '</span>';
-    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2]))
+    h += '<tr><td>' + l[0] + '</td><td class="num" data-label="Expected">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num" data-label="' + (withheld ? 'Actual so far' : 'Actual') + '">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2]))
       + (l[0] === 'Labour' && installerUnconfirmed ? '<div class="jp-sub" data-jp-installer-unconfirmed>plus an unconfirmed installer bill, not counted</div>' : '') + '</td>'
-      + '<td class="num">' + cell + '</td></tr>';
+      + '<td class="num" data-label="Actual minus expected">' + cell + '</td></tr>';
   });
   var te = _jpExpected(j, j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
-  h += '<tr class="jp-total"><td>Total</td><td class="num">' + _jpMoney(te) + '</td><td class="num">' + _jpMoney(j.actual_cost_ex) + '</td><td class="num">'
+  h += '<tr class="jp-total"><td>Total</td><td class="num" data-label="Expected">' + _jpMoney(te) + '</td><td class="num" data-label="' + (withheld ? 'Actual so far' : 'Actual') + '">' + _jpMoney(j.actual_cost_ex) + '</td><td class="num" data-label="Actual minus expected">'
     + (te == null || ta == null ? '<span class="jp-unk">n/a</span>'
       : withheld && ta - te <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
       : '<span class="' + (ta - te > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(ta - te)) + '</span>') + '</td></tr>';
@@ -18680,7 +18770,6 @@ function _jpRenderDetail(data) {
     h += '<div class="jp-sub" style="margin-top:6px;" data-jp-withheld-note>Some of this job\'s cost is not linked yet, so a lower actual is not a saving. An overrun already linked shows as "at least"; the full difference shows once the profit check passes.</div>';
   }
   var recon = [];
-  if (_jpNum(j.committed_open_ex)) recon.push('Open purchase orders ' + fmt$(j.committed_open_ex) + ' (committed, not in actual cost)');
   if (_jpNum(j.draft_revenue_ex)) recon.push('Draft client invoices ' + fmt$(j.draft_revenue_ex) + ' (not counted)');
   if (_jpNum(j.variations_listed_ex)) recon.push('Variations listed ' + fmt$(j.variations_listed_ex) + ' (not added to invoiced)');
   if (recon.length) h += '<div class="jp-sub" style="margin-top:6px;">' + _jpEsc(recon.join(' · ')) + '</div>';
@@ -18694,9 +18783,36 @@ function _jpRenderDetail(data) {
   h += '<div class="jp-sec">Trades who charged</div>';
   if (!trades.length) h += '<div class="jp-sub">No trade charges linked to this job.</div>';
   else {
-    h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Trade</th><th class="num">Lines</th><th>First charge</th><th>Last charge</th><th class="num">Amount</th></tr></thead><tbody>';
-    trades.forEach(function(t) {
-      h += '<tr data-trade-party="' + _jpEsc(t.party_id || '') + '"><td>' + _jpEsc(t.party || 'Unnamed trade') + '</td><td class="num">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td>' + _jpDate(t.first) + '</td><td>' + _jpDate(t.last) + '</td><td class="num">' + _jpMoney(t.amount_ex) + '</td></tr>';
+    // Each trade's own lines open under its row (L7), so a line such as
+    // "Materials Ordered" counted as labour is not hidden in a total.
+    var tradeLines = {};
+    costs.forEach(function(c) {
+      if (!c || c.source !== 'trade_line') return;
+      var key = c.party_id || ('name:' + (c.party || ''));
+      (tradeLines[key] = tradeLines[key] || []).push(c);
+    });
+    h += '<div class="jp-wrap"><table class="jp-table jp-stack" data-jp-trades><thead><tr><th>Trade</th><th class="num">Lines</th><th>First charge</th><th>Last charge</th><th class="num">Amount</th></tr></thead><tbody>';
+    trades.forEach(function(t, i) {
+      var lines = tradeLines[t.party_id || ('name:' + (t.party || ''))] || [];
+      lines.sort(function(a, b) { return String(a.event_date || '').localeCompare(String(b.event_date || '')); });
+      var n = _jpNum(t.lines);
+      var key = 'jt' + i;
+      var label = (n != null ? n : lines.length) + ' line' + ((n != null ? n : lines.length) === 1 ? '' : 's');
+      h += '<tr data-trade-party="' + _jpEsc(t.party_id || '') + '"><td>' + _jpEsc(t.party || 'Unnamed trade')
+        + (lines.length ? ' <button type="button" class="btn btn-secondary btn-sm jp-lines-btn" data-jp-trade-toggle="' + key + '" data-jp-lines-label="' + _jpEsc(label) + '" aria-expanded="false" onclick="jpToggleTradeLines(this, \'' + key + '\')">Show ' + _jpEsc(label) + '</button>' : '')
+        + '</td><td class="num" data-label="Lines">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td data-label="First charge">' + _jpDate(t.first) + '</td><td data-label="Last charge">' + _jpDate(t.last) + '</td><td class="num" data-label="Amount">' + _jpMoney(t.amount_ex) + '</td></tr>';
+      if (lines.length) {
+        h += '<tr class="jp-trade-lines" data-jp-trade-lines="' + key + '" hidden><td colspan="5"><ul class="jp-line-list">';
+        lines.forEach(function(c) {
+          h += '<li><span class="jp-line-desc">' + _jpEsc(c.description || 'No description') + '</span>'
+            + '<span class="jp-line-amt">' + _jpMoney(c.amount_ex) + '</span>'
+            + '<div class="jp-sub">' + _jpDate(c.event_date) + ' &middot; counted as ' + _jpEsc(c.lane || 'no lane')
+            + (_jpNum(c.hours) != null ? ' &middot; ' + _jpNum(c.hours).toFixed(1) + ' h' : '')
+            + (c.document_number ? ' &middot; ' + _jpEsc(c.document_number) : '')
+            + (c.is_actual === false ? ' &middot; <span class="jp-tag mute">not actual</span>' : '') + '</div></li>';
+        });
+        h += '</ul>' + (n != null && n !== lines.length ? '<div class="jp-sub" data-jp-lines-short>' + lines.length + ' of ' + n + ' lines are in this read.</div>' : '') + '</td></tr>';
+      }
     });
     h += '</tbody></table></div>';
   }
@@ -18746,12 +18862,12 @@ function _jpRenderDetail(data) {
   h += '<div class="jp-sec">Materials and other costs</div>';
   if (!other.length) h += '<div class="jp-sub">No supplier bills, materials records or purchase orders linked.</div>';
   else {
-    h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th>Document</th><th>Lane</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
+    h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th>Document</th><th>Lane</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
     other.forEach(function(c) {
-      h += '<tr><td>' + _jpDate(c.event_date) + '</td><td>' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(c.description) + '</div>' : '') + '</td>'
-        + '<td>' + _jpEsc(JP_SOURCE_LABELS[c.source] || c.source || '') + (c.is_actual === false ? ' <span class="jp-tag mute">not actual</span>' : '') + '</td>'
-        + '<td>' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + '</td>'
-        + '<td>' + _jpEsc(c.lane || '') + '</td><td class="num">' + _jpMoney(c.amount_ex) + '</td><td>' + _jpPaid(c.paid, c.paid_on) + '</td></tr>';
+      h += '<tr><td>' + _jpDate(c.event_date) + '</td><td data-label="Supplier">' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(c.description)) + '</div>' : '') + '</td>'
+        + '<td data-label="Source">' + _jpEsc(JP_SOURCE_LABELS[c.source] || c.source || '') + (c.is_actual === false ? ' <span class="jp-tag mute">not actual</span>' : '') + '</td>'
+        + '<td data-label="Document">' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + '</td>'
+        + '<td data-label="Lane">' + _jpEsc(c.lane || '') + '</td><td class="num" data-label="Amount">' + _jpMoney(c.amount_ex) + '</td><td data-label="Paid">' + _jpPaid(c.paid, c.paid_on) + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -18760,11 +18876,11 @@ function _jpRenderDetail(data) {
   h += '<div class="jp-sec">Client invoices and variations</div>';
   if (!revenue.length) h += '<div class="jp-sub">No client invoice linked to this job.</div>';
   else {
-    h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Date</th><th>Document</th><th>Kind</th><th>Status</th><th class="num">Amount</th><th>Counts</th><th>Paid</th></tr></thead><tbody>';
+    h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Document</th><th>Kind</th><th>Status</th><th class="num">Amount</th><th>Counts</th><th>Paid</th></tr></thead><tbody>';
     revenue.forEach(function(r) {
-      h += '<tr><td>' + _jpDate(r.invoice_date) + '</td><td>' + _jpEsc(r.document_number || '') + (r.description ? '<div class="jp-sub">' + _jpEsc(r.description) + '</div>' : '') + '</td>'
-        + '<td>' + _jpEsc(r.kind === 'variation' ? 'Variation' : 'Invoice line') + '</td><td>' + _jpEsc(r.status || '') + '</td><td class="num">' + _jpMoney(r.amount_ex) + '</td>'
-        + '<td>' + (r.counts_as_invoiced ? '<span class="jp-tag ok">Invoiced</span>' : '<span class="jp-tag mute">Not counted</span>') + '</td><td>' + _jpPaid(r.paid, r.paid_on) + '</td></tr>';
+      h += '<tr><td>' + _jpDate(r.invoice_date) + '</td><td data-label="Document">' + _jpEsc(r.document_number || '') + (r.description ? '<div class="jp-sub">' + _jpEsc(r.description) + '</div>' : '') + '</td>'
+        + '<td data-label="Kind">' + _jpEsc(r.kind === 'variation' ? 'Variation' : 'Invoice line') + '</td><td data-label="Status">' + _jpEsc(r.status || '') + '</td><td class="num" data-label="Amount">' + _jpMoney(r.amount_ex) + '</td>'
+        + '<td data-label="Counts">' + (r.counts_as_invoiced ? '<span class="jp-tag ok">Invoiced</span>' : '<span class="jp-tag mute">Not counted</span>') + '</td><td data-label="Paid">' + _jpPaid(r.paid, r.paid_on) + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -18774,19 +18890,19 @@ function _jpRenderDetail(data) {
   if (!timeline.length) h += '<div class="jp-sub">No dated money events yet.</div>';
   else {
     h += '<div class="jp-sub" style="margin-bottom:4px;">The story in date order. Paid rows mark a payment on a document already listed; totals come from the summary above, not from adding this list.</div>';
-    h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Date</th><th>Event</th><th>Who</th><th>Document</th><th class="num">Hours</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
+    h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Event</th><th>Who</th><th>Document</th><th class="num">Hours</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
     timeline.forEach(function(t) {
       var counted = t.counts === false && (t.kind === 'sales_invoice_paid' || t.kind === 'cost_paid');
-      h += '<tr><td>' + _jpDate(t.date) + '</td><td>' + _jpEsc(JP_KIND_LABELS[t.kind] || t.kind || '') + (t.lane ? ' <span class="jp-sub">' + _jpEsc(t.lane) + '</span>' : '') + (t.counts === false && !counted ? ' <span class="jp-tag mute">not counted</span>' : '') + '</td>'
-        + '<td>' + _jpEsc(t.party || '') + (t.description ? '<div class="jp-sub">' + _jpEsc(t.description) + '</div>' : '') + '</td>'
-        + '<td>' + _jpEsc(t.document_number || '') + '</td><td class="num">' + (_jpNum(t.hours) != null ? _jpNum(t.hours).toFixed(1) : '') + '</td>'
-        + '<td class="num">' + (counted ? '<span class="jp-sub">' + _jpEsc(_jpNum(t.amount_ex) != null ? fmt$(t.amount_ex) : '') + '</span>' : _jpMoney(t.amount_ex)) + '</td><td>' + _jpPaid(t.paid, t.paid_on) + '</td></tr>';
+      h += '<tr><td>' + _jpDate(t.date) + '</td><td data-label="Event">' + _jpEsc(JP_KIND_LABELS[t.kind] || t.kind || '') + (t.lane ? ' <span class="jp-sub">' + _jpEsc(t.lane) + '</span>' : '') + (t.counts === false && !counted ? ' <span class="jp-tag mute">not counted</span>' : '') + '</td>'
+        + '<td data-label="Who">' + _jpEsc(t.party || '') + (t.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(t.description)) + '</div>' : '') + '</td>'
+        + '<td data-label="Document">' + _jpEsc(t.document_number || '') + '</td><td class="num" data-label="Hours">' + (_jpNum(t.hours) != null ? _jpNum(t.hours).toFixed(1) : '') + '</td>'
+        + '<td class="num" data-label="Amount">' + (counted ? '<span class="jp-sub">' + _jpEsc(_jpNum(t.amount_ex) != null ? fmt$(t.amount_ex) : '') + '</span>' : _jpMoney(t.amount_ex)) + '</td><td data-label="Paid">' + _jpPaid(t.paid, t.paid_on) + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
 
   h += '<div class="jp-labels">';
-  ['profit', 'quoted_ex', 'expected_cost_ex', 'actual_cost_ex', 'xero_project_expenses_ex', 'verified_paid', 'margin'].forEach(function(k) { if (labels[k]) h += '<div>' + _jpEsc(labels[k]) + '</div>'; });
+  ['profit', 'quoted_ex', 'expected_cost_ex', 'committed_open_ex', 'actual_cost_ex', 'xero_project_expenses_ex', 'verified_paid', 'margin'].forEach(function(k) { if (labels[k]) h += '<div data-jp-label="' + k + '">' + _jpEsc(JP_LABEL_TEXT[k] || labels[k]) + '</div>'; });
   h += '</div></div>';
   return h;
 }
@@ -18809,7 +18925,7 @@ async function loadJobProfitRollup() {
     co.innerHTML = _jpRenderRollup(data);
   } catch (e) {
     if (seq !== _jp.rollupSeq) return;
-    co.innerHTML = '<div class="jp-note err">Company totals could not load: ' + _jpEsc((e && e.message) || 'unknown error') + ' <button class="btn btn-secondary btn-sm" onclick="loadJobProfitRollup()">Retry</button></div>';
+    co.innerHTML = '<div class="jp-note err">Company totals could not load, so none is shown: ' + _jpEsc((e && e.message) || 'unknown error') + '. Press Retry. <button class="btn btn-secondary btn-sm" onclick="loadJobProfitRollup()">Retry</button></div>';
   }
 }
 
@@ -19307,7 +19423,7 @@ var MAT_RECON_STATS_CAP = 1000;
 var MAT_RECON_PAGE = 100;
 var MAT_RECON_ARM_GAP_MS = 700;
 var MAT_RECON_UNCONFIRMED = 'Xero Projects not confirmed for this job: check Xero before placing';
-var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {} };
+var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, errNext: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {} };
 
 var MAT_RECON_REASON_LABELS = {
   no_ref_no_po:            'No reference, no matching PO',
@@ -19493,11 +19609,11 @@ function renderMaterialsRecon() {
       : (L && L.error ? 'Could not read' : '<span class="mrq-muted">Open to read</span>');
     html += '<tr class="mrq-row' + (isOpen ? ' open' : '') + '" data-mrq-row="' + escapeAttr(r.id) + '" data-mrq-act="toggle" data-mrq-id="' + escapeAttr(r.id) + '">'
       + '<td>' + escapeAttr(r.contact_name || '(unknown supplier)') + '</td>'
-      + '<td style="white-space:nowrap;">' + escapeAttr(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '—') + '</td>'
-      + '<td>' + escapeAttr(r.invoice_number || '—') + '</td>'
+      + '<td style="white-space:nowrap;" data-label="Date">' + escapeAttr(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '—') + '</td>'
+      + '<td data-label="Bill">' + escapeAttr(r.invoice_number || '—') + '</td>'
       + '<td class="num">' + fmt$(_mrqEx(r)) + '</td>'
-      + '<td data-mrq-bu>' + bu + '</td>'
-      + '<td>' + (r.suggested_job_number ? escapeAttr(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
+      + '<td data-mrq-bu data-label="Business Unit">' + bu + '</td>'
+      + '<td data-label="Suggested job">' + (r.suggested_job_number ? escapeAttr(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
       + '</tr>';
     if (isOpen) html += '<tr class="mrq-detail" data-mrq-detail="' + escapeAttr(r.id) + '"><td colspan="6">' + _mrqDetailHtml(r) + '</td></tr>';
   });
@@ -19557,7 +19673,7 @@ function _mrqDetailHtml(r) {
     + '<button class="btn btn-secondary btn-sm" data-mrq-act="find" data-mrq-id="' + escapeAttr(id) + '">Find</button></div>';
   if (p.searching) h += '<div class="mrq-muted" style="margin-top:6px;">Searching…</div>';
   else if (p.searchHint) h += '<div class="mrq-muted" style="margin-top:6px;">' + escapeAttr(p.searchHint) + '</div>';
-  else if (p.searchErr) h += '<div class="mrq-err">Search failed: ' + escapeAttr(p.searchErr) + '</div>';
+  else if (p.searchErr) h += '<div class="mrq-err">Search failed: ' + escapeAttr(p.searchErr) + '. Nothing was placed; press Find to try again.</div>';
   else if (p.results && !p.job) {
     if (!p.results.length) h += '<div class="mrq-muted" style="margin-top:6px;">No job matches that.</div>';
     else {
@@ -19609,7 +19725,8 @@ function _mrqDetailHtml(r) {
     + '</div>';
   if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. No cost goes on any job.</div>';
   if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
-  if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>';
+  if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>'
+    + (_matRecon.errNext[id] ? '<div class="mrq-muted" style="margin-top:4px;" data-mrq-err-next>' + escapeAttr(_matRecon.errNext[id]) + '</div>' : '');
   h += '</div></div>';
   return h;
 }
@@ -19675,7 +19792,7 @@ async function _mrqPick(id, jobId, known) {
   var prev = _matRecon.pick[id] || {};
   var p = _matRecon.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false, armed: 0 };
   delete _matRecon.notjobArmed[id];
-  delete _matRecon.err[id];
+  delete _matRecon.err[id]; delete _matRecon.errNext[id];
   renderMaterialsRecon();
   var info = null;
   try {
@@ -19707,13 +19824,19 @@ async function _mrqPick(id, jobId, known) {
 async function _matReconAction(id, action, body, doneLabel, statsDelta, failPrefix) {
   var r = _mrqRow(id);
   if (!r || _matRecon.busy[id]) return;
-  _matRecon.busy[id] = true; delete _matRecon.err[id];
+  _matRecon.busy[id] = true; delete _matRecon.err[id]; delete _matRecon.errNext[id];
   renderMaterialsRecon();
   try {
     await opsPost(action, body);
   } catch (e) {
     _matRecon.busy[id] = false;
-    _matRecon.err[id] = failPrefix + _mrqErrText(e);
+    // No answer from the server (no HTTP status) means the write may have
+    // landed, so the screen does not say "Not placed" and asks for a reload.
+    var answered = !!(e && e.status);
+    _matRecon.err[id] = (answered ? failPrefix : 'Not known if it saved: ') + _mrqErrText(e);
+    _matRecon.errNext[id] = answered
+      ? 'The bill is still on this list. Fix what the message says, or pick another job, then press again.'
+      : 'Reload the list before pressing again. If it saved, the bill will no longer be on the list.';
     renderMaterialsRecon();
     return;
   }
@@ -19727,7 +19850,7 @@ async function _matReconAction(id, action, body, doneLabel, statsDelta, failPref
   }
   _matRecon.done.unshift(doneLabel);
   if (_matRecon.openId === id) _matRecon.openId = null;
-  delete _matRecon.pick[id]; delete _matRecon.busy[id]; delete _matRecon.err[id]; delete _matRecon.notjobArmed[id];
+  delete _matRecon.pick[id]; delete _matRecon.busy[id]; delete _matRecon.err[id]; delete _matRecon.errNext[id]; delete _matRecon.notjobArmed[id];
   renderMaterialsRecon();
 }
 

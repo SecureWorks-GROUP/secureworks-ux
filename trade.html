@@ -29152,6 +29152,9 @@
 
   // The Work Order hub lens: same tenant, and for a managed-vertical lead the
   // verticals he manages whenever the server says which vertical an order is.
+  // Do not filter on kind. my_work_orders does not send it, and a client filter
+  // would empty this hub, the weekly invoice and offline replay the day the
+  // field appears. The server retires old crew rows at go-live.
   function workOrdersForViewer(orders) {
     var managed = managedTradeVerticals(_user);
     return (orders || []).filter(function (order) {

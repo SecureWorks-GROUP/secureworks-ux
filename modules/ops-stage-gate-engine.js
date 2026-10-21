@@ -626,9 +626,9 @@
       return gateResult('work_order_present', 'fail', severity, 'materials', 'office',
         { source: 'packet.work_order', ref: null, value: null },
         'No work order created' + (inWindow ? ' (install in window)' : ''),
-        'Create + send work order via sw_create_work_order + sw_send_work_order', !inWindow);
+        'Open the job work order', !inWindow);
     }
-    if (wo.status === 'sent' || wo.status === 'accepted' || wo.status === 'in_progress' || wo.status === 'complete') {
+    if (wo.status === 'sent' || wo.status === 'accepted' || wo.status === 'in_progress' || wo.status === 'complete' || wo.status === 'approved') {
       return gateResult('work_order_present', 'pass', severity, 'materials', 'office',
         { source: 'packet.work_order.status', ref: wo.id || null, value: wo.status },
         'Work order ' + (wo.wo_number || wo.id || '?') + ' is ' + wo.status, null, false);
@@ -636,7 +636,7 @@
     if (wo.status === 'draft') {
       return gateResult('work_order_present', 'fail', severity, 'materials', 'office',
         { source: 'packet.work_order.status', ref: wo.id || null, value: 'draft' },
-        'Work order still in draft', 'Send work order to crew', !inWindow);
+        'Work order still in draft', 'Open the job work order', !inWindow);
     }
     return gateResult('work_order_present', 'fail', severity, 'materials', 'office',
       { source: 'packet.work_order.status', ref: wo.id || null, value: wo.status || null },

@@ -77,8 +77,6 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       C.renderOpsPanel({ unreadable: true }, null, 'idle', {}),
       C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true }),
       C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true, busy: true }),
-      C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' }),
-      C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' }),
       C.openedWords({ created: true, quote_fill: { reason: 'filled' } }),
       C.openedWords({ created: false, quote_fill: { reason: 'no_accepted_quote' } }),
       C.openedWords({ created: true, quote_fill: { reason: 'no_quote_lines' } }),
@@ -110,57 +108,25 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     }
   });
 
-  test('preview switch: off by default, ?wo=preview / ?wo=live turn it on or off and ask to be remembered', () => {
-    expect(C.previewState('', null)).toEqual({ on: false, persist: null });
-    expect(C.previewState('', '1')).toEqual({ on: true, persist: null });
-    expect(C.previewState('', '0')).toEqual({ on: false, persist: null });
-    expect(C.previewState('?wo=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?jobId=x&wo=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?wo=live', '1')).toEqual({ on: false, persist: '0' });
-    // Any other value, including the old 1/on/0/off spellings, leaves the remembered setting alone.
-    for (const v of ['1', 'on', '0', 'off', 'banana']) {
-      expect(C.previewState(`?wo=${v}`, '1')).toEqual({ on: true, persist: null });
-      expect(C.previewState(`?wo=${v}`, null)).toEqual({ on: false, persist: null });
-    }
-    expect(C.previewState('?two=1', null)).toEqual({ on: false, persist: null });
-  });
-
-  test('only fencing and patio jobs carry a job work order', () => {
+  test('the trade hours view is still fencing and patio', () => {
     expect(C.eligibleType('fencing')).toBe(true);
     expect(C.eligibleType('Patio')).toBe(true);
     expect(C.eligibleType('makesafe')).toBe(false);
     expect(C.eligibleType('')).toBe(false);
   });
 
-  test('Create work order goes to the job work order for fencing and patio only, and only while the preview is on', () => {
-    expect(C.createRoute('fencing', true)).toBe('job');
-    expect(C.createRoute('Patio', true)).toBe('job');
-    for (const type of ['repair', 'makesafe', 'decking', 'renovation', '', null, undefined]) {
-      expect(C.createRoute(type, true)).toBe('crew');
+  test('Create work order goes to the job work order for every type, including while the old switch is off', () => {
+    for (const type of ['fencing', 'Patio', 'repair', 'makesafe', 'decking', 'renovation', 'general', 'miscellaneous', '', null, undefined]) {
+      expect(C.createRoute(type, true)).toBe('job');
+      expect(C.createRoute(type, false)).toBe('job');
     }
-    expect(C.createRoute('fencing', false)).toBe('crew');
-    expect(C.createRoute('patio', false)).toBe('crew');
-  });
-
-  test('the old office form says why it makes no work order for a fencing or patio job, and points to the job work order', () => {
-    const html = C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' });
-    expect(html).toContain('data-wo-form-job-wo');
-    expect(html).toContain('<b>SWF-26904</b> is a fencing job');
-    expect(html).toContain('so this form does not make one for it');
-    expect(html).toContain('data-job-id="job-1"');
-    expect(html).toContain("JobWorkOrderOps.openFromForm(this.getAttribute('data-job-id'))");
-    expect(html).toContain('Open the job work order');
-    expect(C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' })).toContain('This is a patio job');
-    const hostile = C.crewFormNoticeHtml({ id: "x');alert(1);//", job_number: '<img src=x>', type: 'fencing' });
-    expect(hostile).not.toContain('<img');
-    // The job id is only ever an escaped attribute value, never script text.
-    expect(hostile).toContain('data-job-id="x&#39;);alert(1);//"');
-    expect(hostile.split('alert(1)')).toHaveLength(2);
+    expect(C.createRoute()).toBe('job');
   });
 
   test('opening the draft: the button on a job with none yet, what it did, and its refusals in words', () => {
     const none = C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true });
     expect(none).toContain('data-job-wo-none');
+    expect(none).toContain('Work order not filled yet');
     expect(none).toContain('it fills from the accepted quote');
     expect(none).toContain('JobWorkOrderOps.openDraft()');
     expect(none).toMatch(/data-job-wo-open onclick/);
@@ -176,7 +142,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     expect(C.openedWords({ created: true, quote_fill: null })).toBe('Draft opened.');
     expect(C.openedWords(null)).toBe('Draft opened.');
 
-    expect(C.openRefusalWords('job_type_not_eligible', 'raw')).toBe('Job work orders are for fencing and patio jobs.');
+    expect(C.openRefusalWords('job_type_not_eligible', 'raw')).toBe('The draft could not be opened. This job type is not on the server yet.');
     expect(C.openRefusalWords('work_order_sealed', 'raw')).toContain('already approved and sealed');
     expect(C.openRefusalWords('something_new', 'Server words')).toBe('Server words');
     expect(C.openRefusalWords('', '')).toBe('The draft could not be opened.');
@@ -891,5 +857,193 @@ test.describe('A stuck Xero draft record (core)', () => {
     for (const code of Object.keys({ nothing_to_reconcile: 1, xero_draft_already_recorded: 1, xero_draft_in_progress: 1, xero_invoice_already_recorded: 1, stale_review: 1, expected_updated_at_required: 1, invoice_line_not_found: 1, invalid_outcome: 1, invalid_request: 1, invalid_invoice_number: 1, approver_required: 1, approver_identity_missing: 1, approver_not_set: 1, terminal_approval_switched_off: 1 })) {
       expect(C.xeroReconcileRefusalWords(code, '')).not.toMatch(/[–—]/);
     }
+  });
+});
+
+test.describe('Overview card and retired crew work orders (core)', () => {
+  test('a kind=crew row is labelled retiring; a job row and an untagged row are not', () => {
+    expect(C.isRetiredCrewWorkOrder({ id: 'a', kind: 'crew' })).toBe(true);
+    expect(C.isRetiredCrewWorkOrder({ id: 'b', kind: 'CREW' })).toBe(true);
+    expect(C.isRetiredCrewWorkOrder({ id: 'c', kind: 'job' })).toBe(false);
+    expect(C.isRetiredCrewWorkOrder({ id: 'd' })).toBe(false);
+    expect(C.retiringCrewLabel({ kind: 'crew', wo_number: 'WO-OLD' })).toBe('Old crew work order (retiring)');
+    expect(C.retiringCrewLabel({ kind: 'job' })).toBe('');
+    expect(C.retiringCrewLabel({ wo_number: 'WO-UNTAGGED' })).toBe('');
+  });
+
+  test('the Overview card: status, allowance, approver, review, overrun, and no money unless asked', () => {
+    const block = {
+      work_order: {
+        id: 'wo-1', wo_number: 'WO-0042', status: 'approved', kind: 'job',
+        agreed_labour_ex: 1800, makesafe_labour_allowance_ex: 400,
+        approved_at: '2026-10-13T05:00:00Z', approved_by_name: 'Shaun Kay',
+      },
+      figures: { agreed_ex: 2006, billed_to_date_ex: 2400, remaining_ex: -394, over_agreed: true },
+    };
+    const lines = [
+      { trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 1500, total_hours: 8, work_date: '2026-10-12', review_state: 'approved', work_order_id: 'wo-1' },
+      { trade_name: 'Pat Query', description: 'Extra posts', override_amount: 700, acknowledgment_status: 'queried', job_work_order_id: 'wo-1' },
+      { trade_name: 'Held Hand', description: 'Waiting', amount_ex: 200, acknowledgment_status: 'pending', work_order_id: 'wo-1' },
+      { trade_name: 'No Stamp', description: 'On the job', line_total_ex: 50, review_state: 'rejected' },
+      { trade_name: 'Other Job', description: 'Not this work order', line_total_ex: 999, work_order_id: 'wo-other', review_state: 'approved' },
+      { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour' },
+      { trade_name: 'Office', description: 'Commission', line_type: 'commission', line_total_ex: 80, review_state: 'held', work_order_id: 'wo-1' },
+    ];
+    const html = C.renderOverviewCard(block, { figures: block.figures, lines }, { showMoney: true, lines, linesState: 'ready' });
+    expect(html).toContain('data-job-wo-card-status="approved"');
+    expect(html).toContain('WO-0042');
+    expect(html).toContain('Approved by Shaun Kay on 13 Oct 2026');
+    expect(html).toContain('data-job-wo-allowance');
+    expect(html).toContain('Make-safe allowance');
+    expect(html).toContain('$400.00');
+    expect(html).toContain('$2,006.00');
+    expect(html).toContain('$2,400.00');
+    expect(html).toContain('data-job-wo-overrun');
+    expect(html).toContain('Over agreed by $394.00');
+    expect(html).toContain('data-job-wo-vs-agreed');
+    expect(html).toContain('Sam Crew');
+    expect(html).toContain('data-job-wo-review="approved"');
+    expect(html).toContain('data-review-source="review_state"');
+    expect(html).toContain('data-job-wo-review="queried"');
+    expect(html).toContain('data-review-source="acknowledgment_status"');
+    expect(html).toContain('data-job-wo-review="held"');
+    expect(html).toContain('data-job-wo-review="rejected"');
+    expect(html).toContain('Not counted as labour');
+    expect(html).toContain('data-job-wo-lines-unstamped');
+    expect(html).not.toContain('Not this work order');
+    expect(html).not.toContain('Install Colorbond fencing');
+    expect(html).not.toContain('$999.00');
+    expect(html).not.toMatch(/[–—]/);
+    expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
+
+    const quiet = C.renderOverviewCard(block, { figures: block.figures, lines }, { lines, linesState: 'ready' });
+    expect(quiet).not.toContain('$');
+    expect(quiet).not.toContain('Agreed labour');
+    expect(quiet).not.toContain('data-job-wo-overrun');
+    expect(quiet).toContain('Sam Crew');
+
+    const blank = C.renderOverviewCard(null, null, { showMoney: true, lines: [], linesState: 'ready' });
+    expect(blank).toContain('data-job-wo-card-status="blank"');
+    expect(blank).toContain('Work order not filled yet.');
+    expect(blank).toContain('Not set');
+    expect(blank).toContain('No crew invoice lines on this work order yet.');
+    expect(blank).not.toContain('data-job-wo-card-open');
+
+    const openable = C.renderOverviewCard(null, null, { showMoney: true, lines: [], linesState: 'ready', canOpen: true });
+    expect(openable).toContain('data-job-wo-card-open');
+    expect(openable).toContain('JobWorkOrderOps.openDraft()');
+    expect(openable).toContain('Open the draft');
+
+    const refused = C.renderOverviewCard(null, null, {
+      showMoney: true, lines: [], linesState: 'ready', canOpen: true,
+      message: 'The draft could not be opened. This job type is not on the server yet.',
+      messageLevel: 'error',
+    });
+    expect(refused).toContain('data-job-wo-message');
+    expect(refused).toContain('This job type is not on the server yet.');
+    expect(refused).toContain('data-job-wo-card-open');
+
+    const issued = C.renderOverviewCard({ work_order: { id: 'wo-2', status: 'issued', wo_number: 'WO-9' } }, null, { showMoney: true, linesState: 'absent' });
+    expect(issued).toContain('data-job-wo-card-status="issued"');
+    expect(issued).toContain('Crew lines are not on this read yet.');
+    expect(issued).not.toContain('Approved by');
+
+    const uuid = C.renderOverviewCard({
+      work_order: { id: 'wo-3', status: 'approved', approved_at: '2026-10-01T00:00:00Z', approved_by: '11111111-1111-1111-1111-111111111111', approved_via: 'auto' },
+    }, null, { showMoney: false });
+    expect(uuid).toContain('Approved automatically on 1 Oct 2026');
+    expect(uuid).not.toContain('11111111');
+
+    const draft = C.renderOverviewCard({
+      work_order: { id: 'wo-4', status: 'draft', agreed_labour_ex: 100 },
+    }, { labour_before_approval: { amount_ex: 40 }, figures: {} }, { showMoney: true, linesState: 'loading' });
+    expect(draft).toContain('data-job-wo-card-status="draft"');
+    expect(draft).toContain('$100.00');
+    expect(draft).toContain('$40.00');
+    expect(draft).toContain('data-job-wo-crew-state="loading"');
+    expect(draft).not.toContain('data-job-wo-overrun');
+  });
+
+  test('billed labour on a job with no work order counts only billed labour lines (SWF-26615)', () => {
+    // Live list_trade_invoice_lines nests status on trade_invoices, as an
+    // object or a one-element array. A flat invoice_status is not on that read.
+    const swf = [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', trade_invoices: { status: 'acknowledged' }, acknowledgment_status: 'acknowledged', line_total_ex: 430 },
+      { trade_name: 'Van', description: 'Travel', line_type: 'other', trade_invoices: { status: 'acknowledged' }, line_total_ex: 80 },
+      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', trade_invoices: [{ status: 'ops-reject' }], line_total_ex: 100 },
+    ];
+    const html = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: swf, linesState: 'ready' });
+    expect(html).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$430\.00/);
+    expect(html).not.toContain('$610.00');
+    expect(html).toContain('Not counted as labour');
+    expect(html).toContain('Rejected');
+    expect(html).not.toContain('No crew invoice lines');
+
+    const swp = [
+      { trade_name: 'Sam Crew', description: 'Patio day', line_type: 'patio', trade_invoices: { status: 'acknowledged' }, line_total_ex: 3000 },
+      { trade_name: 'Sam Crew', description: 'Second day', line_type: 'labour', trade_invoices: [{ status: 'paid' }], line_total_ex: 686 },
+      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', trade_invoices: [{ status: 'ops-reject' }], line_total_ex: 220 },
+    ];
+    const swpHtml = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: swp, linesState: 'ready' });
+    expect(swpHtml).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$3,686\.00/);
+    expect(swpHtml).toContain('Rejected');
+    expect(swpHtml).not.toContain('$3,906.00');
+
+    const overridden = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', trade_invoices: { status: 'acknowledged' }, counted: false, line_total_ex: 430 },
+    ], linesState: 'ready' });
+    expect(overridden).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
+    expect(overridden).toContain('Not counted as labour');
+
+    const undecided = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', line_total_ex: 430 },
+    ], linesState: 'ready' });
+    expect(undecided).toMatch(/Billed labour<\/div><div class="jwo-fig-v">Not on this read/);
+    expect(undecided).toContain('Not counted on this read');
+
+    const draftOnly = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Draft day', line_type: 'labour', trade_invoices: { status: 'draft' }, line_total_ex: 210 },
+    ], linesState: 'ready' });
+    expect(draftOnly).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
+    expect(draftOnly).toContain('Draft');
+    expect(draftOnly).toContain('Not counted as labour');
+
+    const besideBilled = C.renderOverviewCard(
+      { work_order: null, figures: { billed_to_date_ex: 430 } },
+      null,
+      { showMoney: true, lines: [], linesState: 'ready' },
+    );
+    expect(besideBilled).toContain('$430.00');
+    expect(besideBilled).toContain('Crew lines are not on this read yet.');
+    expect(besideBilled).not.toContain('No crew invoice lines');
+  });
+
+  test('review state is merged from the trade invoice line by line id', () => {
+    const woLines = [
+      { id: 'wo-line', trade_invoice_line_id: 'inv-1', trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 430, work_order_id: 'wo-1' },
+    ];
+    const invoiceLines = [
+      { id: 'inv-1', acknowledgment_status: 'acknowledged', trade_invoices: { status: 'acknowledged' }, line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
+      { id: 'inv-2', acknowledgment_status: 'queried', trade_invoices: [{ status: 'queried' }], line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
+    ];
+    const merged = C.mergeCrewInvoiceLines(woLines, invoiceLines);
+    expect(merged).toHaveLength(2);
+    expect(merged[0].acknowledgment_status).toBe('acknowledged');
+    expect(merged[0].line_type).toBe('labour');
+    expect(merged[0].trade_invoices.status).toBe('acknowledged');
+    expect(merged[1].trade_invoices[0].status).toBe('queried');
+    const fromLines = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: merged, linesState: 'ready' });
+    expect(fromLines).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$510\.00/);
+    const html = C.renderOverviewCard(
+      { work_order: { id: 'wo-1', status: 'draft', wo_number: 'WO-9' } },
+      { labour_before_approval: { amount_ex: 0 } },
+      { showMoney: true, lines: merged, linesState: 'ready' },
+    );
+    expect(html).toContain('data-job-wo-review="approved"');
+    expect(html).toContain('data-review-source="acknowledgment_status"');
+    expect(html).toContain('data-job-wo-review="queried"');
+    expect(html).toContain('Pat Query');
+    expect(html).not.toContain('No crew invoice lines');
+    expect(C.mergeCrewInvoiceLines([], invoiceLines)).toHaveLength(2);
   });
 });

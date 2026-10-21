@@ -147,6 +147,7 @@ test('a transition repaints the open detail from a CURRENT canonical response', 
   // The write is followed by a fresh canonical GET, then the detail refresh.
   expect(result.requests).toEqual([
     { method: 'GET', action: 'makesafe_board' },
+    { method: 'GET', action: 'list_trade_invoice_lines' },
     { method: 'POST', action: 'update_makesafe_substatus' },
     { method: 'GET', action: 'makesafe_board' },
     { method: 'GET', action: 'job_detail' },

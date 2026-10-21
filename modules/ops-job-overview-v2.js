@@ -1399,7 +1399,7 @@ var JobOverviewV2 = (function () {
   function pageHtml(m) {
     return '<div class="ov2" id="ov2Root" data-job="' + esc(m.k) + '">' +
       (api.isStaffViewer() ? '<div class="ov2-switch"><button type="button" class="ov2-linkbtn" id="ov2Toggle" data-ov2-act="classic">Back to classic</button></div>' : '') +
-      readNoticeHtml(m) + custHtml(m) + filesHtml(m) +
+      readNoticeHtml(m) + custHtml(m) + filesHtml(m) + workOrderMountHtml() +
       '<div class="ov2-cols">' + timelineHtml(m) + storyHtml(m) +
       '<section class="ov2-card ov2-col ov2-convcol" id="ov2ConvCol" aria-label="Conversation"><div id="ov2ConvBody">' + convBodyHtml(m) + '</div>' + composeHtml(m) + '</section>' +
       '</div></div>';
@@ -1467,6 +1467,12 @@ var JobOverviewV2 = (function () {
     if (m.wm) chips += '<span class="ov2-chip' + (m.wm.key === 'us' ? ' us' : '') + '" id="ov2Whose">' + esc(m.wm.words) + '</span>';
     if (chips) h += '<div class="ov2-who">' + chips + '</div>';
     return h + '</div>';
+  }
+
+  // Office work order card. Outside the regions repaint() swaps, so a later
+  // job_overview answer leaves it in place. JobWorkOrderOps.paintOverview fills it.
+  function workOrderMountHtml() {
+    return '<div data-job-wo-overview></div>';
   }
 
   function filesHtml(m) {
@@ -2056,6 +2062,9 @@ var JobOverviewV2 = (function () {
       if (prev && prev.getAttribute('data-job') === m.k) captureScroll(m.u);
       else { m.u.convAtBottom = true; m.u.tlAtBottom = true; }
       el.innerHTML = pageHtml(m);
+      try {
+        if (window.JobWorkOrderOps && JobWorkOrderOps.paintOverview) JobWorkOrderOps.paintOverview(data);
+      } catch (woErr) { logErr('work order card', woErr); }
       afterPaint(m);
       setTimeout(function () { load(m.k, false); }, 0);
       return true;

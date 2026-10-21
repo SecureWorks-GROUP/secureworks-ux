@@ -173,6 +173,8 @@ var JobWorkOrderOps = (function () {
     if (!C || !data) return '';
     var opts = { showMoney: true, linesState: 'absent', canOpen: true, busy: _state.busy };
     if (_state.data === data) {
+      opts.message = _state.message;
+      opts.messageLevel = _state.level;
       var detail = _state.detail;
       var woLines = crewLinesAnswer(detail);
       var invState = _state.invoiceLinesState;

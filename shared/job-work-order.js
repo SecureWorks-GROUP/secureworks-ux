@@ -1262,10 +1262,15 @@ var JobWorkOrderCore = (function () {
   //   labour_before_approval, approved_at, approved_via,
   //   line.trade_name, description, line_type, cost_lane, override_amount,
   //   line_total_ex, amount_ex, total_hours, work_date, week_label,
+  //   line.trade_invoices.status                 live list_trade_invoice_lines
+  //                                             shape: an object, or a one-element
+  //                                             array. There is no flat
+  //                                             invoice_status column.
   //   invoice_status, trade_invoice_status, invoice.status, counted
   // Billed labour uses counted when the server sends it. Otherwise a line
   // counts only when its invoice status is a billed one AND the line is
-  // labour. If neither fact is on the read, the total says "Not on this read"
+  // labour. Status on a live invoice line is trade_invoices.status. If neither
+  // fact is on the read, the total says "Not on this read"
   // and each such line is marked. A line with no work order id is still listed
   // (the read is this job) and the card says the id is not on the read yet.
   // A line whose id is a different work order is left out.
@@ -1362,10 +1367,22 @@ var JobWorkOrderCore = (function () {
   function isBilledStatus(status) {
     return !!(status && BILLED_INVOICE_STATUSES[statusKey(status)]);
   }
+  // list_trade_invoice_lines nests the invoice as trade_invoices: an object,
+  // or a one-element array when the join comes back as a list. A flat
+  // invoice_status is only present when some other read adds it.
+  function tradeInvoiceStatus(raw) {
+    if (raw == null || raw === '') return '';
+    var row = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+    var inv = obj(row);
+    if (!inv) return '';
+    return lower(firstText(inv.status, inv.invoice_status));
+  }
   function invoiceStatusOf(it) {
     var row = obj(it) || {};
     var direct = firstText(row.invoice_status, row.trade_invoice_status, row.invoiceStatus);
     if (direct) return lower(direct);
+    var joined = tradeInvoiceStatus(row.trade_invoices);
+    if (joined) return joined;
     var inv = obj(row.invoice);
     if (inv) {
       var nested = firstText(inv.status, inv.invoice_status);
@@ -1424,6 +1441,7 @@ var JobWorkOrderCore = (function () {
       if (lineBlank(out[k]) && !lineBlank(inv[k])) out[k] = inv[k];
     });
     if (!out.invoice && inv.invoice) out.invoice = inv.invoice;
+    if (lineBlank(out.trade_invoices) && !lineBlank(inv.trade_invoices)) out.trade_invoices = inv.trade_invoices;
     if (lineBlank(out.trade_invoice_line_id) && !lineBlank(inv.id)) out.trade_invoice_line_id = inv.id;
     return out;
   }
@@ -1461,7 +1479,7 @@ var JobWorkOrderCore = (function () {
     var looks = it.trade_name != null || it.line_total_ex != null || it.override_amount != null
       || it.acknowledgment_status != null || it.review_state != null || it.trade_invoice_id != null
       || it.line_type != null || it.week_label != null || it.total_hours != null || it.amount_ex != null
-      || it.invoice_status != null || it.counted != null || it.cost_lane != null;
+      || it.invoice_status != null || it.trade_invoices != null || it.counted != null || it.cost_lane != null;
     if (!looks) return null;
     var ids = [];
     if (it.work_order_id != null && str(it.work_order_id) !== '') ids.push(String(it.work_order_id));
@@ -1560,6 +1578,9 @@ var JobWorkOrderCore = (function () {
         h += '<button type="button" class="btn btn-primary btn-sm" data-job-wo-card-open' + (opts.busy ? ' disabled' : '') +
           ' onclick="JobWorkOrderOps.openDraft()">' + (opts.busy ? 'Opening...' : 'Open the draft') + '</button>';
       }
+    }
+    if (opts.message) {
+      h += '<div class="jwo-msg jwo-msg-' + esc(opts.messageLevel || 'info') + '" data-job-wo-message>' + esc(opts.message) + '</div>';
     }
     var who = approverWords(wo);
     if (who) h += '<div class="jwo-sub" data-job-wo-approved-by>' + esc(who) + '</div>';

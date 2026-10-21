@@ -1141,9 +1141,9 @@ test.describe('Review fixes: money, make-safe door, gate, work order list', () =
     const data = detailPayload(null);
     await openSurface(page, 'overview', data, {
       list_trade_invoice_lines: { lines: [
-        { id: 'l1', trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', acknowledgment_status: 'acknowledged', line_total_ex: 430 },
-        { id: 'l2', trade_name: 'Van', description: 'Travel', line_type: 'other', invoice_status: 'acknowledged', line_total_ex: 80 },
-        { id: 'l3', trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', invoice_status: 'ops-reject', line_total_ex: 100 },
+        { id: 'l1', trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', trade_invoices: { status: 'acknowledged' }, acknowledgment_status: 'acknowledged', line_total_ex: 430 },
+        { id: 'l2', trade_name: 'Van', description: 'Travel', line_type: 'other', trade_invoices: { status: 'acknowledged' }, line_total_ex: 80 },
+        { id: 'l3', trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', trade_invoices: [{ status: 'ops-reject' }], line_total_ex: 100 },
       ] },
     }, SHAUN);
     const card = page.locator('#jdOverview [data-job-wo-overview-card]');
@@ -1165,8 +1165,8 @@ test.describe('Review fixes: money, make-safe door, gate, work order list', () =
         { id: 'wo-line', trade_invoice_line_id: 'inv-1', trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 430, work_order_id: 'wo-1' },
       ], variations: [], labour_before_approval: { amount_ex: 0, line_count: 0, note: '' } },
       list_trade_invoice_lines: { lines: [
-        { id: 'inv-1', acknowledgment_status: 'acknowledged', invoice_status: 'acknowledged', line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
-        { id: 'inv-2', acknowledgment_status: 'queried', invoice_status: 'queried', line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
+        { id: 'inv-1', acknowledgment_status: 'acknowledged', trade_invoices: { status: 'acknowledged' }, line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
+        { id: 'inv-2', acknowledgment_status: 'queried', trade_invoices: [{ status: 'queried' }], line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
       ] },
     }, SHAUN);
     const card = page.locator('#jdOverview [data-job-wo-overview-card]');
@@ -1195,6 +1195,14 @@ test.describe('Review fixes: money, make-safe door, gate, work order list', () =
     await expect(page.locator('#jdBuild')).not.toHaveClass(/active/);
     await expect(page.locator('#jdOverview [data-job-wo-card-open]')).toContainText('Open the draft');
     await expect(page.locator('#jdOverview iframe')).toHaveCount(0);
+    await page.evaluate(() => {
+      window.__answers.create_work_order = { reject: { code: 'job_type_not_eligible', status: 422, message: 'raw fencing and patio' } };
+    });
+    await page.locator('#jdOverview [data-job-wo-card-open]').click();
+    await expect(page.locator('#jdOverview [data-job-wo-message]')).toHaveText('The draft could not be opened. This job type is not on the server yet.');
+    await expect(page.locator('#jdOverview [data-job-wo-card-open]')).toBeEnabled();
+    await expect(page.locator('#jdOverview')).toHaveClass(/active/);
+    await expect(page.locator('#jdBuild')).not.toHaveClass(/active/);
     const builder = page.locator('[data-makesafe-builder-wo]');
     await expect(builder).toContainText('Work order missing');
     await expect(builder).toContainText('Old crew work order (retiring)');
@@ -1253,7 +1261,9 @@ test.describe('Review fixes: money, make-safe door, gate, work order list', () =
     const old = page.locator('#woTable [data-office-wo="wo-old"]');
     await expect(old).toContainText('Old crew work order (retiring)');
     await expect(old.locator('button')).toHaveCount(0);
-    await expect(page.locator('#woTable [data-office-wo="wo-job"] button')).toHaveText('Send');
+    const jobRow = page.locator('#woTable [data-office-wo="wo-job"]');
+    await expect(jobRow).toContainText('WO-JOB');
+    await expect(jobRow.locator('button')).toHaveCount(0);
     await page.evaluate(() => renderWOTable([]));
     await expect(page.locator('[data-wo-list-empty]')).toContainText('Job work orders open on each job page');
     await expect(page.locator('#woListNote')).toContainText('Old crew work orders stay listed here, read-only');

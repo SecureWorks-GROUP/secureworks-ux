@@ -18084,7 +18084,11 @@ function renderWOTable(wos) {
     html += '<td>' + fmtDate(wo.scheduled_date) + '</td>';
     html += '<td>' + (wo.sent_at ? fmtDate(wo.sent_at.slice(0, 10)) : '-') + '</td>';
     html += '<td>';
-    if (!retiring && wo.status === 'draft') {
+    // A job work order is approved, not sent. Send stays only for a draft
+    // whose kind is absent: list_work_orders does not return kind='job' today,
+    // and the server refuses send_work_order for that kind.
+    var kind = String(wo.kind || '').toLowerCase();
+    if (!retiring && kind !== 'job' && wo.status === 'draft') {
       html += '<button class="btn btn-primary btn-sm" onclick="sendWO(\'' + wo.id + '\')">Send</button>';
     }
     html += '</td>';

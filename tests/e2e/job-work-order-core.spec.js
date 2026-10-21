@@ -934,6 +934,15 @@ test.describe('Overview card and retired crew work orders (core)', () => {
     expect(openable).toContain('JobWorkOrderOps.openDraft()');
     expect(openable).toContain('Open the draft');
 
+    const refused = C.renderOverviewCard(null, null, {
+      showMoney: true, lines: [], linesState: 'ready', canOpen: true,
+      message: 'The draft could not be opened. This job type is not on the server yet.',
+      messageLevel: 'error',
+    });
+    expect(refused).toContain('data-job-wo-message');
+    expect(refused).toContain('This job type is not on the server yet.');
+    expect(refused).toContain('data-job-wo-card-open');
+
     const issued = C.renderOverviewCard({ work_order: { id: 'wo-2', status: 'issued', wo_number: 'WO-9' } }, null, { showMoney: true, linesState: 'absent' });
     expect(issued).toContain('data-job-wo-card-status="issued"');
     expect(issued).toContain('Crew lines are not on this read yet.');
@@ -956,10 +965,12 @@ test.describe('Overview card and retired crew work orders (core)', () => {
   });
 
   test('billed labour on a job with no work order counts only billed labour lines (SWF-26615)', () => {
+    // Live list_trade_invoice_lines nests status on trade_invoices, as an
+    // object or a one-element array. A flat invoice_status is not on that read.
     const swf = [
-      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', line_total_ex: 430 },
-      { trade_name: 'Van', description: 'Travel', line_type: 'other', invoice_status: 'acknowledged', line_total_ex: 80 },
-      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', invoice_status: 'ops-reject', line_total_ex: 100 },
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', trade_invoices: { status: 'acknowledged' }, acknowledgment_status: 'acknowledged', line_total_ex: 430 },
+      { trade_name: 'Van', description: 'Travel', line_type: 'other', trade_invoices: { status: 'acknowledged' }, line_total_ex: 80 },
+      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', trade_invoices: [{ status: 'ops-reject' }], line_total_ex: 100 },
     ];
     const html = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: swf, linesState: 'ready' });
     expect(html).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$430\.00/);
@@ -968,8 +979,18 @@ test.describe('Overview card and retired crew work orders (core)', () => {
     expect(html).toContain('Rejected');
     expect(html).not.toContain('No crew invoice lines');
 
+    const swp = [
+      { trade_name: 'Sam Crew', description: 'Patio day', line_type: 'patio', trade_invoices: { status: 'acknowledged' }, line_total_ex: 3000 },
+      { trade_name: 'Sam Crew', description: 'Second day', line_type: 'labour', trade_invoices: [{ status: 'paid' }], line_total_ex: 686 },
+      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', trade_invoices: [{ status: 'ops-reject' }], line_total_ex: 220 },
+    ];
+    const swpHtml = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: swp, linesState: 'ready' });
+    expect(swpHtml).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$3,686\.00/);
+    expect(swpHtml).toContain('Rejected');
+    expect(swpHtml).not.toContain('$3,906.00');
+
     const overridden = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
-      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', counted: false, line_total_ex: 430 },
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', trade_invoices: { status: 'acknowledged' }, counted: false, line_total_ex: 430 },
     ], linesState: 'ready' });
     expect(overridden).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
     expect(overridden).toContain('Not counted as labour');
@@ -981,7 +1002,7 @@ test.describe('Overview card and retired crew work orders (core)', () => {
     expect(undecided).toContain('Not counted on this read');
 
     const draftOnly = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
-      { trade_name: 'Sam Crew', description: 'Draft day', line_type: 'labour', invoice_status: 'draft', line_total_ex: 210 },
+      { trade_name: 'Sam Crew', description: 'Draft day', line_type: 'labour', trade_invoices: { status: 'draft' }, line_total_ex: 210 },
     ], linesState: 'ready' });
     expect(draftOnly).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
     expect(draftOnly).toContain('Draft');
@@ -1002,13 +1023,17 @@ test.describe('Overview card and retired crew work orders (core)', () => {
       { id: 'wo-line', trade_invoice_line_id: 'inv-1', trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 430, work_order_id: 'wo-1' },
     ];
     const invoiceLines = [
-      { id: 'inv-1', acknowledgment_status: 'acknowledged', invoice_status: 'acknowledged', line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
-      { id: 'inv-2', acknowledgment_status: 'queried', invoice_status: 'queried', line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
+      { id: 'inv-1', acknowledgment_status: 'acknowledged', trade_invoices: { status: 'acknowledged' }, line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
+      { id: 'inv-2', acknowledgment_status: 'queried', trade_invoices: [{ status: 'queried' }], line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
     ];
     const merged = C.mergeCrewInvoiceLines(woLines, invoiceLines);
     expect(merged).toHaveLength(2);
     expect(merged[0].acknowledgment_status).toBe('acknowledged');
     expect(merged[0].line_type).toBe('labour');
+    expect(merged[0].trade_invoices.status).toBe('acknowledged');
+    expect(merged[1].trade_invoices[0].status).toBe('queried');
+    const fromLines = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: merged, linesState: 'ready' });
+    expect(fromLines).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$510\.00/);
     const html = C.renderOverviewCard(
       { work_order: { id: 'wo-1', status: 'draft', wo_number: 'WO-9' } },
       { labour_before_approval: { amount_ex: 0 } },

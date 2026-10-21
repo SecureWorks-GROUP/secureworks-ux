@@ -59,10 +59,13 @@ with a different work order is left out. `review_state` wins; otherwise
 Billed labour uses the server's `counted` flag when a line has one. Otherwise
 a line counts only when its invoice status is billed (pending acknowledgment,
 queried, acknowledged, pending ops review, approved, pushed to Xero, paid) and
-the line is labour. A rejected, failed, draft or void invoice, and a travel or
-materials line, are marked "Not counted as labour". A line the read cannot
-decide is marked "Not counted on this read", and the total says the same rather
-than a partial sum. When the server's billed figure is present it still wins.
+the line is labour. On `list_trade_invoice_lines` that status is
+`trade_invoices.status`, an object or a one-element array. There is no flat
+`invoice_status` column on that read. A rejected, failed, draft or void invoice,
+and a travel or materials line, are marked "Not counted as labour". A line the
+read cannot decide is marked "Not counted on this read", and the total says the
+same rather than a partial sum. When the server's billed figure is present it
+still wins.
 A positive billed figure with no lines on the read says "Crew lines are not on
 this read yet", not "No crew invoice lines".
 
@@ -203,8 +206,8 @@ job page. `?wo=live` does not write `localStorage` and does not bring the form b
   A make-safe lands on Overview: Build is hidden there and would open the patio scope tool.
   The Overview card's **Open the draft** is that door.
 - **Open the draft** sends `create_work_order {kind: 'job', job_id}`. A
-  `job_type_not_eligible` refusal reads "This job type is not on the server yet" and leaves
-  the button.
+  `job_type_not_eligible` refusal reads "The draft could not be opened. This job type is not on the server yet."
+  on the Build panel and on the Overview card, under the button. The button stays.
 
 "Still need: work order" counts a job work order (`job_work_order.work_order`, or a
 `kind='job'` row) as well as `pipeline`'s `wo_count`. Cap 1B gate 14 passes an approved
@@ -213,7 +216,8 @@ not pass the gate.
 
 The office Work Orders tab lists whatever `list_work_orders` returns (today, old crew
 rows) and always says that job work orders open on each job page. An empty list says
-that too. Old crew rows have no Send.
+that too. Old crew rows have no Send. A `kind='job'` draft has no Send either:
+job work orders are approved, not sent. A draft with no kind can still be sent.
 
 ## Office Work Order PDF
 

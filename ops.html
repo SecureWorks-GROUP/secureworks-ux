@@ -18228,8 +18228,21 @@ var JP_KIND_LABELS = {
   sales_invoice_paid: 'Client paid', cost_paid: 'Cost paid'
 };
 var JP_SOURCE_LABELS = {
-  trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)'
+  trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)',
+  supplier_credit: 'Supplier credit'
 };
+// Where the quoted and expected figures came from, in staff words (the engine's
+// codes stay in the read contract).
+function _jpQuotedSourceText(src) {
+  var s = String(src || '');
+  if (/accepted/.test(s)) return 'accepted quote';
+  if (/^sent_quote:/.test(s)) return 'sent quote, not accepted';
+  return s.replace(/_/g, ' ');
+}
+function _jpExpectedSourceText(src) {
+  return ({ frozen_at_acceptance: 'fixed when the quote was accepted', accepted_quote_revision: 'from the accepted quote',
+    sent_quote_revision: 'from a sent quote, not accepted' })[String(src || '')] || String(src || '').replace(/_/g, ' ');
+}
 var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
 
 // Owner only (approved MVP visibility). Client-side gate; ops-api enforces admin/owner.
@@ -18473,7 +18486,11 @@ async function openJobProfitDetail(jobId, jobNumber, quiet) {
     var m = (e && e.message) || 'unknown error';
     if (e && e.status === 404) m = 'No job profit row for ' + (jobNumber || 'that job') + '.';
     if (e && e.status === 409) m = (jobNumber || 'That job number') + ' matches more than one job. Open it from the list instead.';
-    area.innerHTML = '<div class="jp-detail"><div class="jp-note err">' + _jpEsc(m) + '</div><button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
+    var retry = !(e && (e.status === 404 || e.status === 409));
+    if (retry) m = 'Could not read this job\'s profit, so nothing here is known. ' + m;
+    area.innerHTML = '<div class="jp-detail"><div class="jp-note err">' + _jpEsc(m) + '</div>'
+      + (retry ? '<button class="btn btn-secondary btn-sm" onclick="openJobProfitDetail(' + (jobId ? '\'' + _jpEsc(jobId) + '\', null' : 'null, \'' + _jpEsc(jobNumber || '') + '\'') + ')">Try again</button> ' : '')
+      + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
   }
 }
 
@@ -18522,17 +18539,25 @@ function _jpRenderDetail(data) {
     + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Supplier bills on no job: Financials > Bill Reconciliation">Place bills</button>' : '')
     + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
 
-  if (_jpProfitOf(j) == null) {
+  var inDelivery = JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
+  if (_jpProfitOf(j) == null && inDelivery) {
+    h += '<div class="jp-note"><strong>Job not finished: profit not due yet.</strong> Costs and invoices are still coming in'
+      + (flags.length ? '. Open items: ' + _jpEsc(flags.map(_jpFlagText).join('; ')) : '') + '.</div>';
+  } else if (_jpProfitOf(j) == null) {
     h += '<div class="jp-note"><strong>Profit and margin unknown.</strong> The engine withholds them until the evidence is complete'
       + (flags.length ? ': ' + _jpEsc(flags.map(_jpFlagText).join('; ')) : '') + '.</div>';
   } else if (flags.length) {
     h += '<div class="jp-note">' + _jpEsc(flags.map(_jpFlagText).join('; ')) + '</div>';
   }
 
+  // While profit is withheld the linked costs are a floor, not the job's cost:
+  // a lane with nothing linked is unknown, and actual minus expected is not a
+  // saving. Display only; every figure still comes from the engine.
+  var withheld = _jpProfitOf(j) == null;
   h += '<div class="jp-cards">'
-    + _jpCard('Quoted', _jpMoney(_jpQuoted(j), 'No quote sent'), _jpQuoted(j) != null ? _jpEsc(String(j.quoted_source).replace(/^sent_quote:/, 'sent quote ')) : 'never a live price')
-    + _jpCard('Expected cost', _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote'), _jpExpected(j, j.expected_cost_ex) != null ? _jpEsc(String(j.expected_source).replace(/_/g, ' ')) : 'no cost fixed at a quote; never a live estimate')
-    + _jpCard('Actual cost', _jpMoney(j.actual_cost_ex), 'costs linked line by line')
+    + _jpCard('Quoted', _jpMoney(_jpQuoted(j), 'No quote sent'), _jpQuoted(j) != null ? _jpEsc(_jpQuotedSourceText(j.quoted_source)) : 'never a live price')
+    + _jpCard('Expected cost', _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote'), _jpExpected(j, j.expected_cost_ex) != null ? _jpEsc(_jpExpectedSourceText(j.expected_source)) : 'no cost fixed at a quote; never a live estimate')
+    + _jpCard(withheld ? 'Actual cost so far' : 'Actual cost', _jpMoney(j.actual_cost_ex), withheld ? 'linked so far; not the full cost yet' : 'costs linked line by line')
     + _jpCard('Invoiced', _jpMoney(j.invoiced_ex), j.invoice_count != null ? _jpEsc(j.invoice_count + ' invoice' + (Number(j.invoice_count) === 1 ? '' : 's')) : '')
     + _jpCard('Collected', _jpMoney(j.collected_ex), j.revenue_verified_paid ? 'paid in Xero' + (j.revenue_last_paid_on ? ' ' + _jpDate(j.revenue_last_paid_on) : '') : 'not verified paid')
     + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j)), '')
@@ -18546,17 +18571,29 @@ function _jpRenderDetail(data) {
     ['Commission', _jpExpected(j, j.expected_commission_ex), j.actual_commission_ex],
     ['Other', null, j.actual_other_ex]
   ];
-  h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table"><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
+  var materialsMissing = flags.indexOf('materials_not_linked') !== -1;
+  h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table" data-jp-lanes' + (withheld ? ' data-jp-withheld' : '') + '><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">' + (withheld ? 'Actual so far' : 'Actual') + '</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
   lanes.forEach(function(l) {
     var e = _jpNum(l[1]), a = _jpNum(l[2]);
+    var noneLinked = l[0] === 'Materials' && materialsMissing && !a;
     var diff = (e != null && a != null) ? a - e : null;
-    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + _jpMoney(l[2]) + '</td>'
-      + '<td class="num">' + (diff == null ? '<span class="jp-unk">n/a</span>' : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(diff)) + '</span>') + '</td></tr>';
+    // Linked cost is a floor while profit is withheld: an overrun is already
+    // certain ("at least"), an underspend is not known.
+    var cell = diff == null ? '<span class="jp-unk">n/a</span>'
+      : withheld && diff <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
+      : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(diff)) + '</span>';
+    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2])) + '</td>'
+      + '<td class="num">' + cell + '</td></tr>';
   });
   var te = _jpExpected(j, j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
   h += '<tr class="jp-total"><td>Total</td><td class="num">' + _jpMoney(te) + '</td><td class="num">' + _jpMoney(j.actual_cost_ex) + '</td><td class="num">'
-    + (te != null && ta != null ? '<span class="' + (ta - te > 0 ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(ta - te)) + '</span>' : '<span class="jp-unk">n/a</span>') + '</td></tr>';
+    + (te == null || ta == null ? '<span class="jp-unk">n/a</span>'
+      : withheld && ta - te <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
+      : '<span class="' + (ta - te > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(ta - te)) + '</span>') + '</td></tr>';
   h += '</tbody></table></div>';
+  if (withheld && te != null) {
+    h += '<div class="jp-sub" style="margin-top:6px;" data-jp-withheld-note>Some of this job\'s cost is not linked yet, so a lower actual is not a saving. An overrun already linked shows as "at least"; the full difference shows once the profit check passes.</div>';
+  }
   var recon = [];
   if (_jpNum(j.committed_open_ex)) recon.push('Open purchase orders ' + fmt$(j.committed_open_ex) + ' (committed, not in actual cost)');
   if (_jpNum(j.draft_revenue_ex)) recon.push('Draft client invoices ' + fmt$(j.draft_revenue_ex) + ' (not counted)');

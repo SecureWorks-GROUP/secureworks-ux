@@ -207,7 +207,10 @@ test('data rules on screen: drafts, deleted invoices, view counts, no machine ro
   await expect(page.locator('#ov2Story .ov2-story-money>div').first()).toContainText('Not recorded');
   await expect(page.locator('#ov2Story .ov2-story-money>div').nth(1)).toContainText('$0.00');
   await expect(page.locator('#ov2Story .ov2-story-last')).toContainText('Customer said');
-  await expect(page.locator('#ov2Story .ov2-story-unknown')).toContainText('Nothing listed in the story card.');
+  // No overview not_seen in this fixture: the standing lines still show, never "Nothing listed".
+  await expect(page.locator('#ov2Story .ov2-story-unknown')).toContainText('Material orders and deliveries are not recorded here.');
+  await expect(page.locator('#ov2Story .ov2-story-unknown')).toContainText('Crew tasks and GHL notes are not captured.');
+  await expect(page.locator('#ov2Story .ov2-story-unknown')).not.toContainText('Nothing listed');
   await expect(page.locator('#ov2Paid')).toHaveText('Invoiced $0.00 \u00b7 Paid $0.00 \u00b7 inc GST');
   await expect(page.locator('#ov2Cust')).toContainText('Draft INV-9002 $3,571.43, not issued');
   const files = page.locator('#ov2Files .ov2-file');
@@ -554,4 +557,54 @@ test('B4: Last word follows the customer exchange, never newer supplier or held 
   expect(exchange.explicitNull).toEqual({ customer: null, us: null });
   expect(exchange.call.customer.text).toContain('Transcript words are not shown');
   expect(exchange.known.us.text).toBe('Confirmed customer message');
+});
+
+test('CTX-T22: placed-by provenance, the Matching count with its way there, and the not-seen lines', async ({ page }) => {
+  const ov = buildJobOverview();
+  ov.not_seen = [
+    { key: 'material_orders', text: 'Material orders and deliveries are not recorded here.' },
+    { key: 'crew_tasks_and_crm_notes', text: 'Crew tasks and GHL notes are not captured.' },
+  ];
+  ov.matching = { waiting: 3, more: false, left_off_daily_list: 1 };
+  ov.sources = Object.assign({}, ov.sources, { matching: { ok: true, state: 'ok', count: 3 } });
+  const placed = ov.messages.find((x) => x.id === IDS.msgAcceptAndPay);
+  placed.placed_by_person = {
+    action: 'split', decision_id: 'dec-e2e-1', decided_at: '2026-10-21T01:40:00Z', decided_at_perth: 'Wed 21 Oct, 9:40am',
+    decided_by_name: 'Sam Field', other_job_numbers: ['SWF-990202'], evidence_hash: 'sha256:abc123',
+  };
+  await boot(page, { overviewData: ov });
+  await openJob(page);
+  const bubble = page.locator(`#ov2Conv [data-ov2-msg="${IDS.msgAcceptAndPay}"] .ov2-bplaced`);
+  await expect(bubble).toHaveText('Split onto this job by Sam Field in Matching, Wed 21 Oct, 9:40am. Also on SWF-990202.');
+  await expect(bubble).toHaveAttribute('data-ov2-evidence', 'sha256:abc123');
+  await expect(bubble).toHaveAttribute('data-ov2-decision', 'dec-e2e-1');
+  await expect(page.locator('#ov2Conv .ov2-bplaced')).toHaveCount(1);
+  await expect(page.locator('#ov2DecisionsUnread')).toHaveCount(0);
+  const unknown = page.locator('#ov2Unknown');
+  await expect(unknown.locator('[data-ov2-not-seen]')).toHaveCount(2);
+  const matching = page.locator('#ov2Matching');
+  await expect(matching).toHaveAttribute('data-ov2-matching', 'waiting');
+  await expect(matching).toHaveAttribute('data-ov2-waiting', '3');
+  await expect(matching).toContainText('3 messages wait in Matching for a person to say which job they belong to.');
+  await expect(matching).toContainText('1 of them is not on the daily list; Find by job shows it.');
+  await page.evaluate(() => { window.__reconOpened = []; window.reconOpenJob = (n) => window.__reconOpened.push(n); });
+  await matching.getByRole('button', { name: 'Open in Matching' }).click();
+  expect(await page.evaluate(() => window.__reconOpened)).toEqual(['SWF-990101']);
+  expect(await page.evaluate(() => window.__ov2.posts)).toEqual([]);
+});
+
+test('CTX-T22: a failed Matching read and a failed decisions read say so, never nothing waiting', async ({ page }) => {
+  const ov = buildJobOverview();
+  ov.matching = null;
+  ov.sources = Object.assign({}, ov.sources, {
+    matching: { ok: false, state: 'failed', count: 0, code: 'rpc_failed' },
+    messages: Object.assign({}, (ov.sources || {}).messages || { ok: true, state: 'ok', count: 9 }, { decisions: 'unread' }),
+  });
+  await boot(page, { overviewData: ov });
+  await openJob(page);
+  const matching = page.locator('#ov2Matching');
+  await expect(matching).toHaveAttribute('data-ov2-matching', 'failed');
+  await expect(matching).toHaveText('Could not read how many messages wait in Matching for this job.');
+  await expect(matching.getByRole('button')).toHaveCount(0);
+  await expect(page.locator('#ov2DecisionsUnread')).toContainText('Matching decisions could not be read.');
 });

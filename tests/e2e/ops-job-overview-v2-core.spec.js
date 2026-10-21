@@ -402,3 +402,35 @@ test('the live uploaded attachment is not described as an email', () => {
   expect(file.meta).toBe('uploaded 12 Oct 1:47pm');
   expect(file.pill.words).toBe('Uploaded document');
 });
+
+test('CTX-T22 core: standing not-seen lines, the Matching count and placed-by words', () => {
+  expect(C.notSeen(null)).toEqual(['Material orders and deliveries are not recorded here.', 'Crew tasks and GHL notes are not captured.']);
+  expect(C.notSeen({})).toEqual(C.notSeen(null));
+  // A source the overview no longer lists has been captured: its line goes.
+  expect(C.notSeen({ not_seen: [{ key: 'material_orders', text: 'Material orders and deliveries are not recorded here.' }] }))
+    .toEqual(['Material orders and deliveries are not recorded here.']);
+  expect(C.matchingWait(null)).toBe(null);
+  expect(C.matchingWait({ matching: null, sources: { matching: { ok: false, state: 'failed' } } }).state).toBe('failed');
+  expect(C.matchingWait({ matching: { waiting: 'x' }, sources: {} }).state).toBe('failed');
+  expect(C.matchingWait({ sources: { matching: { ok: false, state: 'not_deployed' } } }).state).toBe('not_deployed');
+  expect(C.matchingWait({ matching: { waiting: 0 }, sources: { matching: { ok: true, state: 'ok' } } }).words).toBe('No messages wait in Matching for this job.');
+  expect(C.matchingWait({ matching: { waiting: 1, left_off_daily_list: 1 } }).words)
+    .toBe('1 message waits in Matching for a person to say which job it belongs to. It is not on the daily list; Find by job shows it.');
+  expect(C.matchingWait({ matching: { waiting: 50, more: true, left_off_daily_list: 2 } }).words)
+    .toBe('At least 50 messages wait in Matching for a person to say which job they belong to. 2 of them are not on the daily list; Find by job shows them.');
+  expect(C.placedBy(null, NOW)).toBe(null);
+  const p = C.placedBy({ action: 'correct', decided_at: '2026-10-09T01:22:00Z', decided_by_name: 'Sam', evidence_hash: 'h1' }, NOW);
+  expect(p.words).toBe('Moved to this job by Sam in Matching, Fri 9 Oct, 9:22am.');
+  expect(p.evidence).toBe('h1');
+  expect(C.placedBy({ action: 'confirm' }, NOW).words).toBe('Confirmed for this job by a person in Matching.');
+  expect(C.decisionsUnread({ sources: { messages: { decisions: 'unread' } } })).toBe(true);
+  expect(C.decisionsUnread({ sources: { messages: { ok: true } } })).toBe(false);
+  // A merged copy keeps the placement.
+  const conv = C.conversation([
+    { id: 'a', at: '2026-10-09T01:00:00Z', channel: 'sms', direction: 'inbound', text: 'Same words' },
+    { id: 'b', at: '2026-10-09T01:00:00Z', channel: 'sms', direction: 'inbound', text: 'Same words', placed_by_person: { action: 'split' } },
+  ], 'all', NOW, null);
+  const msgs = conv.items.filter((x) => x.type === 'msg');
+  expect(msgs).toHaveLength(1);
+  expect(msgs[0].m.placed).toEqual({ action: 'split' });
+});

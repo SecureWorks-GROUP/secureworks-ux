@@ -256,3 +256,38 @@ test('a refused split keeps the bill and shows the server words', async ({ page 
   await expect(d.locator('[data-mrq-err]')).toHaveText('Not split: Split refused: SWP-26050 is a holding job');
   await expect(row(page, 'q-inst')).toHaveCount(1);
 });
+
+test.describe('phone width', () => {
+  test.use({ viewport: { width: 390, height: 860 } });
+
+  test('an open split with two jobs and an overhead part fits the screen, and every control can be reached', async ({ page }) => {
+    await openMaterials(page, { fixture: splitFixture() });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await row(page, 'q-inst').click();
+    const d = detail(page, 'q-inst');
+    await d.locator('[data-mrq-act="splitopen"]').click();
+    await addSplitJob(d, 'q-inst', 'Ellis', 'job-empty');
+    await addSplitJob(d, 'q-inst', 'Harper', 'job-plain');
+    const amts = d.locator('[data-mrq-amt="q-inst"]');
+    await amts.nth(0).fill('400');
+    await amts.nth(1).fill('500');
+    await d.locator('[data-mrq-oh="q-inst"]').fill('100');
+    await expect(d.locator('[data-mrq-left]')).toHaveText('Balanced: the parts and overhead add up to the bill.');
+    const controls = [
+      d.locator('[data-mrq-sq="q-inst"]'),
+      d.locator('[data-mrq-act="splitfind"]'),
+      amts.nth(0), amts.nth(1),
+      d.locator('[data-mrq-oh="q-inst"]'),
+      d.locator('[data-mrq-act="splitsave"]'),
+      d.locator('[data-mrq-left]'),
+    ];
+    for (const c of controls) {
+      await c.scrollIntoViewIfNeeded();
+      const box = await c.boundingBox();
+      expect(box, 'control is on screen').not.toBeNull();
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});

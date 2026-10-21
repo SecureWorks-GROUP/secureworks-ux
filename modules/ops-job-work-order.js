@@ -90,7 +90,7 @@ var JobWorkOrderOps = (function () {
 
   function resetFor(data) {
     if (_state.data === data) return;
-    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', invoiceLines: null, invoiceLinesState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1, cv: freshCv() };
+    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', invoiceLines: null, invoiceLinesState: 'idle', officeReviewEnabled: false, officeReviewCleared: false, busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1, cv: freshCv() };
   }
 
   function panelHtml(data) {
@@ -194,6 +194,7 @@ var JobWorkOrderOps = (function () {
         opts.linesState = 'ready';
       }
     }
+    opts.officeReview = officeReviewWanted(opts.lines);
     return C.renderOverviewCard(data.job_work_order || null, _state.data === data ? _state.detail : null, opts);
   }
 
@@ -231,6 +232,7 @@ var JobWorkOrderOps = (function () {
     opsFetch('list_trade_invoice_lines', { job_id: jobId }).then(function (inv) {
       if (seq !== _state.seq) return;
       _state.invoiceLines = (inv && inv.lines) || [];
+      _state.officeReviewEnabled = !!(inv && inv.office_review_enabled === true);
       _state.invoiceLinesState = 'ready';
       repaint();
     }).catch(function () {
@@ -737,6 +739,9 @@ var JobWorkOrderOps = (function () {
       '.jwo-table tfoot td{font-weight:700;border-bottom:none;}' +
       '.jwo-table .r{text-align:right;white-space:nowrap;}' +
       '.jwo-line-note{font-size:11px;color:var(--sw-text-sec);}' +
+      '.jwo-office-review{margin-top:4px;font-size:12px;}' +
+      '.jwo-office-review-actions{display:flex;gap:6px;margin-top:6px;}' +
+      '.jwo-office-review input{display:block;margin-top:4px;padding:4px 6px;width:220px;}' +
       '.jwo-warn{font-size:10px;font-weight:700;color:#B45309;}' +
       '.jwo-addendum{border-left:3px solid var(--sw-orange);padding-left:10px;margin-top:8px;}' +
       '.jwo-add-desc{font-size:12px;white-space:pre-wrap;margin-bottom:4px;}' +
@@ -796,6 +801,86 @@ var JobWorkOrderOps = (function () {
     document.head.appendChild(tag);
   }
 
+  // The review flag is on when the list says so, or when any line already
+  // carries office_review_status (awaiting is written only while the flag
+  // is on). An unknown review action clears the controls for this job.
+  function officeReviewWanted(lines) {
+    if (_state.officeReviewCleared) return false;
+    if (_state.officeReviewEnabled === true) return true;
+    return (lines || []).some(function (row) {
+      return !!(row && row.office_review_status != null && String(row.office_review_status).trim() !== '');
+    });
+  }
+
+  function isUnknownAction(err) {
+    if (!err) return false;
+    return String(err.code || '') === 'unknown_action' || /unknown action/i.test(String(err.message || ''));
+  }
+
+  function stampOfficeStatus(lineId, status) {
+    function stamp(list) {
+      (list || []).forEach(function (row) {
+        if (!row) return;
+        if (String(row.id) === String(lineId) || String(row.trade_invoice_line_id) === String(lineId)) {
+          row.office_review_status = status;
+        }
+      });
+    }
+    stamp(_state.invoiceLines);
+    if (_state.detail) {
+      stamp(_state.detail.lines);
+      stamp(_state.detail.crew_lines);
+    }
+  }
+
+  function reviewRow(lineId) {
+    var rows = document.querySelectorAll('[data-office-line-review]');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute('data-office-line-review') === String(lineId)) return rows[i];
+    }
+    return null;
+  }
+
+  function reviewLine(lineId, decision) {
+    if (!lineId || _state.officeReviewCleared || typeof opsPost !== 'function') return;
+    var row = reviewRow(lineId);
+    var noteEl = row && row.querySelector('[data-office-line-note]');
+    var note = noteEl ? String(noteEl.value || '').trim() : '';
+    var body = { line_id: lineId, decision: decision };
+    if (note) body.note = note.slice(0, 2000);
+    var seq = _state.seq;
+    opsPost('review_crew_invoice_line', body).then(function (res) {
+      if (seq !== _state.seq) return;
+      var status = (res && res.office_review_status) || '';
+      if (status) stampOfficeStatus(lineId, status);
+      if (res && res.ready_for_xero_push) {
+        _state.message = 'This invoice is ready for Xero.';
+        _state.level = 'ok';
+      }
+      repaint();
+    }).catch(function (e) {
+      if (seq !== _state.seq) return;
+      if (isUnknownAction(e)) {
+        _state.officeReviewCleared = true;
+        _state.message = '';
+        repaint();
+        return;
+      }
+      _state.message = (e && e.message) || 'That review could not be saved.';
+      _state.level = 'error';
+      repaint();
+    });
+  }
+
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target && ev.target.closest && ev.target.closest('[data-office-line-decision]');
+    if (!btn) return;
+    var row = btn.closest('[data-office-line-review]');
+    if (!row) return;
+    ev.preventDefault();
+    reviewLine(row.getAttribute('data-office-line-review'), btn.getAttribute('data-office-line-decision'));
+  });
+
   return {
     officeOn: officeOn,
     viewerIsOffice: viewerIsOffice,
@@ -823,7 +908,8 @@ var JobWorkOrderOps = (function () {
     cvXeroOpen: cvXeroOpen,
     cvXeroChanged: cvXeroChanged,
     cvXeroClose: cvXeroClose,
-    cvXeroSubmit: cvXeroSubmit
+    cvXeroSubmit: cvXeroSubmit,
+    reviewLine: reviewLine
   };
 })();
 window.JobWorkOrderOps = JobWorkOrderOps;

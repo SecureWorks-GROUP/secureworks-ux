@@ -1,6 +1,7 @@
-// Ops job page: the job's work order on the Build tab and in the office Work
-// Order PDF (docs/job-work-order-screens.md). Behind the preview switch
-// (?wo=preview); with it off the Build tab and the PDF are unchanged.
+// Ops job page: the job's work order on the Build tab, the Overview, and in
+// the office Work Order PDF (docs/job-work-order-screens.md). On for office
+// by default. ?wo=live turns it off and is remembered. A trade role sees none
+// of it.
 //
 // The page's own render functions run against a job_detail payload; opsFetch
 // and opsPost are replaced in the page so every read and the one write
@@ -79,14 +80,70 @@ async function openBuild(page, data, answers, email) {
   }, { data, answers, email });
 }
 
-test.describe('Job work order on the Ops job page (preview)', () => {
-  test('preview off: the Build tab carries no work order panel', async ({ page }) => {
+// Same stub as openBuild, on a chosen job tab, with an optional trade role.
+async function openSurface(page, tab, data, answers, email, role) {
+  await page.route('https://marninms98-dotcom.github.io/**', (route) => route.fulfill({ status: 200, body: '' }));
+  await revealOpsStaticFixture(page);
+  await page.evaluate(({ data, answers, email, role, tab }) => {
+    window.__calls = [];
+    window.__answers = answers;
+    _opsUserEmail = email;
+    if (role) {
+      window.SECUREWORKS_CLOUD = {
+        auth: {
+          getRole: function () { return role; },
+          isLoggedIn: function () { return true; },
+        },
+      };
+    }
+    window.opsFetch = async function (action, params) {
+      window.__calls.push({ method: 'GET', action, params });
+      const a = window.__answers[action];
+      if (a && a.reject) { const e = new Error(a.reject.message); e.code = a.reject.code; throw e; }
+      return JSON.parse(JSON.stringify(Array.isArray(a) ? a.shift() : a));
+    };
+    window.opsPost = async function (action, body) {
+      window.__calls.push({ method: 'POST', action, body });
+      const a = window.__answers[action];
+      if (a && a.reject) { const e = new Error(a.reject.message); e.code = a.reject.code; e.status = a.reject.status; throw e; }
+      return JSON.parse(JSON.stringify(a || {}));
+    };
+    _currentJobId = data.job.id;
+    _currentJobData = data;
+    document.getElementById('jobDetailView').classList.add('active');
+    showJobSubView(tab);
+  }, { data, answers, email, role: role || '', tab });
+}
+
+function overviewRead(wo, lines, figures) {
+  return {
+    job_work_order: {
+      schema: 'job-work-order.v1',
+      work_order: wo,
+      figures: figures,
+      lines: lines,
+      variations: [],
+      labour_before_approval: { amount_ex: 0, line_count: 0, note: '' },
+    },
+    list_job_actions: [],
+    list_trade_invoice_lines: { lines: [] },
+  };
+}
+
+test.describe('Job work order on the Ops job page', () => {
+  test('office by default: the Build tab shows the work order panel with no preview setting', async ({ page }) => {
     await page.goto('/ops.html');
     await page.evaluate(() => { try { localStorage.removeItem('sw_wo_preview'); } catch (e) {} });
-    await openBuild(page, detailPayload(workOrder()), {}, SHAUN);
+    const draft = workOrder();
+    await openBuild(page, detailPayload(draft), {
+      job_work_order: { work_order: draft, figures: detailPayload(draft).job_work_order.figures, lines: [], variations: [] },
+    }, SHAUN);
     await expect(page.locator('#jdBuild')).toContainText('Materials Dispatch');
-    await expect(page.locator('[data-job-wo-panel]')).toHaveCount(0);
-    expect(await page.evaluate(() => window.__calls.filter((c) => c.action === 'job_work_order').length)).toBe(0);
+    const panel = page.locator('[data-job-wo-panel]');
+    await expect(panel).toContainText('WO-0042');
+    await expect(panel).toContainText('Agreed labour');
+    await expect(panel.locator('.jwo-preview')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__calls.filter((c) => c.action === 'job_work_order').length)).toBeGreaterThan(0);
   });
 
   test('a draft shows its lines, hours and allocation; Shaun approves it with the updated_at he read', async ({ page }) => {
@@ -964,5 +1021,88 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     const sent = await posts(page);
     expect(sent).toHaveLength(2);
     for (const c of sent) expect(c.body.expected_updated_at).toBe(STUCK_AT);
+  });
+
+  test('the Build list hides a retired kind=crew work order and keeps the job one', async ({ page }) => {
+    await page.goto('/ops.html');
+    const draft = workOrder();
+    const data = detailPayload(draft);
+    data.work_orders = [
+      { id: 'wo-old', wo_number: 'WO-OLD', kind: 'crew', status: 'draft', trade_name: 'Old Trade' },
+      { id: 'wo-job', wo_number: 'WO-JOB', kind: 'job', status: 'approved', trade_name: 'The Job' },
+      { id: 'wo-plain', wo_number: 'WO-PLAIN', status: 'draft' },
+    ];
+    await openBuild(page, data, {
+      job_work_order: { work_order: draft, figures: data.job_work_order.figures, lines: [], variations: [] },
+    }, SHAUN);
+    const list = page.locator('#jdBuild');
+    await expect(list).toContainText('Work Orders (2)');
+    await expect(list).toContainText('WO-JOB');
+    await expect(list).toContainText('WO-PLAIN');
+    await expect(list).not.toContainText('WO-OLD');
+    await expect(list).not.toContainText('Old Trade');
+  });
+
+  test('classic and new Overview show the work order card, the overrun, and the line review', async ({ page }) => {
+    const wo = workOrder({
+      status: 'approved', approved_at: '2026-10-13T05:00:00Z', approved_by_name: 'Shaun Kay',
+      makesafe_labour_allowance_ex: 400,
+    });
+    const figures = {
+      agreed_ex: 2006, billed_to_date_ex: 2400, remaining_ex: -394, over_agreed: true,
+      variations_ex: 0, variation_count: 0, rules: [],
+    };
+    const lines = [
+      { trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 1500, total_hours: 8, review_state: 'approved', work_order_id: 'wo-1' },
+      { trade_name: 'Pat Query', description: 'Extra posts', line_total_ex: 900, acknowledgment_status: 'queried', job_work_order_id: 'wo-1' },
+    ];
+    const data = detailPayload(wo);
+    data.job_work_order.figures = figures;
+    const answers = overviewRead(wo, lines, figures);
+
+    await page.goto('/ops.html');
+    await openSurface(page, 'overview', data, answers, SHAUN);
+    const classic = page.locator('#jdOverview [data-job-wo-overview-card]');
+    await expect(classic).toBeVisible();
+    await expect(classic).toContainText('Approved');
+    await expect(classic).toContainText('Approved by Shaun Kay');
+    await expect(classic).toContainText('Agreed labour');
+    await expect(classic).toContainText('$2,006.00');
+    await expect(classic).toContainText('Make-safe allowance');
+    await expect(classic).toContainText('$400.00');
+    await expect(classic).toContainText('Over agreed by $394.00');
+    await expect(classic).toContainText('Sam Crew');
+    await expect(classic.locator('[data-job-wo-review="approved"]')).toBeVisible();
+    await expect(classic.locator('[data-job-wo-review="queried"]')).toBeVisible();
+    await expect(classic).toContainText('Billed labour $2,400.00 against agreed labour $2,006.00');
+    await expect(page.locator('#ov2Root')).toHaveCount(0);
+
+    await page.goto('/ops.html?overview=v2');
+    await openSurface(page, 'overview', data, answers, SHAUN);
+    const next = page.locator('#ov2Root [data-job-wo-overview-card]');
+    await expect(next).toBeVisible();
+    await expect(next).toContainText('WO-0042');
+    await expect(next).toContainText('Over agreed by $394.00');
+    await expect(next).toContainText('Sam Crew');
+    await expect(page.locator('#ov2Root [data-job-wo-overview]')).toBeVisible();
+  });
+
+  test('a trade role on Ops sees no panel, no card, and no agreed labour', async ({ page }) => {
+    await page.goto('/ops.html');
+    const wo = workOrder({ status: 'approved', approved_at: '2026-10-13T05:00:00Z', agreed_labour_ex: 2006 });
+    const data = detailPayload(wo);
+    await openSurface(page, 'build', data, {
+      job_work_order: { work_order: wo, figures: data.job_work_order.figures, lines: [], variations: [] },
+    }, SHAUN, 'installer');
+    await expect(page.locator('#jdBuild')).toContainText('Materials Dispatch');
+    await expect(page.locator('[data-job-wo-panel]')).toHaveCount(0);
+    await expect(page.locator('#jdBuild')).not.toContainText('Agreed labour');
+    await expect(page.locator('#jdBuild')).not.toContainText('$2,006.00');
+    expect(await page.evaluate(() => window.__calls.filter((c) => c.action === 'job_work_order').length)).toBe(0);
+
+    await page.evaluate(() => showJobSubView('overview'));
+    await expect(page.locator('[data-job-wo-overview-card]')).toHaveCount(0);
+    await expect(page.locator('#jdOverview')).not.toContainText('Agreed labour');
+    await expect(page.locator('#jdOverview')).not.toContainText('$2,006.00');
   });
 });

@@ -260,6 +260,37 @@ test.describe('Job work order on the trade invoice', () => {
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => !!(document.activeElement && document.activeElement.__typing))).toBe(true);
   });
+
+  test('My Work Orders hides a retired kind=crew row and keeps a job row and an untagged row', async ({ appPage: page }) => {
+    await page.route(`${OPS_API}**`, async (route) => {
+      const action = new URL(route.request().url()).searchParams.get('action');
+      if (action !== 'my_work_orders') return route.fallback();
+      const row = (over) => Object.assign({
+        job_number: 'E2E-JOB-001', job_type: 'fencing', status: 'authorised',
+        site_address: '1 Fixture St', client_name: 'Fixture Homeowner',
+        org_id: '00000000-0000-0000-0000-000000000001',
+      }, over);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          work_orders: [
+            row({ id: 'wo-old', wo_number: 'WO-OLD', kind: 'crew' }),
+            row({ id: 'wo-job', wo_number: 'WO-KEEP', kind: 'job' }),
+            row({ id: 'wo-plain', wo_number: 'WO-PLAIN' }),
+          ],
+        }),
+      });
+    });
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'My Work Orders' }).click();
+    await expect(page.getByRole('heading', { name: 'My Work Orders' })).toBeVisible();
+    await expect(page.locator('[data-work-order-card]')).toHaveCount(2);
+    await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-OLD' })).toHaveCount(0);
+    await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-KEEP' })).toHaveCount(1);
+    await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-PLAIN' })).toHaveCount(1);
+  });
 });
 
 test.describe('Job work order and a server-issued crew work order', () => {

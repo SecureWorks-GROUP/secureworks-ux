@@ -3,9 +3,10 @@
 // PDF. Screen doc: docs/job-work-order-screens.md. Lines, status, refusal
 // words and the HTML come from shared/job-work-order.js (JobWorkOrderCore).
 //
-// Preview: off unless ?wo=preview or localStorage sw_wo_preview = '1'
-// (?wo=live turns it off). With it off, the Build tab and the Work Order PDF
-// are exactly as before.
+// Office sees this by default. ?wo=live turns it off and is remembered
+// (sw_wo_preview = '0'); ?wo=preview turns it on. A trade role on this page
+// does not see it: agreed labour stays off every trade screen. The Trade App
+// does not load this file.
 //
 // Reads:  job_detail.job_work_order (already loaded by openJobDetail) and
 //         ops-api job_work_order (the billed lines and trade-reported
@@ -41,6 +42,9 @@ var JobWorkOrderOps = (function () {
 
   var STORE_KEY = 'sw_wo_preview';
   var MOUNT_ID = 'jdJobWorkOrder';
+  // Same trade roles as the job Overview. An empty role is office: this page
+  // is the Ops dashboard, and the tests sign in by email without a role.
+  var TRADE_ROLES = ['installer', 'lead_installer', 'crew', 'trade', 'subcontractor'];
   var _preview = null;
   // One state per job_detail read: the job_work_order read and the approve button.
   var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0, cv: freshCv() };
@@ -63,7 +67,7 @@ var JobWorkOrderOps = (function () {
     if (st.persist) {
       try {
         if (st.persist === '1') localStorage.setItem(STORE_KEY, '1');
-        else localStorage.removeItem(STORE_KEY);
+        else localStorage.setItem(STORE_KEY, '0');
       } catch (e) { /* private window: the URL still decides this load */ }
     }
     _preview = st.on;
@@ -74,13 +78,32 @@ var JobWorkOrderOps = (function () {
     return (typeof _opsUserEmail !== 'undefined' && _opsUserEmail) || '';
   }
 
+  function viewerRole() {
+    try {
+      var c = window.SECUREWORKS_CLOUD;
+      if (c && c.auth && typeof c.auth.getRole === 'function') return String(c.auth.getRole() || '').toLowerCase();
+    } catch (e) { /* no session object: treat as office, below */ }
+    return '';
+  }
+
+  // Office and admin see the panel and the agreed labour. A trade role does not.
+  function viewerIsOffice() {
+    var role = viewerRole();
+    if (!role) return true;
+    return TRADE_ROLES.indexOf(role) < 0;
+  }
+
+  function officeOn() {
+    return previewOn() && viewerIsOffice();
+  }
+
   function currentData() {
     return (typeof _currentJobData !== 'undefined' && _currentJobData) || null;
   }
 
   function resetFor(data) {
     if (_state.data === data) return;
-    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1, cv: freshCv() };
+    _state = { data: data, jobId: data.job.id, detail: null, detailState: 'idle', invoiceLines: null, invoiceLinesState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: _state.seq + 1, cv: freshCv() };
   }
 
   function panelHtml(data) {
@@ -92,7 +115,7 @@ var JobWorkOrderOps = (function () {
       busy: _state.busy,
       message: _state.message,
       messageLevel: _state.level,
-      preview: true,
+      preview: false,
       canOpen: true,
       cv: Object.assign({}, _state.cv, { now: Date.now() })
     });
@@ -123,11 +146,70 @@ var JobWorkOrderOps = (function () {
   // The Build tab calls this; it returns the mount, filled with what is known
   // now, and starts the job_work_order read once per job_detail read.
   function buildTabHtml(data) {
-    if (!previewOn() || !data || !data.job || !data.job_work_order) return '';
+    if (!officeOn() || !data || !data.job || !data.job_work_order) return '';
     injectCss();
-    resetFor(data);
-    if (_state.detailState === 'idle' && data.job_work_order.work_order) loadDetail(data.job.id);
+    ensureReads(data);
     return '<div id="' + MOUNT_ID + '">' + panelHtml(data) + '</div>';
+  }
+
+  // The Overview mount. Same office gate as the Build tab. The card itself
+  // is JobWorkOrderCore.renderOverviewCard.
+  function paintOverview(data) {
+    var host = document.querySelector('[data-job-wo-overview]');
+    if (!host) return;
+    if (!officeOn() || !data || !data.job) { host.innerHTML = ''; return; }
+    injectCss();
+    ensureReads(data);
+    host.innerHTML = overviewInner(data);
+  }
+
+  // The job_work_order lines array, when it is actually crew invoice lines.
+  // An empty array is an answer (none). Scope rows are not, so the card
+  // falls through to list_trade_invoice_lines.
+  function crewLinesAnswer(res) {
+    if (!res) return null;
+    var list = Array.isArray(res.crew_lines) ? res.crew_lines : (Array.isArray(res.lines) ? res.lines : null);
+    if (!list) return null;
+    if (!list.length) return list;
+    var shaped = list.some(function (row) {
+      return row && (row.trade_name != null || row.line_total_ex != null || row.override_amount != null
+        || row.review_state != null || row.acknowledgment_status != null || row.trade_invoice_id != null
+        || row.amount_ex != null || row.week_label != null || row.total_hours != null || row.line_type != null);
+    });
+    return shaped ? list : null;
+  }
+
+  function overviewInner(data) {
+    var C = core();
+    if (!C || !data) return '';
+    var opts = { showMoney: true, linesState: 'absent' };
+    if (_state.data === data) {
+      var detail = _state.detail;
+      var fromDetail = crewLinesAnswer(detail);
+      if (fromDetail) {
+        opts.lines = fromDetail;
+        opts.linesState = 'ready';
+      } else if (_state.invoiceLinesState === 'ready') {
+        opts.lines = _state.invoiceLines || [];
+        opts.linesState = 'ready';
+      } else if (_state.invoiceLinesState === 'loading' || _state.detailState === 'loading') {
+        opts.linesState = 'loading';
+      } else if (_state.detailState === 'failed' || _state.invoiceLinesState === 'failed') {
+        opts.linesState = 'failed';
+      }
+    }
+    return C.renderOverviewCard(data.job_work_order || null, _state.data === data ? _state.detail : null, opts);
+  }
+
+  // One read for the open job_detail: job_work_order when the job has one,
+  // and list_trade_invoice_lines when that read does not carry a lines array
+  // (or there is no work order yet, so the card can still list what was billed).
+  function ensureReads(data) {
+    if (!data || !data.job) return;
+    resetFor(data);
+    var hasWo = data.job_work_order && data.job_work_order.work_order;
+    if (hasWo && _state.detailState === 'idle') loadDetail(data.job.id);
+    else if (!hasWo && _state.invoiceLinesState === 'idle') loadInvoiceLines(data.job.id);
   }
 
   // Repaint with what is typed in the variation form kept.
@@ -140,9 +222,26 @@ var JobWorkOrderOps = (function () {
   // itself (a task row added or removed) after it was read from the page.
   function render() {
     var data = currentData();
+    if (!data || data !== _state.data) return;
     var el = document.getElementById(MOUNT_ID);
-    if (!el || !data || data !== _state.data) return;
-    el.innerHTML = panelHtml(data);
+    if (el) el.innerHTML = panelHtml(data);
+    var host = document.querySelector('[data-job-wo-overview]');
+    if (host && officeOn()) host.innerHTML = overviewInner(data);
+  }
+
+  function loadInvoiceLines(jobId) {
+    var seq = _state.seq;
+    _state.invoiceLinesState = 'loading';
+    opsFetch('list_trade_invoice_lines', { job_id: jobId }).then(function (inv) {
+      if (seq !== _state.seq) return;
+      _state.invoiceLines = (inv && inv.lines) || [];
+      _state.invoiceLinesState = 'ready';
+      repaint();
+    }).catch(function () {
+      if (seq !== _state.seq) return;
+      _state.invoiceLinesState = 'failed';
+      repaint();
+    });
   }
 
   function loadDetail(jobId) {
@@ -152,10 +251,13 @@ var JobWorkOrderOps = (function () {
       if (seq !== _state.seq) return;
       _state.detail = res || null;
       _state.detailState = res ? 'ready' : 'failed';
+      if (crewLinesAnswer(res)) { repaint(); return; }
+      loadInvoiceLines(jobId);
       repaint();
     }).catch(function () {
       if (seq !== _state.seq) return;
       _state.detailState = 'failed';
+      loadInvoiceLines(jobId);
       repaint();
     });
   }
@@ -262,7 +364,7 @@ var JobWorkOrderOps = (function () {
   // else 'crew' (the old office form).
   function createRoute(type) {
     var C = core();
-    return C ? C.createRoute(type, previewOn()) : 'crew';
+    return C ? C.createRoute(type, officeOn()) : 'crew';
   }
 
   // The job page, on the Build tab, where the job work order is.
@@ -605,7 +707,7 @@ var JobWorkOrderOps = (function () {
   // (preview only), else null and the printout keeps its old content.
   function pdfSections(data) {
     var C = core();
-    if (!previewOn() || !C || !data || !data.job_work_order || !data.job_work_order.work_order) return null;
+    if (!officeOn() || !C || !data || !data.job_work_order || !data.job_work_order.work_order) return null;
     var block = data.job_work_order;
     var wo = shownWorkOrder(data);
     var fresher = {};
@@ -629,8 +731,12 @@ var JobWorkOrderOps = (function () {
       '.jwo-title{font-size:14px;font-weight:700;color:var(--sw-dark);}' +
       '.jwo-chip{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:2px 8px;border-radius:10px;background:var(--sw-light);color:var(--sw-text-sec);}' +
       '.jwo-chip-approved{background:#10B98120;color:#047857;}' +
-      '.jwo-chip-draft{background:#F59E0B20;color:#B45309;}' +
-      '.jwo-chip-unreadable{background:#EF444420;color:#B91C1C;}' +
+      '.jwo-chip-draft,.jwo-chip-held,.jwo-chip-queried{background:#F59E0B20;color:#B45309;}' +
+      '.jwo-chip-issued{background:#3B82F620;color:#1D4ED8;}' +
+      '.jwo-chip-blank,.jwo-chip-none{background:var(--sw-light);color:var(--sw-text-sec);}' +
+      '.jwo-chip-unreadable,.jwo-chip-rejected{background:#EF444420;color:#B91C1C;}' +
+      '.jwo-ov{margin-bottom:12px;}' +
+      '.jwo-overrun{margin-top:8px;padding:8px 10px;background:#FEF2F2;border:1px solid #FECACA;color:#991B1B;font-size:13px;font-weight:700;}' +
       '.jwo-preview{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:2px 6px;border:1px dashed var(--sw-mid);color:var(--sw-mid);}' +
       '.jwo-actions{margin-left:auto;display:flex;gap:6px;}' +
       '.jwo-sub{font-size:12px;color:var(--sw-text-sec);margin:6px 0 4px;}' +
@@ -711,7 +817,10 @@ var JobWorkOrderOps = (function () {
 
   return {
     previewOn: previewOn,
+    officeOn: officeOn,
+    viewerIsOffice: viewerIsOffice,
     buildTabHtml: buildTabHtml,
+    paintOverview: paintOverview,
     approve: approve,
     approveConfirmed: approveConfirmed,
     cancelApprove: cancelApprove,

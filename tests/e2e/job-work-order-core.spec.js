@@ -110,19 +110,21 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     }
   });
 
-  test('preview switch: off by default, ?wo=preview / ?wo=live turn it on or off and ask to be remembered', () => {
-    expect(C.previewState('', null)).toEqual({ on: false, persist: null });
+  test('office switch: on unless a remembered 0 says otherwise; ?wo=live / ?wo=preview ask to be remembered', () => {
+    expect(C.previewState('', null)).toEqual({ on: true, persist: null });
     expect(C.previewState('', '1')).toEqual({ on: true, persist: null });
     expect(C.previewState('', '0')).toEqual({ on: false, persist: null });
     expect(C.previewState('?wo=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?jobId=x&wo=preview', null)).toEqual({ on: true, persist: '1' });
+    expect(C.previewState('?jobId=x&wo=preview', '0')).toEqual({ on: true, persist: '1' });
     expect(C.previewState('?wo=live', '1')).toEqual({ on: false, persist: '0' });
+    expect(C.previewState('?wo=live', null)).toEqual({ on: false, persist: '0' });
     // Any other value, including the old 1/on/0/off spellings, leaves the remembered setting alone.
     for (const v of ['1', 'on', '0', 'off', 'banana']) {
       expect(C.previewState(`?wo=${v}`, '1')).toEqual({ on: true, persist: null });
-      expect(C.previewState(`?wo=${v}`, null)).toEqual({ on: false, persist: null });
+      expect(C.previewState(`?wo=${v}`, null)).toEqual({ on: true, persist: null });
+      expect(C.previewState(`?wo=${v}`, '0')).toEqual({ on: false, persist: null });
     }
-    expect(C.previewState('?two=1', null)).toEqual({ on: false, persist: null });
+    expect(C.previewState('?two=1', null)).toEqual({ on: true, persist: null });
   });
 
   test('only fencing and patio jobs carry a job work order', () => {
@@ -891,5 +893,99 @@ test.describe('A stuck Xero draft record (core)', () => {
     for (const code of Object.keys({ nothing_to_reconcile: 1, xero_draft_already_recorded: 1, xero_draft_in_progress: 1, xero_invoice_already_recorded: 1, stale_review: 1, expected_updated_at_required: 1, invoice_line_not_found: 1, invalid_outcome: 1, invalid_request: 1, invalid_invoice_number: 1, approver_required: 1, approver_identity_missing: 1, approver_not_set: 1, terminal_approval_switched_off: 1 })) {
       expect(C.xeroReconcileRefusalWords(code, '')).not.toMatch(/[–—]/);
     }
+  });
+});
+
+test.describe('Overview card and retired crew work orders (core)', () => {
+  test('retired kind=crew rows drop; a row with no kind stays', () => {
+    const rows = [
+      { id: 'a', kind: 'crew', wo_number: 'WO-OLD' },
+      { id: 'b', kind: 'CREW' },
+      { id: 'c', kind: 'job', wo_number: 'WO-JOB' },
+      { id: 'd', wo_number: 'WO-UNTAGGED' },
+      null,
+    ];
+    expect(C.isRetiredCrewWorkOrder(rows[0])).toBe(true);
+    expect(C.isRetiredCrewWorkOrder(rows[2])).toBe(false);
+    expect(C.isRetiredCrewWorkOrder(rows[3])).toBe(false);
+    expect(C.withoutRetiredCrewWorkOrders(rows).map((w) => w.id)).toEqual(['c', 'd']);
+  });
+
+  test('the Overview card: status, allowance, approver, review, overrun, and no money unless asked', () => {
+    const block = {
+      work_order: {
+        id: 'wo-1', wo_number: 'WO-0042', status: 'approved', kind: 'job',
+        agreed_labour_ex: 1800, makesafe_labour_allowance_ex: 400,
+        approved_at: '2026-10-13T05:00:00Z', approved_by_name: 'Shaun Kay',
+      },
+      figures: { agreed_ex: 2006, billed_to_date_ex: 2400, remaining_ex: -394, over_agreed: true },
+    };
+    const lines = [
+      { trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 1500, total_hours: 8, work_date: '2026-10-12', review_state: 'approved', work_order_id: 'wo-1' },
+      { trade_name: 'Pat Query', description: 'Extra posts', override_amount: 700, acknowledgment_status: 'queried', job_work_order_id: 'wo-1' },
+      { trade_name: 'Held Hand', description: 'Waiting', amount_ex: 200, acknowledgment_status: 'pending', work_order_id: 'wo-1' },
+      { trade_name: 'No Stamp', description: 'On the job', line_total_ex: 50, review_state: 'rejected' },
+      { trade_name: 'Other Job', description: 'Not this work order', line_total_ex: 999, work_order_id: 'wo-other', review_state: 'approved' },
+      { description: 'Install Colorbond fencing', qty: 37.6, unit: 'm', kind: 'labour' },
+      { trade_name: 'Office', description: 'Commission', line_type: 'commission', line_total_ex: 80, review_state: 'held', work_order_id: 'wo-1' },
+    ];
+    const html = C.renderOverviewCard(block, { figures: block.figures, lines }, { showMoney: true, lines, linesState: 'ready' });
+    expect(html).toContain('data-job-wo-card-status="approved"');
+    expect(html).toContain('WO-0042');
+    expect(html).toContain('Approved by Shaun Kay on 13 Oct 2026');
+    expect(html).toContain('data-job-wo-allowance');
+    expect(html).toContain('Make-safe allowance');
+    expect(html).toContain('$400.00');
+    expect(html).toContain('$2,006.00');
+    expect(html).toContain('$2,400.00');
+    expect(html).toContain('data-job-wo-overrun');
+    expect(html).toContain('Over agreed by $394.00');
+    expect(html).toContain('data-job-wo-vs-agreed');
+    expect(html).toContain('Sam Crew');
+    expect(html).toContain('data-job-wo-review="approved"');
+    expect(html).toContain('data-review-source="review_state"');
+    expect(html).toContain('data-job-wo-review="queried"');
+    expect(html).toContain('data-review-source="acknowledgment_status"');
+    expect(html).toContain('data-job-wo-review="held"');
+    expect(html).toContain('data-job-wo-review="rejected"');
+    expect(html).toContain('Not counted as labour');
+    expect(html).toContain('data-job-wo-lines-unstamped');
+    expect(html).not.toContain('Not this work order');
+    expect(html).not.toContain('Install Colorbond fencing');
+    expect(html).not.toContain('$999.00');
+    expect(html).not.toMatch(/[–—]/);
+    expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
+
+    const quiet = C.renderOverviewCard(block, { figures: block.figures, lines }, { lines, linesState: 'ready' });
+    expect(quiet).not.toContain('$');
+    expect(quiet).not.toContain('Agreed labour');
+    expect(quiet).not.toContain('data-job-wo-overrun');
+    expect(quiet).toContain('Sam Crew');
+
+    const blank = C.renderOverviewCard(null, null, { showMoney: true, lines: [], linesState: 'ready' });
+    expect(blank).toContain('data-job-wo-card-status="blank"');
+    expect(blank).toContain('No work order on this job yet.');
+    expect(blank).toContain('Not set');
+    expect(blank).toContain('No crew invoice lines on this work order yet.');
+
+    const issued = C.renderOverviewCard({ work_order: { id: 'wo-2', status: 'issued', wo_number: 'WO-9' } }, null, { showMoney: true, linesState: 'absent' });
+    expect(issued).toContain('data-job-wo-card-status="issued"');
+    expect(issued).toContain('Crew lines are not on this read yet.');
+    expect(issued).not.toContain('Approved by');
+
+    const uuid = C.renderOverviewCard({
+      work_order: { id: 'wo-3', status: 'approved', approved_at: '2026-10-01T00:00:00Z', approved_by: '11111111-1111-1111-1111-111111111111', approved_via: 'auto' },
+    }, null, { showMoney: false });
+    expect(uuid).toContain('Approved automatically on 1 Oct 2026');
+    expect(uuid).not.toContain('11111111');
+
+    const draft = C.renderOverviewCard({
+      work_order: { id: 'wo-4', status: 'draft', agreed_labour_ex: 100 },
+    }, { labour_before_approval: { amount_ex: 40 }, figures: {} }, { showMoney: true, linesState: 'loading' });
+    expect(draft).toContain('data-job-wo-card-status="draft"');
+    expect(draft).toContain('$100.00');
+    expect(draft).toContain('$40.00');
+    expect(draft).toContain('data-job-wo-crew-state="loading"');
+    expect(draft).not.toContain('data-job-wo-overrun');
   });
 });

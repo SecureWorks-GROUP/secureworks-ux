@@ -18,15 +18,42 @@ the one rate source.
 The Trade App screens are live for every allocated trade (captain, 16 Oct 2026): no switch,
 and a stale `?wo=` in the address or `localStorage.sw_wo_preview` value never hides them.
 
-The Ops (office) screens are still behind their own preview, using the same live data:
+The Ops (office) screens are on for an office or admin viewer. A trade role on
+this page (installer, lead installer, crew, trade, subcontractor) does not see
+them, and sees no agreed labour. No role on the session counts as office: this
+page is the office dashboard.
 
-- Open `ops.html?wo=preview`. The browser remembers it in `localStorage.sw_wo_preview = '1'`.
-- `?wo=live` turns it off and forgets it. Any other `wo` value is ignored.
-- With it off: no work order panel, the Work Order PDF prints exactly as before, and every
-  "Create Work Order" opens the old office form for every job.
+- No setting, and a remembered `sw_wo_preview = '1'`, leave the screens on.
+- `?wo=live` turns them off and is remembered as `localStorage.sw_wo_preview = '0'`.
+- `?wo=preview` turns them on and is remembered as `'1'`. Any other `wo` value is ignored.
+- With them off: no work order panel, no Overview card, the Work Order PDF prints
+  exactly as before, and every "Create Work Order" opens the old office form.
 
-Making Ops live means making `previewState` answer on by default (one line in
-`shared/job-work-order.js`) and updating the Ops tests.
+The Trade App does not read this switch.
+
+## Job Overview card
+
+The classic Overview and the new Overview (`?overview=v2`) each mount
+`[data-job-wo-overview]`. `JobWorkOrderOps.paintOverview` fills it for an office
+viewer with the same switch as the Build tab. A make-safe job uses the make-safe
+overview, which carries the same mount.
+
+The card shows status (Blank, Draft, Issued, Approved), agreed labour, a
+make-safe labour allowance when the read has one, who approved, and the crew
+invoice lines billed against this job's work order with their review state
+(Held, Approved, Queried, Rejected) and billed labour against agreed labour.
+An overrun is named. `showMoney` is office only: a render without it carries
+no dollar figure.
+
+It reads `job_detail.job_work_order`, then `ops-api job_work_order`. When that
+read has no crew-invoice `lines` array it reads `list_trade_invoice_lines`.
+Fields the parallel backend PR is adding are optional and listed in
+`shared/job-work-order.js` between `// <job-wo-overview-fields>`: absent means
+that fact stays blank. A line with no work order id is still listed and the
+card says so. A line stamped with a different work order is left out.
+`review_state` wins; otherwise `acknowledgment_status` maps onto the same four
+words. Retired `kind='crew'` rows are left off office lists and the Trade App
+work-order lists. A row with no kind stays.
 
 ## Ops job page (Build tab, top)
 
@@ -117,8 +144,8 @@ in https://github.com/SecureWorks-GROUP/secureworks-backend/pull/1065. A custome
 Xero draft record that is `unknown` (Xero did not confirm the create) or stuck in `creating` is
 not retried by anything; a work order approver checks Xero by hand and says what is there.
 
-- **Switch**: none of its own. It shows wherever the job work order panel shows, which is
-  itself behind `?wo=preview`.
+- **Switch**: none of its own. It shows wherever the job work order panel shows
+  (office by default; off for a trade role and while `?wo=live` is remembered).
 - **Where**: the customer invoice line of an approved variation (`invoice` on
   `customer_variations[]`, or the prepare answer's `invoice` once previewed).
   - `unknown`: "Xero draft not confirmed", when it was asked for, and what went wrong

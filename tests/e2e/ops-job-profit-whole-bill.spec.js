@@ -88,6 +88,18 @@ test('an unconfirmed installer bill a machine placed says so and offers the same
   expect(text).toContain('unplacing a bill is not available');
 });
 
+test('a held installer bill whose lines name other jobs says it is not counted, and labour says so too', async ({ page }) => {
+  const held = { source: 'installer_bill_unconfirmed' };
+  const costs = [line('SWF-26824 plinths and gate', 1519, held), line('SWF-27001 install', 820, held)];
+  const job = Object.assign({}, JOB, { job_number: 'SBX-HOLD', actual_cost_ex: 0, actual_labour_ex: 0, completeness: ['installer_bill_unconfirmed', 'holding_job'] });
+  const text = await render(page, job, costs);
+  const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
+  await expect(note).toContainText('It is held as an unconfirmed installer bill and not counted as cost on any job until a person places it.');
+  await expect(note).not.toContainText('counts here in full');
+  await expect(page.locator('#wholeBillHost [data-jp-installer-unconfirmed]')).toHaveText('plus an unconfirmed installer bill, not counted');
+  expect(text).toContain('Installer bill waiting for a person to confirm it (not counted as cost yet)');
+});
+
 test('a failed line read says so and offers Try again', async ({ page }) => {
   const costs = [line('manual_queue:assign-to-job SWF-27001', 5083.4, { source: 'materials_fact', match_method: 'manual_queue' })];
   await render(page, JOB, costs);

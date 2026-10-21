@@ -18222,7 +18222,8 @@ var JP_FLAG_LABELS = {
   unapproved_trade_charges: 'Trade charges not yet approved',
   open_purchase_orders: 'Open purchase orders (committed, not actual)',
   draft_revenue: 'Draft client invoice not counted',
-  holding_job: 'Holding job (costs parked here)'
+  holding_job: 'Holding job (costs parked here)',
+  installer_bill_unconfirmed: 'Installer bill waiting for a person to confirm it (not counted as cost yet)'
 };
 var JP_KIND_LABELS = {
   trade_charge: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials',
@@ -18231,7 +18232,7 @@ var JP_KIND_LABELS = {
 };
 var JP_SOURCE_LABELS = {
   trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)',
-  supplier_credit: 'Supplier credit'
+  supplier_credit: 'Supplier credit', installer_bill_unconfirmed: 'Installer bill, unconfirmed (not counted)'
 };
 // Where the quoted and expected figures came from, in staff words (the engine's
 // codes stay in the read contract).
@@ -18458,7 +18459,7 @@ function swBillPlacedWholeElsewhere(br, ownRef) {
 }
 // Job profit detail: a bill placed whole carries one engine row, so its lines
 // are read from Xero on request. Read only.
-async function jpCheckBillLines(xeroInvoiceId, ownRef) {
+async function jpCheckBillLines(xeroInvoiceId, ownRef, held) {
   var host = document.querySelector('[data-jp-bill-check="' + xeroInvoiceId + '"]');
   if (!host) return;
   host.innerHTML = '<div class="jp-sub">Reading the bill\'s lines from Xero…</div>';
@@ -18469,11 +18470,11 @@ async function jpCheckBillLines(xeroInvoiceId, ownRef) {
     var br = swBillJobRefs(items.map(function(li) { return { description: li.description, amount: li.line_amount }; }));
     if (!br.refs.length) { host.innerHTML = '<div class="jp-sub">Its lines name no job.</div>'; return; }
     host.innerHTML = (swBillPlacedWholeElsewhere(br, ownRef)
-      ? '<div class="jp-sub"><span class="jp-tag bad">Not confirmed for this job</span> Its lines name other jobs. It counts here in full until a person moves, splits or unplaces it.</div>'
+      ? '<div class="jp-sub"><span class="jp-tag bad">Not confirmed for this job</span> Its lines name other jobs. ' + (held ? 'It is held as an unconfirmed installer bill and not counted as cost until a person places it.' : 'It counts here in full until a person moves, splits or unplaces it.') + '</div>'
       : '<div class="jp-sub">Its lines name only this job.</div>') + swBillJobRefsHtml(br, ownRef);
   } catch (e) {
     host.innerHTML = '<div class="jp-note err">Could not read the bill\'s lines: ' + _jpEsc((e && e.message) || String(e))
-      + ' <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(xeroInvoiceId) + '\', \'' + _jpEsc(ownRef) + '\')">Try again</button></div>';
+      + ' <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(xeroInvoiceId) + '\', \'' + _jpEsc(ownRef) + '\', ' + (held ? 'true' : 'false') + ')">Try again</button></div>';
   }
 }
 
@@ -18640,6 +18641,7 @@ function _jpRenderDetail(data) {
     ['Other', null, j.actual_other_ex]
   ];
   var materialsMissing = flags.indexOf('materials_not_linked') !== -1;
+  var installerUnconfirmed = flags.indexOf('installer_bill_unconfirmed') !== -1;
   h += '<div class="jp-sec">Expected vs actual cost</div><div class="jp-wrap"><table class="jp-table" data-jp-lanes' + (withheld ? ' data-jp-withheld' : '') + '><thead><tr><th>Lane</th><th class="num">Expected</th><th class="num">' + (withheld ? 'Actual so far' : 'Actual') + '</th><th class="num">Actual minus expected</th></tr></thead><tbody>';
   lanes.forEach(function(l) {
     var e = _jpNum(l[1]), a = _jpNum(l[2]);
@@ -18650,7 +18652,8 @@ function _jpRenderDetail(data) {
     var cell = diff == null ? '<span class="jp-unk">n/a</span>'
       : withheld && diff <= 0 ? '<span class="jp-unk">Not known until all cost is in</span>'
       : '<span class="' + (diff > 0 ? 'jp-neg' : 'jp-pos') + '">' + (withheld ? 'at least ' : '') + _jpEsc(fmt$(diff)) + '</span>';
-    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2])) + '</td>'
+    h += '<tr><td>' + l[0] + '</td><td class="num">' + _jpMoney(l[1], l[0] === 'Other' ? 'Not estimated' : 'Not fixed at quote') + '</td><td class="num">' + (noneLinked ? '<span class="jp-unk">None linked yet</span>' : _jpMoney(l[2]))
+      + (l[0] === 'Labour' && installerUnconfirmed ? '<div class="jp-sub" data-jp-installer-unconfirmed>plus an unconfirmed installer bill, not counted</div>' : '') + '</td>'
       + '<td class="num">' + cell + '</td></tr>';
   });
   var te = _jpExpected(j, j.expected_cost_ex), ta = _jpNum(j.actual_cost_ex);
@@ -18700,17 +18703,22 @@ function _jpRenderDetail(data) {
     var amount = b.rows.reduce(function(t, c) { return t + (_jpNum(c.amount_ex) || 0); }, 0);
     var how = JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')';
     var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
+    // An installer bill nobody confirmed is held out of cost (JP-12, PR 1107 proposal).
+    var held = b.rows.some(function(c) { return c.source === 'installer_bill_unconfirmed'; });
+    var counts = held
+      ? '. It is held as an unconfirmed installer bill and not counted as cost on any job until a person places it.'
+      : '. It counts here in full until a person moves, splits or unplaces it.';
     if (b.rows.length > 1) {
       // Line detail is here: read the job numbers from the line text.
       var br = swBillJobRefs(b.rows.map(function(c) { return { description: c.description, amount: c.amount_ex }; }));
       if (!swBillPlacedWholeElsewhere(br, j.job_number)) return;
       wholeHtml += '<div class="jp-note" data-jp-whole-bill="' + _jpEsc(b.id) + '"><span class="jp-tag bad">Not confirmed for this job</span> <b>' + label + '</b>, '
         + _jpEsc(fmt$(amount)) + ', is ' + how + ', but its lines name ' + br.refs.length + ' job' + (br.refs.length === 1 ? '' : 's')
-        + '. It counts here in full until a person moves, splits or unplaces it.' + swBillJobRefsHtml(br, j.job_number) + '</div>';
+        + counts + swBillJobRefsHtml(br, j.job_number) + '</div>';
     } else {
       // One row: the lines are not in the engine read. Offer a read-only check.
       wholeHtml += '<div class="jp-note" data-jp-whole-bill="' + _jpEsc(b.id) + '"><b>' + label + '</b>, ' + _jpEsc(fmt$(amount)) + ', is ' + how
-        + '. <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(b.id) + '\', \'' + _jpEsc(j.job_number || '') + '\')">Check which jobs its lines name</button>'
+        + '. <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(b.id) + '\', \'' + _jpEsc(j.job_number || '') + '\', ' + (held ? 'true' : 'false') + ')">Check which jobs its lines name</button>'
         + '<div data-jp-bill-check="' + _jpEsc(b.id) + '"></div></div>';
     }
   });

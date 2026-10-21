@@ -8,10 +8,10 @@
 // the invoice). Both pages read a work order's lines through this file only,
 // so a task, its hours and a variation addendum read the same everywhere.
 //
-// Office (Ops) screens are on by default. ?wo=live turns them off and is
-// remembered (localStorage sw_wo_preview = '0'); ?wo=preview turns them on.
-// The Trade App does not read this switch (captain, 16 Oct 2026): hours
-// only, and no agreed labour.
+// Office (Ops) screens are on for an office viewer, on every job type. The
+// old per-trade form that wrote kind='crew' is retired. ?wo=live does not
+// hide these screens and does not bring that form back. The Trade App does
+// not read this switch (captain, 16 Oct 2026): hours only, and no agreed labour.
 //
 // Money: the Ops renderer shows the agreed labour, each line's allocation and
 // the billed figures (office staff only). The trade renderer reads no money
@@ -64,11 +64,11 @@ var JobWorkOrderCore = (function () {
     });
   }
 
-  // ── Office switch ──
+  // ── Office switch (read only) ──
   // Returns {on, persist}: persist is '1' or '0' when the URL asked for a
-  // change the page should remember, else null. No memory means on: the
-  // office panel is not a hidden preview. A remembered '0' (?wo=live) stays
-  // off. The Trade App never calls this.
+  // change the page should remember, else null. The office panel no longer
+  // uses this to hide itself or to choose a create path. ?wo=live does not
+  // bring back the retired crew form. The Trade App never calls this.
   function previewState(search, stored) {
     var m = /[?&]wo=([^&#]*)/.exec(str(search));
     if (m) {
@@ -81,12 +81,13 @@ var JobWorkOrderCore = (function () {
 
   function eligibleType(type) { return ELIGIBLE_TYPES.indexOf(lower(type)) >= 0; }
 
-  // Which way "Create work order" goes for a job: 'job' (the one job work
-  // order, on the job page) for a fencing or patio job while the office
-  // screens are on, else 'crew' (the old office form, unchanged: repairs,
-  // make-safe, a trade role, and every job while ?wo=live is remembered).
-  function createRoute(type, previewOn) {
-    return previewOn && eligibleType(type) ? 'job' : 'crew';
+  // Every job's "Create work order" goes to the one job work order on the
+  // job page. The old office form that wrote kind='crew' is retired for
+  // every type and every role. Arguments are ignored: ?wo=live does not
+  // bring that form back. eligibleType still says which jobs the Trade App
+  // treats as having a job work order today (fencing and patio).
+  function createRoute() {
+    return 'job';
   }
 
   // kind='crew' is the old per-trade order (none raised since June 2026,
@@ -360,7 +361,7 @@ var JobWorkOrderCore = (function () {
 
   // create_work_order {kind:'job'} (open the job's draft) refusals, in words.
   var OPEN_REFUSALS = {
-    job_type_not_eligible: 'Job work orders are for fencing and patio jobs.',
+    job_type_not_eligible: 'The draft could not be opened. This job type is not on the server yet.',
     work_order_sealed: 'This job\'s work order is already approved and sealed. A later change is a variation.',
     draft_not_created: 'The draft could not be opened. Try again.',
     draft_not_updated: 'The draft could not be opened. Try again.',
@@ -697,11 +698,11 @@ var JobWorkOrderCore = (function () {
     }
     if (st.key === 'none') {
       if (opts.canOpen) {
-        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. Open its draft: it fills from the accepted quote, then Shaun approves it.</div>' +
+        h += '<div class="jwo-empty" data-job-wo-none>Work order not filled yet. Open its draft: it fills from the accepted quote, then Shaun approves it.</div>' +
           '<button type="button" class="btn btn-primary btn-sm" data-job-wo-open' + (opts.busy ? ' disabled' : '') +
           ' onclick="JobWorkOrderOps.openDraft()">' + (opts.busy ? 'Opening...' : 'Open the draft') + '</button></div>';
       } else {
-        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. One opens as a draft when the job is approved.</div></div>';
+        h += '<div class="jwo-empty" data-job-wo-none>Work order not filled yet.</div></div>';
       }
       return h;
     }
@@ -1445,7 +1446,7 @@ var JobWorkOrderCore = (function () {
       return h + '<div class="jwo-empty">The work order could not be read. Reopen the job to try again.</div></section>';
     }
     if (st.key === 'blank') {
-      h += '<div class="jwo-sub" data-job-wo-card-blank>No work order on this job yet.</div>';
+      h += '<div class="jwo-sub" data-job-wo-card-blank>Work order not filled yet.</div>';
     }
     var who = approverWords(wo);
     if (who) h += '<div class="jwo-sub" data-job-wo-approved-by>' + esc(who) + '</div>';

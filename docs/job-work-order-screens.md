@@ -1,9 +1,12 @@
 # Job work order: Ops job page, Work Order PDF and Trade App
 
-Every fencing and patio job has one work order, a draft that Shaun approves and seals
+The office job page shows one work order for every job type: a draft that Shaun approves and seals
 (backend: secureworks-backend `docs/job-work-orders-v1.md`, `ops-api/job_work_orders.ts`,
-merged in https://github.com/SecureWorks-GROUP/secureworks-backend/pull/1022). These
-screens show it. Rules and HTML live in one file both pages load, `shared/job-work-order.js`
+merged in https://github.com/SecureWorks-GROUP/secureworks-backend/pull/1022). The Trade App
+hours view is still fencing and patio. The parallel backend widens the create rule to every
+job type; until that lands, Open the draft on another type says the job type is not on the
+server yet and does not offer the old form. These screens show it. Rules and HTML live in
+one file both pages load, `shared/job-work-order.js`
 (`JobWorkOrderCore`, pure, between `// <job-work-order-core>` sentinels); the Ops glue is
 `modules/ops-job-work-order.js` and the Trade glue is the `// <trade-job-work-order>` block in
 `trade.html`.
@@ -18,25 +21,21 @@ the one rate source.
 The Trade App screens are live for every allocated trade (captain, 16 Oct 2026): no switch,
 and a stale `?wo=` in the address or `localStorage.sw_wo_preview` value never hides them.
 
-The Ops (office) screens are on for an office or admin viewer. A trade role on
-this page (installer, lead installer, crew, trade, subcontractor) does not see
-them, and sees no agreed labour. No role on the session counts as office: this
-page is the office dashboard.
+The Ops (office) screens are on for an office or admin viewer, for every job
+type. A trade role on this page (installer, lead installer, crew, trade,
+subcontractor) does not see them, and sees no agreed labour. No role on the
+session counts as office: this page is the office dashboard.
 
-- No setting, and a remembered `sw_wo_preview = '1'`, leave the screens on.
-- `?wo=live` turns them off and is remembered as `localStorage.sw_wo_preview = '0'`.
-- `?wo=preview` turns them on and is remembered as `'1'`. Any other `wo` value is ignored.
-- With them off: no work order panel, no Overview card, the Work Order PDF prints
-  exactly as before, and every "Create Work Order" opens the old office form.
-
-The Trade App does not read this switch.
+`?wo=live` does not hide the panel, the Overview card or the stored Work Order
+PDF, and it does not bring back the old per-trade form. `?wo=preview` is the
+same screens. The Trade App does not read this switch.
 
 ## Job Overview card
 
 The classic Overview and the new Overview (`?overview=v2`) each mount
 `[data-job-wo-overview]`. `JobWorkOrderOps.paintOverview` fills it for an office
-viewer with the same switch as the Build tab. A make-safe job uses the make-safe
-overview, which carries the same mount.
+viewer, the same gate as the Build tab. A blank card says "Work order not filled yet."
+A make-safe job uses the make-safe overview, which carries the same mount.
 
 The card shows status (Blank, Draft, Issued, Approved), agreed labour, a
 make-safe labour allowance when the read has one, who approved, and the crew
@@ -57,17 +56,19 @@ work-order lists. A row with no kind stays.
 
 ## Ops job page (Build tab, top)
 
-`renderBuildView` (`// <job-work-order-panel>`) calls `JobWorkOrderOps.buildTabHtml(data)`.
-It reads `job_detail.job_work_order` (fencing and patio only; `null` on other jobs, so nothing
-shows) and then `ops-api job_work_order` for the billed lines and the trade-reported
-variations, once for every `job_detail` read (each job open and each `refreshJobDetail()`), so
-the panel never shows an older work order than the job page.
+`renderBuildView` (`// <job-work-order-panel>`) calls `JobWorkOrderOps.buildTabHtml(data)`
+for every job type, including a general or miscellaneous quick quote and a job whose
+`job_work_order` block is missing. A missing block is drawn as no work order yet.
+It then reads `ops-api job_work_order` when a work order is already there, for the billed
+lines and the trade-reported variations, once for every `job_detail` read (each job open
+and each `refreshJobDetail()`), so the panel never shows an older work order than the job
+page. With no work order yet it reads `list_trade_invoice_lines` for the Overview card.
 
 What it shows:
 
 - **Work order number and status**: "Draft, not approved" or "Approved and sealed" with the
   date. A work order that could not be read says so.
-- **A job with none yet** says so and offers **Open the draft**, which sends
+- **A job with none yet** says "Work order not filled yet" and offers **Open the draft**, which sends
   `create_work_order {kind: 'job', job_id}`. The server opens the job's draft (or answers
   with the one already open) and fills it from the accepted quote. The job is then read
   again, and the panel says what happened ("filled from the accepted quote", "no accepted
@@ -145,7 +146,7 @@ Xero draft record that is `unknown` (Xero did not confirm the create) or stuck i
 not retried by anything; a work order approver checks Xero by hand and says what is there.
 
 - **Switch**: none of its own. It shows wherever the job work order panel shows
-  (office by default; off for a trade role and while `?wo=live` is remembered).
+  (office, every job type, including with `?wo=live`; off for a trade role).
 - **Where**: the customer invoice line of an approved variation (`invoice` on
   `customer_variations[]`, or the prepare answer's `invoice` once previewed).
   - `unknown`: "Xero draft not confirmed", when it was asked for, and what went wrong
@@ -169,30 +170,29 @@ not retried by anything; a work order approver checks Xero by hand and says what
   `expected_updated_at_required` close the dialog and re-read the job; any other refusal (such
   as `xero_invoice_already_recorded`) stays in the dialog with what was typed.
 
-## Create Work Order: one way for fencing and patio
+## Create Work Order: the job page, for every type
 
-The old office "New Work Order" form (`#woModal`) made a crew work order whose prefill
-(`autoWOFromScope`) asked `scope_to_po` for a labour figure the backend never returns. With
-the preview on, a fencing or patio job has one way to get a work order: the job work order
-above. `JobWorkOrderCore.createRoute(type, previewOn)` decides it (`// <job-work-order-route>`
-in `ops.html`):
+The old office "New Work Order" form (`#woModal`, `+ New WO`) wrote a per-trade work order
+(`create_work_order` with no `kind`, stored as `kind='crew'`). That path is retired for every
+role. The button is hidden. `openWOModal`, `openCreateWOModal`, `submitWO` (in `ops.html` and
+`modules/ops-modals.js`) and `autoWOFromScope` do not post a work order and do not call
+`scope_to_po`. `?wo=live` does not bring the form back.
 
-- The job quick view (Processing, "Still need: work order") and the calendar's
-  "No work order yet" button say **Open Work Order** and open the job page on the Build tab
-  (`JobWorkOrderOps.openForJob`). `openCreateWOModal` does the same for those jobs.
-- In the old form, picking a fencing or patio job shows a notice that the form makes no work
-  order for it, with **Open the job work order**, and holds Create WO; Load from Scope and
-  Create WO read and write nothing for it (`woFormSyncJobWorkOrder`).
-- Every other job type (repairs, make-safe, builder crew work orders) keeps the old form and
-  its prefill exactly as before, preview on or off.
+`JobWorkOrderCore.createRoute` always answers `'job'` (`// <job-work-order-route>` in `ops.html`):
+
+- The job quick view (Processing, "Still need: work order") and the calendar's work-order
+  button say **Open Work Order** for fencing, patio, repair, make-safe and every other type,
+  and open the job page (`JobWorkOrderOps.openForJob`). `openCreateWOModal` does the same.
+- **Open the draft** on the panel sends `create_work_order {kind: 'job', job_id}`. A
+  `job_type_not_eligible` refusal reads "This job type is not on the server yet" and leaves
+  the button. It does not fall through to the old form.
 
 The quick view's "Still need: work order" hint still comes from `pipeline`'s `wo_count`,
-which counts crew work orders only, so a fencing or patio job keeps that hint even once its
-job work order exists.
+which counts crew work orders only, so a job can keep that hint once its job work order exists.
 
 ## Office Work Order PDF
 
-`generateRichWorkOrder` (`// <job-work-order-pdf>`): when the preview is on and the job has a
+`generateRichWorkOrder` (`// <job-work-order-pdf>`): for an office viewer, when the job has a
 stored work order, the Scope of Work section lists the stored task lines with hours and each
 approved customer variation as a marked block, "ADDENDUM: Variation 1 - approved 13 Oct 2026",
 with its description and tasks with hours (no money). The confidential Cost Breakdown lists the
@@ -257,11 +257,12 @@ office money door (`TRADE_JOB_WO_MONEY_KEYS`) also strips `trade_allocation_ex` 
   the customer variation rules: addenda from the backend, form checks, approve holds, the
   invoice line preview).
 - `tests/e2e/ops-job-work-order.spec.js`: the Build tab panel, approve with the exact
-  `updated_at`, the stale review, preview off, the PDF (fencing, patio, preview off), opening
-  a draft, and Create Work Order leading fencing and patio to the job work order while other
-  job types keep the old form; customer variations added, edited, approved (with the shown
-  `updated_at`, and a stale review re-read), cancelled, the invoice line preview with no Xero
-  write, and the PDF addendum; a stuck Xero draft: preview off, `unknown` and `creating`,
+  `updated_at`, the stale review, the PDF (fencing, patio, and still the stored work order
+  with `?wo=live`), opening a draft, and Open Work Order for every job type including repair
+  and make-safe while the old form posts nothing; customer variations added, edited, approved
+  (with the shown `updated_at`, and a stale review re-read), cancelled, the invoice line
+  preview with no Xero write, and the PDF addendum; a stuck Xero draft still shown with
+  `?wo=live`, `unknown` and `creating`,
   approver only, both answers with the record's `updated_at`, a mistyped id or a non-invoice
   Xero link, and refusals.
 - `tests/e2e/trade-job-work-order.spec.js`: the Scope tab (against the payload

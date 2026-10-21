@@ -3,10 +3,10 @@
 // PDF. Screen doc: docs/job-work-order-screens.md. Lines, status, refusal
 // words and the HTML come from shared/job-work-order.js (JobWorkOrderCore).
 //
-// Office sees this by default. ?wo=live turns it off and is remembered
-// (sw_wo_preview = '0'); ?wo=preview turns it on. A trade role on this page
-// does not see it: agreed labour stays off every trade screen. The Trade App
-// does not load this file.
+// Office sees this on every job type. A trade role on this page does not see
+// it: agreed labour stays off every trade screen. ?wo=live does not hide it
+// and does not bring back the retired crew form. The Trade App does not
+// load this file.
 //
 // Reads:  job_detail.job_work_order (already loaded by openJobDetail) and
 //         ops-api job_work_order (the billed lines and trade-reported
@@ -31,10 +31,11 @@
 //         {variation_id, expected_updated_at (invoice.updated_at as read),
 //         outcome, xero_invoice_id?, invoice_number?}, which never calls Xero.
 //
-// Create work order: while the preview is on, a fencing or patio job's
-// "Create work order" (job quick view, calendar, the old office form) comes
-// here (openForJob) instead of the old form, so the job work order is the one
-// way to make a work order for those jobs. Other job types keep the old form.
+// Create work order: every job type's "Create work order" (job quick view,
+// calendar) opens this panel (openForJob). The old office form that wrote
+// kind='crew' does not. Open the draft posts create_work_order {kind:'job'}.
+// Until the server accepts every job type, a refusal reads in words and the
+// old form is not offered.
 // ════════════════════════════════════════════════════════════
 
 var JobWorkOrderOps = (function () {
@@ -57,6 +58,8 @@ var JobWorkOrderOps = (function () {
 
   function core() { return window.JobWorkOrderCore || null; }
 
+  // Still reads ?wo= and can remember it. The panel does not call this:
+  // ?wo=live must not hide the job work order or restore the crew form.
   function previewOn() {
     if (_preview !== null) return _preview;
     var C = core();
@@ -93,8 +96,10 @@ var JobWorkOrderOps = (function () {
     return TRADE_ROLES.indexOf(role) < 0;
   }
 
+  // Office and admin. The old ?wo=live switch does not hide this and does not
+  // choose a create path.
   function officeOn() {
-    return previewOn() && viewerIsOffice();
+    return viewerIsOffice();
   }
 
   function currentData() {
@@ -108,8 +113,10 @@ var JobWorkOrderOps = (function () {
 
   function panelHtml(data) {
     var C = core();
-    var block = data && data.job_work_order;
-    if (!C || !block) return '';
+    if (!C || !data || !data.job) return '';
+    // A missing block is a job with no work order yet, not a hidden panel.
+    // statusOf(null) is not_applicable and would draw nothing.
+    var block = data.job_work_order || { work_order: null };
     var h = C.renderOpsPanel(block, _state.detail, _state.detailState, {
       viewerEmail: viewerEmail(),
       busy: _state.busy,
@@ -146,7 +153,7 @@ var JobWorkOrderOps = (function () {
   // The Build tab calls this; it returns the mount, filled with what is known
   // now, and starts the job_work_order read once per job_detail read.
   function buildTabHtml(data) {
-    if (!officeOn() || !data || !data.job || !data.job_work_order) return '';
+    if (!officeOn() || !data || !data.job) return '';
     injectCss();
     ensureReads(data);
     return '<div id="' + MOUNT_ID + '">' + panelHtml(data) + '</div>';
@@ -337,7 +344,7 @@ var JobWorkOrderOps = (function () {
     var data = currentData();
     if (!C || !data || data !== _state.data || _state.busy) return;
     var block = data.job_work_order;
-    if (!block || block.unreadable || block.work_order) return;
+    if (block && (block.unreadable || block.work_order)) return;
     var seq = _state.seq;
     _state.busy = true;
     _state.message = '';
@@ -360,11 +367,10 @@ var JobWorkOrderOps = (function () {
     });
   }
 
-  // 'job' when this job type's "Create work order" goes to the job work order,
-  // else 'crew' (the old office form).
-  function createRoute(type) {
-    var C = core();
-    return C ? C.createRoute(type, officeOn()) : 'crew';
+  // Always the job work order. The old form that wrote kind='crew' is retired,
+  // including while ?wo=live is in the address.
+  function createRoute() {
+    return 'job';
   }
 
   // The job page, on the Build tab, where the job work order is.
@@ -703,8 +709,8 @@ var JobWorkOrderOps = (function () {
     if (data && typeof generateRichWorkOrder === 'function') generateRichWorkOrder(data);
   }
 
-  // The office printout: the stored work order's sections when there is one
-  // (preview only), else null and the printout keeps its old content.
+  // The office printout: the stored work order's sections when there is one,
+  // else null and the printout keeps its old content. A trade role gets null.
   function pdfSections(data) {
     var C = core();
     if (!officeOn() || !C || !data || !data.job_work_order || !data.job_work_order.work_order) return null;

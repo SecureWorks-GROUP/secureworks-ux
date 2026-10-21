@@ -206,7 +206,7 @@ function selectJobPicker(prefix, jobId) {
   // Picker-specific post-select hooks
   if (prefix === 'po') onPOJobSelect(jobId);
   if (prefix === 'inv') onInvJobSelect(jobId);
-  if (prefix === 'wo') autoWOFromScope(jobId);
+  if (prefix === 'wo') { /* retired crew form: picking a job does not prefill or create */ }
   if (prefix === 'assign') {
     // Hide label field when a job is selected
     var labelGroup = document.getElementById('assignLabelGroup');
@@ -267,10 +267,11 @@ function onPOFulfilmentChange(type) {
 }
 
 async function openWOModal() {
-  document.getElementById('woModal').classList.add('active');
-  document.getElementById('woJobSearch').value = '';
-  document.getElementById('woJobSelect').value = '';
-  await loadPOJobList();
+  // The per-trade form that wrote kind='crew' is retired. The copy in ops.html
+  // overrides this; both stay unable to open that form.
+  var modal = document.getElementById('woModal');
+  if (modal) modal.classList.remove('active');
+  if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
 async function loadSupplierList() {
@@ -857,25 +858,14 @@ function resetPOModal() {
 }
 
 async function submitWO() {
-  var jobId = document.getElementById('woJobSelect').value;
-  if (!jobId) { alert('Please select a job.'); return; }
-
-  try {
-    var priceVal = document.getElementById('woPrice').value;
-    await opsPost('create_work_order', {
-      job_id: jobId,
-      trade_name: document.getElementById('woTradeName').value || null,
-      trade_phone: document.getElementById('woTradePhone').value || null,
-      trade_email: document.getElementById('woTradeEmail').value || null,
-      scheduled_date: document.getElementById('woScheduledDate').value || null,
-      price: priceVal ? parseFloat(priceVal) : null,
-      special_instructions: document.getElementById('woInstructions').value || null,
-      scope_items: (typeof _woScopeItems !== 'undefined' && _woScopeItems.length > 0) ? _woScopeItems : null,
-    });
-    closeModal('woModal');
-    loadWOs();
-  } catch (e) {
-    alert('Failed to create work order: ' + e.message);
+  // Does not post create_work_order. ops.html overrides this with the same rule.
+  var sel = document.getElementById('woJobSelect');
+  var jobId = sel ? sel.value : '';
+  var modal = document.getElementById('woModal');
+  if (modal) modal.classList.remove('active');
+  if (typeof closeModal === 'function') closeModal('woModal');
+  if (jobId && window.JobWorkOrderOps && typeof JobWorkOrderOps.openForJob === 'function') {
+    await JobWorkOrderOps.openForJob(jobId);
   }
 }
 

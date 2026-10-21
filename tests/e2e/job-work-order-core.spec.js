@@ -127,21 +127,19 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     expect(C.previewState('?two=1', null)).toEqual({ on: true, persist: null });
   });
 
-  test('only fencing and patio jobs carry a job work order', () => {
+  test('the trade hours view is still fencing and patio', () => {
     expect(C.eligibleType('fencing')).toBe(true);
     expect(C.eligibleType('Patio')).toBe(true);
     expect(C.eligibleType('makesafe')).toBe(false);
     expect(C.eligibleType('')).toBe(false);
   });
 
-  test('Create work order goes to the job work order for fencing and patio only, and only while the preview is on', () => {
-    expect(C.createRoute('fencing', true)).toBe('job');
-    expect(C.createRoute('Patio', true)).toBe('job');
-    for (const type of ['repair', 'makesafe', 'decking', 'renovation', '', null, undefined]) {
-      expect(C.createRoute(type, true)).toBe('crew');
+  test('Create work order goes to the job work order for every type, including while the old switch is off', () => {
+    for (const type of ['fencing', 'Patio', 'repair', 'makesafe', 'decking', 'renovation', 'general', 'miscellaneous', '', null, undefined]) {
+      expect(C.createRoute(type, true)).toBe('job');
+      expect(C.createRoute(type, false)).toBe('job');
     }
-    expect(C.createRoute('fencing', false)).toBe('crew');
-    expect(C.createRoute('patio', false)).toBe('crew');
+    expect(C.createRoute()).toBe('job');
   });
 
   test('the old office form says why it makes no work order for a fencing or patio job, and points to the job work order', () => {
@@ -163,6 +161,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
   test('opening the draft: the button on a job with none yet, what it did, and its refusals in words', () => {
     const none = C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true });
     expect(none).toContain('data-job-wo-none');
+    expect(none).toContain('Work order not filled yet');
     expect(none).toContain('it fills from the accepted quote');
     expect(none).toContain('JobWorkOrderOps.openDraft()');
     expect(none).toMatch(/data-job-wo-open onclick/);
@@ -178,7 +177,7 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     expect(C.openedWords({ created: true, quote_fill: null })).toBe('Draft opened.');
     expect(C.openedWords(null)).toBe('Draft opened.');
 
-    expect(C.openRefusalWords('job_type_not_eligible', 'raw')).toBe('Job work orders are for fencing and patio jobs.');
+    expect(C.openRefusalWords('job_type_not_eligible', 'raw')).toBe('The draft could not be opened. This job type is not on the server yet.');
     expect(C.openRefusalWords('work_order_sealed', 'raw')).toContain('already approved and sealed');
     expect(C.openRefusalWords('something_new', 'Server words')).toBe('Server words');
     expect(C.openRefusalWords('', '')).toBe('The draft could not be opened.');
@@ -964,7 +963,7 @@ test.describe('Overview card and retired crew work orders (core)', () => {
 
     const blank = C.renderOverviewCard(null, null, { showMoney: true, lines: [], linesState: 'ready' });
     expect(blank).toContain('data-job-wo-card-status="blank"');
-    expect(blank).toContain('No work order on this job yet.');
+    expect(blank).toContain('Work order not filled yet.');
     expect(blank).toContain('Not set');
     expect(blank).toContain('No crew invoice lines on this work order yet.');
 

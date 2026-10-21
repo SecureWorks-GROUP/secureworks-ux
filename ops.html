@@ -4986,7 +4986,8 @@ __swOpsStampAssets([
       <div id="subWorkorders" class="sub-view">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
           <div class="section-heading">Work Orders</div>
-          <button class="btn btn-primary btn-sm" onclick="openWOModal()">+ New WO</button>
+          <!-- Retired: this opened the per-trade form that wrote kind='crew'. Work orders open on the job page. -->
+          <button class="btn btn-primary btn-sm" id="woNewBtn" type="button" hidden disabled>+ New WO</button>
         </div>
         <div class="data-table-wrap">
           <table class="data-table" id="woTable">
@@ -5758,7 +5759,8 @@ __swOpsStampAssets([
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('woModal')">Cancel</button>
-      <button class="btn btn-primary" id="woSubmitBtn" onclick="submitWO()">Create WO</button>
+      <!-- Retired with the crew form. submitWO does not post a work order. -->
+      <button class="btn btn-primary" id="woSubmitBtn" type="button" hidden disabled>Create WO</button>
     </div>
   </div>
 </div>
@@ -6331,7 +6333,7 @@ __swOpsStampAssets([
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 </script>
-<!-- Job work order (docs/job-work-order-screens.md): on for office. ?wo=live turns it off. -->
+<!-- Job work order (docs/job-work-order-screens.md): on for office, every job type. ?wo=live does not hide it. -->
 <script>
 __swOpsStampAssets([
   {t:'js', u:'shared/job-work-order.js?v=3'},
@@ -11474,10 +11476,10 @@ function _buildCalActions(ev, assignmentId, confStatus, isLocked, isReady, readi
 // Helper: blocker fix button
 function getBlockerFixButton(key, jobId, primary, jobType) {
   var cls = primary ? 'btn-primary-action' : '';
-  // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+  // <job-work-order-route> every job type opens the job work order. The old crew form is not offered, including while ?wo=live is in the address.
   if (key === 'work_order' && window.JobWorkOrderOps && JobWorkOrderOps.createRoute(jobType) === 'job') return '<button class="' + cls + '" onclick="closeCalJobPopup();JobWorkOrderOps.openForJob(\'' + jobId + '\')">Open Work Order</button>';
   if (key === 'pos_created') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'money\')},300)">Create Materials PO</button>';
-  if (key === 'work_order') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'build\')},300)">Create Work Order</button>';
+  if (key === 'work_order') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'build\')},300)">Open Work Order</button>';
   if (key && key.indexOf('_doc') !== -1) return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'files\')},300)">Upload Document</button>';
   return '';
 }
@@ -12363,9 +12365,9 @@ function getNextAction(j) {
         result.hint = 'Still need: ' + pMissing.join(', ');
         if (j.po_count === 0) result.actions.push({ label: 'Create PO', onclick: "closeQuickView();openPOModal('" + j.id + "')", primary: true });
         else if (j.assignment_count === 0) result.actions.push({ label: 'Assign Crew', onclick: "closeQuickView();openJobDetail('" + j.id + "')", primary: true });
-        // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+        // <job-work-order-route> every job type opens the job work order. Never the retired crew form.
         else if (window.JobWorkOrderOps && JobWorkOrderOps.createRoute(j.type) === 'job') result.actions.push({ label: 'Open Work Order', onclick: "closeQuickView();JobWorkOrderOps.openForJob('" + j.id + "')", primary: true });
-        else result.actions.push({ label: 'Create Work Order', onclick: "closeQuickView();openCreateWOModal('" + j.id + "')", primary: true });
+        else result.actions.push({ label: 'Open Work Order', onclick: "closeQuickView();openJobDetail('" + j.id + "')", primary: true });
         result.actions.push({ label: 'Start Job', onclick: "closeQuickView();changeJobStatus('" + j.id + "','in_progress')" });
       }
       break;
@@ -23449,6 +23451,10 @@ function renderBuildView(data) {
   var j = data.job;
   var html = '';
 
+  // <job-work-order-panel> modules/ops-job-work-order.js; office, every job type. A trade role sees none of it. ?wo=live does not hide it.
+  if (window.JobWorkOrderOps) html += JobWorkOrderOps.buildTabHtml(data);
+  // </job-work-order-panel>
+
   // Miscellaneous jobs: show description + line items instead of scope tool
   if ((j.type === 'miscellaneous' || j.type === 'general') && j.pricing_json && j.pricing_json.source === 'quick_quote') {
     var pj = j.pricing_json;
@@ -23470,10 +23476,6 @@ function renderBuildView(data) {
     document.getElementById('jdBuild').innerHTML = html;
     return;
   }
-
-  // <job-work-order-panel> modules/ops-job-work-order.js; office by default, off for a trade role and while ?wo=live is remembered
-  if (window.JobWorkOrderOps) html += JobWorkOrderOps.buildTabHtml(data);
-  // </job-work-order-panel>
 
   // Embedded scope tool preview (3D/2D render)
   if (j.type !== 'miscellaneous' && j.type !== 'general') {
@@ -26348,19 +26350,14 @@ function onPOFulfilmentChange(type) {
 var _woScopeItems = [];
 
 async function openWOModal() {
-  document.getElementById('woModal').classList.add('active');
-  document.getElementById('woJobSearch').value = '';
-  document.getElementById('woJobSelect').value = '';
-  document.getElementById('woScopeItems').innerHTML = 'No job selected';
-  document.getElementById('woSubmitBtn').disabled = false;
-  _woScopeItems = [];
-  await loadPOJobList();
+  // The per-trade form that wrote kind='crew' is retired for every role.
+  var modal = document.getElementById('woModal');
+  if (modal) modal.classList.remove('active');
+  if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
-// <job-work-order-route> The job this old office form is about, when it goes
-// to the job work order instead (a fencing or patio job for office, modules/ops-job-work-order.js);
-// null for every other job, which keeps this form exactly as before
-// (repairs, make-safe, a trade role, and while ?wo=live is remembered).
+// <job-work-order-route> Kept so an old caller can ask. Every type now goes
+// to the job work order; this no longer chooses the retired crew form.
 function woFormJobWorkOrderJob(jobId) {
   if (!jobId || !window.JobWorkOrderOps) return null;
   var job = _poJobList.find(function(j) { return String(j.id) === String(jobId); });
@@ -26388,47 +26385,21 @@ function woFormSyncJobWorkOrder(jobId) {
 }
 
 async function openCreateWOModal(jobId) {
-  if (jobId && window.JobWorkOrderOps && JobWorkOrderOps.officeOn()) {
-    await loadPOJobList();
-    if (woFormJobWorkOrderJob(jobId)) { JobWorkOrderOps.openForJob(jobId); return; }
+  var modal = document.getElementById('woModal');
+  if (modal) modal.classList.remove('active');
+  if (jobId && window.JobWorkOrderOps && typeof JobWorkOrderOps.openForJob === 'function') {
+    await JobWorkOrderOps.openForJob(jobId);
+    return;
   }
-  await openWOModal();
-  if (jobId) {
-    selectJobPicker('wo', jobId);
-    autoWOFromScope(jobId);
-  }
+  if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
-async function autoWOFromScope(jobId) {
+async function autoWOFromScope() {
+  // The crew form's scope prefill is retired with that form. It does not read
+  // scope_to_po and it does not fill a price that a later submit could post.
   var container = document.getElementById('woScopeItems');
-  if (woFormSyncJobWorkOrder(jobId)) return;
-  if (!jobId) { container.innerHTML = 'No job selected'; _woScopeItems = []; return; }
-  container.innerHTML = '<span style="color:var(--sw-text-sec);">Loading scope...</span>';
-  try {
-    var data = await opsFetch('scope_to_po', { jobId: jobId });
-    _woScopeItems = [];
-    var labour = data.labour || 0;
-    var desc = data.job_description || data.type || 'Job';
-    if (labour > 0) {
-      _woScopeItems.push({ description: 'Labour \u2014 ' + desc, quantity: 1, unit: 'job', unit_price: labour });
-    }
-    (data.materials || []).forEach(function(m) {
-      _woScopeItems.push({ description: m.description, quantity: m.quantity || 1, unit: m.unit || 'ea', unit_price: 0 });
-    });
-    if (_woScopeItems.length === 0) {
-      container.innerHTML = '<span style="color:var(--sw-text-sec);">No scope data available</span>';
-      return;
-    }
-    renderWOScopeItems();
-    // Auto-fill price from labour
-    if (labour > 0) {
-      var priceEl = document.getElementById('woPrice');
-      if (!priceEl.value) priceEl.value = labour.toFixed(2);
-    }
-  } catch(e) {
-    console.error('autoWOFromScope error:', e);
-    container.innerHTML = '<span style="color:var(--sw-text-sec);">Could not load scope</span>';
-  }
+  if (container) container.innerHTML = 'Work orders are opened on the job page.';
+  _woScopeItems = [];
 }
 
 function renderWOScopeItems() {
@@ -26965,26 +26936,16 @@ async function switchPOModalTab(tab) {
 }
 
 async function submitWO() {
-  var jobId = document.getElementById('woJobSelect').value;
-  if (!jobId) { alert('Please select a job.'); return; }
-  if (woFormSyncJobWorkOrder(jobId)) return;
-
-  try {
-    var priceVal = document.getElementById('woPrice').value;
-    await opsPost('create_work_order', {
-      job_id: jobId,
-      trade_name: document.getElementById('woTradeName').value || null,
-      trade_phone: document.getElementById('woTradePhone').value || null,
-      trade_email: document.getElementById('woTradeEmail').value || null,
-      scheduled_date: document.getElementById('woScheduledDate').value || null,
-      price: priceVal ? parseFloat(priceVal) : null,
-      special_instructions: document.getElementById('woInstructions').value || null,
-      scope_items: (typeof _woScopeItems !== 'undefined' && _woScopeItems.length) ? _woScopeItems : [],
-    });
-    closeModal('woModal');
-    loadWOs();
-  } catch (e) {
-    alert('Failed to create work order: ' + e.message);
+  // Does not post create_work_order. The retired form wrote kind='crew'
+  // (no kind on the body, which the server stored as crew). A selected job
+  // only opens the job page, where Open the draft writes kind 'job'.
+  var sel = document.getElementById('woJobSelect');
+  var jobId = sel ? sel.value : '';
+  var modal = document.getElementById('woModal');
+  if (modal) modal.classList.remove('active');
+  if (typeof closeModal === 'function') closeModal('woModal');
+  if (jobId && window.JobWorkOrderOps && typeof JobWorkOrderOps.openForJob === 'function') {
+    await JobWorkOrderOps.openForJob(jobId);
   }
 }
 

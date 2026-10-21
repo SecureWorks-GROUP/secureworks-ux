@@ -22124,6 +22124,9 @@
         html += '<div class="inv-line-amount">$' + Number(l.line_total_ex || 0).toFixed(2) + '</div>';
         html += '</div>';
         if (l.quantity && l.unit_rate) html += '<div class="inv-line-detail">' + l.quantity + ' × $' + Number(l.unit_rate).toFixed(2) + '</div>';
+        if (typeCls === 'travel' && l.job_number && String(l.description || '').indexOf(String(l.job_number)) === -1) {
+          html += '<div class="inv-line-detail">' + esc(l.job_number) + '</div>';
+        }
         html += _invoiceLineWhenHtml(l);
         html += '<span class="inv-line-type ' + typeCls + '">' + (l.line_type || 'other') + '</span></div>';
       });
@@ -23165,6 +23168,38 @@
     return html;
   }
 
+  // Optional travel on a work-order card. Amount is the line; km and note are
+  // optional and ride in that line's description. It is not a deduction.
+  function _renderWoTravelHtml(c) {
+    var i = c._idx;
+    var travel = _woTravelState(c);
+    var amt = (c.travel_amount != null && c.travel_amount !== '') ? c.travel_amount : '';
+    var km = (c.travel_km != null && c.travel_km !== '') ? c.travel_km : '';
+    var h = '<div data-cardtravel="' + i + '" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--sw-border)">';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:6px">Travel allowance</div>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+    h += '<label style="font-size:12px;color:var(--sw-text-sec)">Amount $</label>';
+    h += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardtravelamt="' + i + '" value="' + esc(String(amt)) + '" placeholder="0.00" aria-label="Travel allowance amount" '
+      + 'onchange="setJobCardTravel(' + i + ',\'amount\',this.value)" '
+      + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+    h += '<label style="font-size:12px;color:var(--sw-text-sec)">km</label>';
+    h += '<input type="number" min="0" step="0.1" inputmode="decimal" data-cardtravelkm="' + i + '" value="' + esc(String(km)) + '" placeholder="optional" aria-label="Travel kilometres" '
+      + 'onchange="setJobCardTravel(' + i + ',\'km\',this.value)" '
+      + 'style="width:90px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+    h += '</div>';
+    h += '<input type="text" data-cardtravelnote="' + i + '" value="' + esc(c.travel_note || '') + '" placeholder="Note (optional)" aria-label="Travel note" '
+      + 'onchange="setJobCardTravel(' + i + ',\'note\',this.value)" '
+      + 'style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
+    h += '<div data-cardtravelline="' + i + '" style="display:' + (travel.amount > 0 ? 'flex' : 'none') + ';justify-content:space-between;align-items:baseline;margin-top:8px">';
+    h += '<span style="font-size:12px;color:var(--sw-text-sec)">Travel allowance' + (c.job_number ? ' · ' + esc(c.job_number) : '') + '</span>';
+    h += '<span data-cardtravelpay="' + i + '" style="font-size:16px;font-weight:800;color:var(--sw-dark)">$' + travel.amount.toFixed(2) + '</span>';
+    h += '</div>';
+    h += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">Optional. Its own line on this invoice, on this job. No date or times.</div>';
+    h += '<div data-cardtravelwarn="' + i + '" style="display:' + (travel.error ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">' + esc(travel.error) + '</div>';
+    h += '</div>';
+    return h;
+  }
+
   function _restoreJobCardsDraft(cards) {
     return (cards || []).map(function(raw) {
       var fields = Object.assign({}, raw || {});
@@ -23782,6 +23817,11 @@
       wo_block_reason: '',
       wo_hours_ack: false,
       commission_mode: false,
+      // Optional travel allowance on a work-order line. Its own invoice line.
+      // Null means the trade has not entered one. Never a date or a time.
+      travel_amount: null,
+      travel_km: null,
+      travel_note: '',
       hours_user_edited: false,
       hours_mode_locked: false,
       // When the time was worked. hours is always derived from these.
@@ -24826,6 +24866,7 @@
           html += '<span data-cardamt="' + c._idx + '" style="font-size:20px;font-weight:800;color:' + ((c.included && net < 0) ? 'var(--sw-red)' : 'var(--sw-dark)') + '">$' + (c.included ? net : 0).toFixed(2) + '</span>';
           html += '</div>';
           html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
+          html += _renderWoTravelHtml(c);
           html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
             + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
@@ -24869,6 +24910,8 @@
       } else if (c.wo_mode) {
         var n = _woNet(c);
         if (n > 0) sub += n;
+        var travelPay = _woTravelState(c).amount;
+        if (travelPay > 0) sub += travelPay;
       } else if (c.hours != null || _woLumpSum(c) > 0) {
         sub += _hoursCardNet(c, Number(c.rate || rate || 0));
       }
@@ -25050,6 +25093,24 @@
             }
           }
         }
+        var travelAmtEl = document.querySelector('[data-cardtravelamt="' + idx + '"]');
+        if (travelAmtEl) {
+          if (travelAmtEl.value === '') c.travel_amount = null;
+          else {
+            var travelAmt = parseFloat(travelAmtEl.value);
+            c.travel_amount = (isNaN(travelAmt) || travelAmt < 0) ? null : Math.round(travelAmt * 100) / 100;
+          }
+        }
+        var travelKmEl = document.querySelector('[data-cardtravelkm="' + idx + '"]');
+        if (travelKmEl) {
+          if (travelKmEl.value === '') c.travel_km = null;
+          else {
+            var travelKm = parseFloat(travelKmEl.value);
+            c.travel_km = (isNaN(travelKm) || travelKm < 0) ? null : travelKm;
+          }
+        }
+        var travelNoteEl = document.querySelector('[data-cardtravelnote="' + idx + '"]');
+        if (travelNoteEl) c.travel_note = travelNoteEl.value || '';
       } else {
         if (!skipTime) _readJobCardTimeFromDOM(c, idx);
         var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
@@ -25278,6 +25339,25 @@
     c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
     _refreshJobCardLine(idx);
   };
+  // Travel allowance on a work-order card. Empty means none.
+  window.setJobCardTravel = function(idx, field, val) {
+    var c = _jobCards[idx]; if (!c) return;
+    if (field === 'note') {
+      c.travel_note = val || '';
+    } else if (field === 'km') {
+      if (val === '' || val == null) c.travel_km = null;
+      else {
+        var km = parseFloat(val);
+        c.travel_km = (isNaN(km) || km < 0) ? null : km;
+      }
+    } else if (val === '' || val == null) {
+      c.travel_amount = null;
+    } else {
+      var n = parseFloat(val);
+      c.travel_amount = (isNaN(n) || n < 0) ? null : Math.round(n * 100) / 100;
+    }
+    _refreshJobCardLine(idx);
+  };
   // ── WO labour line mutations (Q17) ────────────────────────────────────────
   // Each card's wo_labour_lines = [{trade_name, hours, rate, amount}]
   // wo_labour_deduction = _woLabourSum(c) — kept for backend compat.
@@ -25432,6 +25512,16 @@
       }
       var warn = document.querySelector('[data-cardnetwarn="' + idx + '"]');
       if (warn) warn.style.display = net < 0 ? 'block' : 'none';
+      var travel = _woTravelState(c);
+      var travelLine = document.querySelector('[data-cardtravelline="' + idx + '"]');
+      if (travelLine) travelLine.style.display = travel.amount > 0 ? 'flex' : 'none';
+      var travelPay = document.querySelector('[data-cardtravelpay="' + idx + '"]');
+      if (travelPay) travelPay.textContent = '$' + travel.amount.toFixed(2);
+      var travelWarn = document.querySelector('[data-cardtravelwarn="' + idx + '"]');
+      if (travelWarn) {
+        travelWarn.textContent = travel.error || '';
+        travelWarn.style.display = travel.error ? 'block' : 'none';
+      }
       var brk = document.querySelector('[data-cardwobreak="' + idx + '"]');
       if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.'
         + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '');
@@ -25515,7 +25605,8 @@
   // time line without the fields (code time_entry_required). One line is one
   // job on one day: a second day is a second line, and a shift that runs past
   // midnight is entered as two lines. Lines that are not time (work order,
-  // commission, deductions) carry none of this. Pure and DOM-free:
+  // a work-order travel allowance, commission, deductions) carry none of
+  // this. Pure and DOM-free:
   // scripts/test-trade-time-entry.js runs this block as shipped.
   var TradeTimeEntryCore = (function() {
     var REFUSAL_CODE = 'time_entry_required';
@@ -25778,6 +25869,42 @@
     if (other.length) parts.push('other [' + other.join('; ') + ']');
     return 'WO $' + a + ' − ' + parts.join(' − ') + '=net $' + net;
   }
+  // Travel allowance on a work-order card. Optional. A blank card has none.
+  // An amount is this crew's pay, so it is its own extra line (quantity 1,
+  // rate = the amount), the same shape materials and commission already use.
+  // It is not a pass-through or a lump: those reduce the work-order net.
+  // Super is not worked out here. The amount joins the submitted total, and
+  // the one existing super split runs on that total.
+  function _woTravelState(c) {
+    c = c || {};
+    var amountBlank = c.travel_amount == null || c.travel_amount === '';
+    var amountNum = amountBlank ? null : Number(c.travel_amount);
+    var amountOk = amountNum != null && Number.isFinite(amountNum) && amountNum > 0;
+    var amount = amountOk ? Math.round(amountNum * 100) / 100 : 0;
+    var kmBlank = c.travel_km == null || c.travel_km === '';
+    var kmNum = kmBlank ? null : Number(c.travel_km);
+    var kmOk = kmNum != null && Number.isFinite(kmNum) && kmNum >= 0;
+    var km = kmOk ? Math.round(kmNum * 10) / 10 : null;
+    var note = String(c.travel_note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    var started = (!amountBlank && amountNum !== 0) || (!kmBlank && kmNum !== 0) || note.length > 0;
+    var error = '';
+    if (started) {
+      if (!amountOk) error = 'Enter the travel amount.';
+      else if (!kmBlank && !kmOk) error = 'Kilometres cannot be negative.';
+      else if (!String(c.job_number || '').replace(/\s+/g, ' ').trim()) {
+        error = 'This travel line needs a job number so the cost stays on the job.';
+      }
+    }
+    return { started: started, amount: amount, km: (kmOk && km > 0) ? km : null, note: note, error: error };
+  }
+  function _woTravelDescription(c, travel) {
+    var parts = ['Travel'];
+    var job = String((c && c.job_number) || '').replace(/\s+/g, ' ').trim();
+    if (job) parts.push(job);
+    if (travel && travel.km > 0) parts.push(travel.km + ' km');
+    if (travel && travel.note) parts.push(travel.note);
+    return parts.join(' · ');
+  }
   function _buildJobCentricPayload(cards, opts) {
     opts = opts || {};
     var included = (cards || []).filter(function(c) { return c.included; });
@@ -25838,6 +25965,19 @@
       var _woShown = woBadLine.slice(0, 3).map(function(b) { return b.msg; });
       if (woBadLine.length > 3) _woShown.push('...and ' + (woBadLine.length - 3) + ' more');
       return { error: _woShown.join(' · '), missingIndices: woBadLine.map(function(b){ return b.idx; }) };
+    }
+    var travelBad = [];
+    included.forEach(function(c) {
+      if (!_jobCardEmitsWorkOrder(c)) return;
+      var travel = _woTravelState(c);
+      if (!travel.error) return;
+      var jobLbl = c.job_number || c.client_name || c.site_suburb || 'A job';
+      travelBad.push({ idx: c._idx, msg: jobLbl + ': ' + travel.error });
+    });
+    if (travelBad.length > 0) {
+      var _travelShown = travelBad.slice(0, 3).map(function(b) { return b.msg; });
+      if (travelBad.length > 3) _travelShown.push('...and ' + (travelBad.length - 3) + ' more');
+      return { error: _travelShown.join(' · '), missingIndices: travelBad.map(function(b) { return b.idx; }) };
     }
     // Description is required for manually-added (searched) hourly rows so ops know
     // what was done, but optional for auto-assigned cards (job/client already identifies
@@ -25998,6 +26138,30 @@
           rate_source: 'client_entered',
           client_rate_entered: true
         });
+        // Travel is its own line. It does not reduce the work-order net, and
+        // it carries no work_order_id so a work-order claim fence cannot
+        // treat it as a second claim on that order. No date or times.
+        var travel = _woTravelState(c);
+        if (travel.amount > 0) {
+          subtotal += travel.amount;
+          cardExtraItems.push({
+            type: 'Travel',
+            row_type: 'travel',
+            description: _woTravelDescription(c, travel),
+            quantity: 1,
+            unit: 'ea',
+            rate: travel.amount,
+            date: c.scheduled_date || null,
+            job_id: c.job_id || null,
+            job_number: String(c.job_number || '').replace(/\s+/g, ' ').trim(),
+            division: c.job_type || '',
+            client_name: c.client_name || '',
+            manually_added: !!c.manually_added,
+            source: c.manually_added ? 'manual_job_search' : 'assigned_card',
+            rate_source: 'client_entered',
+            client_rate_entered: true
+          });
+        }
       } else if (!c.assignment_id) {
         // Searched-in job: no assignment row exists, so it cannot ride
         // manual_assignments (ops-api 422s without assignment_id).

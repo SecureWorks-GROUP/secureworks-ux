@@ -77,8 +77,6 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       C.renderOpsPanel({ unreadable: true }, null, 'idle', {}),
       C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true }),
       C.renderOpsPanel({ work_order: null }, null, 'idle', { canOpen: true, busy: true }),
-      C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' }),
-      C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' }),
       C.openedWords({ created: true, quote_fill: { reason: 'filled' } }),
       C.openedWords({ created: false, quote_fill: { reason: 'no_accepted_quote' } }),
       C.openedWords({ created: true, quote_fill: { reason: 'no_quote_lines' } }),
@@ -110,23 +108,6 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
     }
   });
 
-  test('office switch: on unless a remembered 0 says otherwise; ?wo=live / ?wo=preview ask to be remembered', () => {
-    expect(C.previewState('', null)).toEqual({ on: true, persist: null });
-    expect(C.previewState('', '1')).toEqual({ on: true, persist: null });
-    expect(C.previewState('', '0')).toEqual({ on: false, persist: null });
-    expect(C.previewState('?wo=preview', null)).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?jobId=x&wo=preview', '0')).toEqual({ on: true, persist: '1' });
-    expect(C.previewState('?wo=live', '1')).toEqual({ on: false, persist: '0' });
-    expect(C.previewState('?wo=live', null)).toEqual({ on: false, persist: '0' });
-    // Any other value, including the old 1/on/0/off spellings, leaves the remembered setting alone.
-    for (const v of ['1', 'on', '0', 'off', 'banana']) {
-      expect(C.previewState(`?wo=${v}`, '1')).toEqual({ on: true, persist: null });
-      expect(C.previewState(`?wo=${v}`, null)).toEqual({ on: true, persist: null });
-      expect(C.previewState(`?wo=${v}`, '0')).toEqual({ on: false, persist: null });
-    }
-    expect(C.previewState('?two=1', null)).toEqual({ on: true, persist: null });
-  });
-
   test('the trade hours view is still fencing and patio', () => {
     expect(C.eligibleType('fencing')).toBe(true);
     expect(C.eligibleType('Patio')).toBe(true);
@@ -140,22 +121,6 @@ test.describe('Job work order core (extracted from shared/job-work-order.js)', (
       expect(C.createRoute(type, false)).toBe('job');
     }
     expect(C.createRoute()).toBe('job');
-  });
-
-  test('the old office form says why it makes no work order for a fencing or patio job, and points to the job work order', () => {
-    const html = C.crewFormNoticeHtml({ id: 'job-1', job_number: 'SWF-26904', type: 'fencing' });
-    expect(html).toContain('data-wo-form-job-wo');
-    expect(html).toContain('<b>SWF-26904</b> is a fencing job');
-    expect(html).toContain('so this form does not make one for it');
-    expect(html).toContain('data-job-id="job-1"');
-    expect(html).toContain("JobWorkOrderOps.openFromForm(this.getAttribute('data-job-id'))");
-    expect(html).toContain('Open the job work order');
-    expect(C.crewFormNoticeHtml({ id: 'job-2', type: 'patio' })).toContain('This is a patio job');
-    const hostile = C.crewFormNoticeHtml({ id: "x');alert(1);//", job_number: '<img src=x>', type: 'fencing' });
-    expect(hostile).not.toContain('<img');
-    // The job id is only ever an escaped attribute value, never script text.
-    expect(hostile).toContain('data-job-id="x&#39;);alert(1);//"');
-    expect(hostile.split('alert(1)')).toHaveLength(2);
   });
 
   test('opening the draft: the button on a job with none yet, what it did, and its refusals in words', () => {
@@ -896,18 +861,14 @@ test.describe('A stuck Xero draft record (core)', () => {
 });
 
 test.describe('Overview card and retired crew work orders (core)', () => {
-  test('retired kind=crew rows drop; a row with no kind stays', () => {
-    const rows = [
-      { id: 'a', kind: 'crew', wo_number: 'WO-OLD' },
-      { id: 'b', kind: 'CREW' },
-      { id: 'c', kind: 'job', wo_number: 'WO-JOB' },
-      { id: 'd', wo_number: 'WO-UNTAGGED' },
-      null,
-    ];
-    expect(C.isRetiredCrewWorkOrder(rows[0])).toBe(true);
-    expect(C.isRetiredCrewWorkOrder(rows[2])).toBe(false);
-    expect(C.isRetiredCrewWorkOrder(rows[3])).toBe(false);
-    expect(C.withoutRetiredCrewWorkOrders(rows).map((w) => w.id)).toEqual(['c', 'd']);
+  test('a kind=crew row is labelled retiring; a job row and an untagged row are not', () => {
+    expect(C.isRetiredCrewWorkOrder({ id: 'a', kind: 'crew' })).toBe(true);
+    expect(C.isRetiredCrewWorkOrder({ id: 'b', kind: 'CREW' })).toBe(true);
+    expect(C.isRetiredCrewWorkOrder({ id: 'c', kind: 'job' })).toBe(false);
+    expect(C.isRetiredCrewWorkOrder({ id: 'd' })).toBe(false);
+    expect(C.retiringCrewLabel({ kind: 'crew', wo_number: 'WO-OLD' })).toBe('Old crew work order (retiring)');
+    expect(C.retiringCrewLabel({ kind: 'job' })).toBe('');
+    expect(C.retiringCrewLabel({ wo_number: 'WO-UNTAGGED' })).toBe('');
   });
 
   test('the Overview card: status, allowance, approver, review, overrun, and no money unless asked', () => {
@@ -966,6 +927,12 @@ test.describe('Overview card and retired crew work orders (core)', () => {
     expect(blank).toContain('Work order not filled yet.');
     expect(blank).toContain('Not set');
     expect(blank).toContain('No crew invoice lines on this work order yet.');
+    expect(blank).not.toContain('data-job-wo-card-open');
+
+    const openable = C.renderOverviewCard(null, null, { showMoney: true, lines: [], linesState: 'ready', canOpen: true });
+    expect(openable).toContain('data-job-wo-card-open');
+    expect(openable).toContain('JobWorkOrderOps.openDraft()');
+    expect(openable).toContain('Open the draft');
 
     const issued = C.renderOverviewCard({ work_order: { id: 'wo-2', status: 'issued', wo_number: 'WO-9' } }, null, { showMoney: true, linesState: 'absent' });
     expect(issued).toContain('data-job-wo-card-status="issued"');
@@ -986,5 +953,72 @@ test.describe('Overview card and retired crew work orders (core)', () => {
     expect(draft).toContain('$40.00');
     expect(draft).toContain('data-job-wo-crew-state="loading"');
     expect(draft).not.toContain('data-job-wo-overrun');
+  });
+
+  test('billed labour on a job with no work order counts only billed labour lines (SWF-26615)', () => {
+    const swf = [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', line_total_ex: 430 },
+      { trade_name: 'Van', description: 'Travel', line_type: 'other', invoice_status: 'acknowledged', line_total_ex: 80 },
+      { trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', invoice_status: 'ops-reject', line_total_ex: 100 },
+    ];
+    const html = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: swf, linesState: 'ready' });
+    expect(html).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$430\.00/);
+    expect(html).not.toContain('$610.00');
+    expect(html).toContain('Not counted as labour');
+    expect(html).toContain('Rejected');
+    expect(html).not.toContain('No crew invoice lines');
+
+    const overridden = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', counted: false, line_total_ex: 430 },
+    ], linesState: 'ready' });
+    expect(overridden).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
+    expect(overridden).toContain('Not counted as labour');
+
+    const undecided = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', line_total_ex: 430 },
+    ], linesState: 'ready' });
+    expect(undecided).toMatch(/Billed labour<\/div><div class="jwo-fig-v">Not on this read/);
+    expect(undecided).toContain('Not counted on this read');
+
+    const draftOnly = C.renderOverviewCard({ work_order: null }, null, { showMoney: true, lines: [
+      { trade_name: 'Sam Crew', description: 'Draft day', line_type: 'labour', invoice_status: 'draft', line_total_ex: 210 },
+    ], linesState: 'ready' });
+    expect(draftOnly).toMatch(/Billed labour<\/div><div class="jwo-fig-v">\$0\.00/);
+    expect(draftOnly).toContain('Draft');
+    expect(draftOnly).toContain('Not counted as labour');
+
+    const besideBilled = C.renderOverviewCard(
+      { work_order: null, figures: { billed_to_date_ex: 430 } },
+      null,
+      { showMoney: true, lines: [], linesState: 'ready' },
+    );
+    expect(besideBilled).toContain('$430.00');
+    expect(besideBilled).toContain('Crew lines are not on this read yet.');
+    expect(besideBilled).not.toContain('No crew invoice lines');
+  });
+
+  test('review state is merged from the trade invoice line by line id', () => {
+    const woLines = [
+      { id: 'wo-line', trade_invoice_line_id: 'inv-1', trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 430, work_order_id: 'wo-1' },
+    ];
+    const invoiceLines = [
+      { id: 'inv-1', acknowledgment_status: 'acknowledged', invoice_status: 'acknowledged', line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
+      { id: 'inv-2', acknowledgment_status: 'queried', invoice_status: 'queried', line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
+    ];
+    const merged = C.mergeCrewInvoiceLines(woLines, invoiceLines);
+    expect(merged).toHaveLength(2);
+    expect(merged[0].acknowledgment_status).toBe('acknowledged');
+    expect(merged[0].line_type).toBe('labour');
+    const html = C.renderOverviewCard(
+      { work_order: { id: 'wo-1', status: 'draft', wo_number: 'WO-9' } },
+      { labour_before_approval: { amount_ex: 0 } },
+      { showMoney: true, lines: merged, linesState: 'ready' },
+    );
+    expect(html).toContain('data-job-wo-review="approved"');
+    expect(html).toContain('data-review-source="acknowledgment_status"');
+    expect(html).toContain('data-job-wo-review="queried"');
+    expect(html).toContain('Pat Query');
+    expect(html).not.toContain('No crew invoice lines');
+    expect(C.mergeCrewInvoiceLines([], invoiceLines)).toHaveLength(2);
   });
 });

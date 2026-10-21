@@ -394,8 +394,9 @@ test.describe('Create work order leads to the job work order for every job type'
     await openBuild(page, detailPayload(null), { list_trade_invoice_lines: { lines: [] } }, SHAUN);
     await expect(page.locator('[data-job-wo-none]')).toContainText('Work order not filled yet');
     await expect(page.locator('[data-job-wo-open]')).toBeEnabled();
-    await expect(page.locator('#woNewBtn')).toBeHidden();
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
+    await expect(page.locator('#woNewBtn')).toHaveCount(0);
+    await expect(page.locator('#woModal')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('sw_wo_preview'))).toBeNull();
   });
 
   test('the job quick view and the calendar offer Open Work Order for every type, including with ?wo=live', async ({ page }) => {
@@ -415,6 +416,12 @@ test.describe('Create work order leads to the job work order for every job type'
     expect(labels.patio.label).toBe('Open Work Order');
     expect(labels.repair).toEqual({ label: 'Open Work Order', onclick: "closeQuickView();JobWorkOrderOps.openForJob('job-repair-1')", primary: true });
     expect(labels.makesafe.onclick).toContain("JobWorkOrderOps.openForJob('job-ms-1')");
+    const ready = await page.evaluate((fence) => {
+      const proc = (j) => Object.assign({}, j, { status: 'processing', po_count: 1, assignment_count: 1, wo_count: 0 });
+      return getNextAction(Object.assign({}, proc(fence), { job_work_order: { work_order: { id: 'wo-1', status: 'approved', kind: 'job' } } }));
+    }, FENCE_JOB);
+    expect(ready.hint).not.toContain('work order');
+    expect(ready.hint).toContain('Everything ready');
     expect(labels.calFence).toContain("JobWorkOrderOps.openForJob('job-fence-1')");
     expect(labels.calRepair).toContain("JobWorkOrderOps.openForJob('job-repair-1')");
     expect(labels.calRepair).toContain('Open Work Order');
@@ -437,13 +444,13 @@ test.describe('Create work order leads to the job work order for every job type'
     await page.evaluate((id) => openCreateWOModal(id), FENCE_JOB.id);
     await expect(page.locator('#jdBuild [data-job-wo-panel]')).toContainText('WO-0042');
     await expect(page.locator('#jdBuild')).toHaveClass(/active/);
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
+    await expect(page.locator('#woModal')).toHaveCount(0);
     const actions = await page.evaluate(() => window.__calls.map((c) => c.action));
     expect(actions).not.toContain('scope_to_po');
     expect(await page.evaluate(() => window.__calls.filter((c) => c.method === 'POST').length)).toBe(0);
   });
 
-  test('the old form does not open and a forced submit posts no crew work order', async ({ page }) => {
+  test('the old form is gone and a forced submit posts no crew work order', async ({ page }) => {
     await page.goto('/ops.html?wo=live');
     const draft = workOrder();
     await stubOps(page, {
@@ -454,18 +461,15 @@ test.describe('Create work order leads to the job work order for every job type'
       create_work_order: { id: 'crew-wo-1' },
       list_work_orders: { work_orders: [] },
     }, SHAUN);
-    await expect(page.locator('#woNewBtn')).toBeHidden();
-    await expect(page.locator('#woSubmitBtn')).toBeHidden();
-    await page.evaluate(() => openWOModal());
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
-    await page.evaluate((id) => { document.getElementById('woJobSelect').value = id; }, REPAIR_JOB.id);
-    await page.evaluate(() => autoWOFromScope(document.getElementById('woJobSelect').value));
-    await page.evaluate(() => submitWO());
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
+    await expect(page.locator('#woNewBtn')).toHaveCount(0);
+    await expect(page.locator('#woSubmitBtn')).toHaveCount(0);
+    await expect(page.locator('#woModal')).toHaveCount(0);
+    await expect(page.locator('#woJobSelect')).toHaveCount(0);
+    await page.evaluate(() => { openWOModal(); autoWOFromScope(); return submitWO(); });
     const calls = await page.evaluate(() => window.__calls.map((c) => c.method + ' ' + c.action));
     expect(calls).not.toContain('GET scope_to_po');
     expect(calls.filter((c) => c.startsWith('POST'))).toEqual([]);
-    expect(calls).toContain('GET job_detail');
+    expect(calls).not.toContain('POST create_work_order');
   });
 
   test('a repair job with no work order block opens a job draft, and a server refusal stays on that panel', async ({ page }) => {
@@ -483,7 +487,7 @@ test.describe('Create work order leads to the job work order for every job type'
     await page.locator('[data-job-wo-open]').click();
     await expect(page.locator('[data-job-wo-message]')).toHaveText('The draft could not be opened. This job type is not on the server yet.');
     await expect(page.locator('[data-job-wo-open]')).toBeEnabled();
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
+    await expect(page.locator('#woModal')).toHaveCount(0);
     let posts = await page.evaluate(() => window.__calls.filter((c) => c.method === 'POST'));
     expect(posts).toEqual([{ method: 'POST', action: 'create_work_order', body: { kind: 'job', job_id: 'job-repair-1' } }]);
 
@@ -855,7 +859,7 @@ test.describe('Customer variations on the job work order (preview)', () => {
     await openBuild(page, data, { job_work_order: read }, SHAUN);
     await expect(page.locator('[data-job-wo-panel]')).toBeVisible();
     await expect(page.locator('[data-job-wo-cv]')).toBeVisible();
-    await expect(page.locator('#woModal')).not.toHaveClass(/active/);
+    await expect(page.locator('#woModal')).toHaveCount(0);
     const posts = await page.evaluate(() => window.__calls.filter((c) => c.method === 'POST'));
     expect(posts).toEqual([]);
     expect(await page.evaluate(() => window.__calls.some((c) => c.action === 'job_work_order'))).toBe(true);
@@ -1039,7 +1043,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     for (const c of sent) expect(c.body.expected_updated_at).toBe(STUCK_AT);
   });
 
-  test('the Build list hides a retired kind=crew work order and keeps the job one', async ({ page }) => {
+  test('the Build list keeps an old crew work order, read-only and labelled', async ({ page }) => {
     await page.goto('/ops.html');
     const draft = workOrder();
     const data = detailPayload(draft);
@@ -1050,13 +1054,21 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     ];
     await openBuild(page, data, {
       job_work_order: { work_order: draft, figures: data.job_work_order.figures, lines: [], variations: [] },
+      list_trade_invoice_lines: { lines: [] },
     }, SHAUN);
     const list = page.locator('#jdBuild');
-    await expect(list).toContainText('Work Orders (2)');
+    await expect(list).toContainText('Work Orders (3)');
     await expect(list).toContainText('WO-JOB');
     await expect(list).toContainText('WO-PLAIN');
-    await expect(list).not.toContainText('WO-OLD');
-    await expect(list).not.toContainText('Old Trade');
+    const old = list.locator('[data-office-wo="wo-old"]');
+    await expect(old).toContainText('WO-OLD');
+    await expect(old).toContainText('Old crew work order (retiring)');
+    await expect(old).toContainText('Old Trade');
+    await page.evaluate(() => showJobSubView('files'));
+    const filesOld = page.locator('#jdFiles [data-office-wo="wo-old"]');
+    await expect(filesOld).toContainText('Old crew work order (retiring)');
+    await expect(filesOld).not.toContainText('Save to Files');
+    await expect(page.locator('#jdFiles [data-office-wo="wo-job"]')).toContainText('Save to Files');
   });
 
   test('classic and new Overview show the work order card, the overrun, and the line review', async ({ page }) => {
@@ -1120,5 +1132,130 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     await expect(page.locator('[data-job-wo-overview-card]')).toHaveCount(0);
     await expect(page.locator('#jdOverview')).not.toContainText('Agreed labour');
     await expect(page.locator('#jdOverview')).not.toContainText('$2,006.00');
+  });
+});
+
+test.describe('Review fixes: money, make-safe door, gate, work order list', () => {
+  test('a job with no work order bills only acknowledged labour, not travel or a rejected line', async ({ page }) => {
+    await page.goto('/ops.html');
+    const data = detailPayload(null);
+    await openSurface(page, 'overview', data, {
+      list_trade_invoice_lines: { lines: [
+        { id: 'l1', trade_name: 'Sam Crew', description: 'Install day', line_type: 'labour', invoice_status: 'acknowledged', acknowledgment_status: 'acknowledged', line_total_ex: 430 },
+        { id: 'l2', trade_name: 'Van', description: 'Travel', line_type: 'other', invoice_status: 'acknowledged', line_total_ex: 80 },
+        { id: 'l3', trade_name: 'Sam Crew', description: 'Rejected day', line_type: 'labour', invoice_status: 'ops-reject', line_total_ex: 100 },
+      ] },
+    }, SHAUN);
+    const card = page.locator('#jdOverview [data-job-wo-overview-card]');
+    await expect(card).toContainText('$430.00');
+    await expect(card).not.toContainText('$610.00');
+    await expect(card).toContainText('Not counted as labour');
+    await expect(card).toContainText('Rejected');
+    await expect(card).not.toContainText('No crew invoice lines');
+    await expect(card.locator('[data-job-wo-review="approved"]')).toBeVisible();
+    await expect(card.locator('[data-job-wo-review="queried"]')).toHaveCount(0);
+  });
+
+  test('a work order line takes its review from list_trade_invoice_lines', async ({ page }) => {
+    await page.goto('/ops.html');
+    const wo = workOrder({ status: 'draft' });
+    const data = detailPayload(wo);
+    await openSurface(page, 'overview', data, {
+      job_work_order: { work_order: wo, figures: data.job_work_order.figures, lines: [
+        { id: 'wo-line', trade_invoice_line_id: 'inv-1', trade_name: 'Sam Crew', description: 'Install day', line_total_ex: 430, work_order_id: 'wo-1' },
+      ], variations: [], labour_before_approval: { amount_ex: 0, line_count: 0, note: '' } },
+      list_trade_invoice_lines: { lines: [
+        { id: 'inv-1', acknowledgment_status: 'acknowledged', invoice_status: 'acknowledged', line_type: 'labour', line_total_ex: 430, trade_name: 'Sam Crew', description: 'Install day' },
+        { id: 'inv-2', acknowledgment_status: 'queried', invoice_status: 'queried', line_type: 'labour', line_total_ex: 80, trade_name: 'Pat Query', description: 'Extra posts' },
+      ] },
+    }, SHAUN);
+    const card = page.locator('#jdOverview [data-job-wo-overview-card]');
+    await expect(card.locator('[data-job-wo-review="approved"]')).toBeVisible();
+    await expect(card.locator('[data-job-wo-review="queried"]')).toBeVisible();
+    await expect(card).toContainText('Pat Query');
+    await expect(card).not.toContainText('No crew invoice lines');
+    const actions = await page.evaluate(() => window.__calls.map((c) => c.action));
+    expect(actions).toContain('job_work_order');
+    expect(actions).toContain('list_trade_invoice_lines');
+  });
+
+  test('Open Work Order on a make-safe stays on Overview and does not open the patio scope tool', async ({ page }) => {
+    await page.goto('/ops.html?wo=live');
+    const ms = detailPayload(null);
+    ms.job = Object.assign({}, ms.job, { id: 'job-ms-1', type: 'makesafe', job_number: 'SWMS-1' });
+    ms.job_work_order = null;
+    ms.work_orders = [{ id: 'wo-old', wo_number: 'WO-OLD', kind: 'crew', status: 'sent', trade_name: 'Old Trade' }];
+    await stubOps(page, {
+      job_detail: ms,
+      list_trade_invoice_lines: { lines: [] },
+      makesafe_board: { jobs: [], column_counts: {} },
+    }, SHAUN);
+    await page.evaluate(() => JobWorkOrderOps.openForJob('job-ms-1'));
+    await expect(page.locator('#jdOverview')).toHaveClass(/active/);
+    await expect(page.locator('#jdBuild')).not.toHaveClass(/active/);
+    await expect(page.locator('#jdOverview [data-job-wo-card-open]')).toContainText('Open the draft');
+    await expect(page.locator('#jdOverview iframe')).toHaveCount(0);
+    const builder = page.locator('[data-makesafe-builder-wo]');
+    await expect(builder).toContainText('Work order missing');
+    await expect(builder).toContainText('Old crew work order (retiring)');
+    await expect(builder).toContainText('WO-OLD');
+    await expect(builder).not.toContainText('Available');
+    await page.evaluate(() => showJobSubView('build'));
+    await expect(page.locator('#jdBuild iframe[src*="patio"]')).toHaveCount(0);
+    await expect(page.locator('#jdBuild [data-job-wo-open]')).toBeVisible();
+  });
+
+  test('Cap 1B gate 14 passes an approved job work order and does not name sw_create_work_order', async ({ page }) => {
+    await page.goto('/ops.html');
+    const result = await page.evaluate(() => {
+      const engine = window.SW_STAGE_GATE_ENGINE;
+      function gate(packet) {
+        const r = engine.evaluateStageGates({ id: 'job-1', type: 'fencing' }, packet, { assignments: [] }, {});
+        return r.gates.find((g) => g.gate_id === 'work_order_present');
+      }
+      const job = { id: 'job-1', type: 'fencing', status: 'scheduled' };
+      return {
+        approved: gate({ job: job, work_order: { id: 'wo-1', wo_number: 'WO-0042', status: 'approved', kind: 'job' }, purchase_orders: [] }),
+        missing: gate({ job: job, purchase_orders: [] }),
+        draft: gate({ job: job, work_order: { id: 'wo-d', status: 'draft', kind: 'job' }, purchase_orders: [] }),
+        picked: packetJobWorkOrder({
+          job_work_order: { work_order: { id: 'job-wo', status: 'approved', kind: 'job' } },
+          work_order: { id: 'crew', kind: 'crew', status: 'sent' },
+          work_orders: [{ id: 'crew2', kind: 'crew', status: 'draft' }],
+        }),
+        crewOnly: packetJobWorkOrder({
+          work_order: { id: 'crew', kind: 'crew', status: 'approved' },
+          work_orders: [{ id: 'crew2', kind: 'crew', status: 'sent' }],
+        }),
+      };
+    });
+    expect(result.approved.status).toBe('pass');
+    expect(result.approved.reason).toContain('approved');
+    expect(result.approved.next_action).toBeNull();
+    expect(result.missing.next_action).toBe('Open the job work order');
+    expect(result.draft.next_action).toBe('Open the job work order');
+    expect(JSON.stringify(result)).not.toContain('sw_create_work_order');
+    expect(result.picked.id).toBe('job-wo');
+    expect(result.crewOnly).toBeNull();
+  });
+
+  test('the Work Orders tab explains job work orders and lists old crew rows without Send', async ({ page }) => {
+    await page.goto('/ops.html');
+    await page.evaluate(() => {
+      document.getElementById('subWorkorders').classList.add('active');
+      renderWOTable([
+        { id: 'wo-old', wo_number: 'WO-OLD', kind: 'crew', status: 'draft', trade_name: 'Old Trade' },
+        { id: 'wo-job', wo_number: 'WO-JOB', kind: 'job', status: 'draft' },
+      ]);
+    });
+    await expect(page.locator('#woListNote')).toContainText('Job work orders open on each job page');
+    await expect(page.locator('#woListNote')).toContainText('Old crew work orders stay listed here, read-only');
+    const old = page.locator('#woTable [data-office-wo="wo-old"]');
+    await expect(old).toContainText('Old crew work order (retiring)');
+    await expect(old.locator('button')).toHaveCount(0);
+    await expect(page.locator('#woTable [data-office-wo="wo-job"] button')).toHaveText('Send');
+    await page.evaluate(() => renderWOTable([]));
+    await expect(page.locator('[data-wo-list-empty]')).toContainText('Job work orders open on each job page');
+    await expect(page.locator('#woListNote')).toContainText('Old crew work orders stay listed here, read-only');
   });
 });

@@ -29152,16 +29152,13 @@
 
   // The Work Order hub lens: same tenant, and for a managed-vertical lead the
   // verticals he manages whenever the server says which vertical an order is.
-  // Retired per-trade orders (kind='crew') stay off every trade screen. A row
-  // with no kind stays: an untagged payload is not a crew row this page can prove.
+  // Do not filter on kind. my_work_orders does not send it, and a client filter
+  // would empty this hub, the weekly invoice and offline replay the day the
+  // field appears. The server retires old crew rows at go-live.
   function workOrdersForViewer(orders) {
     var managed = managedTradeVerticals(_user);
-    var woCore = window.JobWorkOrderCore;
     return (orders || []).filter(function (order) {
       if (!order || !workOrderTenantOk(order)) return false;
-      if (woCore && woCore.isRetiredCrewWorkOrder) {
-        if (woCore.isRetiredCrewWorkOrder(order)) return false;
-      } else if (String(order.kind || '').toLowerCase() === 'crew') return false;
       if (!managed.length) return true;
       var vertical = workOrderVertical(order);
       return !vertical || managed.indexOf(vertical) !== -1;

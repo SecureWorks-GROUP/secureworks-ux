@@ -44,15 +44,33 @@ invoice lines billed against this job's work order with their review state
 An overrun is named. `showMoney` is office only: a render without it carries
 no dollar figure.
 
-It reads `job_detail.job_work_order`, then `ops-api job_work_order`. When that
-read has no crew-invoice `lines` array it reads `list_trade_invoice_lines`.
-Fields the parallel backend PR is adding are optional and listed in
-`shared/job-work-order.js` between `// <job-wo-overview-fields>`: absent means
-that fact stays blank. A line with no work order id is still listed and the
-card says so. A line stamped with a different work order is left out.
-`review_state` wins; otherwise `acknowledgment_status` maps onto the same four
-words. Retired `kind='crew'` rows are left off office lists and the Trade App
-work-order lists. A row with no kind stays.
+It reads `job_detail.job_work_order`, then `ops-api job_work_order`, and always
+`list_trade_invoice_lines`. The invoice lines are merged onto the work order
+lines by `trade_invoice_line_id` (else `id`), so a review state that lives only
+on the invoice line still shows when a work order exists. An empty work order
+`lines` array is "none linked yet", not "no crew lines". Fields the parallel
+backend PR is adding are optional and listed in `shared/job-work-order.js`
+between `// <job-wo-overview-fields>`: absent means that fact stays blank. A
+line with no work order id is still listed and the card says so. A line stamped
+with a different work order is left out. `review_state` wins; otherwise
+`acknowledgment_status` maps onto the same four words (`acknowledged` and
+`approved` are Approved, `queried` is Queried).
+
+Billed labour uses the server's `counted` flag when a line has one. Otherwise
+a line counts only when its invoice status is billed (pending acknowledgment,
+queried, acknowledged, pending ops review, approved, pushed to Xero, paid) and
+the line is labour. A rejected, failed, draft or void invoice, and a travel or
+materials line, are marked "Not counted as labour". A line the read cannot
+decide is marked "Not counted on this read", and the total says the same rather
+than a partial sum. When the server's billed figure is present it still wins.
+A positive billed figure with no lines on the read says "Crew lines are not on
+this read yet", not "No crew invoice lines".
+
+Old `kind='crew'` rows stay on office lists, read-only, labelled "Old crew work
+order (retiring)", until the server retires them at go-live. They do not count
+as a make-safe builder work order and they do not satisfy the Cap 1B work order
+gate. The Trade App does not filter on `kind`: `my_work_orders` does not send
+it. A row with no kind is not labelled as retiring.
 
 ## Ops job page (Build tab, top)
 
@@ -62,7 +80,7 @@ for every job type, including a general or miscellaneous quick quote and a job w
 It then reads `ops-api job_work_order` when a work order is already there, for the billed
 lines and the trade-reported variations, once for every `job_detail` read (each job open
 and each `refreshJobDetail()`), so the panel never shows an older work order than the job
-page. With no work order yet it reads `list_trade_invoice_lines` for the Overview card.
+page. It always reads `list_trade_invoice_lines` for the Overview card, including when a work order is already there.
 
 What it shows:
 
@@ -172,23 +190,30 @@ not retried by anything; a work order approver checks Xero by hand and says what
 
 ## Create Work Order: the job page, for every type
 
-The old office "New Work Order" form (`#woModal`, `+ New WO`) wrote a per-trade work order
-(`create_work_order` with no `kind`, stored as `kind='crew'`). That path is retired for every
-role. The button is hidden. `openWOModal`, `openCreateWOModal`, `submitWO` (in `ops.html` and
-`modules/ops-modals.js`) and `autoWOFromScope` do not post a work order and do not call
-`scope_to_po`. `?wo=live` does not bring the form back.
+The old office "New Work Order" form is gone (`#woModal`, `+ New WO`, Load from Scope).
+`openWOModal`, `submitWO` and `autoWOFromScope` (in `ops.html` and `modules/ops-modals.js`)
+do not post a work order and do not call `scope_to_po`. `openCreateWOModal` only opens the
+job page. `?wo=live` does not write `localStorage` and does not bring the form back.
 
 `JobWorkOrderCore.createRoute` always answers `'job'` (`// <job-work-order-route>` in `ops.html`):
 
 - The job quick view (Processing, "Still need: work order") and the calendar's work-order
   button say **Open Work Order** for fencing, patio, repair, make-safe and every other type,
-  and open the job page (`JobWorkOrderOps.openForJob`). `openCreateWOModal` does the same.
-- **Open the draft** on the panel sends `create_work_order {kind: 'job', job_id}`. A
+  and open the job page (`JobWorkOrderOps.openForJob`). Fencing and patio land on Build.
+  A make-safe lands on Overview: Build is hidden there and would open the patio scope tool.
+  The Overview card's **Open the draft** is that door.
+- **Open the draft** sends `create_work_order {kind: 'job', job_id}`. A
   `job_type_not_eligible` refusal reads "This job type is not on the server yet" and leaves
-  the button. It does not fall through to the old form.
+  the button.
 
-The quick view's "Still need: work order" hint still comes from `pipeline`'s `wo_count`,
-which counts crew work orders only, so a job can keep that hint once its job work order exists.
+"Still need: work order" counts a job work order (`job_work_order.work_order`, or a
+`kind='job'` row) as well as `pipeline`'s `wo_count`. Cap 1B gate 14 passes an approved
+job work order. A missing or draft one says "Open the job work order". A crew row does
+not pass the gate.
+
+The office Work Orders tab lists whatever `list_work_orders` returns (today, old crew
+rows) and always says that job work orders open on each job page. An empty list says
+that too. Old crew rows have no Send.
 
 ## Office Work Order PDF
 

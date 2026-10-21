@@ -261,7 +261,7 @@ test.describe('Job work order on the trade invoice', () => {
     expect(await page.evaluate(() => !!(document.activeElement && document.activeElement.__typing))).toBe(true);
   });
 
-  test('My Work Orders hides a retired kind=crew row and keeps a job row and an untagged row', async ({ appPage: page }) => {
+  test('My Work Orders keeps a kind=crew row, because my_work_orders does not send kind', async ({ appPage: page }) => {
     await page.route(`${OPS_API}**`, async (route) => {
       const action = new URL(route.request().url()).searchParams.get('action');
       if (action !== 'my_work_orders') return route.fallback();
@@ -286,8 +286,8 @@ test.describe('Job work order on the trade invoice', () => {
     await page.locator('[data-view="hours"]').click();
     await page.getByRole('button', { name: 'My Work Orders' }).click();
     await expect(page.getByRole('heading', { name: 'My Work Orders' })).toBeVisible();
-    await expect(page.locator('[data-work-order-card]')).toHaveCount(2);
-    await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-OLD' })).toHaveCount(0);
+    await expect(page.locator('[data-work-order-card]')).toHaveCount(3);
+    await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-OLD' })).toHaveCount(1);
     await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-KEEP' })).toHaveCount(1);
     await expect(page.locator('[data-work-order-card]').filter({ hasText: 'WO-PLAIN' })).toHaveCount(1);
   });

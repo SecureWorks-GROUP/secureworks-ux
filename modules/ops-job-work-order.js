@@ -8,10 +8,13 @@
 // and does not bring back the retired crew form. The Trade App does not
 // load this file.
 //
-// Reads:  job_detail.job_work_order (already loaded by openJobDetail) and
+// Reads:  job_detail.job_work_order (already loaded by openJobDetail),
 //         ops-api job_work_order (the billed lines and trade-reported
 //         variations), read again for every job_detail read (job open or
-//         refresh), so the panel never shows an older copy than job_detail.
+//         refresh), so the panel never shows an older copy than job_detail,
+//         and list_trade_invoice_lines on every office open, merged onto the
+//         work order lines by line id so review state is not dropped when a
+//         work order exists.
 // Writes: ops-api approve_work_order {work_order_id, expected_updated_at},
 //         only from the approver's button, with the updated_at of the draft
 //         this panel shows, so the seal covers exactly what was read.
@@ -41,12 +44,10 @@
 var JobWorkOrderOps = (function () {
   'use strict';
 
-  var STORE_KEY = 'sw_wo_preview';
   var MOUNT_ID = 'jdJobWorkOrder';
   // Same trade roles as the job Overview. An empty role is office: this page
   // is the Ops dashboard, and the tests sign in by email without a role.
   var TRADE_ROLES = ['installer', 'lead_installer', 'crew', 'trade', 'subcontractor'];
-  var _preview = null;
   // One state per job_detail read: the job_work_order read and the approve button.
   var _state = { data: null, jobId: null, detail: null, detailState: 'idle', busy: false, confirming: false, message: '', level: 'info', seq: 0, cv: freshCv() };
 
@@ -57,25 +58,6 @@ var JobWorkOrderOps = (function () {
   }
 
   function core() { return window.JobWorkOrderCore || null; }
-
-  // Still reads ?wo= and can remember it. The panel does not call this:
-  // ?wo=live must not hide the job work order or restore the crew form.
-  function previewOn() {
-    if (_preview !== null) return _preview;
-    var C = core();
-    if (!C) { _preview = false; return false; }
-    var stored = null;
-    try { stored = localStorage.getItem(STORE_KEY); } catch (e) { stored = null; }
-    var st = C.previewState(location.search, stored);
-    if (st.persist) {
-      try {
-        if (st.persist === '1') localStorage.setItem(STORE_KEY, '1');
-        else localStorage.setItem(STORE_KEY, '0');
-      } catch (e) { /* private window: the URL still decides this load */ }
-    }
-    _preview = st.on;
-    return _preview;
-  }
 
   function viewerEmail() {
     return (typeof _opsUserEmail !== 'undefined' && _opsUserEmail) || '';
@@ -189,34 +171,39 @@ var JobWorkOrderOps = (function () {
   function overviewInner(data) {
     var C = core();
     if (!C || !data) return '';
-    var opts = { showMoney: true, linesState: 'absent' };
+    var opts = { showMoney: true, linesState: 'absent', canOpen: true, busy: _state.busy };
     if (_state.data === data) {
       var detail = _state.detail;
-      var fromDetail = crewLinesAnswer(detail);
-      if (fromDetail) {
-        opts.lines = fromDetail;
+      var woLines = crewLinesAnswer(detail);
+      var invState = _state.invoiceLinesState;
+      var hasWo = data.job_work_order && data.job_work_order.work_order;
+      if (invState === 'ready') {
+        opts.lines = C.mergeCrewInvoiceLines(woLines || [], _state.invoiceLines || []);
         opts.linesState = 'ready';
-      } else if (_state.invoiceLinesState === 'ready') {
-        opts.lines = _state.invoiceLines || [];
+      } else if (woLines && woLines.length) {
+        opts.lines = woLines;
         opts.linesState = 'ready';
-      } else if (_state.invoiceLinesState === 'loading' || _state.detailState === 'loading') {
+      } else if (invState === 'loading' || _state.detailState === 'loading' || (hasWo && _state.detailState === 'idle')) {
         opts.linesState = 'loading';
-      } else if (_state.detailState === 'failed' || _state.invoiceLinesState === 'failed') {
+      } else if (invState === 'failed' || _state.detailState === 'failed') {
         opts.linesState = 'failed';
+      } else if (woLines) {
+        opts.lines = woLines;
+        opts.linesState = 'ready';
       }
     }
     return C.renderOverviewCard(data.job_work_order || null, _state.data === data ? _state.detail : null, opts);
   }
 
   // One read for the open job_detail: job_work_order when the job has one,
-  // and list_trade_invoice_lines when that read does not carry a lines array
-  // (or there is no work order yet, so the card can still list what was billed).
+  // and list_trade_invoice_lines every time, including when a work order
+  // already carries lines. Review state is merged by line id.
   function ensureReads(data) {
     if (!data || !data.job) return;
     resetFor(data);
     var hasWo = data.job_work_order && data.job_work_order.work_order;
     if (hasWo && _state.detailState === 'idle') loadDetail(data.job.id);
-    else if (!hasWo && _state.invoiceLinesState === 'idle') loadInvoiceLines(data.job.id);
+    if (_state.invoiceLinesState === 'idle') loadInvoiceLines(data.job.id);
   }
 
   // Repaint with what is typed in the variation form kept.
@@ -258,13 +245,10 @@ var JobWorkOrderOps = (function () {
       if (seq !== _state.seq) return;
       _state.detail = res || null;
       _state.detailState = res ? 'ready' : 'failed';
-      if (crewLinesAnswer(res)) { repaint(); return; }
-      loadInvoiceLines(jobId);
       repaint();
     }).catch(function () {
       if (seq !== _state.seq) return;
       _state.detailState = 'failed';
-      loadInvoiceLines(jobId);
       repaint();
     });
   }
@@ -373,28 +357,18 @@ var JobWorkOrderOps = (function () {
     return 'job';
   }
 
-  // The job page, on the Build tab, where the job work order is.
+  // Fencing and patio open on Build, where the panel sits. A make-safe has
+  // no Build tab: that tab is the patio scope tool, so Open Work Order stays
+  // on Overview, where the card's Open the draft lives.
   function openForJob(jobId) {
     if (!jobId || typeof openJobDetail !== 'function') return Promise.resolve();
     return Promise.resolve(openJobDetail(jobId)).then(function () {
       var data = currentData();
       var current = (typeof _currentJobId !== 'undefined') ? _currentJobId : null;
-      if (data && String(current) === String(jobId) && typeof showJobSubView === 'function') showJobSubView('build');
+      if (!(data && String(current) === String(jobId) && typeof showJobSubView === 'function')) return;
+      var type = data.job && String(data.job.type || '').toLowerCase();
+      showJobSubView(type === 'makesafe' ? 'overview' : 'build');
     });
-  }
-
-  // From the old office form's notice: close the form, open the job page.
-  function openFromForm(jobId) {
-    if (typeof closeModal === 'function') closeModal('woModal');
-    return openForJob(jobId);
-  }
-
-  // The old office form's notice for a fencing or patio job.
-  function formNoticeHtml(job) {
-    var C = core();
-    if (!C) return '';
-    injectCss();
-    return C.crewFormNoticeHtml(job);
   }
 
   // ── Customer variations ──
@@ -807,8 +781,7 @@ var JobWorkOrderOps = (function () {
       '.jwo-rule-info{color:var(--sw-text-sec);}' +
       '.jwo-rv{padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;}' +
       '.jwo-rv-desc{white-space:pre-wrap;}' +
-      '.jwo .btn:disabled,#woSubmitBtn:disabled{opacity:0.45;cursor:not-allowed;}' +
-      '.jwo-redirect{border:1px solid var(--sw-border);background:var(--sw-light);padding:10px 12px;font-size:13px;color:var(--sw-text);display:flex;flex-direction:column;gap:8px;align-items:flex-start;}' +
+      '.jwo .btn:disabled{opacity:0.45;cursor:not-allowed;}' +
       '@media (max-width:600px){.jwo-actions{margin-left:0;width:100%;}' +
       '.jwo-cv-task-table thead{display:none;}' +
       '.jwo-cv-task-table tr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:6px 0;border-bottom:1px solid var(--sw-border);}' +
@@ -822,7 +795,6 @@ var JobWorkOrderOps = (function () {
   }
 
   return {
-    previewOn: previewOn,
     officeOn: officeOn,
     viewerIsOffice: viewerIsOffice,
     buildTabHtml: buildTabHtml,
@@ -833,8 +805,6 @@ var JobWorkOrderOps = (function () {
     openDraft: openDraft,
     createRoute: createRoute,
     openForJob: openForJob,
-    openFromForm: openFromForm,
-    formNoticeHtml: formNoticeHtml,
     openPdf: openPdf,
     pdfSections: pdfSections,
     cvAdd: cvAdd,

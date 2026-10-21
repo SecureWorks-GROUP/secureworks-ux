@@ -267,10 +267,7 @@ function onPOFulfilmentChange(type) {
 }
 
 async function openWOModal() {
-  // The per-trade form that wrote kind='crew' is retired. The copy in ops.html
-  // overrides this; both stay unable to open that form.
-  var modal = document.getElementById('woModal');
-  if (modal) modal.classList.remove('active');
+  // The per-trade form that wrote kind='crew' is gone. ops.html overrides this.
   if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
@@ -859,14 +856,6 @@ function resetPOModal() {
 
 async function submitWO() {
   // Does not post create_work_order. ops.html overrides this with the same rule.
-  var sel = document.getElementById('woJobSelect');
-  var jobId = sel ? sel.value : '';
-  var modal = document.getElementById('woModal');
-  if (modal) modal.classList.remove('active');
-  if (typeof closeModal === 'function') closeModal('woModal');
-  if (jobId && window.JobWorkOrderOps && typeof JobWorkOrderOps.openForJob === 'function') {
-    await JobWorkOrderOps.openForJob(jobId);
-  }
 }
 
 // ── Supplier Quote Scanner ──

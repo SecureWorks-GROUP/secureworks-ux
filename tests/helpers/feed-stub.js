@@ -46,6 +46,11 @@ function loadJsonFixture(fileName, replacements = {}) {
   return JSON.parse(source);
 }
 
+// The trade dispatcher reads group_work_order_my_share from the JSON body only,
+// so the app posts it. It does not change anything. Suites that do not register
+// a handler see the feature off, which is what an unknown action paints.
+const POST_READ_ACTIONS = new Set(['group_work_order_my_share']);
+
 /**
  * Generic edge-function router for static-app tests.
  * Every action is explicit. Unknown reads receive 404 and every unapproved write
@@ -64,7 +69,7 @@ async function installFeedStubs(page, {
     const request = route.request();
     const url = new URL(request.url());
     const action = url.searchParams.get('action') || '';
-    const isWrite = request.method() !== 'GET';
+    const isWrite = request.method() !== 'GET' && !POST_READ_ACTIONS.has(action);
     requestLog.push({
       method: request.method(),
       action,
@@ -85,6 +90,14 @@ async function installFeedStubs(page, {
 
     const handler = actions[action];
     if (handler === undefined) {
+      if (POST_READ_ACTIONS.has(action)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ enabled: false })
+        });
+        return;
+      }
       await route.fulfill({
         status: 404,
         contentType: 'application/json',

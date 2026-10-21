@@ -148,9 +148,11 @@ test('a transition repaints the open detail from a CURRENT canonical response', 
   expect(result.requests).toEqual([
     { method: 'GET', action: 'makesafe_board' },
     { method: 'GET', action: 'list_trade_invoice_lines' },
+    { method: 'GET', action: 'group_work_order_office' },
     { method: 'POST', action: 'update_makesafe_substatus' },
     { method: 'GET', action: 'makesafe_board' },
     { method: 'GET', action: 'job_detail' },
+    { method: 'GET', action: 'group_work_order_office' },
   ]);
   expect(result.after).toEqual({ stage: 'report_ready', source: 'board_feed' });
   // ...and the ALREADY-RENDERED detail now shows the new stage, not the old one.

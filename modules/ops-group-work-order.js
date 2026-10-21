@@ -49,17 +49,19 @@
     var jobId = data.job.id;
     opsFetch('group_work_order_office', { job_id: jobId }).then(function (res) {
       if (!host() || (data.job && data.job.id !== jobId)) return;
-      if (C.isOff(res)) { host().innerHTML = ''; return; }
+      // A catch-all stub answers {}. A real group always carries group_id.
+      if (C.isOff(res) || !res || !res.group_id) { host().innerHTML = ''; return; }
       host().innerHTML = C.officeHtml(res);
-      if (res && res.group_id) host().setAttribute('data-group-id', res.group_id);
+      host().setAttribute('data-group-id', res.group_id);
     }).catch(function (e) {
       var box = host();
       if (!box) return;
       if (C.isOff(null, e) || (e && e.status === 403)) { box.innerHTML = ''; return; }
-      if (C.errCode(e) === 'group_work_order_not_found' || (e && e.status === 404)) {
+      if (C.errCode(e) === 'group_work_order_not_found') {
         box.innerHTML = '<p data-office-group-empty>No group work order on this job.</p>';
         return;
       }
+      if (e && e.status === 404) { box.innerHTML = ''; return; }
       box.innerHTML = '<p data-office-group-error>The group work order could not be read.</p>';
     });
   }

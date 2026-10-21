@@ -18420,6 +18420,11 @@ function jpOpenBillsToPlace() {
   showSubTab('billrecon');
 }
 
+// A row the engine flags as having nothing linked reads "None linked", not $0.00.
+function _jpLinkedMoney(j, v, flag) {
+  return _jpFlags(j).indexOf(flag) !== -1 && !_jpNum(v) ? '<span class="jp-unk">None linked</span>' : _jpMoney(v);
+}
+
 function _jpRenderList() {
   var body = document.getElementById('jpListBody');
   var status = document.getElementById('jpListStatus');
@@ -18438,8 +18443,8 @@ function _jpRenderList() {
         + '<td>' + _jpEsc(j.status || '') + '</td>'
         + '<td class="num">' + _jpMoney(_jpQuoted(j), 'No quote sent') + '</td>'
         + '<td class="num">' + _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote') + '</td>'
-        + '<td class="num">' + _jpMoney(j.actual_cost_ex) + '</td>'
-        + '<td class="num">' + _jpMoney(j.invoiced_ex) + '</td>'
+        + '<td class="num">' + _jpLinkedMoney(j, j.actual_cost_ex, 'no_cost_linked') + '</td>'
+        + '<td class="num">' + _jpLinkedMoney(j, j.invoiced_ex, 'missing_client_invoice') + '</td>'
         + '<td class="num">' + _jpMoney(j.collected_ex) + '</td>'
         + '<td class="num">' + _jpProfit(_jpProfitOf(j)) + '</td>'
         + '<td class="num">' + _jpPct(_jpMarginOf(j)) + '</td>'

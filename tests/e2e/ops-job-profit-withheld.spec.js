@@ -9,6 +9,8 @@
 //  - A job still in delivery says profit is not due yet, not "unknown".
 //  - Where quoted and expected came from reads in staff words, not engine codes.
 //  - A published profit keeps the plain differences it had before.
+//  - In the job list, a job with no cost or no client invoice linked reads
+//    "None linked" in that column, not $0.00.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -71,4 +73,19 @@ test('a published profit keeps plain differences', async ({ page }) => {
   expect(text).toMatch(/actual cost/i);
   expect(text).not.toMatch(/actual cost so far/i);
   expect(text).not.toContain('Not known until all cost is in');
+});
+
+test('job list: nothing linked reads None linked, not $0.00', async ({ page }) => {
+  await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
+  const cells = await page.evaluate((rows) => {
+    _jp.rows = rows; _jp.more = false;
+    _jpRenderList();
+    return Array.from(document.querySelectorAll('#jpListBody tr')).map((tr) => [tr.cells[4].innerText.trim(), tr.cells[5].innerText.trim()]);
+  }, [
+    { job_id: 'a', job_number: 'T-EMPTY', status: 'complete', actual_cost_ex: 0, invoiced_ex: 0, collected_ex: 0, completeness: ['missing_client_invoice', 'no_cost_linked'], cost_flag: 'no_cost_linked' },
+    { job_id: 'b', job_number: 'T-SOME', status: 'complete', actual_cost_ex: 1200, invoiced_ex: 3000, collected_ex: 0, completeness: [], cost_flag: 'ok' },
+  ]);
+  expect(cells[0]).toEqual(['None linked', 'None linked']);
+  expect(cells[1]).toEqual(['$1,200.00', '$3,000.00']);
 });

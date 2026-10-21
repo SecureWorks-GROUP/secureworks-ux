@@ -382,7 +382,7 @@ test('a bill whose lines name ten jobs: they are listed as evidence, and placing
   await openMaterials(page, { fixture: tenJobFixture() });
   await row(page, 'q-ten').click();
   const d = detail(page, 'q-ten');
-  await expect(d.locator('[data-mrq-named]')).toContainText("Jobs named on the bill's lines (read from the text; evidence, not a split)");
+  await expect(d.locator('[data-mrq-named]')).toContainText("Jobs named on the bill's lines (inferred from the line text; evidence, not a split)");
   await expect(d.locator('[data-mrq-named] [data-bill-ref]')).toHaveCount(10);
   await expect(d.locator('[data-mrq-named] [data-bill-ref="SWF-26824"]')).toContainText('$-683.00 on 3 lines');
   await expect(d.locator('[data-mrq-named]')).toContainText('No single job named: $325.40');

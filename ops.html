@@ -18436,7 +18436,7 @@ function swBillJobRefs(lines) {
 }
 // One line per named job, for both screens.
 function swBillJobRefsHtml(br, ownRef) {
-  var h = '<div class="jp-sub" data-bill-refs>Jobs named on the bill\'s lines (read from the text; evidence, not a split):</div><ul class="jp-sub" style="margin:2px 0 0 16px;padding:0;">';
+  var h = '<div class="jp-sub" data-bill-refs>Jobs named on the bill\'s lines (inferred from the line text; evidence, not a split):</div><ul class="jp-sub" style="margin:2px 0 0 16px;padding:0;">';
   br.refs.forEach(function(x) {
     h += '<li data-bill-ref="' + _jpEsc(x.ref) + '">' + (x.ref === ownRef ? '<b>' + _jpEsc(x.ref) + '</b> (this job)' : _jpEsc(x.ref))
       + (x.shared ? ': on a line that names more than one job' : ': ' + _jpEsc(fmt$(x.amount)) + ' on ' + x.lines + ' line' + (x.lines === 1 ? '' : 's')) + '</li>';
@@ -18444,6 +18444,14 @@ function swBillJobRefsHtml(br, ownRef) {
   if (br.none) h += '<li>No single job named: ' + _jpEsc(fmt$(br.none)) + '</li>';
   return h + '</ul>';
 }
+// Who placed a bill, from v_job_cost_events.match_method (CFO allocation contract, 21 Oct).
+var JP_BILL_PLACED_BY = {
+  'xero_invoices.job_id': 'linked whole by the bill\'s job in Xero (Xero\'s reference, not a person)',
+  manual_queue: 'placed whole by a person in Bills to place',
+  xero_ref_link: 'placed whole by a machine from its Xero reference',
+  po_deterministic: 'placed whole by a machine from a purchase order',
+  agent_prematch: 'placed whole by the agent',
+};
 // A bill placed whole that names any other job is not confirmed for this job.
 function swBillPlacedWholeElsewhere(br, ownRef) {
   return br.refs.some(function(x) { return x.ref !== ownRef; });
@@ -18681,7 +18689,7 @@ function _jpRenderDetail(data) {
   // figures and allocation are unchanged, and nothing is split for the person.
   var bills = {}, billOrder = [];
   costs.forEach(function(c) {
-    if (!c || !c.document_id || (c.source !== 'supplier_bill' && c.source !== 'materials_fact')) return;
+    if (!c || !c.document_id || (c.source !== 'supplier_bill' && c.source !== 'materials_fact' && c.source !== 'installer_bill_unconfirmed')) return;
     if (c.match_method === 'manual_split') return;
     if (!bills[c.document_id]) { bills[c.document_id] = { id: c.document_id, number: c.document_number, party: c.party, how: c.match_method, rows: [] }; billOrder.push(c.document_id); }
     bills[c.document_id].rows.push(c);
@@ -18690,9 +18698,7 @@ function _jpRenderDetail(data) {
   billOrder.forEach(function(k) {
     var b = bills[k];
     var amount = b.rows.reduce(function(t, c) { return t + (_jpNum(c.amount_ex) || 0); }, 0);
-    var how = b.how === 'xero_invoices.job_id' ? 'linked whole by the bill\'s job in Xero'
-      : b.how === 'manual_queue' ? 'placed whole by a person in Bills to place'
-      : 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')';
+    var how = JP_BILL_PLACED_BY[b.how] || 'placed whole (' + _jpEsc(String(b.how || 'unknown route').replace(/_/g, ' ')) + ')';
     var label = _jpEsc((b.party || 'Bill') + ' ' + (b.number || ''));
     if (b.rows.length > 1) {
       // Line detail is here: read the job numbers from the line text.
@@ -18701,7 +18707,7 @@ function _jpRenderDetail(data) {
       wholeHtml += '<div class="jp-note" data-jp-whole-bill="' + _jpEsc(b.id) + '"><span class="jp-tag bad">Not confirmed for this job</span> <b>' + label + '</b>, '
         + _jpEsc(fmt$(amount)) + ', is ' + how + ', but its lines name ' + br.refs.length + ' job' + (br.refs.length === 1 ? '' : 's')
         + '. It counts here in full until a person moves, splits or unplaces it.' + swBillJobRefsHtml(br, j.job_number) + '</div>';
-    } else if (b.how === 'manual_queue' || b.how === 'agent_prematch') {
+    } else {
       // One row: the lines are not in the engine read. Offer a read-only check.
       wholeHtml += '<div class="jp-note" data-jp-whole-bill="' + _jpEsc(b.id) + '"><b>' + label + '</b>, ' + _jpEsc(fmt$(amount)) + ', is ' + how
         + '. <button class="btn btn-secondary btn-sm" onclick="jpCheckBillLines(\'' + _jpEsc(b.id) + '\', \'' + _jpEsc(j.job_number || '') + '\')">Check which jobs its lines name</button>'
@@ -18710,7 +18716,7 @@ function _jpRenderDetail(data) {
   });
   if (wholeHtml) {
     h += '<div class="jp-sec">Bills placed whole on this job</div>' + wholeHtml
-      + '<div class="jp-sub" data-jp-whole-recover>Moving, splitting or unplacing a placed bill is not on this screen yet; a bill left on the wrong job keeps counting here in full. Naming a job on a bill shows evidence only and never puts cost on that job.</div>';
+      + '<div class="jp-sub" data-jp-whole-recover>Moving or splitting a placed bill is not on this screen yet, and unplacing a bill is not available; a bill left on the wrong job keeps counting here in full. Naming a job on a bill shows evidence only and never puts cost on that job.</div>';
   }
 
   // Materials and other costs (non-trade cost events)

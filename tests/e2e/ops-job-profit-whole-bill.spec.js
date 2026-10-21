@@ -5,7 +5,8 @@
 // Contract under guard (display only; the engine's figures and allocation are unchanged):
 //  - A supplier bill linked whole whose lines name another job reads "Not confirmed for this
 //    job", says how it was placed and that it counts here in full until a person moves, splits
-//    or unplaces it, and lists the named jobs as evidence, never as a split.
+//    or unplaces it, and lists the named jobs as evidence (inferred from the line text), never
+//    as a split. How it was placed reads from match_method: a person, a machine or Xero's reference.
 //  - A bill whose lines name only this job, and the parts of a person's split, show no note.
 //  - A bill placed whole as one row offers a read-only check of its lines; a failed read says
 //    so with Try again.
@@ -48,8 +49,8 @@ test('a bill linked whole whose lines name ten jobs reads not confirmed, with th
   const text = await render(page, Object.assign({}, JOB, { job_number: 'SBX-HOLD' }), costs);
   const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
   await expect(note).toContainText('Not confirmed for this job');
-  await expect(note).toContainText("Installer EH 31, $1,742.08, is linked whole by the bill's job in Xero, but its lines name 3 jobs. It counts here in full until a person moves, splits or unplaces it.");
-  await expect(note).toContainText("Jobs named on the bill's lines (read from the text; evidence, not a split)");
+  await expect(note).toContainText("Installer EH 31, $1,742.08, is linked whole by the bill's job in Xero (Xero's reference, not a person), but its lines name 3 jobs. It counts here in full until a person moves, splits or unplaces it.");
+  await expect(note).toContainText("Jobs named on the bill's lines (inferred from the line text; evidence, not a split)");
   await expect(note.locator('[data-bill-ref="SWF-26824"]')).toHaveText('SWF-26824: $217.00 on 2 lines');
   await expect(note).toContainText('No single job named: $65.08');
   expect(text).toContain('Naming a job on a bill shows evidence only and never puts cost on that job.');
@@ -76,6 +77,15 @@ test('a bill placed whole as one row offers a read-only check of its lines', asy
   await expect(check.locator('[data-bill-ref="SWF-27001"]')).toHaveText('SWF-27001 (this job): $820.00 on 1 line');
   await expect(check.locator('[data-bill-ref="SWF-26824"]')).toHaveText('SWF-26824: $1,519.00 on 1 line');
   expect(await page.evaluate(() => window.__reads)).toEqual([{ action: 'get_xero_invoice', params: { xero_invoice_id: 'xinv-31' } }]);
+});
+
+test('an unconfirmed installer bill a machine placed says so and offers the same check', async ({ page }) => {
+  const costs = [line('Installer EH 31', 5083.4, { source: 'installer_bill_unconfirmed', match_method: 'xero_ref_link' })];
+  const text = await render(page, JOB, costs);
+  const note = page.locator('#wholeBillHost [data-jp-whole-bill="xinv-31"]');
+  await expect(note).toContainText('is placed whole by a machine from its Xero reference');
+  await expect(note.locator('button')).toHaveText('Check which jobs its lines name');
+  expect(text).toContain('unplacing a bill is not available');
 });
 
 test('a failed line read says so and offers Try again', async ({ page }) => {

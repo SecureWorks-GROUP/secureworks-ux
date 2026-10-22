@@ -18683,7 +18683,9 @@ function _jpLikeCells(r, pair) {
 }
 function _jpRenderLikeForLike(t, types) {
   var h = '<div class="jp-sec" data-jp-like>Quoted vs invoiced, expected vs actual (like for like)</div>'
-    + '<div class="jp-sub" style="margin-bottom:4px;">Each comparison counts only jobs with a sent quote, or with a cost fixed at the quote. Jobs left out are in this view but have no such figure; they are not in that comparison.</div>';
+    + '<div class="jp-sub" style="margin-bottom:4px;">Each comparison counts only jobs with a sent quote, or with a cost fixed at the quote. Expected vs actual also needs the job\'s actual cost to be complete. Jobs left out are in this view but are not in that comparison.'
+    + (_jpNum(t.jobs_with_expected_not_comparable) ? ' ' + _jpEsc(Number(t.jobs_with_expected_not_comparable).toLocaleString()) + ' with an expected cost (' + _jpMoney(t.expected_cost_not_comparable_ex) + ') are not compared yet because their actual cost is still partial.' : '')
+    + '</div>';
   var head = '<th class="num">Jobs counted</th><th class="num">Left out</th>';
   h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Group</th><th>Comparison</th>' + head + '<th class="num">Quoted / expected</th><th class="num">Invoiced / actual</th><th class="num">Difference</th></tr></thead><tbody>';
   [{ label: 'All work types', r: t }].concat(types.map(function(r) { return { label: r.work_type || 'unknown', r: r }; })).forEach(function(g, i) {
@@ -18721,6 +18723,16 @@ function _jpRenderRollup(d) {
     h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Work type</th>' + head + '</tr></thead><tbody>';
     types.forEach(function(r) { h += '<tr><td>' + _jpEsc(r.work_type || 'unknown') + '</td>' + _jpRollupCells(r) + '</tr>'; });
     h += '</tbody></table></div>';
+  }
+
+  // Holding jobs (costs parked on a bucket card such as SWF-PDF-BUCKET) are in
+  // no total above; the server reports them on their own so the cost stays seen.
+  var hold = d.holding_jobs;
+  if (hold && _jpNum(hold.jobs)) {
+    h += '<div class="jp-sec" data-jp-holding>Holding jobs (not in any total above)</div>'
+      + '<div class="jp-sub" style="margin-bottom:4px;">Costs parked on a holding card until they are placed on their real job. They are not a customer\'s job, so they are left out of every total, work type and month.</div>'
+      + '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Group</th>' + head + '</tr></thead><tbody>'
+      + '<tr><td>Holding jobs</td>' + _jpRollupCells(hold) + '</tr></tbody></table></div>';
   }
 
   var months = Array.isArray(d.by_month) ? d.by_month : [];

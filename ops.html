@@ -1493,6 +1493,14 @@
     }
     .kanban-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .kanban-client { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+    /* Asbestos job marker on every job card (// <asbestos-card-badge>). A plain
+       marker: no onclick, so a press falls through to the card as before. */
+    .asbestos-a {
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      width: 14px; height: 14px; margin-right: 4px; border-radius: 3px; vertical-align: middle;
+      background: #FEE2E2; border: 1px solid #DC2626; color: #991B1B;
+      font-size: 10px; font-weight: 800; line-height: 1; font-family: inherit;
+    }
     .kanban-value { font-size: 12px; font-weight: 600; color: #1a9a5a; font-family: var(--sw-font-num); }
     .kanban-suburb { font-size: 11px; color: #5a6068; }
     /* SWR- number on a repair card: quiet, monospaced, sits under the suburb. */
@@ -9647,6 +9655,7 @@ function renderSwimlaneView(container, range) {
         } else {
           if (ev.start_time && !isMonthMode) html += '<span style="font-weight:700;font-size:9px;font-family:var(--sw-font-num);margin-right:3px;">' + ev.start_time.slice(0,5) + '</span>';
           if (!isMonthMode && ev.job_number) html += '<strong>' + ev.job_number + '</strong> ';
+          html += asbestosCardBadgeHtml(ev.job_type, ev.existing_fence_type);
           html += escapeHtml(ev.client_name || 'Unknown');
         }
         if (confStatus === 'confirmed') html += '<span class="cal-lock-icon">&#128274;</span>';
@@ -9909,6 +9918,7 @@ function renderScheduleView(container, range) {
         site_address: ev.site_address || '',
         job_type: ev.job_type || 'patio',
         job_family: ev.job_family || null,
+        existing_fence_type: ev.existing_fence_type || null,
         confirmation: ev.confirmation_status || 'tentative',
         start_time: ev.start_time || null,
         end_time: ev.end_time || null,
@@ -10291,6 +10301,7 @@ function renderScheduleView(container, range) {
         if (v3) {
           // Type square, client, job number, staff circles, lock.
           html += '<span class="cal-v3-sq">' + calV3Icon(calV3Symbol(job), 12) + '</span>';
+          html += asbestosCardBadgeHtml(job.job_type, job.existing_fence_type);
           html += '<span class="bar-label">' + escapeHtml(job.client_name) + '</span>';
           if (job.job_number) html += '<span class="v3-num">' + escapeHtml(job.job_number) + '</span>';
           html += calV3CrewHtml(job.crewNames, startIdx === endIdx ? 2 : 4, v3Unit, true);
@@ -10299,6 +10310,7 @@ function renderScheduleView(container, range) {
         // Time + Job number + client
         if (job.start_time) html += '<span style="font-weight:700;font-size:8px;margin-right:2px;">' + job.start_time.slice(0,5) + '</span>';
         if (job.job_number) html += '<strong style="font-size:9px;">' + job.job_number + '</strong> ';
+        html += asbestosCardBadgeHtml(job.job_type, job.existing_fence_type);
         html += '<span class="bar-label">' + escapeHtml(job.client_name) + '</span>';
 
         // Lock icon
@@ -17012,10 +17024,26 @@ function copyJobInfo(jobId, job) {
   });
 }
 
+// <asbestos-card-badge>
+// The red A on a job card: a fencing job whose existing fence being removed is
+// asbestos. The pipeline and calendar rows carry existing_fence_type (the
+// scope's job.removal.existingFenceType); the hover pop-up's Asbestos tag
+// (renderRunBreakdown) reads the same field off the full scope through the same
+// isAsbestosFenceType, so the card and the pop-up cannot disagree.
+function isAsbestosFenceType(existingFenceType) {
+  return existingFenceType === 'asbestos';
+}
+
+function asbestosCardBadgeHtml(jobType, existingFenceType) {
+  if (jobType !== 'fencing' || !isAsbestosFenceType(existingFenceType)) return '';
+  return '<span class="asbestos-a">A</span>';
+}
+// </asbestos-card-badge>
+
 function renderKanbanCard(j, status) {
   var html = '<div class="kanban-card" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
   html += '<div class="kanban-card-header">';
-  html += '<span class="kanban-client">' + (j.client_name || 'Unknown') + '</span>';
+  html += '<span class="kanban-client">' + asbestosCardBadgeHtml(j.type, j.existing_fence_type) + (j.client_name || 'Unknown') + '</span>';
   if (j.value) html += '<span class="kanban-value">' + fmt$(j.value) + '</span>';
   html += '</div>';
 
@@ -20640,7 +20668,7 @@ function renderRunBreakdown(scopeOrBreakdown, jobType, flags, jobCtx) {
       };
     });
     if (fenceJob.installation && fenceJob.installation.coreDrill) needsCoreDrill = true;
-    if (fenceJob.removal && fenceJob.removal.existingFenceType === 'asbestos') {
+    if (fenceJob.removal && isAsbestosFenceType(fenceJob.removal.existingFenceType)) {
       hasAsbestos = true;
       removalLength = parseFloat(fenceJob.removal.existingFenceLength) || 0;
     }

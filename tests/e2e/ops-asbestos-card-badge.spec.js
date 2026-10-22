@@ -10,8 +10,6 @@
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
-const TOOLTIP = 'Asbestos job - WorkSafe notification and clearance required';
-
 async function renderCard(page, job) {
   await page.evaluate((card) => {
     let host = document.getElementById('asbestos-card-host');
@@ -91,7 +89,7 @@ test.describe('kanban job card', () => {
 
     const a = asb.locator('.kanban-client .asbestos-a');
     await expect(a).toHaveText('A');
-    await expect(a).toHaveAttribute('title', TOOLTIP);
+    expect(await a.getAttribute('title')).toBeNull();
     await expect(a).toBeVisible();
     expect(await a.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(153, 27, 27)');
     await expect(asb.locator('.kanban-client')).toContainText('Ged Fixture');
@@ -132,7 +130,7 @@ for (const v3 of [true, false]) {
     test('Crew view: only the asbestos job block carries the A', async ({ page }) => {
       await seedCalendar(page, 'crew');
       const got = await badgeByJob(page, '.cal-job-block');
-      expect(got['Asbestos Fixture']).toEqual({ text: 'A', title: TOOLTIP, onclick: null });
+      expect(got['Asbestos Fixture']).toEqual({ text: 'A', title: null, onclick: null });
       expect(got['Clean Fixture']).toBeNull();
       expect(got['Absent Fixture']).toBeNull();
     });
@@ -140,7 +138,7 @@ for (const v3 of [true, false]) {
     test('Schedule view: only the asbestos job bar carries the A', async ({ page }) => {
       await seedCalendar(page, 'schedule');
       const got = await badgeByJob(page, '.cal-schedule-bar');
-      expect(got['Asbestos Fixture']).toEqual({ text: 'A', title: TOOLTIP, onclick: null });
+      expect(got['Asbestos Fixture']).toEqual({ text: 'A', title: null, onclick: null });
       expect(got['Clean Fixture']).toBeNull();
       expect(got['Absent Fixture']).toBeNull();
       await expect(page.locator('.cal-schedule-bar .asbestos-a').first()).toBeVisible();

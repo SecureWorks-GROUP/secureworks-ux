@@ -6283,6 +6283,8 @@ __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 __swOpsStampAssets([
   {t:'js', u:'shared/job-work-order.js?v=4'},
   {t:'js', u:'modules/ops-job-work-order.js?v=4'},
+  {t:'js', u:'shared/group-work-order.js?v=2'},
+  {t:'js', u:'modules/ops-group-work-order.js?v=2'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
 </script>
@@ -22403,6 +22405,7 @@ function renderMakesafeOpsDetail(data) {
   html += '</div>';
 
   html += '<div data-job-wo-overview></div>';
+  html += '<div data-office-group-wo></div>';
 
   html += renderMakesafeOpsExternalLinks(md);
 
@@ -22588,10 +22591,14 @@ function renderOverviewView(data) {
   if (j.type === 'makesafe') {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
     if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
+    if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
     return;
   }
   // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below
-  if (window.JobOverviewV2 && JobOverviewV2.render(data)) return;
+  if (window.JobOverviewV2 && JobOverviewV2.render(data)) {
+    if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
+    return;
+  }
   // </job-overview-v2-switch>
   var html = '';
   // Section 1: Client Card
@@ -22610,6 +22617,7 @@ function renderOverviewView(data) {
 
   // <job-wo-overview> office work order card. JobWorkOrderOps.paintOverview fills it.
   html += '<div data-job-wo-overview></div>';
+  html += '<div data-office-group-wo></div>';
   // </job-wo-overview>
 
   // Site Plan Image (between client card and job summary)
@@ -22843,6 +22851,7 @@ function renderOverviewView(data) {
   html += '</div>';
   document.getElementById('jdOverview').innerHTML = html;
   if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
+  if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
   if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
 
   // Load job actions async

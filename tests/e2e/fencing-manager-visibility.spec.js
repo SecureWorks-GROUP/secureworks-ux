@@ -411,7 +411,9 @@ test.describe('Fencing manager visibility', () => {
       await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
       await expect(page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
 
-      const stageWrites = feedRequests.filter((entry) => entry.method === 'POST');
+      // Opening the job posts group_work_order_my_share. The trade API reads that
+      // from the JSON body, and the feed stub counts it as a read.
+      const stageWrites = feedRequests.filter((entry) => entry.method === 'POST' && entry.action !== 'group_work_order_my_share');
       expect(stageWrites.map((entry) => [entry.action, entry.body.status || entry.body.event])).toEqual([
         ['update_my_assignment', 'confirmed']
       ]);

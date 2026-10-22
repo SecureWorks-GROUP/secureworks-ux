@@ -28,6 +28,8 @@
   <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
+  <script src="shared/group-work-order.js?v=2"></script>
+  <script src="modules/trade-group-work-order.js?v=2"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -13248,6 +13250,7 @@
     var h = '';
 
     h += renderTradeJobWorkOrder(data);
+    h += renderGroupWorkOrderSlot(data);
     h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
@@ -13798,6 +13801,13 @@
     return JobWorkOrderCore.renderTrade(read, read ? 'ready' : (e && e.state === 'failed' ? 'failed' : 'loading'));
   }
 
+  function renderGroupWorkOrderSlot(data) {
+    if (!window.GroupWorkOrderTrade || !data || !data.job || isForeignCrewJob(data)) return '';
+    if (!GroupWorkOrderTrade.arm(data)) return '';
+    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); });
+    return GroupWorkOrderTrade.slotHtml(data.job.id);
+  }
+
   // The Work Order and Scope tabs: the job's work order scope, on an
   // allocated fencing or patio job.
   function renderTradeJobWorkOrder(data) {
@@ -13891,6 +13901,7 @@
     // lines → videos → materials. Quote-pack / compact WO rates stay office-only.
     h += renderTradeInstructions(data);
     h += renderTradeJobWorkOrder(data);
+    h += renderGroupWorkOrderSlot(data);
     h += renderQuotePacks(data);
 
     // 1. Build spec (dimensions, colours, attachment)

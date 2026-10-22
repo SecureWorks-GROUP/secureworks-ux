@@ -4984,10 +4984,11 @@ __swOpsStampAssets([
 
       <!-- Work Orders -->
       <div id="subWorkorders" class="sub-view">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <div class="section-heading">Work Orders</div>
-          <button class="btn btn-primary btn-sm" onclick="openWOModal()">+ New WO</button>
         </div>
+        <div id="officeWoFill" data-office-wo-fill-host></div>
+        <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders open on each job page. Old crew work orders stay listed here, read-only, until they are retired.</div>
         <div class="data-table-wrap">
           <table class="data-table" id="woTable">
             <thead>
@@ -5709,60 +5710,6 @@ __swOpsStampAssets([
   </div>
 </div>
 
-<!-- WO Modal -->
-<div class="modal-overlay" id="woModal">
-  <div class="modal">
-    <div class="modal-title">New Work Order</div>
-    <div class="form-group">
-      <label class="form-label">Job</label>
-      <div style="position:relative;">
-        <input type="text" class="form-input" id="woJobSearch" placeholder="Type client name, job number, or suburb..." autocomplete="off" oninput="filterJobPicker('wo', this.value)" onfocus="filterJobPicker('wo', this.value)" />
-        <input type="hidden" id="woJobSelect" />
-        <div id="woJobDropdown" class="job-picker-dropdown"></div>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Trade Name</label>
-        <input type="text" class="form-input" id="woTradeName" placeholder="Trade / contractor name">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Trade Phone</label>
-        <input type="tel" class="form-input" id="woTradePhone">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Trade Email</label>
-      <input type="email" class="form-input" id="woTradeEmail" placeholder="trade@example.com">
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Scheduled Date</label>
-        <input type="date" class="form-input" id="woScheduledDate">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Price (ex GST)</label>
-        <input type="number" class="form-input" id="woPrice" placeholder="0.00" step="0.01" min="0">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Special Instructions</label>
-      <textarea class="form-textarea" id="woInstructions" placeholder="Scope and instructions..."></textarea>
-    </div>
-    <div class="form-group">
-      <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;">
-        Scope Items
-        <button class="btn btn-secondary btn-sm" onclick="autoWOFromScope(document.getElementById('woJobSelect').value)" style="font-size:11px;padding:2px 8px;">Load from Scope</button>
-      </label>
-      <div id="woScopeItems" style="font-size:13px;color:var(--sw-text-sec);">No job selected</div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal('woModal')">Cancel</button>
-      <button class="btn btn-primary" id="woSubmitBtn" onclick="submitWO()">Create WO</button>
-    </div>
-  </div>
-</div>
-
 <!-- Slide Panel (Job Detail) -->
 <div class="slide-backdrop" id="slideBackdrop" onclick="closeSlidePanel()"></div>
 <div class="slide-panel" id="slidePanel">
@@ -6331,11 +6278,12 @@ __swOpsStampAssets([
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 </script>
-<!-- Job work order (docs/job-work-order-screens.md): off unless ?wo=preview or localStorage sw_wo_preview = '1'. -->
+<!-- Job work order (docs/job-work-order-screens.md): on for office, every job type. ?wo=live does not hide it. -->
 <script>
 __swOpsStampAssets([
-  {t:'js', u:'shared/job-work-order.js?v=3'},
-  {t:'js', u:'modules/ops-job-work-order.js?v=3'}
+  {t:'js', u:'shared/job-work-order.js?v=4'},
+  {t:'js', u:'modules/ops-job-work-order.js?v=4'},
+  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
 </script>
 <!-- Paid close-out tags and Get Review ladder (docs/job-closeout-screens.md): off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
@@ -11358,7 +11306,7 @@ function openCalJobPopup(event, assignmentId) {
     h += '<div style="display:flex;gap:12px;margin-top:6px;padding-top:8px;border-top:1px solid var(--sw-border);font-size:12px;color:var(--sw-text-sec);">';
     h += '<span>' + (data.assignments || []).length + ' assignments</span>';
     h += '<span>' + (data.purchase_orders || []).length + ' POs</span>';
-    h += '<span>' + (data.work_orders || []).length + ' WOs</span>';
+    h += '<span>' + visibleOfficeWorkOrders(data.work_orders).length + ' WOs</span>';
     h += '</div>';
 
     h += '</div>';
@@ -11474,10 +11422,10 @@ function _buildCalActions(ev, assignmentId, confStatus, isLocked, isReady, readi
 // Helper: blocker fix button
 function getBlockerFixButton(key, jobId, primary, jobType) {
   var cls = primary ? 'btn-primary-action' : '';
-  // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+  // <job-work-order-route> every job type opens the job work order. The old crew form is not offered, including while ?wo=live is in the address.
   if (key === 'work_order' && window.JobWorkOrderOps && JobWorkOrderOps.createRoute(jobType) === 'job') return '<button class="' + cls + '" onclick="closeCalJobPopup();JobWorkOrderOps.openForJob(\'' + jobId + '\')">Open Work Order</button>';
   if (key === 'pos_created') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'money\')},300)">Create Materials PO</button>';
-  if (key === 'work_order') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'build\')},300)">Create Work Order</button>';
+  if (key === 'work_order') return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'build\')},300)">Open Work Order</button>';
   if (key && key.indexOf('_doc') !== -1) return '<button class="' + cls + '" onclick="closeCalJobPopup();openJobQuickView(\'' + jobId + '\');setTimeout(function(){showJobSubView(\'files\')},300)">Upload Document</button>';
   return '';
 }
@@ -12288,7 +12236,7 @@ function computeSubStage(j, status) {
     case 'processing':
       var hasPOs = j.po_count > 0;
       var hasCrew = j.assignment_count > 0;
-      var hasWO = j.wo_count > 0;
+      var hasWO = jobHasWorkOrder(j);
       if (hasPOs && hasCrew && hasWO) return 'Ready to Start';
       if (hasPOs && hasCrew) return 'Crew Assigned';
       if (hasCrew) return 'Crew Assigned';
@@ -12313,6 +12261,16 @@ var SUB_STAGE_ORDER = {
   in_progress: ['On Site'],
   complete: ['Needs Invoice', 'Awaiting Payment', 'Get Sign-off'],
 };
+
+// pipeline wo_count counts old crew rows only. A job work order on the job,
+// or a kind='job' row, is a work order for this hint.
+function jobHasWorkOrder(j) {
+  if (!j) return false;
+  if (j.wo_count > 0) return true;
+  var block = j.job_work_order;
+  if (block && block.work_order) return true;
+  return !!(j.work_order && String(j.work_order.kind || '').toLowerCase() === 'job');
+}
 
 function getNextAction(j) {
   var sub = computeSubStage(j, j.status);
@@ -12355,7 +12313,7 @@ function getNextAction(j) {
       var pMissing = [];
       if (j.po_count === 0) pMissing.push('POs');
       if (j.assignment_count === 0) pMissing.push('crew');
-      if (j.wo_count === 0) pMissing.push('work order');
+      if (!jobHasWorkOrder(j)) pMissing.push('work order');
       if (pMissing.length === 0) {
         result.hint = 'Everything ready \u2014 start the job';
         result.actions.push({ label: 'Start Job', onclick: "closeQuickView();changeJobStatus('" + j.id + "','in_progress')", primary: true });
@@ -12363,9 +12321,9 @@ function getNextAction(j) {
         result.hint = 'Still need: ' + pMissing.join(', ');
         if (j.po_count === 0) result.actions.push({ label: 'Create PO', onclick: "closeQuickView();openPOModal('" + j.id + "')", primary: true });
         else if (j.assignment_count === 0) result.actions.push({ label: 'Assign Crew', onclick: "closeQuickView();openJobDetail('" + j.id + "')", primary: true });
-        // <job-work-order-route> fencing and patio go to the job work order while ?wo=preview is on
+        // <job-work-order-route> every job type opens the job work order. Never the retired crew form.
         else if (window.JobWorkOrderOps && JobWorkOrderOps.createRoute(j.type) === 'job') result.actions.push({ label: 'Open Work Order', onclick: "closeQuickView();JobWorkOrderOps.openForJob('" + j.id + "')", primary: true });
-        else result.actions.push({ label: 'Create Work Order', onclick: "closeQuickView();openCreateWOModal('" + j.id + "')", primary: true });
+        else result.actions.push({ label: 'Open Work Order', onclick: "closeQuickView();openJobDetail('" + j.id + "')", primary: true });
         result.actions.push({ label: 'Start Job', onclick: "closeQuickView();changeJobStatus('" + j.id + "','in_progress')" });
       }
       break;
@@ -17199,7 +17157,8 @@ function renderKanbanCard(j, status) {
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
-  // <job-closeout-tags> fencing and patio close-out tags while ?closeout=preview is on
+  // <job-closeout-tags> fencing and patio close-out tags (while ?closeout=preview is on)
+  // and the live Review text switch
   if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
@@ -18063,33 +18022,76 @@ function renderPOTable(pos) {
   tbody.innerHTML = html;
 }
 
+// Office lists keep every row, including old kind='crew' work orders. Those
+// are read-only and labelled until the server retires them. Job work orders
+// are not in list_work_orders; the note above the table says where they are.
+function visibleOfficeWorkOrders(list) {
+  return (list || []).filter(function (wo) { return !!wo; });
+}
+
+function officeWoKindNote(wo) {
+  var C = window.JobWorkOrderCore;
+  if (C && C.retiringCrewLabel) return C.retiringCrewLabel(wo);
+  if (wo && String(wo.kind || '').toLowerCase() === 'crew') return 'Old crew work order (retiring)';
+  return '';
+}
+
+function isOfficeRetiringCrew(wo) {
+  return !!officeWoKindNote(wo);
+}
+
+// The gate's work order is the job work order. A crew row never satisfies it.
+function packetJobWorkOrder(data) {
+  data = data || {};
+  var block = data.job_work_order;
+  var fromBlock = block && block.work_order;
+  if (fromBlock && !isOfficeRetiringCrew(fromBlock)) return fromBlock;
+  var rows = data.work_orders || [];
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i] && String(rows[i].kind || '').toLowerCase() === 'job') return rows[i];
+  }
+  if (data.work_order && String(data.work_order.kind || '').toLowerCase() === 'job') return data.work_order;
+  return null;
+}
+
 async function loadWOs() {
+  if (window.OfficeWoFill) OfficeWoFill.paint();
+  var tbody = document.getElementById('woTableBody');
   try {
     var data = await opsFetch('list_work_orders');
-    renderWOTable(data.work_orders);
+    renderWOTable(visibleOfficeWorkOrders(data.work_orders));
   } catch (e) {
     console.error('loadWOs error:', e);
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-state" data-wo-list-empty>Work orders could not be read. Reopen this tab to try again.</td></tr>';
   }
 }
 
 function renderWOTable(wos) {
   var tbody = document.getElementById('woTableBody');
+  if (!tbody) return;
   if (!wos || wos.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No work orders yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state" data-wo-list-empty>No old crew work orders on this list. Job work orders open on each job page.</td></tr>';
     return;
   }
 
   var html = '';
   wos.forEach(function(wo) {
-    html += '<tr>';
-    html += '<td><strong>' + wo.wo_number + '</strong></td>';
-    html += '<td>' + (wo.trade_name || '-') + '</td>';
+    var retiring = isOfficeRetiringCrew(wo);
+    html += '<tr data-office-wo="' + escapeHtml(wo.id || '') + '"' + (retiring ? ' data-office-wo-retiring="1"' : '') + '>';
+    html += '<td><strong>' + escapeHtml(wo.wo_number || '') + '</strong>';
+    if (retiring) html += '<div data-office-wo-retiring>' + escapeHtml(officeWoKindNote(wo)) + '</div>';
+    html += '</td>';
+    html += '<td>' + escapeHtml(wo.trade_name || '-') + '</td>';
     html += '<td>' + (wo.job_id ? '<a href="#" onclick="openJobPeek(\'' + wo.job_id + '\');return false;">View</a>' : '-') + '</td>';
-    html += '<td><span class="status-badge ' + wo.status + '">' + wo.status + '</span></td>';
+    html += '<td><span class="status-badge ' + wo.status + '">' + escapeHtml(wo.status || '') + '</span></td>';
     html += '<td>' + fmtDate(wo.scheduled_date) + '</td>';
     html += '<td>' + (wo.sent_at ? fmtDate(wo.sent_at.slice(0, 10)) : '-') + '</td>';
     html += '<td>';
-    if (wo.status === 'draft') {
+    // A job work order is approved, not sent. Send stays only for a draft
+    // whose kind is absent: list_work_orders does not return kind='job' today,
+    // and the server refuses send_work_order for that kind.
+    var kind = String(wo.kind || '').toLowerCase();
+    if (!retiring && kind !== 'job' && wo.status === 'draft') {
       html += '<button class="btn btn-primary btn-sm" onclick="sendWO(\'' + wo.id + '\')">Send</button>';
     }
     html += '</td>';
@@ -20207,13 +20209,16 @@ function renderJobPeek(data) {
   }
 
   // WOs
-  if (data.work_orders && data.work_orders.length > 0) {
-    html += '<div class="panel-title" style="margin-top:16px;">Work Orders (' + data.work_orders.length + ')</div>';
-    data.work_orders.forEach(function(wo) {
-      html += '<div style="padding:8px 0; border-bottom:1px solid var(--sw-border); font-size:13px;">';
-      html += '<strong>' + wo.wo_number + '</strong>';
-      if (wo.trade_name) html += ' — ' + wo.trade_name;
-      html += ' <span class="status-badge ' + wo.status + '">' + wo.status + '</span>';
+  var slideWorkOrders = visibleOfficeWorkOrders(data.work_orders);
+  if (slideWorkOrders.length > 0) {
+    html += '<div class="panel-title" style="margin-top:16px;">Work Orders (' + slideWorkOrders.length + ')</div>';
+    slideWorkOrders.forEach(function(wo) {
+      var retiring = isOfficeRetiringCrew(wo);
+      html += '<div style="padding:8px 0; border-bottom:1px solid var(--sw-border); font-size:13px;" data-office-wo="' + escapeHtml(wo.id || '') + '"' + (retiring ? ' data-office-wo-retiring="1"' : '') + '>';
+      html += '<strong>' + escapeHtml(wo.wo_number || '') + '</strong>';
+      if (retiring) html += ' <span data-office-wo-retiring>' + escapeHtml(officeWoKindNote(wo)) + '</span>';
+      if (wo.trade_name) html += ' — ' + escapeHtml(wo.trade_name);
+      html += ' <span class="status-badge ' + wo.status + '">' + escapeHtml(wo.status || '') + '</span>';
       html += '</div>';
     });
   }
@@ -21122,7 +21127,7 @@ async function renderJarvisView(data) {
       { label: 'Notes', count: noteEvents.length, latest: noteEvents[0] && noteEvents[0].created_at, tab: 'overview' },
       { label: 'History', count: events.length, latest: events[0] && events[0].created_at, tab: 'history' },
       { label: 'Comms', count: commsEvents.length, latest: commsEvents[0] && commsEvents[0].occurred_at, tab: 'comms' },
-      { label: 'Files', count: documents.length + (data.work_orders || []).length, latest: filesLatest && filesLatest.created_at, tab: 'files' },
+      { label: 'Files', count: documents.length + visibleOfficeWorkOrders(data.work_orders).length, latest: filesLatest && filesLatest.created_at, tab: 'files' },
     ];
     html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">';
     evidence.forEach(function(e) {
@@ -22330,7 +22335,9 @@ function renderMakesafeOpsDetail(data) {
   // family field, so passing it as override squashes the j.metadata fallback).
   var typeLabel = getMakesafeTypeLabel(j);
   var docs = data.documents || [];
-  var workOrders = data.work_orders || [];
+  var allOfficeWorkOrders = visibleOfficeWorkOrders(data.work_orders);
+  var retiringCrewOrders = allOfficeWorkOrders.filter(isOfficeRetiringCrew);
+  var workOrders = allOfficeWorkOrders.filter(function(wo) { return !isOfficeRetiringCrew(wo); });
   var workOrderDocs = docs.filter(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; });
   var reports = getMakesafeReports(data);
   var report = reports.length ? reports[reports.length - 1] : null;
@@ -22395,6 +22402,8 @@ function renderMakesafeOpsDetail(data) {
   html += '</div>';
   html += '</div>';
 
+  html += '<div data-job-wo-overview></div>';
+
   html += renderMakesafeOpsExternalLinks(md);
 
   if (adminNotes.length) {
@@ -22415,7 +22424,7 @@ function renderMakesafeOpsDetail(data) {
 
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px;">';
 
-  html += '<div style="background:var(--sw-card);padding:14px;box-shadow:var(--sw-shadow);min-height:128px;">';
+  html += '<div style="background:var(--sw-card);padding:14px;box-shadow:var(--sw-shadow);min-height:128px;" data-makesafe-builder-wo>';
   html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Builder work order</div>';
   if (workOrders.length || workOrderDocs.length) {
     html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">Available</div>';
@@ -22424,6 +22433,10 @@ function renderMakesafeOpsDetail(data) {
   } else {
     html += '<div style="font-size:14px;font-weight:850;color:#F39C12;margin-bottom:6px;">Work order missing</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">No corresponding builder work order is attached yet.</div>';
+  }
+  if (retiringCrewOrders.length) {
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;" data-office-wo-retiring>Old crew work order (retiring)</div>';
+    retiringCrewOrders.slice(0, 3).forEach(function(wo) { html += '<div style="font-size:12px;color:var(--sw-text);margin-bottom:4px;" data-office-wo="' + escapeHtml(wo.id || '') + '" data-office-wo-retiring="1"><strong>' + escapeHtml(wo.wo_number || 'Work order') + '</strong>' + (wo.status ? ' · ' + escapeHtml(wo.status) : '') + '</div>'; });
   }
   html += '</div>';
 
@@ -22574,6 +22587,7 @@ function renderOverviewView(data) {
   var j = data.job;
   if (j.type === 'makesafe') {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
+    if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
     return;
   }
   // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below
@@ -22593,6 +22607,10 @@ function renderOverviewView(data) {
   if (j.client_email) html += '<a href="mailto:' + j.client_email + '" class="btn btn-secondary btn-sm" style="text-decoration:none;">&#9993; Email</a>';
   if (j.site_address) html += '<a href="https://maps.google.com/?q=' + encodeURIComponent((j.site_address||'') + (j.site_suburb ? ', ' + j.site_suburb : '')) + '" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none;">&#128205; Navigate</a>';
   html += '</div></div>';
+
+  // <job-wo-overview> office work order card. JobWorkOrderOps.paintOverview fills it.
+  html += '<div data-job-wo-overview></div>';
+  // </job-wo-overview>
 
   // Site Plan Image (between client card and job summary)
   if (j.scope_json && j.type !== 'miscellaneous') {
@@ -22654,7 +22672,8 @@ function renderOverviewView(data) {
     html += '<span style="font-size:13px;flex:1;">' + a.icon + ' ' + a.message + '</span>';
     html += '<span style="font-size:11px;color:var(--sw-mid);">&#8594;</span></div>';
   });
-  // <job-closeout-tags> the same close-out tags on the job page while ?closeout=preview is on
+  // <job-closeout-tags> the same close-out tags (preview only) and live Review text
+  // switch on the job page
   if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
   var nextStatuses = getNextStatuses(j.status, j.type);
   nextStatuses.forEach(function(s) {
@@ -22823,6 +22842,7 @@ function renderOverviewView(data) {
   if (evts.length > 5) html += '<div style="margin-top:6px;"><a href="#" onclick="event.preventDefault();showJobSubView(\x27history\x27)" style="font-size:11px;color:var(--sw-mid);">View full history &#8594;</a></div>';
   html += '</div>';
   document.getElementById('jdOverview').innerHTML = html;
+  if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
   if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
 
   // Load job actions async
@@ -23440,6 +23460,10 @@ function renderBuildView(data) {
   var j = data.job;
   var html = '';
 
+  // <job-work-order-panel> modules/ops-job-work-order.js; office, every job type. A trade role sees none of it. ?wo=live does not hide it.
+  if (window.JobWorkOrderOps) html += JobWorkOrderOps.buildTabHtml(data);
+  // </job-work-order-panel>
+
   // Miscellaneous jobs: show description + line items instead of scope tool
   if ((j.type === 'miscellaneous' || j.type === 'general') && j.pricing_json && j.pricing_json.source === 'quick_quote') {
     var pj = j.pricing_json;
@@ -23462,12 +23486,8 @@ function renderBuildView(data) {
     return;
   }
 
-  // <job-work-order-panel> modules/ops-job-work-order.js; '' unless the preview is on and the job has one (fencing, patio)
-  if (window.JobWorkOrderOps) html += JobWorkOrderOps.buildTabHtml(data);
-  // </job-work-order-panel>
-
-  // Embedded scope tool preview (3D/2D render)
-  if (j.type !== 'miscellaneous' && j.type !== 'general') {
+  // Embedded scope tool preview (3D/2D render). A make-safe has no patio scope.
+  if (j.type !== 'miscellaneous' && j.type !== 'general' && j.type !== 'makesafe') {
     var scopeToolUrl = j.type === 'fencing'
       ? 'https://marninms98-dotcom.github.io/fence-designer/'
       : 'https://marninms98-dotcom.github.io/patio/';
@@ -23536,15 +23556,18 @@ function renderBuildView(data) {
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">No assignments yet</div>';
   }
 
-  // Work Orders
-  if ((data.work_orders || []).length > 0) {
-    html += '<div style="font-size:14px;font-weight:700;margin-top:16px;margin-bottom:8px;">Work Orders (' + data.work_orders.length + ')</div>';
-    data.work_orders.forEach(function(wo) {
-      html += '<div style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:13px;display:flex;align-items:center;gap:8px;">';
+  // Work Orders. Old kind='crew' rows stay, read-only, labelled as retiring.
+  var buildWorkOrders = visibleOfficeWorkOrders(data.work_orders);
+  if (buildWorkOrders.length > 0) {
+    html += '<div style="font-size:14px;font-weight:700;margin-top:16px;margin-bottom:8px;">Work Orders (' + buildWorkOrders.length + ')</div>';
+    buildWorkOrders.forEach(function(wo) {
+      var retiring = isOfficeRetiringCrew(wo);
+      html += '<div data-office-wo="' + escapeHtml(wo.id || '') + '"' + (retiring ? ' data-office-wo-retiring="1"' : '') + ' style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:13px;display:flex;align-items:center;gap:8px;">';
       html += '<div style="flex:1;">';
-      html += '<strong>' + (wo.wo_number || '') + '</strong>';
-      if (wo.trade_name) html += ' — ' + wo.trade_name;
-      html += ' <span class="status-badge ' + wo.status + '">' + wo.status + '</span>';
+      html += '<strong>' + escapeHtml(wo.wo_number || '') + '</strong>';
+      if (retiring) html += ' <span data-office-wo-retiring>' + escapeHtml(officeWoKindNote(wo)) + '</span>';
+      if (wo.trade_name) html += ' — ' + escapeHtml(wo.trade_name);
+      html += ' <span class="status-badge ' + wo.status + '">' + escapeHtml(wo.status || '') + '</span>';
       html += '</div>';
       html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="viewWOModalById(\'' + wo.id + '\')">View</button>';
       html += '</div>';
@@ -23563,7 +23586,7 @@ function renderBuildView(data) {
 function viewWOModalById(woId) {
   var data = _currentJobData;
   if (!data) return;
-  var wo = (data.work_orders || []).find(function(w) { return w.id === woId; });
+  var wo = visibleOfficeWorkOrders(data.work_orders).find(function(w) { return w.id === woId; });
   if (!wo) return;
   viewWOModal(wo);
 }
@@ -24458,17 +24481,19 @@ function renderFilesView(data) {
     });
   }
 
-  // Work Orders
-  var workOrders = data.work_orders || [];
+  // Work Orders. Old kind='crew' rows stay, read-only, labelled as retiring.
+  var workOrders = visibleOfficeWorkOrders(data.work_orders);
   if (workOrders.length > 0) {
     html += '<div style="font-size:14px;font-weight:700;margin-top:16px;margin-bottom:8px;">Work Orders (' + workOrders.length + ')</div>';
     workOrders.forEach(function(wo) {
-      html += '<div style="padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-light)">';
+      var retiring = isOfficeRetiringCrew(wo);
+      html += '<div data-office-wo="' + escapeHtml(wo.id || '') + '"' + (retiring ? ' data-office-wo-retiring="1"' : '') + ' style="padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-light)">';
       html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
-      html += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:2px 6px;border-radius:3px;background:#F59E0B20;color:#F59E0B">work order</span>';
+      html += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:2px 6px;border-radius:3px;background:#F59E0B20;color:#F59E0B">' + (retiring ? 'old crew work order' : 'work order') + '</span>';
       html += '<strong style="font-size:13px">' + escapeHtml(wo.wo_number) + '</strong>';
-      html += '<span class="status-badge ' + wo.status + '" style="font-size:10px;margin-left:auto">' + wo.status + '</span>';
+      html += '<span class="status-badge ' + wo.status + '" style="font-size:10px;margin-left:auto">' + escapeHtml(wo.status || '') + '</span>';
       html += '</div>';
+      if (retiring) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;" data-office-wo-retiring>' + escapeHtml(officeWoKindNote(wo)) + '</div>';
       if (wo.scheduled_date) {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px">Scheduled: ' + new Date(wo.scheduled_date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + '</div>';
       }
@@ -24484,8 +24509,12 @@ function renderFilesView(data) {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px">Trade: ' + escapeHtml(wo.trade_name) + '</div>';
       }
       html += '<div style="display:flex;gap:6px;margin-top:8px">';
-      html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="generateRichWorkOrder(_currentJobData)">View Full WO</button>';
-      html += '<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="saveWOToFiles(_currentJobData && _currentJobData.job.id)">Save to Files</button>';
+      if (retiring) {
+        html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="viewWOModalById(\'' + wo.id + '\')">View</button>';
+      } else {
+        html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="generateRichWorkOrder(_currentJobData)">View Full WO</button>';
+        html += '<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 8px;" onclick="saveWOToFiles(_currentJobData && _currentJobData.job.id)">Save to Files</button>';
+      }
       html += '</div>';
       html += '</div>';
     });
@@ -25105,7 +25134,7 @@ async function showHoverPopover(anchor, jobId) {
     html += '<div style="display:flex;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--sw-border);font-size:12px;color:var(--sw-text-sec);">';
     html += '<span>' + (data.assignments || []).length + ' assignments</span>';
     html += '<span>' + (data.purchase_orders || []).length + ' POs</span>';
-    html += '<span>' + (data.work_orders || []).length + ' WOs</span>';
+    html += '<span>' + visibleOfficeWorkOrders(data.work_orders).length + ' WOs</span>';
     html += '</div>';
 
     var alerts = evaluateJobAlerts(data);
@@ -25561,7 +25590,7 @@ async function openJobQuickView(jobId) {
     html += '<div style="display:flex;gap:12px;margin-top:12px;padding-top:8px;border-top:1px solid var(--sw-border);font-size:12px;color:var(--sw-text-sec);">';
     html += '<span>' + (data.assignments || []).length + ' assignments</span>';
     html += '<span>' + (data.purchase_orders || []).length + ' POs</span>';
-    html += '<span>' + (data.work_orders || []).length + ' WOs</span>';
+    html += '<span>' + visibleOfficeWorkOrders(data.work_orders).length + ' WOs</span>';
     html += '</div>';
 
     // Alerts preview
@@ -25584,7 +25613,7 @@ async function openJobQuickView(jobId) {
           revision: data.revision || null,
           document: data.document || null,
           purchase_orders: data.purchase_orders || [],
-          work_order: data.work_order || (data.work_orders && data.work_orders[0]) || null,
+          work_order: packetJobWorkOrder(data),
           media: data.media || [],
           events: data.events || [],
           customer: { name: j.client_name, email: j.client_email, mobile: j.client_phone, ghl_contact_id: j.ghl_contact_id || null },
@@ -25631,7 +25660,9 @@ async function openJobQuickView(jobId) {
 
     // Footer — context-aware "What's Next" action bar
     var footerHtml = '';
-    var action = getNextAction(j);
+    var actionJob = j;
+    if (data.job_work_order && !j.job_work_order) actionJob = Object.assign({}, j, { job_work_order: data.job_work_order });
+    var action = getNextAction(actionJob);
     if (action && action.stage) {
       footerHtml += '<div class="next-step-bar">';
       footerHtml += '<div class="next-step-label"><span class="next-step-stage">' + action.stage + '</span>';
@@ -26278,7 +26309,6 @@ function selectJobPicker(prefix, jobId) {
   // Picker-specific post-select hooks
   if (prefix === 'po') onPOJobSelect(jobId);
   if (prefix === 'inv') onInvJobSelect(jobId);
-  if (prefix === 'wo') woFormSyncJobWorkOrder(jobId);
 }
 
 // Legacy wrappers for PO modal (existing code calls these)
@@ -26333,116 +26363,21 @@ function onPOFulfilmentChange(type) {
   }
 }
 
-var _woScopeItems = [];
-
 async function openWOModal() {
-  document.getElementById('woModal').classList.add('active');
-  document.getElementById('woJobSearch').value = '';
-  document.getElementById('woJobSelect').value = '';
-  document.getElementById('woScopeItems').innerHTML = 'No job selected';
-  document.getElementById('woSubmitBtn').disabled = false;
-  _woScopeItems = [];
-  await loadPOJobList();
-}
-
-// <job-work-order-route> The job this old office form is about, when it goes
-// to the job work order instead (a fencing or patio job while ?wo=preview is
-// on, modules/ops-job-work-order.js); null for every other job, which keeps
-// this form exactly as before (repairs, make-safe, builder crew work orders).
-function woFormJobWorkOrderJob(jobId) {
-  if (!jobId || !window.JobWorkOrderOps) return null;
-  var job = _poJobList.find(function(j) { return String(j.id) === String(jobId); });
-  return job && JobWorkOrderOps.createRoute(job.type) === 'job' ? job : null;
-}
-
-// Show the form's notice and hold Create WO for such a job (true), or lift
-// both once another job is picked (false). Preview off: never changes a thing.
-function woFormSyncJobWorkOrder(jobId) {
-  var container = document.getElementById('woScopeItems');
-  var submitBtn = document.getElementById('woSubmitBtn');
-  var job = woFormJobWorkOrderJob(jobId);
-  if (job) {
-    _woScopeItems = [];
-    submitBtn.disabled = true;
-    container.innerHTML = JobWorkOrderOps.formNoticeHtml(job);
-    return true;
-  }
-  if (submitBtn.disabled) {
-    submitBtn.disabled = false;
-    _woScopeItems = [];
-    container.innerHTML = 'No job selected';
-  }
-  return false;
+  // The per-trade form that wrote kind='crew' is gone. This does not post.
+  if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
 async function openCreateWOModal(jobId) {
-  if (jobId && window.JobWorkOrderOps && JobWorkOrderOps.previewOn()) {
-    await loadPOJobList();
-    if (woFormJobWorkOrderJob(jobId)) { JobWorkOrderOps.openForJob(jobId); return; }
+  if (jobId && window.JobWorkOrderOps && typeof JobWorkOrderOps.openForJob === 'function') {
+    await JobWorkOrderOps.openForJob(jobId);
+    return;
   }
-  await openWOModal();
-  if (jobId) {
-    selectJobPicker('wo', jobId);
-    autoWOFromScope(jobId);
-  }
+  if (typeof showToast === 'function') showToast('Work orders are opened on the job page.', 'info');
 }
 
-async function autoWOFromScope(jobId) {
-  var container = document.getElementById('woScopeItems');
-  if (woFormSyncJobWorkOrder(jobId)) return;
-  if (!jobId) { container.innerHTML = 'No job selected'; _woScopeItems = []; return; }
-  container.innerHTML = '<span style="color:var(--sw-text-sec);">Loading scope...</span>';
-  try {
-    var data = await opsFetch('scope_to_po', { jobId: jobId });
-    _woScopeItems = [];
-    var labour = data.labour || 0;
-    var desc = data.job_description || data.type || 'Job';
-    if (labour > 0) {
-      _woScopeItems.push({ description: 'Labour \u2014 ' + desc, quantity: 1, unit: 'job', unit_price: labour });
-    }
-    (data.materials || []).forEach(function(m) {
-      _woScopeItems.push({ description: m.description, quantity: m.quantity || 1, unit: m.unit || 'ea', unit_price: 0 });
-    });
-    if (_woScopeItems.length === 0) {
-      container.innerHTML = '<span style="color:var(--sw-text-sec);">No scope data available</span>';
-      return;
-    }
-    renderWOScopeItems();
-    // Auto-fill price from labour
-    if (labour > 0) {
-      var priceEl = document.getElementById('woPrice');
-      if (!priceEl.value) priceEl.value = labour.toFixed(2);
-    }
-  } catch(e) {
-    console.error('autoWOFromScope error:', e);
-    container.innerHTML = '<span style="color:var(--sw-text-sec);">Could not load scope</span>';
-  }
-}
-
-function renderWOScopeItems() {
-  var container = document.getElementById('woScopeItems');
-  if (_woScopeItems.length === 0) { container.innerHTML = '<span style="color:var(--sw-text-sec);">No items</span>'; return; }
-  var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-  html += '<tr style="border-bottom:1px solid var(--sw-border);color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">';
-  html += '<th style="text-align:left;padding:4px 0;">Description</th><th style="width:50px;text-align:center;padding:4px;">Qty</th><th style="width:50px;text-align:center;padding:4px;">Unit</th><th style="width:70px;text-align:right;padding:4px;">Price</th><th style="width:24px;"></th></tr>';
-  _woScopeItems.forEach(function(item, i) {
-    var isLabour = i === 0 && item.unit_price > 0;
-    var bold = isLabour ? 'font-weight:600;color:var(--sw-text);' : '';
-    html += '<tr style="border-bottom:1px solid var(--sw-border);' + bold + '">';
-    html += '<td style="padding:6px 0;">' + item.description + '</td>';
-    html += '<td style="text-align:center;padding:6px 4px;">' + item.quantity + '</td>';
-    html += '<td style="text-align:center;padding:6px 4px;">' + item.unit + '</td>';
-    html += '<td style="text-align:right;padding:6px 4px;">' + (item.unit_price > 0 ? '$' + item.unit_price.toFixed(2) : '\u2014') + '</td>';
-    html += '<td style="text-align:center;cursor:pointer;color:var(--sw-text-sec);" onclick="removeWOScopeItem(' + i + ')">\u00d7</td>';
-    html += '</tr>';
-  });
-  html += '</table>';
-  container.innerHTML = html;
-}
-
-function removeWOScopeItem(idx) {
-  _woScopeItems.splice(idx, 1);
-  renderWOScopeItems();
+async function autoWOFromScope() {
+  // The crew form's scope prefill is gone. It does not read scope_to_po.
 }
 
 async function loadSupplierList() {
@@ -26953,27 +26888,7 @@ async function switchPOModalTab(tab) {
 }
 
 async function submitWO() {
-  var jobId = document.getElementById('woJobSelect').value;
-  if (!jobId) { alert('Please select a job.'); return; }
-  if (woFormSyncJobWorkOrder(jobId)) return;
-
-  try {
-    var priceVal = document.getElementById('woPrice').value;
-    await opsPost('create_work_order', {
-      job_id: jobId,
-      trade_name: document.getElementById('woTradeName').value || null,
-      trade_phone: document.getElementById('woTradePhone').value || null,
-      trade_email: document.getElementById('woTradeEmail').value || null,
-      scheduled_date: document.getElementById('woScheduledDate').value || null,
-      price: priceVal ? parseFloat(priceVal) : null,
-      special_instructions: document.getElementById('woInstructions').value || null,
-      scope_items: (typeof _woScopeItems !== 'undefined' && _woScopeItems.length) ? _woScopeItems : [],
-    });
-    closeModal('woModal');
-    loadWOs();
-  } catch (e) {
-    alert('Failed to create work order: ' + e.message);
-  }
+  // Does not post create_work_order. The form that wrote kind='crew' is gone.
 }
 
 // ── Supplier Quote Scanner ──

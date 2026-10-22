@@ -4987,6 +4987,7 @@ __swOpsStampAssets([
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <div class="section-heading">Work Orders</div>
         </div>
+        <div id="officeWoFill" data-office-wo-fill-host></div>
         <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders open on each job page. Old crew work orders stay listed here, read-only, until they are retired.</div>
         <div class="data-table-wrap">
           <table class="data-table" id="woTable">
@@ -6281,7 +6282,8 @@ __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 <script>
 __swOpsStampAssets([
   {t:'js', u:'shared/job-work-order.js?v=4'},
-  {t:'js', u:'modules/ops-job-work-order.js?v=4'}
+  {t:'js', u:'modules/ops-job-work-order.js?v=4'},
+  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
 </script>
 <!-- Paid close-out tags and Get Review ladder (docs/job-closeout-screens.md): off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
@@ -18053,6 +18055,7 @@ function packetJobWorkOrder(data) {
 }
 
 async function loadWOs() {
+  if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {
     var data = await opsFetch('list_work_orders');

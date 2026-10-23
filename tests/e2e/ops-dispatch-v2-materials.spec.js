@@ -10,7 +10,7 @@
 //    email = a box whose sending is blocked), lines moved by drag or by the
 //    Move to box, and the main supplier tick on a fencing job.
 //  - Slice 5: Make email holds an editable email (From fixed as admin@),
-//    one open email per box, the TEST copy first, Send now behind a confirm,
+//    one open email per box, an optional TEST copy, Send now behind a confirm,
 //    a send that may have gone needing confirm_resend, a sent-but-not-noted
 //    email never offered again, and sent lines locked.
 //  - The phone width (390) has no sideways scroll.
@@ -315,7 +315,7 @@ function fakeV2(seed = {}) {
         m.test = { sent_at: new Date(clock + 500).toISOString(), sent_to: ADMIN, sent_by_email: 'shaun@secureworkswa.com.au' };
         return { success: true, test: true, sent_to: ADMIN, recorded: true, email: emailOut(m) };
       }
-      if (!fake.testDone) return no(409, 'test_send_first');
+      // The test copy is optional (Shaun's ruling, 23 Oct): no refusal here.
       const outcome = fake.sendOutcome.shift() || 'sent';
       if (outcome === 'unknown') {
         m.status = 'send_unknown';
@@ -742,12 +742,14 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     expect(writes().map((c) => c.action)).toEqual(['dispatch_v2_make_email', 'dispatch_v2_make_email', 'dispatch_v2_discard_email']);
   });
 
-  test('Send now stays off until the first test copy; the test confirm is marked TEST ONLY and sends test:true once, to admin@ only', async ({ page }) => {
+  test('Send now is open straight away; the optional test confirm is marked TEST ONLY and sends test:true once, to admin@ only', async ({ page }) => {
     const fake = fakeV2(SPLIT());
     const { mat, writes, modal } = await boot(page, fake);
     const acacia = await makeHeld(mat, 'Acacia Steel', '2026-11-04');
-    await expect(acacia.locator('[data-dpc-v2="send"]')).toBeDisabled();
-    await expect(acacia.locator('.dpc-v2-warn', { hasText: 'Test first.' })).toContainText('Send now stays off until one test copy has gone to admin@.');
+    // No test copy has gone, and Send now is still open (Shaun's ruling: the test is not compulsory).
+    await expect(acacia.locator('[data-dpc-v2="send"]')).toBeEnabled();
+    await expect(acacia).not.toContainText('Test first.');
+    await expect(acacia.locator('.dpc-v2-hint', { hasText: 'A test copy is optional.' })).toHaveText('A test copy is optional. It goes to admin@ only, marked TEST ONLY; the supplier gets nothing.');
     await expect(acacia.locator('[data-dpc-v2="test"] .dpc-v2-testtag')).toHaveText('Test');
 
     await acacia.locator('[data-dpc-v2="test"]').click();
@@ -770,9 +772,10 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     await expect(modal).toHaveCount(0);
     const sends = writes().filter((c) => c.action === 'dispatch_v2_send_email');
     expect(sends.map((c) => c.body)).toEqual([{ email_id: EID(1), expected_updated_at: fake.jobs['job-f1'].emails[0].updated_at, test: true, confirm_resend: false, operator_email: expect.any(String) }]);
-    await expect(acacia).toContainText('Test copy sent to admin@secureworkswa.com.au only. Check it in admin@, then press Send now.');
+    await expect(acacia).toContainText('Test copy sent to admin@secureworkswa.com.au only. Check it in admin@, then press Send now when it looks right.');
     await expect(acacia.locator('[data-dpc-v2="send"]')).toBeEnabled();
-    await expect(acacia.locator('.dpc-v2-warn', { hasText: 'Test first.' })).toHaveCount(0);
+    await expect(acacia.locator('.dpc-v2-hint', { hasText: 'A test copy is optional.' })).toHaveCount(0);
+    await expect(acacia.locator('.dpc-v2-hint', { hasText: 'Test copy sent to' })).toBeVisible();
     // The email is still held: the test sent nothing to the supplier.
     expect(fake.jobs['job-f1'].emails[0].status).toBe('draft');
   });
@@ -781,7 +784,7 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     const seed = SPLIT();
     seed['job-f1'].photos = [{ id: PID(50), supplier_id: SID(1), file_name: 'site-list.jpg', content_type: 'image/jpeg', size_bytes: 812345, added_at: '2026-10-23T00:00:00.000Z' }];
     const fake = fakeV2(seed);
-    fake.testDone = true;
+    // No test copy first: the send does not need one.
     fake.n.photo = 50;
     const { mat, writes, modal } = await boot(page, fake);
     const acacia = await makeHeld(mat, 'Acacia Steel', '2026-11-04');

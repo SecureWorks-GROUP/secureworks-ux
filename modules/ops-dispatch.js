@@ -71,9 +71,9 @@
  * _add_supplier, _remove_supplier, _set_main_supplier, _upload_photo,
  * _move_photo, _delete_photo, _make_email, _save_email, _discard_email and
  * dispatch_v2_send_email. Only the send sends, and only from the Send button
- * inside the confirm ("Send this order to <Supplier>?"). The first send ever
- * must be a TEST copy to admin@ (the server refuses a supplier send until
- * then). A send that may have gone is sent again only with confirm_resend
+ * inside the confirm ("Send this order to <Supplier>?"). A TEST copy to
+ * admin@ is optional (Shaun's ruling, 23 Oct): Send now is open straight
+ * away, still behind its confirm. A send that may have gone is sent again only with confirm_resend
  * after a person checked admin@ Sent Items; one that went but was not noted
  * is never offered again. Never called: create_po, update_po, email_po,
  * push_po_to_xero, send-po-email, update_supplier_email and sync_suppliers,
@@ -3637,9 +3637,9 @@
   //      use the line's "Move to" box, which works on a phone).
   //   3. Make email: a held email in Shaun's template, From admin@, To and CC
   //      from the app-kept approved list. Every field can be edited.
-  //   4. Send now asks "Send this order to <Supplier>?" first. The very first
-  //      send must be a TEST copy to admin@ (Shaun's rule), and the server
-  //      refuses a supplier send until one has gone.
+  //   4. Send now asks "Send this order to <Supplier>?" first. A TEST copy
+  //      to admin@ (its own TEST ONLY confirm) can be sent before it, but is
+  //      not required (Shaun's ruling on the preview, 23 Oct).
   // One email per supplier box at a time. Nothing here makes a purchase order:
   // v2 has none. Every read and write is an ops-api dispatch_v2_* action
   // (secureworks-backend contract: Dispatch v2 supplier order emails). Each
@@ -4474,11 +4474,6 @@
         paintV2If(jobId);
         return;
       }
-      if (mode === 'real' && !e.d.testDone) {
-        e.msg[key] = { bad: true, text: 'Send a test copy to admin@ first. Dispatch sends to a supplier only after one test has gone to our own address.' };
-        paintV2If(jobId);
-        return;
-      }
       state.v2m.modal = { jobId: jobId, emailId: emailId, mode: mode, busy: false, msg: null };
       paintV2Modal();
       refocus('[data-dpc-v2="modal-go"]');
@@ -4523,7 +4518,7 @@
       paintV2Modal();
       if (test) {
         e.d.testDone = true;
-        e.msg[key] = { text: 'Test copy sent to ' + (text(resp.sent_to) || V2_FROM) + ' only. Check it in admin@, then press Send now.' };
+        e.msg[key] = { text: 'Test copy sent to ' + (text(resp.sent_to) || V2_FROM) + ' only. Check it in admin@, then press Send now when it looks right.' };
       } else if (resp.recorded === false) {
         // It went, but noting it failed: never offer a second send of it.
         state.v2m.unrecorded[emailId] = true;
@@ -4540,7 +4535,8 @@
       var code = err && err.code;
       var stay = null; // a line in the confirm, which stays open
       var after = null; // a line on the box once the confirm closes
-      if (code === 'test_send_first') stay = 'Send a test copy to admin@ first. Dispatch sends to a supplier only after one test has gone to our own address.';
+      // An older server can still ask for the test copy first.
+      if (code === 'test_send_first') stay = 'The server still asks for a test copy to admin@ before this send. Send a test copy, then Send now.';
       else if (code === 'no_approved_email') stay = 'This supplier has no approved order email any more, so Dispatch cannot send to it. Ask Shaun.';
       else if (code === 'order_lines_changed') stay = 'The lines in this box changed after the email was made. Go back, press Rebuild from the lines, check the email, then send.';
       else if (code === 'email_details_missing') stay = 'Fill in the ' + v2MissingWords(v2Arr(err.body && err.body.missing).length ? v2Arr(err.body.missing) : ['date']) + ' in the email first.';
@@ -4865,14 +4861,14 @@
       h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-v2="' + (rebuild ? 'rebuild-go' : 'discard-go') + '" data-dpc-v2-id="' + id + '">' + (rebuild ? 'Rebuild' : 'Discard') + '</button>';
       h += '<button type="button" data-dpc-v2="ask-no">Keep it</button></div></div>';
     }
-    var testDone = d.testDone;
+    // The test copy is optional: Send now is open straight away, behind its confirm.
     h += '<div class="dpc-actions dpc-v2-sendrow">';
     h += '<button type="button" class="dpc-v2-testbtn" data-dpc-v2="test" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '><span class="dpc-v2-testtag">Test</span> Send a test copy to admin@</button>';
-    h += '<button type="button" class="dpc-primary" data-dpc-v2="send" data-dpc-v2-id="' + id + '"' + (busy || !testDone || !!b.blocked ? ' disabled' : '') + '>Send now</button>';
+    h += '<button type="button" class="dpc-primary" data-dpc-v2="send" data-dpc-v2-id="' + id + '"' + (busy || !!b.blocked ? ' disabled' : '') + '>Send now</button>';
     h += '<button type="button" data-dpc-v2="rebuild" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '>Rebuild from the lines</button>';
     h += '<button type="button" data-dpc-v2="discard" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '>Discard</button>';
     h += '</div>';
-    if (!testDone) h += '<p class="dpc-v2-warn" role="note"><strong>Test first.</strong> Send now stays off until one test copy has gone to admin@. The test goes to admin@ only, marked TEST ONLY; the supplier gets nothing.</p>';
+    if (!m.test) h += '<p class="dpc-v2-hint">A test copy is optional. It goes to admin@ only, marked TEST ONLY; the supplier gets nothing.</p>';
     h += '<p class="dpc-v2-hint">One email per supplier at a time. Lines added to this box now need Rebuild from the lines, or go on the next email.</p>';
     return h + '</div>';
   }

@@ -307,3 +307,140 @@ test.describe('Dispatch v2: one Emails panel for order emails and supplier repli
     expect(await page.evaluate(() => localStorage.getItem('sw_dispatch_mail_open'))).toBe('1');
   });
 });
+
+// ── Deliveries and install: the v1 table, kept ─────────────────────────────
+
+// One purchase order made outside Dispatch on SWF-930001, and a v1
+// "not ordered yet" row, which v2 leaves out (a v2 box is ordered by email).
+const PO_ROW = (over) => Object.assign({
+  kind: 'order', purchase_order_id: 'po-1', po_number: 'PO-3001', supplier_name: 'Plain Hardware', made_in_dispatch: false, status: 'sent',
+  updated_at: '2026-10-22T03:00:00.000Z',
+  delivery: { step: 1, expected: '2026-10-27', expected_editable: true, confirmed: { state: 'waiting', date: null, by_hand: false, set_by: null, set_at: null }, sighted: null },
+}, over);
+const ARRIVAL = (orders) => ({
+  job_id: 'job-f1', install: null, installs: [], arrival_read: 'ok',
+  arrival: { today: '2026-10-23', install_day: '2026-10-30', orders, counts: { orders: orders.length, sent: 1, confirmed: 0, late: 0 }, all_confirmed_in_time: false },
+});
+const BOX_ORDER = { key: `box:${SID(2)}`, source: 'supplier_box', supplier_id: SID(2), supplier_name: 'Banksia Roofing', order_sent: true, sent_at: '2026-10-20T02:00:00Z',
+  delivery_date: '2026-10-28', date_source: 'requested', date_confirmed: false, mark: 'ring', flag: null };
+const PO_ORDER = { key: 'po:po-1', source: 'other_order', supplier_id: null, supplier_name: 'Plain Hardware', order_sent: true, sent_at: null,
+  delivery_date: '2026-10-27', date_source: 'order', date_confirmed: false, mark: 'ring', flag: null };
+
+// The stub keeps the order's delivery block, as dispatch_deliveries.ts answers.
+function delivApi() {
+  const row = PO_ROW();
+  let n = 0;
+  const stamp = () => { n += 1; return `2026-10-23T02:00:${String(n).padStart(2, '0')}.000Z`; };
+  const answer = () => ({ success: true, order: { id: 'po-1', updated_at: row.updated_at, status: row.status, delivery: JSON.parse(JSON.stringify(row.delivery)) },
+    deliveries: { counted: 1, sighted: row.delivery.sighted ? 1 : 0, all_sighted: !!row.delivery.sighted } });
+  return {
+    row,
+    api: {
+      pipeline: () => ({ columns: { accepted: [Object.assign({}, JOBS.f1, { deliveries_orders_total: 1, deliveries_orders_sighted: 0 }), JOBS.p1] }, total: 2, dispatch_materials: 'ok', dispatch_deliveries: 'ok' }),
+      dispatch_materials: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? OLD() : OLD({
+        orders: [{ id: 'po-1', po_number: 'PO-3001', supplier_name: 'Plain Hardware', status: 'sent', lines: [] }],
+        deliveries: { rows: [JSON.parse(JSON.stringify(row)), { kind: 'not_ordered', supplier_id: SID(2), supplier_name: 'Banksia Roofing' }], counted: 1, sighted: row.delivery.sighted ? 1 : 0, all_sighted: false },
+      })),
+      dispatch_arrival: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? ARRIVAL([]) : ARRIVAL([BOX_ORDER, Object.assign({}, PO_ORDER, { delivery_date: row.delivery.expected })])),
+      dispatch_delivery_set_expected: (url, body) => {
+        if (body.expected_updated_at !== row.updated_at) return { status: 409, body: { error: 'changed', code: 'order_changed' } };
+        row.delivery.expected = body.delivery_date; row.updated_at = stamp(); return answer();
+      },
+      dispatch_delivery_set_confirmed: (url, body) => {
+        if (body.expected_updated_at !== row.updated_at) return { status: 409, body: { error: 'changed', code: 'order_changed' } };
+        row.delivery.confirmed = body.confirmed_delivery_date
+          ? { state: 'date', date: body.confirmed_delivery_date, by_hand: true, set_by: 'Shaun', set_at: '2026-10-23T02:00:00.000Z' }
+          : { state: 'waiting', date: null, by_hand: false, set_by: null, set_at: null };
+        row.delivery.step = body.confirmed_delivery_date ? 2 : 1;
+        row.updated_at = stamp(); return answer();
+      },
+      dispatch_delivery_mark_sighted: (url, body) => {
+        if (body.expected_updated_at !== row.updated_at) return { status: 409, body: { error: 'changed', code: 'order_changed' } };
+        row.delivery.sighted = body.sighted ? { at: '2026-10-23T03:00:00.000Z', by: 'Shaun' } : null;
+        row.delivery.step = body.sighted ? 3 : 2;
+        row.updated_at = stamp(); return answer();
+      },
+    },
+  };
+}
+
+test.describe('Dispatch v2: Deliveries and install, kept from v1', () => {
+  test('a purchase order records its expected date, confirmed date and sighting, each once, and the Arrival line is read again', async ({ page }) => {
+    const dv = delivApi();
+    const { root, of, writes } = await boot(page, { api: dv.api });
+    const sched = root.locator('[data-dpc-region="sched"]');
+    await expect(sched.locator('h3')).toHaveText('Deliveries and install');
+    const po = sched.locator('[data-dpc-deliv-row="po-1"]');
+    await expect(po).toContainText('Plain Hardware');
+    await expect(po).toContainText('PO-3001 · Made outside Dispatch');
+    // v1's "not ordered yet" rows are left out.
+    await expect(sched).not.toContainText('Not ordered yet');
+    await expect(sched.locator('[data-dpc-deliv-expected="po-1"]')).toHaveValue('2026-10-27');
+    await expect(root.locator('[data-dpc-deliv-rail]')).toHaveText('0 of 1 orders sighted on site.');
+    const arrivalReads = of('dispatch_arrival').length;
+
+    // The expected date: saved when the box is left.
+    await sched.locator('[data-dpc-deliv-expected="po-1"]').fill('2026-10-29');
+    await sched.locator('h3').click();
+    await expect.poll(() => writes().length).toBe(1);
+    expect(writes()[0]).toMatchObject({ action: 'dispatch_delivery_set_expected', body: { purchase_order_id: 'po-1', expected_updated_at: '2026-10-22T03:00:00.000Z', delivery_date: '2026-10-29' } });
+    await expect.poll(() => of('dispatch_arrival').length).toBe(arrivalReads + 1);
+    await expect(sched.locator('[data-dpc-deliv-expected="po-1"]')).toHaveValue('2026-10-29');
+
+    // The confirmed date, by hand: opening the line sends nothing.
+    await po.locator('[data-dpc-deliv-confirm]').click();
+    expect(writes()).toHaveLength(1);
+    await sched.locator('[data-dpc-deliv-edit-date]').fill('2026-10-30');
+    await sched.locator('[data-dpc-deliv-edit="save"]').click();
+    await expect(po).toContainText('Set by Shaun');
+    expect(writes()[1]).toMatchObject({ action: 'dispatch_delivery_set_confirmed', body: { purchase_order_id: 'po-1', expected_updated_at: '2026-10-23T02:00:01.000Z', confirmed_delivery_date: '2026-10-30', via: 'deliveries' } });
+
+    // Mark sighted, then the rail line counts it.
+    await po.locator('[data-dpc-deliv-sight]').click();
+    await expect(po.locator('[data-dpc-deliv-unsight="ask"]')).toBeVisible();
+    expect(writes()[2]).toMatchObject({ action: 'dispatch_delivery_mark_sighted', body: { purchase_order_id: 'po-1', sighted: true } });
+    await expect(root.locator('[data-dpc-deliv-rail]')).toHaveText('Every order on this job is sighted on site.');
+    // Not sighted asks first; Keep sends nothing.
+    await po.locator('[data-dpc-deliv-unsight="ask"]').click();
+    await sched.locator('[data-dpc-deliv-unsight="keep"]').click();
+    expect(writes()).toHaveLength(3);
+    expect(writes().map((c) => c.action)).toEqual(['dispatch_delivery_set_expected', 'dispatch_delivery_set_confirmed', 'dispatch_delivery_mark_sighted']);
+    expect(await sched.innerText()).not.toMatch(/[–—]/);
+  });
+
+  test('the boxes ordered by email are listed read only, with where their date came from', async ({ page }) => {
+    const dv = delivApi();
+    const { root } = await boot(page, { api: dv.api });
+    const sched = root.locator('[data-dpc-region="sched"]');
+    const box = sched.locator(`[data-dpc-deliv-box="${SID(2)}"]`);
+    await expect(box).toContainText('Banksia Roofing');
+    await expect(box).toContainText('Order email sent');
+    await expect(box).toContainText('Asked for in our email');
+    await expect(box).toContainText('Waiting on supplier');
+    await expect(box).toContainText('Not recorded here');
+    await expect(box.locator('input, button')).toHaveCount(0);
+    await expect(sched.locator('.dpc-deliv-boxnote')).toHaveText('Orders sent by email from Materials take their dates from supplier replies (Accept in Emails). A date or a sighting cannot be set by hand on them yet.');
+  });
+
+  test('an order changed somewhere else says so and shows the latest; a failed read offers Retry', async ({ page }) => {
+    const dv = delivApi();
+    let down = false;
+    const api = Object.assign({}, dv.api, {
+      dispatch_materials: (url, body) => (down ? { status: 500, body: { error: 'down' } } : dv.api.dispatch_materials(url, body)),
+    });
+    const { root, of } = await boot(page, { api });
+    const sched = root.locator('[data-dpc-region="sched"]');
+    await expect(sched.locator('[data-dpc-deliv-row="po-1"]')).toBeVisible();
+    dv.row.updated_at = '2026-10-23T09:00:00.000Z';
+    await sched.locator('[data-dpc-deliv-sight="po-1"]').click();
+    await expect(sched.locator('.dpc-deliv-msg')).toHaveText('This order changed somewhere else. Showing the latest.');
+    await expect.poll(() => of('dispatch_materials').length).toBe(2);
+
+    down = true;
+    await root.locator('.dpc-job', { hasText: 'SWP-930002' }).click();
+    await expect(sched.locator('[role="alert"]')).toContainText('Could not load the deliveries.');
+    down = false;
+    await sched.locator('[data-dpc-deliv-retry="read"]').click();
+    await expect(sched).toContainText('No orders on this job yet. Orders sent from Materials show here with their delivery dates.');
+  });
+});

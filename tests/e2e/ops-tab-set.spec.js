@@ -291,11 +291,11 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   expect(tabText).not.toMatch(/—/);
   // The right panel (slice 2) is drawn: tests/e2e/ops-dispatch-panel.spec.js.
   // The v2 list and rail are drawn: tests/e2e/ops-dispatch-v2.spec.js.
-  // Materials (v2 slices 5 and 6), Supplier replies (v2 slice 8) and Install are drawn under Scope and notes.
+  // Materials (v2 slices 5 and 6), Emails (order emails and supplier replies) and Deliveries and install are drawn under Scope and notes.
   for (const later of ['.dpc-banner']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Emails', 'Install']);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Emails', 'Deliveries and install']);
   await expect(root).not.toContainText(/items ready/i);
   // No crew chip on the job header (the calendar strip under Deliveries names the crews).
   await expect(root.locator('.dpc-jobhead')).not.toContainText(/crew/i);

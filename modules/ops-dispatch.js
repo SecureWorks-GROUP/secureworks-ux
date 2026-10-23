@@ -1909,6 +1909,9 @@
   function paintArrival() {
     var el = region('arrival');
     if (el && state.row) el.outerHTML = arrivalHtml(state.row);
+    // The Deliveries table lists the supplier boxes from the same answer.
+    var sched = region('sched');
+    if (sched && state.row && !sched.contains(document.activeElement)) paintSched();
   }
 
   // Under the Arrival line: how many supplier delivery dates wait for Accept
@@ -2672,6 +2675,392 @@
     writeStore('localStorage', LS_WORKOUT, t.open ? '1' : '0');
   }
 
+  // ── kept from v1: the Deliveries table and its three writes ──
+  // Each write is sent once, on a person's change or press, against the
+  // order's updated_at the screen was showing. Its answer redraws the row, the
+  // open job's list counts and the rail line, then the Arrival line is read
+  // again (it takes a purchase order's dates when its supplier box has none of
+  // its own). Nothing here retries on its own.
+
+  function delivRow(e, poId) {
+    var rows = e && e.deliveries ? e.deliveries.rows : [];
+    for (var i = 0; i < rows.length; i++) if (rows[i].purchase_order_id === poId) return rows[i];
+    return null;
+  }
+
+  // An order as a write (or its order_changed refusal) answered it, onto the
+  // row and the job's orders.
+  function applyDelivOrder(e, poId, o) {
+    if (!e || !o || typeof o !== 'object' || o.id !== poId || !delivOk(o.delivery)) return false;
+    e.orders = e.orders.map(function (x) {
+      if (!x || x.id !== poId) return x;
+      var merged = Object.assign({}, x, o);
+      if (!Array.isArray(o.lines)) merged.lines = x.lines;
+      return merged;
+    });
+    var r = delivRow(e, poId);
+    if (r) {
+      r.updated_at = o.updated_at;
+      r.delivery = o.delivery;
+      if ('status' in o) r.status = o.status;
+      if ('in_xero' in o) r.in_xero = o.in_xero === true;
+    }
+    return true;
+  }
+
+  // The answer's counted and sighted, onto the table and onto every copy of
+  // the job's list row that carries the counts (the rail line reads them).
+  function applyDelivCounts(jobId, c) {
+    var e = oldEntry(jobId);
+    if (!e || !e.deliveries || !c || typeof c.counted !== 'number' || typeof c.sighted !== 'number') return;
+    e.deliveries.counted = c.counted;
+    e.deliveries.sighted = c.sighted;
+    e.deliveries.all_sighted = c.all_sighted === true;
+    [state.base.rows, state.found.rows, state.arch.rows, state.row ? [state.row] : []].forEach(function (rows) {
+      rows.forEach(function (r) {
+        if (r && r.id === jobId && typeof r.deliveries_orders_total === 'number') { r.deliveries_orders_total = c.counted; r.deliveries_orders_sighted = c.sighted; }
+      });
+    });
+  }
+
+  // The order changed somewhere else, or cannot be changed here: say so, and
+  // show the latest by one quiet re-read.
+  function delivChanged(jobId, words) {
+    var e = oldEntry(jobId);
+    state.deliv.msg = { jobId: jobId, text: words };
+    state.deliv.edit = null;
+    state.deliv.ask = null;
+    paintSchedIf(jobId);
+    if (!e || e.rereading) return;
+    e.rereading = true;
+    readOld(jobId, true).then(function () { e.rereading = false; });
+  }
+
+  var DELIV_REFUSED = ['order_in_xero', 'order_cancelled', 'not_material', 'not_dispatch_work', 'order_not_found'];
+
+  // One delivery write. onFail says what a failed press leaves on screen.
+  // Resolves true when it landed.
+  function delivSend(jobId, poId, action, body, onFail) {
+    var e = oldEntry(jobId);
+    var r = delivRow(e, poId);
+    var d = state.deliv;
+    if (!r || d.busy[poId]) return Promise.resolve(false);
+    d.busy[poId] = action;
+    d.msg = null;
+    paintSchedIf(jobId);
+    return Promise.resolve().then(function () {
+      return global.opsPost(action, Object.assign({ purchase_order_id: poId, expected_updated_at: r.updated_at || null }, body));
+    }).then(oldOk).then(function (resp) {
+      delete d.busy[poId];
+      // Saved, but an answer without the order cannot redraw the row: one quiet re-read shows it.
+      if (!applyDelivOrder(e, poId, resp.order)) readOld(jobId, true);
+      applyDelivCounts(jobId, resp.deliveries);
+      if (state.jobId === jobId) {
+        paintTape();
+        paintSources();
+        // The Arrival line takes a purchase order's dates: read it again.
+        loadArrival(rowById(jobId) || state.row);
+      }
+      return true;
+    }, function (err) {
+      delete d.busy[poId];
+      var code = err && err.code;
+      if (code === 'order_changed') {
+        if (err.body) applyDelivOrder(e, poId, err.body.order);
+        delivChanged(jobId, 'This order changed somewhere else. Showing the latest.');
+      } else if (DELIV_REFUSED.indexOf(code) >= 0) {
+        delivChanged(jobId, 'This order cannot be changed here.');
+      } else {
+        onFail();
+      }
+      return false;
+    }).then(function (landed) {
+      paintSchedIf(jobId);
+      return landed;
+    });
+  }
+
+  function setExpected(jobId, poId, value) {
+    var r = delivRow(oldEntry(jobId), poId);
+    if (!r || !r.delivery.expected_editable || (r.delivery.expected || null) === value) {
+      delete state.deliv.typed[poId];
+      return;
+    }
+    delivSend(jobId, poId, 'dispatch_delivery_set_expected', { delivery_date: value }, function () {
+      state.deliv.msg = { jobId: jobId, text: 'Not saved.', retry: { kind: 'expected', poId: poId, value: value } };
+    }).then(function () {
+      delete state.deliv.typed[poId];
+      paintSchedIf(jobId);
+    });
+  }
+
+  function markSighted(jobId, poId, sighted) {
+    state.deliv.ask = null;
+    delivSend(jobId, poId, 'dispatch_delivery_mark_sighted', { sighted: sighted }, function () {
+      state.deliv.msg = { jobId: jobId, text: sighted ? 'Not saved.' : 'Sighting not cleared.', retry: { kind: 'sight', poId: poId, value: sighted } };
+    });
+  }
+
+  // The open inline line's Save (a date) or Clear (null). The line stays open
+  // with its date when the press fails.
+  function saveConfirmed(value) {
+    var ed = state.deliv.edit;
+    if (!ed || ed.busy || (value !== null && !wholeDay(value))) return;
+    ed.busy = true;
+    ed.fail = false;
+    ed.last = value;
+    delivSend(ed.jobId, ed.poId, 'dispatch_delivery_set_confirmed', { confirmed_delivery_date: value, via: 'deliveries' }, function () {
+      ed.fail = true;
+    }).then(function (landed) {
+      ed.busy = false;
+      if (landed && state.deliv.edit === ed) state.deliv.edit = null;
+      paintSchedIf(ed.jobId);
+    });
+  }
+
+  // Opens the one inline line on a row. Nothing is sent until Save or Clear.
+  function openConfirmedLine(jobId, poId) {
+    var r = delivRow(oldEntry(jobId), poId);
+    if (!r) return;
+    var c = r.delivery.confirmed;
+    var day = c.by_hand ? c.date : r.delivery.expected;
+    state.deliv.edit = { jobId: jobId, poId: poId, date: wholeDay(day), busy: false, fail: false, last: null };
+    state.deliv.ask = null;
+    state.deliv.msg = null;
+  }
+
+  // ── render: the Deliveries table ──
+
+  function dayOf(v) { return dayText(parseDay(v)); }
+
+  // A date box styled as the approved dashed input. Empty, it reads "Set date".
+  function dateBoxHtml(value, attrs, label, off, asTyped) {
+    var v = asTyped ? value : wholeDay(value);
+    return '<span class="dpc-deliv-date' + (v ? '' : ' dpc-deliv-blank') + '"><input type="date" ' + attrs + ' value="' + esc(v) + '" aria-label="' + esc(label) + '"' +
+      (off ? ' disabled' : '') + '><span class="dpc-deliv-ph" aria-hidden="true">Set date</span></span>';
+  }
+
+  function delivExpectedHtml(r, busy) {
+    var d = r.delivery;
+    var po = text(r.po_number) || 'this order';
+    if (!d.expected_editable) {
+      return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' + (d.expected ? esc(dayOf(d.expected)) : '<em>No date in Xero</em>') + '<small>Set in Xero</small></span>';
+    }
+    var typed = state.deliv.typed[r.purchase_order_id];
+    var asTyped = Object.prototype.hasOwnProperty.call(state.deliv.typed, r.purchase_order_id) && (typed === '' || /^\d{4}-\d{2}-\d{2}$/.test(typed));
+    return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' +
+      dateBoxHtml(asTyped ? typed : d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy, asTyped) + '</span>';
+  }
+
+  function delivConfirmedHtml(r, busy) {
+    var c = r.delivery.confirmed;
+    var poId = esc(r.purchase_order_id);
+    var open = ' data-dpc-deliv-confirm="' + poId + '"' + (busy ? ' disabled' : '');
+    if (c.state === 'date') {
+      if (!c.by_hand) return '<span class="dpc-dstate on">' + esc(dayOf(c.date)) + '</span>';
+      var when = dayText(parseStamp(c.set_at));
+      return '<span class="dpc-dstate on"><button type="button" class="dpc-deliv-daybtn" aria-label="Change the confirmed date"' + open + '>' + esc(dayOf(c.date)) + '</button>' +
+        '<small>Set by ' + esc(text(c.set_by) || 'name not recorded') + (when ? ', ' + esc(when) : '') + '</small></span>';
+    }
+    if (c.state === 'status_only') return '<span class="dpc-dstate on">Confirmed, no date given</span>';
+    var words = c.state === 'not_confirmed' ? 'Not confirmed by supplier' : 'Waiting on supplier';
+    return '<span class="dpc-dstate"><em>' + words + '</em><button type="button" class="dpc-textbtn"' + open + '>Set confirmed date</button></span>';
+  }
+
+  function delivSightedHtml(r, busy) {
+    var s = r.delivery.sighted;
+    var poId = esc(r.purchase_order_id);
+    if (!s) {
+      return '<span class="dpc-dstate"><button type="button" class="dpc-deliv-btn" data-dpc-deliv-sight="' + poId + '"' + (busy ? ' disabled' : '') + '>' +
+        (busy === 'dispatch_delivery_mark_sighted' ? 'Saving...' : 'Mark sighted') + '</button></span>';
+    }
+    var who = [stampText(s.at), text(s.by)].filter(Boolean).join(', ');
+    return '<span class="dpc-dstate on">' + esc(who || 'Sighted') + '<button type="button" class="dpc-textbtn" data-dpc-deliv-unsight="ask" data-dpc-deliv-po="' + poId + '"' +
+      (busy ? ' disabled' : '') + '>Not sighted</button></span>';
+  }
+
+  // The inline confirmed-date line under a row.
+  function delivEditHtml(r, ed) {
+    var po = text(r.po_number) || 'this order';
+    var off = ed.busy ? ' disabled' : '';
+    var h = '<div class="dpc-deliv-edit" role="group" aria-label="Confirmed delivery date"><p class="dpc-empty dpc-empty-tight">Confirmed delivery for ' + esc(po) + ':</p><div class="dpc-actions">';
+    h += dateBoxHtml(ed.date, 'data-dpc-deliv-edit-date', 'Confirmed delivery date for ' + po, ed.busy);
+    h += '<button type="button" class="dpc-primary" data-dpc-deliv-edit="save"' + (ed.busy || !wholeDay(ed.date) ? ' disabled' : '') + '>' + (ed.busy && ed.last !== null ? 'Saving...' : 'Save') + '</button>';
+    if (r.delivery.confirmed.by_hand) h += '<button type="button" class="dpc-primary" data-dpc-deliv-edit="clear"' + off + '>' + (ed.busy && ed.last === null ? 'Clearing...' : 'Clear') + '</button>';
+    h += '<button type="button" data-dpc-deliv-edit="cancel"' + off + '>Cancel</button></div>';
+    if (ed.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Confirmed date not saved. <button type="button" class="dpc-retry" data-dpc-deliv-edit="retry"' + off + '>Retry</button></p>';
+    return h + '</div>';
+  }
+
+  function delivRowHtml(jobId, r) {
+    var d = state.deliv;
+    var poId = r.purchase_order_id;
+    var busy = d.busy[poId] || false;
+    var dl = r.delivery;
+    var h = '<div class="dpc-deliv-item" data-dpc-deliv-row="' + esc(poId) + '"><div class="dpc-deliv-row" data-step="' + esc(dl.step) + '">';
+    h += '<span><strong>' + esc(text(r.supplier_name) || 'Supplier not recorded') + '</strong><small>' + esc(text(r.po_number) || 'No order number') +
+      (r.made_in_dispatch ? '' : ' · Made outside Dispatch') + '</small></span>';
+    h += delivExpectedHtml(r, busy) + delivConfirmedHtml(r, busy) + delivSightedHtml(r, busy) + '</div>';
+    var confirmedDay = dl.confirmed.state === 'date' ? text(dl.confirmed.date) : '';
+    if (confirmedDay && text(dl.expected) && confirmedDay !== text(dl.expected)) {
+      h += '<p class="dpc-deliv-sub">The calendar shows this delivery on the expected day, ' + esc(dayOf(dl.expected)) + '.</p>';
+    }
+    if (d.edit && d.edit.jobId === jobId && d.edit.poId === poId) h += '<div class="dpc-deliv-sub">' + delivEditHtml(r, d.edit) + '</div>';
+    if (d.ask && d.ask.jobId === jobId && d.ask.poId === poId && dl.sighted) {
+      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Clear the sighting"><p class="dpc-empty dpc-empty-tight">Clear the sighting on ' +
+        esc(text(r.po_number) || 'this order') + '? It was marked by ' + esc(text(dl.sighted.by) || 'someone not recorded') + '.</p><div class="dpc-actions">' +
+        '<button type="button" class="dpc-primary" data-dpc-deliv-unsight="go" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Clear</button>' +
+        '<button type="button" data-dpc-deliv-unsight="keep" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Keep</button></div></div></div>';
+    }
+    return h + '</div>';
+  }
+
+  // The line under the table: a failed press with its Retry, or a notice.
+  function delivMsgHtml(jobId) {
+    var m = state.deliv.msg;
+    if (!m || m.jobId !== jobId) return '';
+    if (!m.retry) return '<p class="dpc-deliv-msg" role="status">' + esc(m.text) + '</p>';
+    return '<p class="dpc-deliv-msg dpc-mat-fail" role="alert">' + esc(m.text) + ' <button type="button" class="dpc-retry" data-dpc-deliv-retry="write">Retry</button></p>';
+  }
+
+  // The supplier boxes ordered by email from Materials, read only, from the
+  // Arrival line's own answer: their dates come from supplier replies
+  // (Accept in Emails) or the date our email asked for. No by-hand date or
+  // sighting can be set on them yet: no backend action exists for that.
+  var BOX_DATE_FROM = { box: "From the supplier's reply", requested: 'Asked for in our email', order: 'From the purchase order' };
+  function boxDelivHtml(row) {
+    var a = arrivalFor(row).arrival;
+    var boxes = a && Array.isArray(a.orders) ? a.orders.filter(function (o) { return o && o.source === 'supplier_box'; }) : [];
+    if (!boxes.length) return '';
+    var h = '<div class="dpc-deliv dpc-deliv-boxes"><div class="dpc-deliv-row dpc-deliv-head"><span>Supplier (order email)</span><span>Expected</span><span>Confirmed by supplier</span><span>Sighted on site</span></div>';
+    boxes.forEach(function (o) {
+      var day = parseDay(o.delivery_date);
+      var from = BOX_DATE_FROM[o.date_source] || '';
+      h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(text(o.supplier_id) || text(o.key)) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
+      h += '<span><strong>' + esc(text(o.supplier_name) || 'Supplier not recorded') + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + '</small></span>';
+      h += !o.date_confirmed && day ? '<span class="dpc-dstate on">' + esc(dayText(day)) + (from ? '<small>' + esc(from) + '</small>' : '') + '</span>' : '<span class="dpc-dstate"><em>' + (day ? '-' : 'No date yet') + '</em></span>';
+      h += o.date_confirmed && day ? '<span class="dpc-dstate on">' + esc(dayText(day)) + (from ? '<small>' + esc(from) + '</small>' : '') + '</span>' : '<span class="dpc-dstate"><em>Waiting on supplier</em></span>';
+      h += '<span class="dpc-dstate"><em>Not recorded here</em></span></div></div>';
+    });
+    h += '</div><p class="dpc-deliv-sub dpc-deliv-boxnote">Orders sent by email from Materials take their dates from supplier replies (Accept in Emails). A date or a sighting cannot be set by hand on them yet.</p>';
+    return h;
+  }
+
+  var DELIV_EMPTY = 'No orders on this job yet. Orders sent from Materials show here with their delivery dates.';
+
+  function delivBodyHtml(row) {
+    var jobId = row.id;
+    var e = oldEntry(jobId);
+    var boxes = boxDelivHtml(row);
+    var h = '';
+    if (!e || e.status === 'loading' && !e.w.loaded) h += '<div class="dpc-empty dpc-empty-tight">Loading the deliveries...</div>';
+    else if (e.status === 'error' && !e.w.loaded || !e.deliveries) {
+      h += '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Could not load the deliveries. <button type="button" class="dpc-retry" data-dpc-deliv-retry="read">Retry</button></div>';
+    } else if (e.deliveries.rows.length) {
+      h += '<div class="dpc-deliv"><div class="dpc-deliv-row dpc-deliv-head"><span>Supplier and PO</span><span>Expected</span><span>Confirmed by supplier</span><span>Sighted on site</span></div>';
+      e.deliveries.rows.forEach(function (r) { h += delivRowHtml(jobId, r); });
+      h += '</div>';
+    } else if (!boxes) {
+      h += '<div class="dpc-empty dpc-empty-tight">' + esc(DELIV_EMPTY) + '</div>';
+    }
+    return h + delivMsgHtml(jobId) + boxes;
+  }
+
+  // The Deliveries table's presses. True when the press was one of them. Only
+  // Mark sighted, Clear, Save, Clear (a hand-set date) and Retry send
+  // anything; opening and cancelling a line writes nothing.
+  function onDelivClick(t) {
+    var jobId = state.jobId;
+    var d = state.deliv;
+    var poId = t.getAttribute('data-dpc-deliv-po') || t.getAttribute('data-dpc-deliv-sight') || t.getAttribute('data-dpc-deliv-confirm') || '';
+    if (t.hasAttribute('data-dpc-deliv-sight')) {
+      if (jobId) markSighted(jobId, poId, true);
+    } else if (t.hasAttribute('data-dpc-deliv-unsight')) {
+      var u = t.getAttribute('data-dpc-deliv-unsight');
+      if (!jobId) return true;
+      if (u === 'ask') {
+        d.ask = { jobId: jobId, poId: poId };
+        d.edit = null;
+        d.msg = null;
+        paintSched();
+        refocus('[data-dpc-deliv-unsight="keep"]');
+      } else if (u === 'keep') {
+        d.ask = null;
+        paintSched();
+        refocus('[data-dpc-deliv-unsight="ask"][data-dpc-deliv-po="' + poId + '"]');
+      } else if (u === 'go') {
+        markSighted(jobId, poId, false);
+      }
+    } else if (t.hasAttribute('data-dpc-deliv-confirm')) {
+      if (!jobId) return true;
+      openConfirmedLine(jobId, poId);
+      paintSched();
+      refocus('[data-dpc-deliv-edit-date]');
+    } else if (t.hasAttribute('data-dpc-deliv-edit')) {
+      var ed = d.edit;
+      var act = t.getAttribute('data-dpc-deliv-edit');
+      if (!ed) return true;
+      if (act === 'save') { if (wholeDay(ed.date)) saveConfirmed(ed.date); }
+      else if (act === 'clear') saveConfirmed(null);
+      else if (act === 'retry') saveConfirmed(ed.last);
+      else if (act === 'cancel') {
+        d.edit = null;
+        paintSched();
+        refocus('[data-dpc-deliv-confirm="' + ed.poId + '"]');
+      }
+    } else if (t.hasAttribute('data-dpc-deliv-retry')) {
+      if (!jobId) return true;
+      if (t.getAttribute('data-dpc-deliv-retry') === 'read') {
+        var e = oldEntry(jobId);
+        readOld(jobId, !!e && e.status === 'ok');
+      } else {
+        var m = d.msg && d.msg.jobId === jobId ? d.msg.retry : null;
+        if (m && m.kind === 'expected') setExpected(jobId, m.poId, m.value);
+        else if (m && m.kind === 'sight') markSighted(jobId, m.poId, m.value);
+      }
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  // The expected date box is saved when it is left or Enter is pressed, never
+  // while a segment is still being typed. A box only part filled is not a date
+  // and is never sent; an emptied box clears the date.
+  function commitExpected(jobId, t) {
+    var poId = t.getAttribute('data-dpc-deliv-expected');
+    var v = text(t.value);
+    if ((!v && t.validity && t.validity.badInput) || (v && !wholeDay(v))) {
+      delete state.deliv.typed[poId];
+      var r = delivRow(oldEntry(jobId), poId);
+      t.value = r ? wholeDay(r.delivery.expected) : '';
+      if (t.parentNode && t.parentNode.classList) t.parentNode.classList.toggle('dpc-deliv-blank', !t.value);
+      return;
+    }
+    setExpected(jobId, poId, v || null);
+  }
+
+  // Typing in a date box: its "Set date" look, what was typed, and the
+  // inline line's Save button.
+  function onDelivInput(t) {
+    if (!t.hasAttribute('data-dpc-deliv-edit-date') && !t.hasAttribute('data-dpc-deliv-expected')) return false;
+    var wrap = t.parentNode;
+    if (wrap && wrap.classList) wrap.classList.toggle('dpc-deliv-blank', !t.value);
+    if (t.hasAttribute('data-dpc-deliv-expected') && state.jobId && !(!t.value && t.validity && t.validity.badInput)) {
+      var poId = t.getAttribute('data-dpc-deliv-expected');
+      var dr = delivRow(oldEntry(state.jobId), poId);
+      if (dr && (dr.delivery.expected || '') === t.value) delete state.deliv.typed[poId];
+      else state.deliv.typed[poId] = t.value;
+    }
+    if (t.hasAttribute('data-dpc-deliv-edit-date') && state.deliv.edit) {
+      state.deliv.edit.date = t.value;
+      var line = t.closest('.dpc-deliv-edit');
+      var saveBtn = line && line.querySelector('[data-dpc-deliv-edit="save"]');
+      if (saveBtn) saveBtn.disabled = !!state.deliv.edit.busy || !wholeDay(t.value);
+    }
+    return true;
+  }
+
   // The Sources tab, when it is the one showing.
   function paintSources() {
     if (!state.rightOpen || state.tab !== 'sources' || !state.row) return;
@@ -2715,21 +3104,22 @@
     return h + '</div>';
   }
 
-  // Drawn on every job except a make-safe one, under Emails. v2 has
-  // no purchase orders, so the v1 deliveries table is gone: each supplier's
-  // delivery date is on the Arrival line in the header.
+  // Drawn on every job except a make-safe one, under Emails: the v1
+  // Deliveries table (each purchase order to site, working as v1 does), the
+  // supplier boxes ordered by email (read only), then the install row.
   function schedHtml() {
     var row = state.row;
     if (!row || isMakesafe(row)) return '';
     var open = state.sched.open;
-    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Install</h3>';
-    if (open) h += '<p>The trade booked for this job</p>';
-    h += '</div><button type="button" class="dpc-chev" data-dpc-sched-toggle aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Install">' + CHEV_SVG + '</button></div>';
-    if (open) h += '<div class="dpc-sec-body">' + installHtml(row) + portalHtml() + '</div>';
+    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Deliveries and install</h3>';
+    if (open) h += '<p>Each order to site, then the trade booked</p>';
+    h += '</div><button type="button" class="dpc-chev" data-dpc-sched-toggle aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Deliveries and install">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + delivBodyHtml(row) + installHtml(row) + portalHtml() + '</div>';
     return h + '</div>';
   }
 
-  var SCHED_FOCUS_KEYS = ['data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-sched-toggle'];
+  var SCHED_FOCUS_KEYS = ['data-dpc-deliv-expected', 'data-dpc-deliv-edit-date', 'data-dpc-deliv-sight', 'data-dpc-deliv-unsight', 'data-dpc-deliv-po',
+    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-sched-toggle'];
   function paintSched() {
     var el = region('sched');
     if (!el) return;
@@ -4813,6 +5203,7 @@
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
       '[data-dpc-mode],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
+      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
@@ -4824,6 +5215,7 @@
     if (onStageClick(t)) return;
     if (onRepClick(t)) return;
     if (onInstallClick(t)) return;
+    if (onDelivClick(t)) return;
     if (t.hasAttribute('data-dpc-deliv-cal')) {
       // The Calendar tab's own call, once: the calendar opens as it was left.
       if (typeof global.showView === 'function') global.showView('calendar');
@@ -4831,6 +5223,8 @@
     }
     if (t.hasAttribute('data-dpc-sched-toggle')) {
       state.sched.open = !state.sched.open;
+      state.deliv.edit = null;
+      state.deliv.ask = null;
       writeStore('localStorage', LS_SCHED, state.sched.open ? '1' : '0');
       paintSched();
       refocus('[data-dpc-sched-toggle]');
@@ -5084,6 +5478,8 @@
     // Escape closes the send confirm (never while it is sending) and the supplier search.
     if (e.key === 'Escape' && state.v2m.modal) { e.preventDefault(); v2CloseModal(); return; }
     if (e.key === 'Escape' && t && t.hasAttribute && t.hasAttribute('data-dpc-v2-q')) { state.v2m.find.open = false; paintV2(); refocus('[data-dpc-v2="find"]'); return; }
+    // Enter in a Deliveries expected date saves it.
+    if (e.key === 'Enter' && t && t.hasAttribute && state.jobId && t.hasAttribute('data-dpc-deliv-expected')) { e.preventDefault(); commitExpected(state.jobId, t); }
   }
 
   // A cell or the held email is saved when it is left. A repaint that takes
@@ -5092,6 +5488,7 @@
     var t = e.target;
     if (painting || !t || !t.hasAttribute || !state.jobId) return;
     if (t.hasAttribute('data-dpc-mat-pad')) { saveText(state.jobId); return; }
+    if (t.hasAttribute('data-dpc-deliv-expected')) { commitExpected(state.jobId, t); return; }
     onV2FocusOut(t);
   }
 
@@ -5100,6 +5497,7 @@
     if (!t || !t.hasAttribute) return;
     if (onV2Input(t)) return;
     if (t.hasAttribute('data-dpc-mat-pad')) { if (state.jobId) padInput(state.jobId, t.value); return; }
+    if (onDelivInput(t)) return;
     if (t.hasAttribute('data-dpc-search')) {
       state.search = t.value || '';
       clearTimeout(searchTimer);

@@ -47,51 +47,51 @@ profit sub-tab (`// <job-profit>`). Bill Reconciliation (the `materials_recon_*`
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
-section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-to 7 of the approved design, rebuilt as Dispatch v2 in Oct 2026: job list with
-Active beside Archive in folding pipeline-stage sections, job header with the
-real pipeline (or Repairs) stage rail and the Arrival line, Scope and notes,
-Supplier replies with the Unmatched supplier emails tray, the right panel of Sources,
-Context story and Messages, Materials by supplier, Emails, and Deliveries and
-install, the last three never drawn on a make-safe). It reads
-`pipeline&dispatch=1&board=v2` (Active and Archive), `dispatch_arrival` and
-`dispatch_v2_replies` once per job open, `dispatch_v2_replies_unmatched` for the
-tray, `job_detail` (once per job open; the panel reuses it, never
-a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
-`get_conversation` and `get_job_conversation` only when their tab is first shown.
-Materials by supplier reads `dispatch_materials` once per job open and
-`list_suppliers` once a session.
-Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
-`send_sms` from `+61489267771` (after "Text this to the client?"), the rail's
-`update_job_status` (compare-and-set, `source 'dispatch'`) or
-`update_repair_stage` (each after a confirm line; never `set_dispatch_stage` or
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, rebuilt
+as Dispatch v2 in Oct 2026: job list with Active beside Archive in folding
+pipeline-stage sections, job header with the real pipeline (or Repairs) stage
+rail and the Arrival line, Scope and notes, Materials (the Draft list, supplier
+boxes and held order emails), Supplier replies with the Unmatched supplier
+emails tray, Install, and the right panel of Sources, Context story and
+Messages; Materials, the Arrival line and Install are never drawn on a
+make-safe). It reads `pipeline&dispatch=1&board=v2` (Active and Archive),
+`dispatch_arrival`, `dispatch_v2_replies` and `dispatch_v2_materials` once per
+job open, `dispatch_v2_replies_unmatched` for the tray,
+`dispatch_v2_supplier_search` as a person types in Add supplier,
+`dispatch_v2_photo_url` when a photo is opened, `job_detail` (once per job
+open; the panel reuses it, never a second call) and `job_notes`; the panel
+reads `job_story`, ghl-proxy `get_conversation` and `get_job_conversation` only
+when their tab is first shown. Its writes are `add_note` (always
+`visibility: 'internal_only'`), a pressed `send_sms` from `+61489267771` (after
+"Text this to the client?"), the rail's `update_job_status` (compare-and-set
+on `expected_statuses`, `source 'dispatch'`) or `update_repair_stage` (each
+after a confirm line; never `set_dispatch_stage` or
 `set_dispatch_install_confirmed`), `set_dispatch_next_step`, the six
-`dispatch_v2_replies_*` / `dispatch_v2_suggestion_*` presses, and the six `dispatch_materials_*`
-writes on a person's edit or press, which touch only Dispatch's own tables (no
-order, message or job status). Slice 5 (back-end contract
-`docs/dispatch-slice-5-contract.md` in secureworks-backend): Create PO and email
-makes one `purchase_orders` row (`source 'dispatch'`, no price), its PDF in the
-private `dispatch-order-pdfs` bucket (opened only through `dispatch_order_pdf`)
-and a held `job_order_emails` draft, read with `dispatch_order_emails` once per
-job open and after each slice 5 write. A supplier email goes only from a Send
-now press (or Try the send again after an unconfirmed send), with the draft's
-hash; never on create, open or reply, never to a typed address, never via
-`create_po`, `email_po`, `push_po_to_xero` or `send-po-email`. Sources lists the
-job's orders from the same `dispatch_materials` read. Slices 6 and 7 add only
-`dispatch_delivery_set_expected`, `_set_confirmed` and `_mark_sighted` (one
-order row each, never its status) and `set_dispatch_install_confirmed`
-(Dispatch's own install mark, never a booking write). The rail's stage is Dispatch's own
-record (`job_dispatch_state`), never the job status: it never calls
-`update_job_status`. A stage read that failed fails To do and the rail, never an
-empty To do; a `todo_total` that does not match the To do rows fails To do only,
-and All jobs keeps listing. A quote with no stored PDF is never opened
-through `send-quote/view`, which records a client view. A failed read never
-renders as empty, and a later slice is not drawn until it is real. Below
-it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
-Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
-Rcvd and Mark Paid), loaded when Dispatch opens. Guards:
-`tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`,
-`tests/e2e/ops-dispatch-v2.spec.js`.
+`dispatch_v2_replies_*` / `dispatch_v2_suggestion_*` presses, and the Materials
+writes in secureworks-backend's supplier order emails contract, each on a
+person's edit or press and compare-and-set on `expected_updated_at`:
+`dispatch_v2_save_line`, `_move_line`, `_delete_line`, `_suggest_draft`,
+`_add_supplier`, `_remove_supplier`, `_set_main_supplier`, `_upload_photo`,
+`_move_photo`, `_delete_photo`, `_make_email`, `_save_email`, `_discard_email`
+and `_send_email`. A supplier order email goes only from the "Send this order
+to <Supplier>?" confirm, from admin@secureworkswa.com.au; the first send is a
+TEST to admin@ (marked TEST ONLY) until the back end says it was done; a send
+whose outcome is unknown is offered again only with `confirm_resend`, and one
+the back end says was not recorded is never offered again in that session. A
+supplier with no approved order email is shown but cannot be sent to. Sent
+lines are locked. One box holds one open email. The screen never writes a
+supplier email into `suppliers.email`, never writes to Xero and never calls
+`create_po`, `email_po`, `push_po_to_xero`, `send-po-email` or the v1
+`dispatch_materials*` / `dispatch_order_*` / `dispatch_delivery_*` actions.
+Sources lists quotes and invoices only. A quote with no stored PDF is never
+opened through `send-quote/view`, which records a client view. A failed read
+never renders as empty. Below it, `#dispatchPurchaseOrders` is the LIVE
+purchase order board that was the Materials view (`loadMaterials`, the only
+front end for Delete PO, Invoice Rcvd and Mark Paid), loaded when Dispatch
+opens; an order made in Dispatch has no Email, Approve & Send or Push to Xero
+there. Guards: `tests/e2e/ops-tab-set.spec.js`,
+`tests/e2e/ops-dispatch-panel.spec.js`, `tests/e2e/ops-dispatch-v2.spec.js`,
+`tests/e2e/ops-dispatch-v2-materials.spec.js`.
 
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /

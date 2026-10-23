@@ -403,7 +403,7 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     await expect(mat).toContainText('No supplier boxes yet. Press Add supplier to make one, then move lines into it.');
     await expect(draftOf(mat).locator('[data-dpc-v2="suggest"]')).toHaveText('Fill from the scope');
     // The job's sections: no v1 Emails or Deliveries, Install on its own.
-    await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Supplier replies', 'Install']);
+    await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Emails', 'Install']);
     // The header pill is the list row's own count.
     await expect(root.locator('.dpc-jobhead .dpc-pill', { hasText: 'items ready' })).toHaveText('1 of 3 items ready');
     expect(of('dispatch_v2_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1']);

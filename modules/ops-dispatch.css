@@ -585,6 +585,10 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-rep-snip { margin-top: 2px; font-size: 13px; color: var(--steel-2); overflow-wrap: anywhere; }
 .dpc-rep-why { margin-top: 3px; font-size: 11.5px; color: var(--mute); overflow-wrap: anywhere; }
 .dpc-rep-off { margin-bottom: 10px; }
+/* A reply open in the Emails panel's view: the view is its card. */
+.dpc-mail-view .dpc-rep { border: 0; padding: 0; background: transparent; }
+.dpc-mail-view .dpc-rep-guess .dpc-rep-ask { background: #fffaf0; border: 1px solid #e9c98a; border-radius: 8px; padding: 8px 10px; }
+.dpc-mail-item .dpc-mail-tags { flex-wrap: wrap; }
 .dpc-rep-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .dpc-rep-msg { margin-top: 6px; font-size: 12.5px; color: var(--sage); }
 .dpc-rep-msg.dpc-mat-fail { color: #b3261e; }

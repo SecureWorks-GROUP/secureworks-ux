@@ -206,3 +206,104 @@ test.describe('Dispatch v2: the working out pad, kept from v1', () => {
     expect(of('dispatch_materials')).toHaveLength(2);
   });
 });
+
+// ── The Emails panel: v2 order emails and supplier replies together ────────
+
+// A v2 materials answer with two supplier boxes: Acacia holds an email whose
+// TEST copy went, Banksia's email was sent.
+const SID = (n) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const MAIL = (over) => Object.assign({
+  id: 'mail-1', supplier_id: SID(1), supplier_name: 'Acacia Steel Pty Ltd', status: 'draft', from: 'admin@secureworkswa.com.au',
+  to: ['orders@acacia.example'], cc: ['tony@acacia.example', 'fencing@secureworkswa.com.au'], team_cc: 'fencing@secureworkswa.com.au',
+  subject: 'Material Order Ref SWF-930001', body_text: 'Hi Acacia,\n\n14 x Colorbond panels\n\nThanks', edited: false,
+  delivery_date: '2026-10-28', line_count: 1, photo_ids: [], empty_detail_lines: [], test: null, sent: null, last_error: null,
+  updated_at: '2026-10-23T01:00:00.000Z',
+}, over);
+const BOX = (n, name, over) => Object.assign({
+  supplier_id: SID(n), name, active: true, position: n, is_main: false,
+  approved_email: { id: `ap-${n}`, name, used_for: 'fencing', to: ['orders@example.test'], cc: [] },
+  send_blocked: null, lines: [], photos: [], open_email: null, sent_emails: [],
+}, over);
+const MATERIALS = (url) => ({
+  job_id: url.searchParams.get('job_id'), job_number: 'SWF-930001', work_type: 'fencing', team_cc: { email: 'fencing@secureworkswa.com.au', open_question: null },
+  from: 'admin@secureworkswa.com.au', test_send_done: true, main_supplier_id: null, main_supplier_ticked: false, can_suggest: false,
+  draft_list: { lines: [], photos: [] },
+  suppliers: url.searchParams.get('job_id') !== 'job-f1' ? [] : [
+    BOX(1, 'Acacia Steel Pty Ltd', { open_email: MAIL({ test: { sent_at: '2026-10-23T01:05:00.000Z', sent_to: 'admin@secureworkswa.com.au', sent_by_email: 'shaun@secureworkswa.com.au' } }) }),
+    BOX(2, 'Banksia Roofing', { sent_emails: [MAIL({ id: 'mail-2', supplier_id: SID(2), supplier_name: 'Banksia Roofing', status: 'sent', subject: 'Material Order Ref SWF-930001 (Banksia)',
+      to: ['sales@banksia.example'], cc: [], body_text: 'Hi Banksia,\n\n6 x roof sheets', line_count: 2, photo_ids: ['p1'],
+      sent: { sent_at: '2026-10-20T02:00:00.000Z', sent_by_email: 'shaun@secureworkswa.com.au', from: 'admin@secureworkswa.com.au', to: ['sales@banksia.example'], cc: [] } })] }),
+  ],
+});
+const REPLY = (over) => Object.assign({
+  id: 'em-1', received_at: '2026-10-21T01:30:00+00:00', from_email: 'sales@banksia.example', subject: 'RE: Material Order Ref SWF-930001 (Banksia)',
+  snippet: 'We can deliver Monday.', supplier_name: 'Banksia Roofing', state: 'matched', rung: 'thread', match_reason: null,
+  job_id: 'job-f1', job_number: 'SWF-930001', order_id: 'ord-1', candidates: [], delivery_label: null, decision: null,
+}, over);
+const REPLIES = (url) => ({
+  ok: true, job_id: url.searchParams.get('job_id'), orders_wired: true, scan: { enabled: true },
+  orders: [{ order_id: 'ord-1', supplier_name: 'Banksia Roofing', sent_at: '2026-10-20T02:00:00.000Z' }],
+  emails: url.searchParams.get('job_id') !== 'job-f1' ? [] : [REPLY()],
+  suggestions: url.searchParams.get('job_id') !== 'job-f1' ? [] : [{ id: 'sg-1', email_id: 'em-1', label: 'Delivery Monday 27 October', quote: 'We can deliver Monday.',
+    weekday_mismatch: false, day_word_only: true, other_dates: [], state: 'open', can_accept: true, needs_order_pick: false, acted_by_email: null, acted_at: null }],
+});
+
+test.describe('Dispatch v2: one Emails panel for order emails and supplier replies', () => {
+  test('lists the held, test-sent and sent order emails read only, with the replies, and sends nothing', async ({ page }) => {
+    const { root, calls } = await boot(page, { api: { dispatch_v2_materials: MATERIALS, dispatch_v2_replies: REPLIES } });
+    const mail = root.locator('[data-dpc-region="mail"]');
+    await expect(mail.locator('h3')).toHaveText('Emails');
+    await expect(mail.locator('.dpc-eyebrow')).toHaveText('Send');
+    // Held first, then the rest newest first.
+    const items = mail.locator('.dpc-mail-item');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toContainText('Acacia Steel Pty Ltd');
+    await expect(items.nth(0).locator('.dpc-mail-drafttag')).toHaveText('Held');
+    await expect(items.nth(0)).toContainText('Held, test sent');
+    await expect(items.nth(1)).toContainText('RE: Material Order Ref SWF-930001 (Banksia)');
+    await expect(items.nth(1).locator('.dpc-rung')).toHaveText('Same thread');
+    await expect(items.nth(2)).toContainText('Banksia Roofing');
+    await expect(items.nth(2)).toContainText('Sent');
+    // The reply with a date to check opens first, with Accept and Dismiss.
+    const view = mail.locator('.dpc-mail-view');
+    await expect(items.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await expect(view.locator('[data-dpc-sug="sg-1"] [data-dpc-sug-accept]')).toBeEnabled();
+
+    // The held email, read only: no send, edit or discard here.
+    await items.nth(0).click();
+    await expect(view.locator('.dpc-mail-head strong')).toHaveText('Order email to Acacia Steel Pty Ltd');
+    await expect(view).toContainText('Held, nothing sent yet. Check it and send it in Materials.');
+    await expect(view.locator('.dpc-field')).toHaveText([
+      'Fromadmin@secureworkswa.com.au', 'Toorders@acacia.example', 'CCtony@acacia.example, fencing@secureworkswa.com.au', 'SubjectMaterial Order Ref SWF-930001',
+    ]);
+    await expect(view).toContainText('Test copy sent to admin@secureworkswa.com.au');
+    await expect(view.locator('.dpc-v2-pre')).toContainText('14 x Colorbond panels');
+    await expect(view.locator('input, textarea, [data-dpc-v2]')).toHaveCount(0);
+    // Edit and send goes to the email in its Materials box.
+    await view.locator('[data-dpc-mail-goto]').click();
+    await expect(root.locator(`[data-dpc-v2-box="${SID(1)}"] [data-dpc-v2-mf="subject"]`)).toBeFocused();
+
+    // The sent email.
+    await items.nth(2).click();
+    await expect(view.locator('.dpc-mail-head strong')).toHaveText('Order email to Banksia Roofing');
+    await expect(view).toContainText('by shaun@secureworkswa.com.au');
+    await expect(view).toContainText('2 lines, 1 photo, delivery asked for Wed 28/10.');
+    await expect(view.locator('[data-dpc-mail-goto]')).toHaveText('Show in Materials');
+    // No v1 purchase order email wording for v2 orders.
+    expect(await mail.innerText()).not.toMatch(/purchase order|\bPO\b|Draft ready to send|Link to PO|Send reply/i);
+    expect(await mail.innerText()).not.toMatch(/[–—]/);
+    expect(calls.filter((c) => c.method === 'POST' && c.action !== 'operator_heartbeat')).toEqual([]);
+    expect(calls.filter((c) => c.action === 'dispatch_order_emails')).toEqual([]);
+  });
+
+  test('Show in Emails opens the panel on the reply with a date to check', async ({ page }) => {
+    const { root } = await boot(page, { api: { dispatch_v2_materials: MATERIALS, dispatch_v2_replies: REPLIES }, storage: { sw_dispatch_mail_open: '0' } });
+    const mail = root.locator('[data-dpc-region="mail"]');
+    await expect(root.locator('.dpc-sugnote [data-dpc-rep-goto]')).toBeVisible();
+    await expect(mail.locator('.dpc-mail')).toHaveCount(0);
+    await root.locator('.dpc-sugnote [data-dpc-rep-goto]').click();
+    await expect(mail.locator('[data-dpc-mail-key="r:em-1"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(mail.locator('.dpc-mail-view [data-dpc-sug-accept]')).toBeFocused();
+    expect(await page.evaluate(() => localStorage.getItem('sw_dispatch_mail_open'))).toBe('1');
+  });
+});

@@ -1459,7 +1459,7 @@
     return keyWords(key);
   }
 
-  // One press on the job's Supplier replies. id is the email's id (confirm,
+  // One press on a supplier reply in the job's Emails panel. id is the email's id (confirm,
   // reject) or the suggestion's (accept, dismiss).
   function repPress(jobId, kind, id, extra) {
     var e = repEntry(jobId);
@@ -1912,7 +1912,7 @@
   }
 
   // Under the Arrival line: how many supplier delivery dates wait for Accept
-  // or Dismiss in Supplier replies, with a button that goes to them.
+  // or Dismiss in the Emails panel, with a button that goes to them.
   function sugNoteHtml(row) {
     var e = row ? repEntry(row.id) : null;
     var open = e && e.status === 'ok' ? e.data.suggestions.filter(function (s) { return s.state === 'open'; }) : [];
@@ -1922,7 +1922,7 @@
       var parts = [];
       if (open.length) parts.push(open.length === 1 ? '1 supplier delivery date to check' : open.length + ' supplier delivery dates to check');
       if (guesses.length) parts.push(guesses.length === 1 ? '1 best guess email to confirm' : guesses.length + ' best guess emails to confirm');
-      h += '<div class="dpc-sugnote" role="status"><span class="dpc-grow">' + esc(parts.join(', ') + '.') + '</span><button type="button" data-dpc-rep-goto>Show in Supplier replies</button></div>';
+      h += '<div class="dpc-sugnote" role="status"><span class="dpc-grow">' + esc(parts.join(', ') + '.') + '</span><button type="button" data-dpc-rep-goto>Show in Emails</button></div>';
     }
     return h + '</div>';
   }
@@ -2715,7 +2715,7 @@
     return h + '</div>';
   }
 
-  // Drawn on every job except a make-safe one, under Supplier replies. v2 has
+  // Drawn on every job except a make-safe one, under Emails. v2 has
   // no purchase orders, so the v1 deliveries table is gone: each supplier's
   // delivery date is on the Arrival line in the header.
   function schedHtml() {
@@ -2815,7 +2815,8 @@
     var guess = m.state === 'needs_confirmation';
     var busy = e.busy[m.id];
     var off = busy ? ' disabled' : '';
-    var h = '<li class="dpc-rep' + (guess ? ' dpc-rep-guess' : '') + '" data-dpc-rep="' + esc(m.id) + '"><div class="dpc-rep-top"><strong>' + esc(text(m.supplier_name) || text(m.from_email) || 'Supplier') + '</strong>' + rungHtml(m) +
+    // The rung pill is on the email's line in the list, not repeated here.
+    var h = '<li class="dpc-rep' + (guess ? ' dpc-rep-guess' : '') + '" data-dpc-rep="' + esc(m.id) + '"><div class="dpc-rep-top"><strong>' + esc(text(m.supplier_name) || text(m.from_email) || 'Supplier') + '</strong>' +
       '<span class="dpc-grow"></span><span class="dpc-muted">' + esc(parseStamp(m.received_at) ? stampText(m.received_at) : '') + '</span></div>';
     if (text(m.subject)) h += '<p class="dpc-rep-subj">' + esc(text(m.subject)) + '</p>';
     if (text(m.snippet)) h += '<p class="dpc-rep-snip">' + esc(text(m.snippet)) + '</p>';
@@ -2830,59 +2831,241 @@
     return h + '</li>';
   }
 
-  function repBodyHtml(e) {
-    if (!e || e.status === 'loading' && !e.data) return '<p class="dpc-empty">Reading supplier replies...</p>';
-    if (e.status === 'error') return failLine('Could not load the supplier replies.', 'replies', true);
-    var d = e.data;
-    var h = '';
-    if (d.scan && d.scan.enabled === false) h += '<p class="dpc-empty dpc-empty-tight dpc-rep-off">Supplier emails are not being read yet. Nothing new will show here until reading is switched on.</p>';
-    // A press whose email has gone from the list (put on another job, sent back) keeps its answer at the top.
-    var shown = {};
-    d.emails.forEach(function (m) { shown[m.id] = true; });
-    d.suggestions.forEach(function (s) { shown[s.id] = true; });
-    Object.keys(e.msg).forEach(function (id) { if (!shown[id] && e.msg[id]) h += repMsgHtml(e.msg[id]); });
-    if (!d.emails.length && !d.suggestions.length) return h + '<p class="dpc-empty">No supplier emails on this job yet. Replies to our order emails show here.</p>';
-    var byEmail = {};
-    var loose = [];
-    d.suggestions.forEach(function (s) {
-      var on = d.emails.some(function (m) { return m.id === s.email_id; });
-      if (on) (byEmail[s.email_id] = byEmail[s.email_id] || []).push(s); else loose.push(s);
-    });
-    h += '<ul class="dpc-rep-list">';
-    d.emails.forEach(function (m) { h += repEmailHtml(e, m, byEmail[m.id] || []); });
-    h += '</ul>';
-    // A suggestion whose email is not listed (it is older than the newest 100) still shows.
-    loose.forEach(function (s) { h += sugHtml(e, s); });
-    return h;
+  // ───────────────────────── render: Emails (the job's one email panel) ─────────────────────────
+  //
+  // The v1 Emails panel, kept in its list-and-view look, now holding what v2
+  // sends and receives:
+  //   - the v2 order emails from Materials (held, TEST copy sent, sent), read
+  //     from dispatch_v2_materials. They are shown here only: making, editing
+  //     and sending stay in Materials, behind its test-first and confirm
+  //     checks, so this panel has no send button;
+  //   - the supplier replies matched to the job (dispatch_v2_replies), with
+  //     the delivery dates read from them (Accept or Dismiss) and the best
+  //     guesses to confirm.
+  // The v1 purchase order email threads are not shown: v2 orders are emails,
+  // not purchase orders.
+
+  var MAIL_FOOT = 'Order emails are made and sent in Materials; this panel only shows them. Supplier replies are read from admin@.';
+
+  // The words for an order email's state, short (list) and long (view).
+  function orderMailState(m) {
+    if (state.v2m.unrecorded[m.id]) return { tag: 'Went, not noted', bad: true, line: 'This email went, but Dispatch could not note it. Do not send it again.' };
+    if (m.sent) return { tag: 'Sent', line: 'Sent ' + stampText(m.sent.sent_at) + (text(m.sent.sent_by_email) ? ' by ' + text(m.sent.sent_by_email) : '') + '.' };
+    if (m.status === 'sending') return { tag: 'Sending', line: 'Sending now. If this stays for more than 2 minutes, check admin@ Sent Items.' };
+    if (m.status === 'send_unknown') return { tag: 'May have gone', bad: true, line: 'This email may have gone. Check admin@ Sent Items, then use Materials to send it again only if it is not there.' };
+    return { tag: m.test ? 'Held, test sent' : 'Held', line: 'Held, nothing sent yet. Check it and send it in Materials.' };
   }
 
-  function repHtml() {
+  // Every order email on the job: each box's open email, then the ones sent.
+  function orderMails(e) {
+    var out = [];
+    if (!e || !e.d) return out;
+    e.d.boxes.forEach(function (b) {
+      if (b.open) out.push({ m: b.open, box: b });
+      b.sent.forEach(function (m) { out.push({ m: m, box: b }); });
+    });
+    return out;
+  }
+
+  // The panel's list: held order emails first, then sent order emails and
+  // supplier emails together, newest first.
+  function mailItems(jobId) {
+    var v = v2Entry(jobId);
+    var r = repEntry(jobId);
+    var held = [], rest = [];
+    orderMails(v).forEach(function (o) {
+      var item = { key: 'o:' + o.m.id, kind: 'order', m: o.m, box: o.box, at: o.m.sent ? o.m.sent.sent_at : o.m.updated_at };
+      if (o.m.sent || state.v2m.unrecorded[o.m.id]) rest.push(item); else held.push(item);
+    });
+    if (r && r.data && r.status !== 'error') {
+      r.data.emails.forEach(function (m) {
+        var sugs = r.data.suggestions.filter(function (s) { return s.email_id === m.id; });
+        rest.push({ key: 'r:' + m.id, kind: 'reply', m: m, sugs: sugs, at: m.received_at,
+          ask: m.state === 'needs_confirmation' || sugs.some(function (s) { return s.state === 'open'; }) });
+      });
+    }
+    var ms = function (v) { var t = Date.parse(text(v)); return isFinite(t) ? t : 0; };
+    rest.sort(function (a, b) { return ms(b.at) - ms(a.at); });
+    return held.concat(rest);
+  }
+
+  // The email open in the view: the one picked, else the first reply that
+  // needs an answer, else the first held email, else the first in the list.
+  function mailSel(jobId, items) {
+    var want = state.mail.sel[jobId];
+    var i;
+    for (i = 0; i < items.length; i++) if (items[i].key === want) return items[i];
+    for (i = 0; i < items.length; i++) if (items[i].ask) return items[i];
+    for (i = 0; i < items.length; i++) if (items[i].kind === 'order' && !items[i].m.sent) return items[i];
+    return items[0] || null;
+  }
+
+  function mailItemHtml(it, on) {
+    var h = '<button type="button" class="dpc-mail-item' + (it.kind === 'order' && !it.m.sent ? ' dpc-mail-draft' : '') + '" data-dpc-mail="pick" data-dpc-mail-key="' + esc(it.key) + '" aria-pressed="' + on + '">';
+    if (it.kind === 'order') {
+      var st = orderMailState(it.m);
+      h += '<span class="dpc-mail-top"><strong>' + esc(it.box.name) + (it.m.sent ? '' : '<span class="dpc-mail-drafttag">Held</span>') + '</strong><small>' + esc(stampText(it.at)) + '</small></span>';
+      h += '<span class="dpc-mail-subj">' + esc(text(it.m.subject) || 'No subject') + '</span>';
+      return h + '<span class="dpc-mail-tags"><span class="dpc-type">Order email</span><span class="' + (st.bad ? 'dpc-mat-fail' : 'dpc-muted') + '">' + esc(st.tag) + '</span></span></button>';
+    }
+    var m = it.m;
+    h += '<span class="dpc-mail-top"><strong>' + esc(text(m.supplier_name) || text(m.from_email) || 'Supplier') + '</strong><small>' + esc(parseStamp(m.received_at) ? stampText(m.received_at) : '') + '</small></span>';
+    h += '<span class="dpc-mail-subj">' + esc(text(m.subject) || 'No subject') + '</span>';
+    if (text(m.snippet)) h += '<span class="dpc-muted dpc-mail-prev">' + esc(text(m.snippet)) + '</span>';
+    h += '<span class="dpc-mail-tags"><span class="dpc-type">Supplier</span>' + rungHtml(m);
+    if (it.sugs.some(function (s) { return s.state === 'open'; })) h += '<span class="dpc-mail-drafttag">Date to check</span>';
+    return h + '</span></button>';
+  }
+
+  // An order email, read only, with the way back to Materials.
+  function orderViewHtml(it) {
+    var m = it.m;
+    var st = orderMailState(m);
+    var s = m.sent || {};
+    var to = v2Arr(s.to).length ? v2Arr(s.to) : m.to;
+    var cc = v2Arr(s.cc).length ? v2Arr(s.cc) : m.cc;
+    var sid = esc(it.box.supplier_id);
+    var h = '<div class="dpc-mail-head"><strong>Order email to ' + esc(it.box.name) + '</strong><span class="dpc-mail-tags"><span class="dpc-type">' + esc(st.tag) + '</span></span></div>';
+    h += '<p class="dpc-mail-msg' + (st.bad ? ' dpc-mat-fail' : '') + '" role="' + (st.bad ? 'alert' : 'status') + '">' + esc(st.line) + '</p>';
+    h += '<div class="dpc-field"><span>From</span><span class="dpc-field-val">' + esc(text(s.from) || m.from || V2_FROM) + '</span></div>';
+    h += '<div class="dpc-field"><span>To</span><span class="dpc-field-val">' + esc(to.join(', ') || 'Not filled in yet') + '</span></div>';
+    h += '<div class="dpc-field"><span>CC</span><span class="dpc-field-val">' + esc(cc.join(', ') || 'None') + '</span></div>';
+    h += '<div class="dpc-field"><span>Subject</span><span class="dpc-field-val">' + esc(text(m.subject) || 'No subject') + '</span></div>';
+    var facts = [v2Count(m.line_count, 'line', 'lines')];
+    if (m.photo_ids.length) facts.push(v2Count(m.photo_ids.length, 'photo', 'photos'));
+    var day = parseDay(m.delivery_date);
+    if (day) facts.push('delivery asked for ' + dayText(day));
+    h += '<p class="dpc-mail-msg">' + esc(facts.join(', ') + '.') + '</p>';
+    if (m.test) h += '<p class="dpc-mail-msg">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';
+    h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre>';
+    return h + '<div class="dpc-actions"><button type="button" data-dpc-mail-goto="' + sid + '" data-dpc-mail-id="' + esc(m.id) + '">' + (m.sent ? 'Show in Materials' : 'Edit and send in Materials') + '</button></div>';
+  }
+
+  function mailBodyHtml(jobId) {
+    var v = v2Entry(jobId);
+    var r = repEntry(jobId);
+    var vWait = !v || !v.d && v.status !== 'error';
+    var rWait = !r || !r.data && r.status !== 'error';
+    if (vWait && rWait) return '<div class="dpc-empty dpc-empty-tight">Loading email...</div>';
+    var h = '';
+    var d = r && r.data;
+    if (d && d.scan && d.scan.enabled === false) h += '<p class="dpc-empty dpc-empty-tight dpc-rep-off">Supplier emails are not being read yet. Nothing new will show here until reading is switched on.</p>';
+    // A press whose email has gone from the list (put on another job, sent back) keeps its answer at the top.
+    if (d) {
+      var shown = {};
+      d.emails.forEach(function (m) { shown[m.id] = true; });
+      d.suggestions.forEach(function (s) { shown[s.id] = true; });
+      Object.keys(r.msg).forEach(function (id) { if (!shown[id] && r.msg[id]) h += repMsgHtml(r.msg[id]); });
+    }
+    var items = mailItems(jobId);
+    var fails = '';
+    if (v && v.status === 'error' && !v.d) fails += '<div class="dpc-mail-listfail">' + v2Fail1('Could not load the order emails.', 'data-dpc-v2="retry"') + '</div>';
+    else if (vWait) fails += '<div class="dpc-mail-listfail"><span class="dpc-muted">Loading the order emails...</span></div>';
+    if (r && r.status === 'error') fails += '<div class="dpc-mail-listfail">' + failLine('Could not load the supplier replies.', 'replies', true) + '</div>';
+    else if (rWait) fails += '<div class="dpc-mail-listfail"><span class="dpc-muted">Reading supplier replies...</span></div>';
+    // A suggestion whose email is not listed (it is older than the newest 100) still shows.
+    var loose = d && r.status !== 'error' ? d.suggestions.filter(function (s) { return !d.emails.some(function (m) { return m.id === s.email_id; }); }) : [];
+    var foot = '<p class="dpc-foot-line">' + esc(MAIL_FOOT) + '</p>';
+    if (!items.length && !fails) {
+      h += '<div class="dpc-empty dpc-empty-tight">No email on this job yet. Order emails made in Materials, and supplier replies to them, show here.</div>';
+      loose.forEach(function (s) { h += sugHtml(r, s); });
+      return h + foot;
+    }
+    var sel = mailSel(jobId, items);
+    h += '<div class="dpc-mail"><div class="dpc-mail-list">' + fails;
+    items.forEach(function (it) { h += mailItemHtml(it, !!sel && sel.key === it.key); });
+    h += '</div><div class="dpc-mail-view">';
+    if (!sel) h += '<div class="dpc-empty dpc-empty-tight">Nothing open.</div>';
+    else if (sel.kind === 'order') h += orderViewHtml(sel);
+    else h += '<ul class="dpc-rep-list">' + repEmailHtml(r, sel.m, sel.sugs) + '</ul>';
+    h += '</div></div>';
+    loose.forEach(function (s) { h += sugHtml(r, s); });
+    return h + foot;
+  }
+
+  // Drawn on every job except a make-safe one, under Materials.
+  function mailHtml() {
     var row = state.row;
     if (!row || isMakesafe(row)) return '';
-    var e = repEntry(row.id);
-    var h = '<div class="dpc-sec dpc-replies" data-dpc-region="rep" id="dpc-replies"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">From suppliers</span><h3>Supplier replies</h3>';
-    h += '<p>Supplier emails matched to this job, and delivery dates read from them</p></div></div>';
-    return h + '<div class="dpc-sec-body">' + repBodyHtml(e) + '</div></div>';
+    var open = state.mail.open;
+    var h = '<div class="dpc-sec dpc-mailsec' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="mail" id="dpc-emails"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Send</span><h3>Emails</h3>';
+    if (open) h += '<p>Order emails from Materials, and supplier replies matched to this job with the delivery dates read from them</p>';
+    h += '</div><button type="button" class="dpc-chev" data-dpc-mail-toggle aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Emails">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + mailBodyHtml(row.id) + '</div>';
+    return h + '</div>';
   }
 
-  var REP_FOCUS_KEYS = ['data-dpc-rep-confirm', 'data-dpc-rep-reject', 'data-dpc-rep-retry', 'data-dpc-sug-accept', 'data-dpc-sug-dismiss', 'data-dpc-sug-order', 'data-dpc-sug-retry', 'data-dpc-retry'];
-  function paintRep() {
-    var el = region('rep');
+  var MAIL_FOCUS_KEYS = ['data-dpc-rep-confirm', 'data-dpc-rep-reject', 'data-dpc-rep-retry', 'data-dpc-sug-accept', 'data-dpc-sug-dismiss', 'data-dpc-sug-order', 'data-dpc-sug-retry', 'data-dpc-retry',
+    'data-dpc-mail', 'data-dpc-mail-key', 'data-dpc-mail-toggle', 'data-dpc-mail-goto', 'data-dpc-v2'];
+  function paintMail() {
+    var el = region('mail');
     if (!el) return;
     var a = document.activeElement;
-    var sel = a && el.contains(a) ? REP_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+    var sel = a && el.contains(a) ? MAIL_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
       return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
     }).join('') : '';
     painting = true;
-    try { el.outerHTML = repHtml(); } finally { painting = false; }
-    var now = sel && region('rep') ? region('rep').querySelector(sel) : null;
+    try { el.outerHTML = mailHtml(); } finally { painting = false; }
+    var now = sel && region('mail') ? region('mail').querySelector(sel) : null;
     if (now && !now.disabled) now.focus({ preventScroll: true });
   }
 
   function paintRepIf(jobId) {
     if (state.jobId !== jobId) return;
-    paintRep();
+    paintMail();
     paintSugNote();
+  }
+
+  // Opens the Emails panel on the first email that needs an answer.
+  function mailGotoAsk() {
+    var jobId = state.jobId;
+    if (!jobId) return;
+    var items = mailItems(jobId);
+    for (var i = 0; i < items.length; i++) if (items[i].ask) { state.mail.sel[jobId] = items[i].key; break; }
+    if (!state.mail.open) { state.mail.open = true; writeStore('localStorage', LS_MAIL, '1'); }
+    paintMail();
+    var sec = region('mail');
+    if (!sec) return;
+    sec.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    var first = sec.querySelector('.dpc-mail-view [data-dpc-sug-accept]:not([disabled]),.dpc-mail-view [data-dpc-rep-confirm]:not([disabled])');
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  // The Emails panel's own presses. True when the press was one of them.
+  function onMailClick(t) {
+    var jobId = state.jobId;
+    // A press on the reply open in the view keeps that reply open after it lands.
+    var li = t.closest ? t.closest('.dpc-mail-view [data-dpc-rep]') : null;
+    if (li && jobId) state.mail.sel[jobId] = 'r:' + li.getAttribute('data-dpc-rep');
+    if (t.hasAttribute('data-dpc-mail-toggle')) {
+      state.mail.open = !state.mail.open;
+      writeStore('localStorage', LS_MAIL, state.mail.open ? '1' : '0');
+      paintMail();
+      refocus('[data-dpc-mail-toggle]');
+      return true;
+    }
+    if (t.getAttribute('data-dpc-mail') === 'pick') {
+      if (!jobId) return true;
+      var key = t.getAttribute('data-dpc-mail-key');
+      state.mail.sel[jobId] = key;
+      paintMail();
+      refocus('[data-dpc-mail-key="' + String(key).replace(/["\\]/g, '\\$&') + '"]');
+      return true;
+    }
+    var sid = t.getAttribute('data-dpc-mail-goto');
+    if (sid) {
+      // The email lives in its supplier box in Materials: open Materials and go there.
+      if (!state.v2m.open) { state.v2m.open = true; writeStore('localStorage', LS_ORDER, '1'); paintV2(); }
+      var mid = t.getAttribute('data-dpc-mail-id');
+      var box = root().querySelector('[data-dpc-v2-box="' + sid.replace(/["\\]/g, '\\$&') + '"]');
+      if (box) {
+        box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        var field = mid ? box.querySelector('[data-dpc-v2-mf="subject"][data-dpc-v2-mid="' + mid.replace(/["\\]/g, '\\$&') + '"]') : null;
+        if (field) field.focus({ preventScroll: true });
+      }
+      return true;
+    }
+    return false;
   }
 
   // ── the Unmatched supplier emails tray ──
@@ -2956,7 +3139,7 @@
     if (!t.open) return '<div data-dpc-region="tray" hidden></div>';
     var h = '<div class="dpc-panel dpc-tray" data-dpc-region="tray" id="dpc-tray" role="region" aria-label="Unmatched supplier emails"><div class="dpc-row"><h3 class="dpc-grow">Unmatched supplier emails</h3>';
     h += '<label class="dpc-tray-other"><input type="checkbox" data-dpc-tray-other' + (t.other ? ' checked' : '') + '> Also show accounts and other supplier mail</label></div>';
-    h += '<p class="dpc-empty dpc-empty-tight">Supplier emails that could not be matched to a job, and best guesses to check. Pick the job, and it moves to that job\'s Supplier replies.</p>';
+    h += '<p class="dpc-empty dpc-empty-tight">Supplier emails that could not be matched to a job, and best guesses to check. Pick the job, and it moves to that job\'s Emails.</p>';
     if (t.msg) h += repMsgHtml(t.msg);
     if (t.status === 'error') return h + failLine('Could not load the unmatched supplier emails.', 'tray', true) + '</div>';
     if (!t.data) return h + '<p class="dpc-empty">Reading supplier emails...</p></div>';
@@ -4364,6 +4547,8 @@
     var f = v2Focus(el);
     painting = true;
     try { el.outerHTML = v2Html(); } finally { painting = false; }
+    // The order emails are also listed in the Emails panel.
+    paintMail();
     var now = f && region('v2mat') ? region('v2mat').querySelector(f.sel) : null;
     if (!now || now.disabled) return;
     now.focus({ preventScroll: true });
@@ -4575,7 +4760,7 @@
     } else if (!state.row) {
       h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
     } else {
-      h += headHtml(state.row) + sectionHtml() + v2Html() + repHtml() + schedHtml();
+      h += headHtml(state.row) + sectionHtml() + v2Html() + mailHtml() + schedHtml();
     }
     return h + '</section>';
   }
@@ -4630,10 +4815,11 @@
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
-      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry]') : null;
+      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
     if (!t || t.disabled) return;
     if (onV2Click(t)) return;
     if (onPadClick(t)) return;
+    if (onMailClick(t)) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
     if (onRepClick(t)) return;
@@ -4742,15 +4928,14 @@
     return true;
   }
 
-  // Supplier replies and the tray. True when the press was one of them.
+  // Supplier replies (in the Emails panel) and the tray. True when the press was one of them.
   function onRepClick(t) {
     var jobId = state.jobId;
     var e = repEntry(jobId);
     var tray = state.rep.tray;
     var id;
     if (t.hasAttribute('data-dpc-rep-goto')) {
-      var sec = region('rep');
-      if (sec) { sec.scrollIntoView({ block: 'start', behavior: 'smooth' }); var first = sec.querySelector('[data-dpc-sug-accept]:not([disabled]),[data-dpc-rep-confirm]:not([disabled])'); if (first) first.focus({ preventScroll: true }); }
+      mailGotoAsk();
     } else if ((id = t.getAttribute('data-dpc-rep-confirm'))) {
       repPress(jobId, 'confirm', id);
     } else if ((id = t.getAttribute('data-dpc-rep-reject'))) {
@@ -4888,7 +5073,7 @@
       if (!e2) return;
       var sid = t.getAttribute('data-dpc-sug-order');
       e2.pick[sid] = t.value;
-      var acc = region('rep') && region('rep').querySelector('[data-dpc-sug-accept="' + sid + '"]');
+      var acc = region('mail') && region('mail').querySelector('[data-dpc-sug-accept="' + sid + '"]');
       if (acc) acc.disabled = !t.value || !!e2.busy[sid];
       return;
     }

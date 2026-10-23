@@ -295,7 +295,7 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   for (const later of ['.dpc-banner']) {
     await expect(root.locator(later)).toHaveCount(0);
   }
-  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Supplier replies', 'Install']);
+  await expect(root.locator('.dpc-sec h3')).toHaveText(['Scope and notes', 'Materials', 'Emails', 'Install']);
   await expect(root).not.toContainText(/items ready/i);
   // No crew chip on the job header (the calendar strip under Deliveries names the crews).
   await expect(root.locator('.dpc-jobhead')).not.toContainText(/crew/i);

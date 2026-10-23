@@ -436,9 +436,14 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_suggestion_accept: () => { accepted = true; return { ok: true, order: { supplier_name: 'Metroll', confirmed_delivery_date: dayFrom(4) }, stage_move_offer: { job_id: 'job-f1', from_status: 'order_materials', to_status: 'order_confirmed' } }; },
       update_job_status: () => ({ success: true }),
     });
-    const rep = root.locator('[data-dpc-region="rep"]');
-    await expect(rep.locator('h3')).toHaveText('Supplier replies');
-    await expect(rep.locator('.dpc-rung')).toHaveText(['Same thread', 'Job number', 'Their number']);
+    const rep = root.locator('[data-dpc-region="mail"]');
+    // Supplier replies are in the job's one Emails panel: each on its own line
+    // in the list with how it was matched, the one needing an answer open.
+    await expect(rep.locator('h3')).toHaveText('Emails');
+    await expect(rep.locator('.dpc-mail-list .dpc-rung')).toHaveText(['Same thread', 'Job number', 'Their number']);
+    await expect(rep.locator('[data-dpc-mail-key="r:em-1"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(rep.locator('[data-dpc-mail-key="r:em-1"] .dpc-mail-drafttag')).toHaveText('Date to check');
+    await expect(rep.locator('.dpc-mail-view .dpc-rung')).toHaveCount(0);
     // The header notice points to the date waiting.
     const note = root.locator('.dpc-sugnote');
     await expect(note).toContainText('1 supplier delivery date to check.');
@@ -470,7 +475,7 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_suggestion_accept: () => ({ ok: true, order: { supplier_name: 'Metroll', confirmed_delivery_date: dayFrom(4) }, stage_move_offer: { job_id: 'job-f1', from_status: 'order_materials', to_status: 'order_confirmed' } }),
       dispatch_v2_suggestion_dismiss: () => ({ ok: true }),
     });
-    const rep = root.locator('[data-dpc-region="rep"]');
+    const rep = root.locator('[data-dpc-region="mail"]');
     const two = rep.locator('[data-dpc-sug="sg-2"]');
     await expect(two.locator('.dpc-sug-hints li')).toHaveText(['The email named a weekday that is not on this date. The date was used.', `The email also named ${words(dayFrom(9))}.`]);
     await expect(two.locator('[data-dpc-sug-accept]')).toBeDisabled();
@@ -505,14 +510,15 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_replies_confirm_guess: () => ({ ok: true }),
       dispatch_v2_replies_reject_guess: () => ({ ok: true }),
     });
-    const rep = root.locator('[data-dpc-region="rep"]');
+    const rep = root.locator('[data-dpc-region="mail"]');
     await expect(root.locator('.dpc-sugnote')).toContainText('2 best guess emails to confirm.');
     const g = rep.locator('[data-dpc-rep="em-g"]');
-    await expect(g.locator('.dpc-rung')).toHaveText('Best guess');
+    await expect(rep.locator('[data-dpc-mail-key="r:em-g"] .dpc-rung')).toHaveText('Best guess');
     await expect(g.locator('.dpc-rep-why')).toHaveText('Same supplier, one open order');
     await expect(g.locator('.dpc-rep-ask')).toContainText('Is this email about this job?');
     await g.locator('[data-dpc-rep-confirm]').click();
     await expect(rep).toContainText('Put on this job.');
+    await rep.locator('[data-dpc-mail-key="r:em-h"]').click();
     await rep.locator('[data-dpc-rep="em-h"] [data-dpc-rep-reject]').click();
     await expect(rep).toContainText('Sent back to the Unmatched supplier emails tray.');
     expect(of('dispatch_v2_replies_confirm_guess').map((c) => c.body.email_id)).toEqual(['em-g']);
@@ -522,11 +528,11 @@ test.describe('Dispatch v2 supplier replies', () => {
   test('no email and a failed read each say so', async ({ page }) => {
     let down = true;
     const { root } = await boot(page, { dispatch_v2_replies: () => (down ? { status: 500, body: { error: 'e2e' } } : REPLIES([], [], { scan: { enabled: false } })) });
-    const rep = root.locator('[data-dpc-region="rep"]');
+    const rep = root.locator('[data-dpc-region="mail"]');
     await expect(rep.locator('[role="alert"]')).toContainText('Could not load the supplier replies.');
     down = false;
     await rep.locator('[data-dpc-retry="replies"]').click();
-    await expect(rep).toContainText('No supplier emails on this job yet. Replies to our order emails show here.');
+    await expect(rep).toContainText('No email on this job yet. Order emails made in Materials, and supplier replies to them, show here.');
     await expect(rep).toContainText('Supplier emails are not being read yet.');
   });
 

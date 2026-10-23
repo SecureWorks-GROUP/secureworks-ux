@@ -1571,6 +1571,7 @@
       display: block; width: 100%; padding: 14px 16px; border: none; background: none; text-align: left;
       font-size: 14px; font-family: var(--sw-font); color: var(--sw-text); cursor: pointer;
     }
+    .user-menu-btn[hidden] { display: none; }
 
     /* ══════════════════════════════════════════════════
        TIMER CARD
@@ -3532,6 +3533,7 @@
 <div id="userMenu" style="display:none;position:fixed;top:56px;right:8px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:200;min-width:140px;overflow:hidden">
   <div class="user-menu-access" id="userMenuAccess"></div>
   <button class="user-menu-btn" id="userMenuActivity" onclick="openActivityFromMenu()">Activity</button>
+  <button class="user-menu-btn" id="userMenuScoper" onclick="openScoperFromMenu()" hidden>Scope a job</button>
   <button class="user-menu-btn" onclick="doLogout()">Sign out</button>
 </div>
 
@@ -4108,7 +4110,27 @@
   function syncUserMenuAccess() {
     var el = document.getElementById('userMenuAccess');
     if (el) el.innerHTML = _user ? tradeAccessBlockHTML('menu') : '';
+    var sc = document.getElementById('userMenuScoper');
+    if (sc) sc.hidden = !scoperLinkAllowed();
   }
+
+  // Staff open the scoper (Scope Engine T42). Off until the switch-on:
+  // set SCOPER_LINK_ENABLED to true. Shown to office staff only (admin, owner,
+  // ops_manager). The scoper page is on this same site, so the trade app's
+  // sign-in carries over and the page opens already signed in.
+  var SCOPER_LINK_ENABLED = false;
+  var SCOPER_URL = 'scopers/practice/';
+  function scoperLinkAllowed() {
+    var role = String((_user && _user.role) || '').toLowerCase();
+    return SCOPER_LINK_ENABLED && (role === 'admin' || role === 'owner' || role === 'ops_manager');
+  }
+
+  window.openScoperFromMenu = function () {
+    var menu = document.getElementById('userMenu');
+    if (menu) menu.style.display = 'none';
+    if (!scoperLinkAllowed()) return;
+    window.open(SCOPER_URL, '_blank', 'noopener');
+  };
 
   window.openActivityFromMenu = function () {
     var menu = document.getElementById('userMenu');

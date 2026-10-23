@@ -4644,6 +4644,7 @@ __swOpsStampAssets([
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
         <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none">Debt</button>
+        <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none">Matching</button>
         <button onclick="showView('dispatch')" data-view="dispatch">Dispatch</button>
         <button onclick="showView('sales')" data-view="sales">Sales</button>
       </div>
@@ -5251,6 +5252,9 @@ __swOpsStampAssets([
     <!-- ═══════════ DEBT WORKSHOP (modules/ops-debt-workshop.js, docs/debt-workshop.md) ═══════════ -->
     <div id="viewDebt" class="view"><div id="debtWorkshopRoot"></div></div>
 
+    <!-- ═══════════ MATCHING: the Context reconciliation list (modules/ops-recon.js) ═══════════ -->
+    <div id="viewRecon" class="view"><div id="reconRoot"></div></div>
+
     <div class="view" id="viewSales">
       <div id="salesWorkspaceSubnav" class="sales-workspace-subnav" aria-label="Sales views">
         <span class="sales-workspace-label">Sales</span>
@@ -5270,6 +5274,7 @@ __swOpsStampAssets([
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
     <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 3v7l5 5"/></svg></span>Debt</button>
+    <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h9l-3-3M16 13H7l3 3"/></svg></span>Matching</button>
     <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#128666;</span>Dispatch</button>
     <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
   </div>
@@ -7447,6 +7452,7 @@ function showView(view) {
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
   if (view === 'debt' && typeof loadDebtWorkshop === 'function') loadDebtWorkshop();
+  if (view === 'recon' && typeof loadRecon === 'function') loadRecon();
   if (view === 'dispatch') {
     if (typeof OpsDispatch !== 'undefined') OpsDispatch.show();
     loadMaterials();
@@ -7505,7 +7511,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['jobs', 'calendar', 'financials', 'debt', 'dispatch', 'performance', 'booking', 'sales'];
+  var validTabs = ['jobs', 'calendar', 'financials', 'debt', 'recon', 'dispatch', 'performance', 'booking', 'sales'];
   showView(validTabs.indexOf(hash) >= 0 ? hash : 'jobs');
 }
 
@@ -29733,6 +29739,12 @@ if (document.readyState === 'loading') {
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-debt-workshop.js?v=1'}
+]);
+</script>
+<!-- Matching: the Context reconciliation list (modules/ops-recon.js) -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-recon.js?v=1'}
 ]);
 </script>
 </body>

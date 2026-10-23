@@ -88,6 +88,26 @@
   // ── Init Supabase Client ──
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  // ── Lend the signed-in session to an embedded scope preview ──
+  // The patio and fence tools open with noAuth=true inside Ops Dash and the
+  // trade app, and ask for this page's session by postMessage so they can read
+  // the job without a shared key. Answer only a frame inside this page, only on
+  // the tools' own origins, and only with the session we already hold.
+  var _PREVIEW_ORIGINS = ['https://marninms98-dotcom.github.io', 'https://secureworks-group.github.io'];
+  window.addEventListener('message', function(ev) {
+    if (!ev.data || ev.data.type !== 'sw:session-request') return;
+    if (_PREVIEW_ORIGINS.indexOf(ev.origin) === -1 || !ev.source) return;
+    var frames = document.getElementsByTagName('iframe');
+    var ours = false;
+    for (var i = 0; i < frames.length; i++) { if (frames[i].contentWindow === ev.source) { ours = true; break; } }
+    if (!ours) return;
+    var source = ev.source, origin = ev.origin;
+    sb.auth.getSession().then(function(r) {
+      var token = r && r.data && r.data.session && r.data.session.access_token;
+      if (token) source.postMessage({ type: 'sw:session', access_token: token }, origin);
+    }).catch(function() {});
+  });
+
   // ── State ──
   var _user = null;
   var _userProfile = null;

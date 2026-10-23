@@ -77,8 +77,19 @@
  * after a person checked admin@ Sent Items; one that went but was not noted
  * is never offered again. Never called: create_po, update_po, email_po,
  * push_po_to_xero, send-po-email, update_supplier_email and sync_suppliers,
- * nor any v1 dispatch_materials_*, dispatch_order_* or dispatch_delivery_*
- * action.
+ * nor any v1 dispatch_order_* action, nor any v1 dispatch_materials_* or
+ * dispatch_delivery_* action other than the kept ones below.
+ *
+ * Deliveries and install keeps v1's table for purchase orders made outside
+ * Dispatch (dispatch_delivery_set_expected, _set_confirmed, _mark_sighted;
+ * the working out pad keeps dispatch_materials_save_workings). Under it, the
+ * supplier boxes ordered by email, from the Arrival line's answer. Their
+ * delivery date can be set, confirmed, changed or cleared by hand (Shaun's
+ * ruling, 23 Oct: "we can tweak delivery dates manually", for example when a
+ * supplier confirms by phone) through ops-api dispatch_v2_set_delivery_date,
+ * sent once on Save or Clear, never on opening the line, typing or Cancel.
+ * A date set by hand replaces the supplier's reply date and never moves the
+ * job. Its answer redraws the Arrival line; the list is then read again.
  *
  * The Install section (v2 slice 7) shows the install day from the board and
  * who is booked from the list row's dispatch_install. It has no write: Mark
@@ -90,8 +101,9 @@
  * Guards: tests/e2e/ops-tab-set.spec.js (slice 1),
  * tests/e2e/ops-dispatch-panel.spec.js (slice 2),
  * tests/e2e/ops-dispatch-v2.spec.js (the v2 list, rail, Arrival line and
- * supplier replies) and tests/e2e/ops-dispatch-v2-materials.spec.js (v2
- * Materials and the order emails).
+ * supplier replies), tests/e2e/ops-dispatch-v2-materials.spec.js (v2
+ * Materials and the order emails) and tests/e2e/ops-dispatch-v2-restored.spec.js
+ * (the kept v1 parts and the box delivery dates set by hand).
  * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md, and
  * the Dispatch v2 contracts (board, replies, and supplier order emails on the
  * be-dispatch-supplier-order-emails branch).
@@ -926,7 +938,7 @@
     old: { jobs: {}, workOpen: readStore('localStorage', LS_WORKOUT) === '1', pdf: {} },
     // The Deliveries table: the row being saved, its message, the date being
     // edited, the confirm question open, and what was typed in a date box.
-    deliv: { busy: {}, msg: null, edit: null, ask: null, typed: {} },
+    deliv: { busy: {}, msg: null, edit: null, ask: null, typed: {}, boxEdit: null, boxMsg: null },
     // The Emails panel: open or shut, and the email picked on each job.
     mail: { open: readStore('localStorage', LS_MAIL) !== '0', sel: {} }
   };
@@ -2927,27 +2939,208 @@
     return '<p class="dpc-deliv-msg dpc-mat-fail" role="alert">' + esc(m.text) + ' <button type="button" class="dpc-retry" data-dpc-deliv-retry="write">Retry</button></p>';
   }
 
-  // The supplier boxes ordered by email from Materials, read only, from the
-  // Arrival line's own answer: their dates come from supplier replies
-  // (Accept in Emails) or the date our email asked for. No by-hand date or
-  // sighting can be set on them yet: no backend action exists for that.
-  var BOX_DATE_FROM = { box: "From the supplier's reply", requested: 'Asked for in our email', order: 'From the purchase order' };
-  function boxDelivHtml(row) {
+  // ── The supplier boxes ordered by email from Materials: the delivery date ──
+  // Listed from the Arrival line's own answer. Their date comes from a
+  // supplier reply (Accept in Emails), from a person by hand, or else the date
+  // our order email asked for. Shaun's ruling (23 Oct): "we can tweak delivery
+  // dates manually", for example when a supplier confirms by phone. Each box
+  // has one inline line: a date, a Confirmed tick, Save, Clear and Cancel.
+  // One write, ops-api dispatch_v2_set_delivery_date, sent once on Save or
+  // Clear (never on opening the line, typing, ticking or Cancel). A date set by
+  // hand replaces the supplier's date; it never moves the job's stage. The
+  // answer carries the job's fresh Arrival line, then the list is read again
+  // so the card's thin line and its count follow. No sighting is recorded on
+  // these orders (v1 purchase orders keep theirs).
+  function boxDateFrom(o) {
+    if (o.date_source === 'box') {
+      if (o.box_date_source === 'by_hand') return 'Set by hand' + (text(o.box_date_set_by_email) ? ' by ' + text(o.box_date_set_by_email) : '');
+      return "From the supplier's reply";
+    }
+    return o.date_source === 'requested' ? 'Asked for in our email' : o.date_source === 'order' ? 'From the purchase order' : '';
+  }
+
+  function boxOrders(row) {
     var a = arrivalFor(row).arrival;
-    var boxes = a && Array.isArray(a.orders) ? a.orders.filter(function (o) { return o && o.source === 'supplier_box'; }) : [];
+    return a && Array.isArray(a.orders) ? a.orders.filter(function (o) { return o && o.source === 'supplier_box' && text(o.supplier_id); }) : [];
+  }
+
+  function boxOrderOf(row, supplierId) {
+    var list = boxOrders(row);
+    for (var i = 0; i < list.length; i++) if (text(list[i].supplier_id) === supplierId) return list[i];
+    return null;
+  }
+
+  // Opens the one inline line on a box, filled with the date shown (so a
+  // supplier's yes by phone to the date we asked for is one tick and Save).
+  // Nothing is sent until Save or Clear.
+  function openBoxLine(row, supplierId, tick) {
+    var o = boxOrderOf(row, supplierId);
+    if (!o) return;
+    var own = o.date_source === 'box';
+    state.deliv.boxEdit = {
+      jobId: row.id, supplierId: supplierId, boxId: text(o.box_id) || null, name: text(o.supplier_name) || 'this supplier',
+      date: wholeDay(o.delivery_date), confirmed: tick || (own && o.date_confirmed === true), own: own,
+      // The guard: the box's own date stamp as shown (null = no date of its
+      // own). Sent only when the Arrival answer carries it.
+      guard: Object.prototype.hasOwnProperty.call(o, 'box_date_set_at') ? { set_at: own ? (text(o.box_date_set_at) || null) : null } : null,
+      fromReply: own && o.box_date_source === 'supplier_reply',
+      busy: false, fail: false, last: null
+    };
+    state.deliv.boxMsg = null;
+  }
+
+  // The answer's fresh Arrival line onto the open job and every copy of its
+  // list row, so the full line, its count and the card's thin line redraw.
+  function applyBoxArrival(jobId, resp) {
+    var fresh = resp && isObj(resp.arrival) && resp.arrival.job_id === jobId && resp.arrival.arrival_read !== 'failed' && arrivalOk(resp.arrival.arrival) ? resp.arrival : null;
+    if (!fresh) return false;
+    state.arrival[jobId] = { status: 'ok', data: fresh };
+    [state.base.rows, state.found.rows, state.arch.rows, state.row ? [state.row] : []].forEach(function (rows) {
+      rows.forEach(function (r) { if (r && r.id === jobId && boardOf(r)) r.board.arrival = fresh.arrival; });
+    });
+    return true;
+  }
+
+  var BOX_REFUSED = {
+    date_changed: 'This date was changed somewhere else. Showing the latest.',
+    box_not_found: 'That supplier order is no longer on this job. Showing the latest.',
+    not_dispatch_work: 'Delivery dates cannot be set on this job.'
+  };
+
+  function boxSavedWords(ed, resp) {
+    if (resp && resp.unchanged) return 'No change: ' + ed.name + ' already had that date.';
+    var b = resp && resp.box;
+    var d = b && parseDay(b.delivery_date);
+    if (!d) return 'Delivery date cleared: ' + ed.name + '.';
+    return 'Delivery date saved: ' + ed.name + ', ' + dayText(d) + (b.confirmed ? ', confirmed.' : ', not confirmed yet.');
+  }
+
+  // Save (value: a date) or Clear (value: null). The line stays open with
+  // what was typed when the press fails.
+  function saveBoxDate(value) {
+    var ed = state.deliv.boxEdit;
+    if (!ed || ed.busy || (value !== null && !wholeDay(value))) return;
+    var jobId = ed.jobId;
+    ed.busy = true;
+    ed.fail = false;
+    ed.last = value;
+    paintSchedIf(jobId);
+    var body = ed.boxId ? { box_id: ed.boxId } : { job_id: jobId, supplier_id: ed.supplierId };
+    body.delivery_date = value;
+    body.confirmed = value !== null && ed.confirmed === true;
+    if (ed.guard) body.expected_set_at = ed.guard.set_at;
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_set_delivery_date', body); }).then(function (resp) {
+      if (!resp || resp.success !== true) throw new Error('Unexpected answer');
+      if (state.deliv.boxEdit === ed) state.deliv.boxEdit = null;
+      state.deliv.boxMsg = { jobId: jobId, text: boxSavedWords(ed, resp) };
+      if (!applyBoxArrival(jobId, resp)) loadArrival(rowById(jobId) || state.row);
+      if (state.jobId === jobId) { paintArrival(); paintSched(); refocus('[data-dpc-box-open="' + ed.supplierId + '"]'); }
+      paintList(true);
+      // The list read again: the card's thin line and count, from the server.
+      if (!resp.unchanged) loadBase();
+    }, function (err) {
+      ed.busy = false;
+      var words = BOX_REFUSED[err && err.code];
+      if (words) {
+        if (state.deliv.boxEdit === ed) state.deliv.boxEdit = null;
+        state.deliv.boxMsg = { jobId: jobId, text: words };
+        if (state.jobId === jobId) loadArrival(rowById(jobId) || state.row);
+      } else {
+        ed.fail = true;
+      }
+      paintSchedIf(jobId);
+    });
+  }
+
+  // The inline delivery date line under a box.
+  function boxEditHtml(ed) {
+    var off = ed.busy ? ' disabled' : '';
+    var h = '<div class="dpc-deliv-edit" role="group" aria-label="Delivery date for ' + esc(ed.name) + '"><p class="dpc-empty dpc-empty-tight">Delivery date for ' + esc(ed.name) + ', set by hand:</p><div class="dpc-actions">';
+    h += dateBoxHtml(ed.date, 'data-dpc-box-date', 'Delivery date for ' + ed.name, ed.busy, true);
+    h += '<label class="dpc-v2-main dpc-box-tick"><input type="checkbox" data-dpc-box-confirmed' + (ed.confirmed ? ' checked' : '') + off + '> Confirmed by the supplier</label>';
+    h += '<button type="button" class="dpc-primary" data-dpc-box-edit="save"' + (ed.busy || !wholeDay(ed.date) ? ' disabled' : '') + '>' + (ed.busy && ed.last !== null ? 'Saving...' : 'Save') + '</button>';
+    if (ed.own) h += '<button type="button" class="dpc-primary" data-dpc-box-edit="clear"' + off + '>' + (ed.busy && ed.last === null ? 'Clearing...' : 'Clear') + '</button>';
+    h += '<button type="button" data-dpc-box-edit="cancel"' + off + '>Cancel</button></div>';
+    if (ed.fromReply) h += '<p class="dpc-empty dpc-empty-tight">A date saved here replaces the date from the supplier\'s reply.</p>';
+    if (ed.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Delivery date not saved. <button type="button" class="dpc-retry" data-dpc-box-edit="retry"' + off + '>Retry</button></p>';
+    return h + '</div>';
+  }
+
+  function boxDelivHtml(row) {
+    var boxes = boxOrders(row);
     if (!boxes.length) return '';
+    var ed = state.deliv.boxEdit && state.deliv.boxEdit.jobId === row.id ? state.deliv.boxEdit : null;
     var h = '<div class="dpc-deliv dpc-deliv-boxes"><div class="dpc-deliv-row dpc-deliv-head"><span>Supplier (order email)</span><span>Expected</span><span>Confirmed by supplier</span><span>Sighted on site</span></div>';
     boxes.forEach(function (o) {
+      var sid = text(o.supplier_id);
+      var name = text(o.supplier_name) || 'Supplier not recorded';
       var day = parseDay(o.delivery_date);
-      var from = BOX_DATE_FROM[o.date_source] || '';
-      h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(text(o.supplier_id) || text(o.key)) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
-      h += '<span><strong>' + esc(text(o.supplier_name) || 'Supplier not recorded') + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + '</small></span>';
-      h += !o.date_confirmed && day ? '<span class="dpc-dstate on">' + esc(dayText(day)) + (from ? '<small>' + esc(from) + '</small>' : '') + '</span>' : '<span class="dpc-dstate"><em>' + (day ? '-' : 'No date yet') + '</em></span>';
-      h += o.date_confirmed && day ? '<span class="dpc-dstate on">' + esc(dayText(day)) + (from ? '<small>' + esc(from) + '</small>' : '') + '</span>' : '<span class="dpc-dstate"><em>Waiting on supplier</em></span>';
-      h += '<span class="dpc-dstate"><em>Not recorded here</em></span></div></div>';
+      var from = boxDateFrom(o);
+      var small = from ? '<small>' + esc(from) + '</small>' : '';
+      var off = ed && ed.busy ? ' disabled' : '';
+      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the delivery date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
+      h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
+      h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + '</small></span>';
+      // Expected: the date while it is not confirmed.
+      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
+      else if (!o.date_confirmed) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
+      else h += '<span class="dpc-dstate"><em>-</em></span>';
+      // Confirmed by supplier: the date once it is.
+      if (o.date_confirmed && day) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
+      else h += '<span class="dpc-dstate"><em>Waiting on supplier</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '" data-dpc-box-tick' + off + '>Set confirmed date</button></span>';
+      h += '<span class="dpc-dstate"><em>Not recorded here</em></span></div>';
+      if (ed && ed.supplierId === sid) h += '<div class="dpc-deliv-sub">' + boxEditHtml(ed) + '</div>';
+      h += '</div>';
     });
-    h += '</div><p class="dpc-deliv-sub dpc-deliv-boxnote">Orders sent by email from Materials take their dates from supplier replies (Accept in Emails). A date or a sighting cannot be set by hand on them yet.</p>';
+    h += '</div>';
+    var m = state.deliv.boxMsg;
+    if (m && m.jobId === row.id) h += '<p class="dpc-deliv-msg dpc-deliv-boxmsg" role="status">' + esc(m.text) + '</p>';
+    h += '<p class="dpc-deliv-sub dpc-deliv-boxnote">Orders sent by email from Materials take their dates from supplier replies (Accept in Emails), or set one here by hand, for example when a supplier confirms by phone. A date set by hand replaces the supplier\'s date and never moves the job. Sightings are not recorded on these orders.</p>';
     return h;
+  }
+
+  // The box lines' presses. True when the press was one of them. Only Save,
+  // Clear and Retry send anything.
+  function onBoxClick(t) {
+    if (t.hasAttribute('data-dpc-box-open')) {
+      if (!state.row || state.deliv.boxEdit && state.deliv.boxEdit.busy) return true;
+      openBoxLine(state.row, t.getAttribute('data-dpc-box-open'), t.hasAttribute('data-dpc-box-tick'));
+      paintSched();
+      refocus('[data-dpc-box-date]');
+      return true;
+    }
+    if (!t.hasAttribute('data-dpc-box-edit')) return false;
+    var ed = state.deliv.boxEdit;
+    if (!ed) return true;
+    var act = t.getAttribute('data-dpc-box-edit');
+    if (act === 'save') saveBoxDate(ed.date);
+    else if (act === 'clear') saveBoxDate(null);
+    else if (act === 'retry') saveBoxDate(ed.last);
+    else if (act === 'cancel') {
+      state.deliv.boxEdit = null;
+      paintSched();
+      refocus('[data-dpc-box-open="' + ed.supplierId + '"]');
+    }
+    return true;
+  }
+
+  // Typing a date or ticking Confirmed on the open line. True when it was one.
+  function onBoxInput(t) {
+    var ed = state.deliv.boxEdit;
+    if (t.hasAttribute('data-dpc-box-confirmed')) {
+      if (ed) ed.confirmed = !!t.checked;
+      return true;
+    }
+    if (!t.hasAttribute('data-dpc-box-date')) return false;
+    var wrap = t.parentNode;
+    if (wrap && wrap.classList) wrap.classList.toggle('dpc-deliv-blank', !t.value);
+    if (ed) {
+      ed.date = t.value;
+      var line = t.closest('.dpc-deliv-edit');
+      var saveBtn = line && line.querySelector('[data-dpc-box-edit="save"]');
+      if (saveBtn) saveBtn.disabled = !!ed.busy || !wholeDay(t.value);
+    }
+    return true;
   }
 
   var DELIV_EMPTY = 'No orders on this job yet. Orders sent from Materials show here with their delivery dates.';
@@ -3189,7 +3382,7 @@
   }
 
   var SCHED_FOCUS_KEYS = ['data-dpc-deliv-expected', 'data-dpc-deliv-edit-date', 'data-dpc-deliv-sight', 'data-dpc-deliv-unsight', 'data-dpc-deliv-po',
-    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-sched-toggle'];
+    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-box-open', 'data-dpc-box-date', 'data-dpc-box-confirmed', 'data-dpc-box-edit', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-sched-toggle'];
   function paintSched() {
     var el = region('sched');
     if (!el) return;
@@ -5269,7 +5462,7 @@
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
       '[data-dpc-mode],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
-      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],' +
+      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
@@ -5281,6 +5474,7 @@
     if (onStageClick(t)) return;
     if (onRepClick(t)) return;
     if (onInstallClick(t)) return;
+    if (onBoxClick(t)) return;
     if (onDelivClick(t)) return;
     if (t.hasAttribute('data-dpc-deliv-cal')) {
       // The Calendar tab's own call, once: the calendar opens as it was left.
@@ -5527,6 +5721,7 @@
       return;
     }
     if (!state.jobId) return;
+    if (t.hasAttribute('data-dpc-box-confirmed')) { onBoxInput(t); return; }
     if (onV2Change(t)) return;
     if (t.hasAttribute('data-dpc-sug-order')) {
       var e2 = repEntry(state.jobId);
@@ -5563,6 +5758,7 @@
     if (!t || !t.hasAttribute) return;
     if (onV2Input(t)) return;
     if (t.hasAttribute('data-dpc-mat-pad')) { if (state.jobId) padInput(state.jobId, t.value); return; }
+    if (onBoxInput(t)) return;
     if (onDelivInput(t)) return;
     if (t.hasAttribute('data-dpc-search')) {
       state.search = t.value || '';

@@ -7,7 +7,9 @@
 //    through the v1 dispatch_materials_save_workings.
 //  - The Deliveries table in "Deliveries and install": expected date,
 //    confirmed date and sighted on site for each purchase order, through the
-//    three v1 delivery writes.
+//    three v1 delivery writes. Under it, the supplier boxes ordered by
+//    email: their delivery date set, confirmed, changed or cleared by hand
+//    through dispatch_v2_set_delivery_date, onto the Arrival line.
 //  - Purchase orders in Sources, read only (v2 makes no purchase orders).
 //  - One Emails panel: the v2 order emails (held, TEST and sent) read only,
 //    and the supplier replies thread, in the v1 list and view look.
@@ -319,29 +321,57 @@ const PO_ROW = (over) => Object.assign({
 }, over);
 const ARRIVAL = (orders) => ({
   job_id: 'job-f1', install: null, installs: [], arrival_read: 'ok',
-  arrival: { today: '2026-10-23', install_day: '2026-10-30', orders, counts: { orders: orders.length, sent: 1, confirmed: 0, late: 0 }, all_confirmed_in_time: false },
+  arrival: { today: '2026-10-23', install_day: '2026-10-30', orders, counts: { orders: orders.length, sent: 1, confirmed: orders.filter((o) => o.date_confirmed).length, late: 0 }, all_confirmed_in_time: false },
 });
+// A supplier box ordered by email: its date is the one our email asked for
+// until a reply is accepted or a person sets one by hand.
 const BOX_ORDER = { key: `box:${SID(2)}`, source: 'supplier_box', supplier_id: SID(2), supplier_name: 'Banksia Roofing', order_sent: true, sent_at: '2026-10-20T02:00:00Z',
-  delivery_date: '2026-10-28', date_source: 'requested', date_confirmed: false, mark: 'ring', flag: null };
+  delivery_date: '2026-10-28', date_source: 'requested', date_confirmed: false, mark: 'ring', flag: null,
+  box_id: 'box-1', box_date_source: null, box_date_set_at: null, box_date_set_by_email: null };
 const PO_ORDER = { key: 'po:po-1', source: 'other_order', supplier_id: null, supplier_name: 'Plain Hardware', order_sent: true, sent_at: null,
   delivery_date: '2026-10-27', date_source: 'order', date_confirmed: false, mark: 'ring', flag: null };
 
 // The stub keeps the order's delivery block, as dispatch_deliveries.ts answers.
 function delivApi() {
   const row = PO_ROW();
+  // The box as the Arrival line answers it; dispatch_v2_set_delivery_date
+  // changes it as dispatch_v2_delivery_date.ts does.
+  const box = Object.assign({}, BOX_ORDER);
+  const orders = () => [Object.assign({}, box), Object.assign({}, PO_ORDER, { delivery_date: row.delivery.expected })];
   let n = 0;
   const stamp = () => { n += 1; return `2026-10-23T02:00:${String(n).padStart(2, '0')}.000Z`; };
   const answer = () => ({ success: true, order: { id: 'po-1', updated_at: row.updated_at, status: row.status, delivery: JSON.parse(JSON.stringify(row.delivery)) },
     deliveries: { counted: 1, sighted: row.delivery.sighted ? 1 : 0, all_sighted: !!row.delivery.sighted } });
   return {
     row,
+    box,
     api: {
       pipeline: () => ({ columns: { accepted: [Object.assign({}, JOBS.f1, { deliveries_orders_total: 1, deliveries_orders_sighted: 0 }), JOBS.p1] }, total: 2, dispatch_materials: 'ok', dispatch_deliveries: 'ok' }),
+      dispatch_v2_set_delivery_date: (url, body) => {
+        if (body.box_id !== box.box_id) return { status: 404, body: { error: 'gone', code: 'box_not_found' } };
+        const own = box.date_source === 'box' ? box.box_date_set_at : null;
+        if ('expected_set_at' in body && body.expected_set_at !== own) {
+          return { status: 409, body: { error: 'changed', code: 'date_changed', box: null } };
+        }
+        if (body.delivery_date) {
+          Object.assign(box, { delivery_date: body.delivery_date, date_source: 'box', date_confirmed: body.confirmed === true, mark: body.confirmed ? 'solid' : 'ring',
+            box_date_source: 'by_hand', box_date_set_at: stamp(), box_date_set_by_email: 'ops-e2e@example.test' });
+        } else {
+          // Cleared: the line falls back to the date our email asked for.
+          Object.assign(box, BOX_ORDER);
+        }
+        return {
+          success: true, job_status_changed: false, audit_logged: true,
+          box: { box_id: box.box_id, job_id: 'job-f1', supplier_id: box.supplier_id, supplier_name: box.supplier_name,
+            delivery_date: box.date_source === 'box' ? box.delivery_date : null, confirmed: box.date_confirmed },
+          arrival: ARRIVAL(orders()),
+        };
+      },
       dispatch_materials: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? OLD() : OLD({
         orders: [{ id: 'po-1', po_number: 'PO-3001', supplier_name: 'Plain Hardware', status: 'sent', lines: [] }],
         deliveries: { rows: [JSON.parse(JSON.stringify(row)), { kind: 'not_ordered', supplier_id: SID(2), supplier_name: 'Banksia Roofing' }], counted: 1, sighted: row.delivery.sighted ? 1 : 0, all_sighted: false },
       })),
-      dispatch_arrival: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? ARRIVAL([]) : ARRIVAL([BOX_ORDER, Object.assign({}, PO_ORDER, { delivery_date: row.delivery.expected })])),
+      dispatch_arrival: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? ARRIVAL([]) : ARRIVAL(orders())),
       dispatch_delivery_set_expected: (url, body) => {
         if (body.expected_updated_at !== row.updated_at) return { status: 409, body: { error: 'changed', code: 'order_changed' } };
         row.delivery.expected = body.delivery_date; row.updated_at = stamp(); return answer();
@@ -408,9 +438,9 @@ test.describe('Dispatch v2: Deliveries and install, kept from v1', () => {
     expect(await sched.innerText()).not.toMatch(/[–—]/);
   });
 
-  test('the boxes ordered by email are listed read only, with where their date came from', async ({ page }) => {
+  test('a box ordered by email shows where its date came from; a date set by hand is sent once, on Save, onto the Arrival line', async ({ page }) => {
     const dv = delivApi();
-    const { root } = await boot(page, { api: dv.api });
+    const { root, of, calls, writes } = await boot(page, { api: dv.api });
     const sched = root.locator('[data-dpc-region="sched"]');
     const box = sched.locator(`[data-dpc-deliv-box="${SID(2)}"]`);
     await expect(box).toContainText('Banksia Roofing');
@@ -418,8 +448,116 @@ test.describe('Dispatch v2: Deliveries and install, kept from v1', () => {
     await expect(box).toContainText('Asked for in our email');
     await expect(box).toContainText('Waiting on supplier');
     await expect(box).toContainText('Not recorded here');
-    await expect(box.locator('input, button')).toHaveCount(0);
-    await expect(sched.locator('.dpc-deliv-boxnote')).toHaveText('Orders sent by email from Materials take their dates from supplier replies (Accept in Emails). A date or a sighting cannot be set by hand on them yet.');
+    await expect(sched.locator('.dpc-deliv-boxnote')).toHaveText("Orders sent by email from Materials take their dates from supplier replies (Accept in Emails), or set one here by hand, for example when a supplier confirms by phone. A date set by hand replaces the supplier's date and never moves the job. Sightings are not recorded on these orders.");
+    const count = root.locator('[data-dpc-region="arrival"] .dpc-arr-count');
+    await expect(count).toHaveText('2 orders: 0 confirmed');
+    const lists = of('pipeline').length;
+
+    // A supplier's yes by phone: Set confirmed date opens the line on the date
+    // shown, ticked. Opening, typing and ticking send nothing.
+    await box.locator('[data-dpc-box-open][data-dpc-box-tick]').click();
+    const line = box.locator('.dpc-deliv-edit');
+    await expect(line).toContainText('Delivery date for Banksia Roofing, set by hand:');
+    await expect(line.locator('[data-dpc-box-date]')).toHaveValue('2026-10-28');
+    await expect(line.locator('[data-dpc-box-date]')).toBeFocused();
+    await expect(line.locator('[data-dpc-box-confirmed]')).toBeChecked();
+    // No date of its own yet, so nothing to clear.
+    await expect(line.locator('[data-dpc-box-edit="clear"]')).toHaveCount(0);
+    await line.locator('[data-dpc-box-date]').fill('2026-10-29');
+    await line.locator('[data-dpc-box-confirmed]').uncheck();
+    await line.locator('[data-dpc-box-confirmed]').check();
+    expect(writes()).toHaveLength(0);
+
+    await line.locator('[data-dpc-box-edit="save"]').click();
+    await expect(sched.locator('.dpc-deliv-boxmsg')).toHaveText('Delivery date saved: Banksia Roofing, Thu 29/10, confirmed.');
+    expect(writes().map((c) => ({ action: c.action, body: c.body }))).toEqual([
+      { action: 'dispatch_v2_set_delivery_date', body: { box_id: 'box-1', delivery_date: '2026-10-29', confirmed: true, expected_set_at: null, operator_email: 'ops-e2e@example.test' } },
+    ]);
+    await expect(box.locator('.dpc-deliv-edit')).toHaveCount(0);
+    await expect(box).toContainText('Set by hand by ops-e2e@example.test');
+    await expect(box.locator('[data-dpc-box-open]').first()).toHaveText('Thu 29/10');
+    // The Arrival line takes the answer's fresh line: solid, and counted.
+    await expect(count).toHaveText('2 orders: 1 confirmed');
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-mk', { hasText: 'Banksia Roofing' })).toHaveClass(/ok/);
+    // The list is read again, so the card's thin line follows.
+    await expect.poll(() => of('pipeline').length).toBe(lists + 1);
+    // It never moves the job.
+    expect(calls.filter((c) => c.action === 'update_job_status')).toHaveLength(0);
+    expect(writes()).toHaveLength(1);
+    expect(await sched.innerText()).not.toMatch(/[–—]/);
+  });
+
+  test('Cancel sends nothing; a date set by hand can be changed and cleared, back to the date our email asked for', async ({ page }) => {
+    const dv = delivApi();
+    const { root, writes } = await boot(page, { api: dv.api });
+    const sched = root.locator('[data-dpc-region="sched"]');
+    const box = sched.locator(`[data-dpc-deliv-box="${SID(2)}"]`);
+
+    // The date in Expected opens the line unticked; Cancel closes it.
+    await box.locator('[data-dpc-box-open]:not([data-dpc-box-tick])').click();
+    await expect(box.locator('[data-dpc-box-confirmed]')).not.toBeChecked();
+    await box.locator('[data-dpc-box-edit="cancel"]').click();
+    await expect(box.locator('.dpc-deliv-edit')).toHaveCount(0);
+    expect(writes()).toHaveLength(0);
+
+    // Saved not confirmed: it stays a ring in Expected.
+    await box.locator('[data-dpc-box-open]:not([data-dpc-box-tick])').click();
+    await box.locator('[data-dpc-box-date]').fill('2026-10-27');
+    await box.locator('[data-dpc-box-edit="save"]').click();
+    await expect(sched.locator('.dpc-deliv-boxmsg')).toHaveText('Delivery date saved: Banksia Roofing, Tue 27/10, not confirmed yet.');
+    await expect(box).toContainText('Set by hand by ops-e2e@example.test');
+    await expect(box).toContainText('Waiting on supplier');
+    const stamp = dv.box.box_date_set_at;
+
+    // Clear: sent with the stamp of the date it clears.
+    await box.locator('[data-dpc-box-open]:not([data-dpc-box-tick])').click();
+    await box.locator('[data-dpc-box-edit="clear"]').click();
+    await expect(sched.locator('.dpc-deliv-boxmsg')).toHaveText('Delivery date cleared: Banksia Roofing.');
+    expect(writes().map((c) => c.body)).toEqual([
+      { box_id: 'box-1', delivery_date: '2026-10-27', confirmed: false, expected_set_at: null, operator_email: 'ops-e2e@example.test' },
+      { box_id: 'box-1', delivery_date: null, confirmed: false, expected_set_at: stamp, operator_email: 'ops-e2e@example.test' },
+    ]);
+    await expect(box).toContainText('Asked for in our email');
+    await expect(box.locator('[data-dpc-box-open]').first()).toHaveText('Wed 28/10');
+    expect(writes().every((c) => c.action === 'dispatch_v2_set_delivery_date')).toBe(true);
+  });
+
+  test('a date changed somewhere else says so and shows the latest; a failed save keeps the line with Retry', async ({ page }) => {
+    const dv = delivApi();
+    let down = false;
+    const api = Object.assign({}, dv.api, {
+      dispatch_v2_set_delivery_date: (url, body) => (down ? { status: 500, body: { error: 'down' } } : dv.api.dispatch_v2_set_delivery_date(url, body)),
+    });
+    const { root, of, writes } = await boot(page, { api });
+    const sched = root.locator('[data-dpc-region="sched"]');
+    const box = sched.locator(`[data-dpc-deliv-box="${SID(2)}"]`);
+    await expect(box).toContainText('Asked for in our email');
+
+    // Someone else set a date by hand after this screen was read.
+    Object.assign(dv.box, { delivery_date: '2026-10-26', date_source: 'box', box_date_source: 'by_hand', box_date_set_at: '2026-10-23T05:00:00.000Z', box_date_set_by_email: 'hugo@example.test' });
+    const reads = of('dispatch_arrival').length;
+    await box.locator('[data-dpc-box-open][data-dpc-box-tick]').click();
+    await box.locator('[data-dpc-box-edit="save"]').click();
+    await expect(sched.locator('.dpc-deliv-boxmsg')).toHaveText('This date was changed somewhere else. Showing the latest.');
+    await expect.poll(() => of('dispatch_arrival').length).toBe(reads + 1);
+    await expect(box).toContainText('Set by hand by hugo@example.test');
+    await expect(box.locator('[data-dpc-box-open]').first()).toHaveText('Mon 26/10');
+
+    // A failed save keeps what was typed, says so, and Retry sends it again.
+    down = true;
+    await box.locator('[data-dpc-box-open][data-dpc-box-tick]').click();
+    await box.locator('[data-dpc-box-date]').fill('2026-10-29');
+    await box.locator('[data-dpc-box-edit="save"]').click();
+    await expect(box.locator('[role="alert"]')).toContainText('Delivery date not saved.');
+    await expect(box.locator('[data-dpc-box-date]')).toHaveValue('2026-10-29');
+    down = false;
+    await box.locator('[data-dpc-box-edit="retry"]').click();
+    await expect(sched.locator('.dpc-deliv-boxmsg')).toHaveText('Delivery date saved: Banksia Roofing, Thu 29/10, confirmed.');
+    const sent = writes().map((c) => c.body);
+    expect(sent).toHaveLength(3);
+    expect(sent[1]).toEqual({ box_id: 'box-1', delivery_date: '2026-10-29', confirmed: true, expected_set_at: '2026-10-23T05:00:00.000Z', operator_email: 'ops-e2e@example.test' });
+    expect(sent[2]).toEqual(sent[1]);
+    expect(await sched.innerText()).not.toMatch(/[–—]/);
   });
 
   test('an order changed somewhere else says so and shows the latest; a failed read offers Retry', async ({ page }) => {

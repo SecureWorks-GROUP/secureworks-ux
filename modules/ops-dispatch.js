@@ -2060,9 +2060,9 @@
       '<span class="dpc-grow"><strong>' + esc(name) + '</strong><small>' + esc(detail) + '</small></span></' + tag + '>';
   }
 
-  // Sources: quotes and invoices from job_detail, then the job's purchase
-  // orders from the materials read already made on job open (slice 5).
-  function sourcesHtml() { return sourceDocsHtml(); }
+  // Sources: quotes and invoices from job_detail, then the job's old purchase
+  // orders (if any) from the v1 materials read already made on job open.
+  function sourcesHtml() { return sourceDocsHtml() + poSourcesHtml(); }
 
   function sourceDocsHtml() {
     var d = state.detail;
@@ -2658,6 +2658,10 @@
   function onPadClick(t) {
     var jobId = state.jobId;
     if (t.hasAttribute('data-dpc-mat-clear')) { if (jobId) clearSketch(jobId); return true; }
+    if (t.hasAttribute('data-dpc-order-pdf')) {
+      openOrderPdf(t.getAttribute('data-dpc-order-pdf'), t.getAttribute('data-dpc-order-pdf-version'), t.getAttribute('data-dpc-order-pdf-key'));
+      return true;
+    }
     if (t.hasAttribute('data-dpc-mat-retry')) {
       if (!jobId) return true;
       if (t.getAttribute('data-dpc-mat-retry') === 'read') { var e = oldEntry(jobId); readOld(jobId, !!e && e.w.loaded); }
@@ -3059,6 +3063,72 @@
       if (saveBtn) saveBtn.disabled = !!state.deliv.edit.busy || !wholeDay(t.value);
     }
     return true;
+  }
+
+  // ── render: the Purchase orders group in Sources (kept from v1, read only) ──
+  // v2 makes no purchase orders, so the group shows only on a job that has
+  // some already (made in v1 Dispatch, or elsewhere). An order made in v1
+  // Dispatch with a stored PDF opens it through dispatch_order_pdf (a read).
+
+  // An order made in v1 Dispatch carries its supplier and source.
+  function isDispatchOrder(o) { return !!(o && o.supplier_id && o.source); }
+
+  function orderStatusWord(s) {
+    if (s === 'cancelled') return 'Cancelled';
+    var words = text(s).replace(/_/g, ' ');
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Status not recorded';
+  }
+
+  function pdfFailHtml(key, attrs) {
+    if (state.old.pdf[key] !== 'failed') return '';
+    return '<div class="dpc-line-msg dpc-mat-fail dpc-pdf-fail" role="alert">Could not open the PDF. <button type="button" class="dpc-retry" ' + attrs + '>Retry</button></div>';
+  }
+
+  function poSourcesHtml() {
+    var row = state.row;
+    if (!row || isMakesafe(row)) return '';
+    var e = oldEntry(row.id);
+    var h = '<h4 class="dpc-h4">Purchase orders</h4>';
+    if (!e || !e.w.loaded && e.status !== 'error') return '';
+    if (e.status === 'error' && !e.w.loaded || !e.ordersOk) {
+      return h + '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Could not load this job\'s orders. <button type="button" class="dpc-retry" data-dpc-mat-retry="read">Retry</button></div>';
+    }
+    if (!e.orders.length) return '';
+    e.orders.forEach(function (o) {
+      var po = text(o.po_number);
+      var words = (text(o.supplier_name) || 'Supplier not recorded') + ', ' + orderStatusWord(o.status);
+      if (isDispatchOrder(o) && o.pdf_version) {
+        var key = 'src:' + o.id;
+        var attrs = 'data-dpc-order-pdf="' + esc(o.id) + '" data-dpc-order-pdf-version="' + esc(o.pdf_version) + '" data-dpc-order-pdf-key="' + esc(key) + '"';
+        h += docChip((po || 'Order') + '.pdf', words + (state.old.pdf[key] === 'busy' ? ' · Opening...' : ''), attrs) + pdfFailHtml(key, attrs);
+      } else {
+        h += '<div class="dpc-doc dpc-doc-nopdf"><span class="dpc-grow"><strong>' + esc(po || 'No order number') + '</strong><small>' + esc(words) + '</small><small>No PDF on file</small></span></div>';
+      }
+    });
+    return h + '<p class="dpc-foot-line">Read only. New orders are sent by email from Materials.</p>';
+  }
+
+  // An order's PDF, through a short-lived link, opened in a new tab. The tab is
+  // opened on the press so the browser does not block it, then pointed at the link.
+  function openOrderPdf(poId, version, key) {
+    if (!poId || state.old.pdf[key] === 'busy') return;
+    state.old.pdf[key] = 'busy';
+    paintSources();
+    var win = null;
+    try { win = global.open('', '_blank'); if (win) win.opener = null; } catch (x) { win = null; }
+    var params = { purchase_order_id: poId };
+    if (version) params.version = version;
+    Promise.resolve().then(function () { return global.opsFetch('dispatch_order_pdf', params); }).then(function (resp) {
+      var url = safeUrl(resp && resp.url);
+      if (!url) throw new Error('Unexpected PDF answer');
+      delete state.old.pdf[key];
+      if (win && !win.closed) win.location.href = url; else global.open(url, '_blank', 'noopener');
+      paintSources();
+    }).catch(function () {
+      if (win) { try { win.close(); } catch (x) { /* already gone */ } }
+      state.old.pdf[key] = 'failed';
+      paintSources();
+    });
   }
 
   // The Sources tab, when it is the one showing.
@@ -5206,7 +5276,7 @@
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
-      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
+      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
     if (!t || t.disabled) return;
     if (onV2Click(t)) return;
     if (onPadClick(t)) return;

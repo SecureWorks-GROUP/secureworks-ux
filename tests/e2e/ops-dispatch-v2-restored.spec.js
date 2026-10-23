@@ -444,3 +444,62 @@ test.describe('Dispatch v2: Deliveries and install, kept from v1', () => {
     await expect(sched).toContainText('No orders on this job yet. Orders sent from Materials show here with their delivery dates.');
   });
 });
+
+// ── Sources: old purchase orders, read only ────────────────────────────────
+
+test.describe('Dispatch v2: purchase orders in Sources, kept from v1', () => {
+  const ORDERS = [
+    { id: 'po-7', po_number: 'PO-2107', supplier_name: 'Acacia Steel Pty Ltd', supplier_id: SID(1), source: 'dispatch', status: 'sent', pdf_version: 3, lines: [] },
+    { id: 'po-8', po_number: 'PO-2108', supplier_name: 'Plain Hardware', supplier_id: null, source: null, status: 'confirmed', lines: [] },
+  ];
+
+  test('a job with old orders lists them, and a stored PDF opens through one read', async ({ page }) => {
+    // The new tab is caught: each address it is opened at or pointed at is noted.
+    await page.addInitScript(() => {
+      window.__opened = [];
+      window.open = (u) => {
+        window.__opened.push(u || '');
+        const tab = { closed: false, opener: null, close() { this.closed = true; }, location: {} };
+        Object.defineProperty(tab.location, 'href', { set(v) { window.__opened.push(v); } });
+        return tab;
+      };
+    });
+    const { root, of, writes } = await boot(page, {
+      api: {
+        dispatch_materials: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? OLD() : OLD({ orders: ORDERS })),
+        dispatch_order_pdf: () => ({ url: 'https://files.example.test/po-2107.pdf' }),
+      },
+    });
+    await root.locator('[data-dpc-tab="sources"]').click();
+    const panel = root.locator('[data-dpc-region="panel"]');
+    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', 'Purchase orders']);
+    const chip = panel.locator('[data-dpc-order-pdf="po-7"]');
+    await expect(chip).toContainText('PO-2107.pdf');
+    await expect(chip).toContainText('Acacia Steel Pty Ltd, Sent');
+    await expect(panel.locator('.dpc-doc-nopdf', { hasText: 'PO-2108' })).toContainText('Plain Hardware, Confirmed');
+    await expect(panel.locator('.dpc-doc-nopdf', { hasText: 'PO-2108' })).toContainText('No PDF on file');
+    await expect(panel).toContainText('Read only. New orders are sent by email from Materials.');
+    await chip.click();
+    await expect.poll(() => page.evaluate(() => window.__opened)).toEqual(['', 'https://files.example.test/po-2107.pdf']);
+    expect(of('dispatch_order_pdf').map((c) => [c.url.searchParams.get('purchase_order_id'), c.url.searchParams.get('version')])).toEqual([['po-7', '3']]);
+    expect(writes()).toEqual([]);
+
+    // A job with no old orders has no Purchase orders group.
+    await root.locator('.dpc-job', { hasText: 'SWP-930002' }).click();
+    await expect(root.locator('.dpc-jobhead h2')).toContainText('SWP-930002');
+    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices']);
+  });
+
+  test('a failed orders read says so in Sources with Retry', async ({ page }) => {
+    let down = true;
+    const { root } = await boot(page, {
+      api: { dispatch_materials: () => (down ? { status: 500, body: { error: 'down' } } : OLD({ orders: ORDERS })) },
+    });
+    await root.locator('[data-dpc-tab="sources"]').click();
+    const panel = root.locator('[data-dpc-region="panel"]');
+    await expect(panel.locator('[role="alert"]')).toContainText("Could not load this job's orders.");
+    down = false;
+    await panel.locator('[data-dpc-mat-retry="read"]').click();
+    await expect(panel.locator('[data-dpc-order-pdf="po-7"]')).toBeVisible();
+  });
+});

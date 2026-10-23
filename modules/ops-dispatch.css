@@ -399,7 +399,8 @@
 .dpc-mail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
 .dpc-mail-head strong { overflow-wrap: anywhere; }
 .dpc-field { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--galv); padding: 3px 0; }
-.dpc-field > span, .dpc-field > label { flex: 0 0 58px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+/* The label column only; the value beside it (.dpc-field-val) keeps body text. */
+.dpc-field > span:not(.dpc-field-val), .dpc-field > label { flex: 0 0 58px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
 .dpc-field input { flex: 1; min-width: 0; border: 0; padding: 6px 0; font-size: 13px; outline: none; background: transparent; }
 .dpc-field input:focus { box-shadow: inset 0 -2px 0 var(--signal); }
 .dpc-field-val { flex: 1; min-width: 0; font-size: 13px; padding: 6px 0; overflow-wrap: anywhere; }
@@ -607,6 +608,8 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-tray { background: #fff; padding: 16px 18px; margin-bottom: 18px; box-shadow: 0 1px 0 rgba(26,39,46,.04), 0 10px 30px -18px rgba(26,39,46,.35); }
 .dpc-tray h3 { font: 700 20px/1.05 var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); }
 .dpc-tray > .dpc-row { flex-wrap: wrap; }
+/* The title keeps room for itself; on a phone the tick drops to its own line. */
+.dpc-tray > .dpc-row > h3 { flex: 1 1 240px; }
 .dpc-tray > .dpc-empty-tight { margin: 4px 0 10px; }
 .dpc-tray-other { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--steel-2); }
 .dpc-tray-cands { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
@@ -665,8 +668,9 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-main { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--steel-2); cursor: pointer; white-space: nowrap; }
 .dpc-v2-main small { font-weight: 400; color: var(--mute); }
 .dpc-v2-main input { width: 16px; height: 16px; accent-color: var(--signal); }
-.dpc-v2-hint { margin: 6px 12px; font-size: 12.5px; color: var(--mute); overflow-wrap: anywhere; }
-.dpc-v2-warn { margin: 6px 12px; padding: 8px 10px; border-radius: 8px; background: #FCE7DE; color: #8C3413; font-size: 12.5px; overflow-wrap: anywhere; }
+/* `.dpc p { margin: 0 }` would win over a one-class margin, so these name .dpc too. */
+.dpc .dpc-v2-hint { margin: 6px 12px; font-size: 12.5px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc .dpc-v2-warn { margin: 6px 12px; padding: 8px 10px; border-radius: 8px; background: #FCE7DE; color: #8C3413; font-size: 12.5px; overflow-wrap: anywhere; }
 .dpc-v2-nobox { margin-top: 12px; }
 /* The order part of a box: Make email, the held email, a send that may have gone. */
 .dpc-v2-order { border-top: 1px solid var(--galv); padding: 10px 12px 12px; }

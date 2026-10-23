@@ -8,8 +8,8 @@
  * facts), job_detail once per job open (scope, photos, quote), job_notes
  * (every saved note). Slice 1 writes exactly one thing: add_note, always with
  * visibility 'internal_only' and from_ops true. Without that visibility a note
- * is copied to the customer's contact notes. Add no other write here beyond
- * slice 2's pressed send_sms and slice 3's two stage writes below.
+ * is copied to the customer's contact notes. The other writes are the ones
+ * named below, each on a person's press.
  *
  * A failed read never renders as empty. An ops-api that does not know
  * dispatch=1 answers with rows missing description / value_inc_gst /
@@ -52,59 +52,49 @@
  * never moves the job: when its answer offers a stage move, the rail's own
  * confirm line asks first.
  *
- * Slice 4 adds Materials by supplier under Scope and notes (never on a
- * make-safe job). Reads: ops-api dispatch_materials once per job open (the
- * job's chosen suppliers, material lines, counts, working out, sketch and its
- * purchase orders, read only), and list_suppliers once a session for Add
- * supplier; the list's materials_lines_total / materials_lines_ready draw a
- * card's "x of y items ready". Its six writes, each sent once on a person's
- * edit or press: dispatch_materials_add_supplier, _remove_supplier,
- * _save_line, _delete_line, _suggest and _save_workings. They touch only
- * Dispatch's own tables: no purchase order, no message, no job status.
+ * v2 slices 5 and 6 are Materials, under Scope and notes (never on a
+ * make-safe job). They replace v1's Materials by supplier, purchase orders,
+ * Emails and Deliveries screens: v2 has no purchase orders. On top is the
+ * Draft list (typed, or filled from the scope, with photos); under it one
+ * box per supplier, and lines are dragged between them (or moved with each
+ * line's Move to box, which works on a phone). Each box makes one held order
+ * email at a time, From admin@secureworkswa.com.au, with To and CC from the
+ * app-kept approved list (never suppliers.email). A supplier with no approved
+ * order email can hold lines, but its sending is blocked. On a fencing job the
+ * main supplier's email ends with the two standing lines.
+ *   Reads: ops-api dispatch_v2_materials once per job open and once after a
+ * write that changes the boxes; dispatch_v2_supplier_search for Add
+ * supplier; dispatch_v2_photo_url only when a photo is pressed. The list's
+ * materials_lines_total / materials_lines_ready draw "x of y items ready".
+ *   Writes, each sent once on a person's press or on leaving a box they
+ * changed: dispatch_v2_save_line, _move_line, _delete_line, _suggest_draft,
+ * _add_supplier, _remove_supplier, _set_main_supplier, _upload_photo,
+ * _move_photo, _delete_photo, _make_email, _save_email, _discard_email and
+ * dispatch_v2_send_email. Only the send sends, and only from the Send button
+ * inside the confirm ("Send this order to <Supplier>?"). The first send ever
+ * must be a TEST copy to admin@ (the server refuses a supplier send until
+ * then). A send that may have gone is sent again only with confirm_resend
+ * after a person checked admin@ Sent Items; one that went but was not noted
+ * is never offered again. Never called: create_po, update_po, email_po,
+ * push_po_to_xero, send-po-email, update_supplier_email and sync_suppliers,
+ * nor any v1 dispatch_materials_*, dispatch_order_* or dispatch_delivery_*
+ * action.
  *
- * Slice 5 turns a supplier's To order lines into a purchase order, its PDF and
- * a held email, and adds the Emails section under Materials by supplier and the
- * Purchase orders group in Sources. Reads: ops-api dispatch_order_emails once
- * per job open and once after each slice 5 write (drafts and the job's order
- * and client email threads), and dispatch_order_pdf only on a press (a 300
- * second link to an order's PDF). Its writes, each sent once on a person's
- * press or on leaving a draft box: dispatch_order_create, _update (Update PO
- * and email, and Take off), _cancel, _draft_save, _discard,
- * _release_unknown, dispatch_order_send, dispatch_order_reply and
- * dispatch_email_link_po. An email goes to a supplier only from the two Send
- * now presses (sendDraft, sendThreadReply below) or Try the send again after a send
- * whose result was not confirmed; nothing sends on create, on open or on its
- * own. Never called: create_po, update_po, delete_po, email_po,
- * push_po_to_xero, send-po-email, update_supplier_email and sync_suppliers.
+ * The Install section (v2 slice 7) shows the install day from the board and
+ * who is booked from the list row's dispatch_install. It has no write: Mark
+ * confirmed is gone. It makes, moves, locks or confirms no booking (never
+ * create_assignment, update_assignment, confirm_assignment or bulk_confirm).
+ * Open Calendar calls the page's own showView('calendar'), the same as the
+ * Calendar tab.
  *
- * Slice 6 adds the Schedule section (Deliveries) under Emails (never on a
- * make-safe job): one row per purchase order per chosen supplier, each from
- * expected, to confirmed by the supplier, to sighted on site. It adds no read:
- * its rows are the deliveries block of slice 4's one dispatch_materials read,
- * and the rail's sightings line reads the list row's deliveries_orders_total /
- * deliveries_orders_sighted. Its three writes, each sent once on a person's
- * press (the expected date only when its box is left or Enter is pressed),
- * against the order's updated_at: ops-api
- * dispatch_delivery_set_expected, dispatch_delivery_set_confirmed (from the
- * row or a supplier thread) and dispatch_delivery_mark_sighted. Each writes one
- * purchase_orders row and one job_events row: never the order's status, a job
- * status, a Dispatch stage, Xero or a message. Open Calendar calls the page's
- * own showView('calendar') once, the same as the Calendar tab.
- *
- * Slice 7 finishes that section as Deliveries and install: under the
- * deliveries table, the install row (the install day from the board, and who
- * is booked from the list row's dispatch_install; no new read). In v2 it has
- * no write: Mark confirmed is gone. It makes, moves, locks or confirms no
- * booking (never create_assignment, update_assignment, confirm_assignment or
- * bulk_confirm).
- *
- * Guards: tests/e2e/ops-tab-set.spec.js (slices 1, 3, 4 and 5),
- * tests/e2e/ops-dispatch-panel.spec.js (slice 2) and
+ * Guards: tests/e2e/ops-tab-set.spec.js (slice 1),
+ * tests/e2e/ops-dispatch-panel.spec.js (slice 2),
  * tests/e2e/ops-dispatch-v2.spec.js (the v2 list, rail, Arrival line and
- * supplier replies).
- * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md,
- * docs/dispatch-slice-3-contract.md, docs/dispatch-slice-4-contract.md,
- * docs/dispatch-slice-5-contract.md and docs/dispatch-slice-6-contract.md.
+ * supplier replies) and tests/e2e/ops-dispatch-v2-materials.spec.js (v2
+ * Materials and the order emails).
+ * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md, and
+ * the Dispatch v2 contracts (board, replies, and supplier order emails on the
+ * be-dispatch-supplier-order-emails branch).
  */
 (function (global) {
   'use strict';
@@ -780,7 +770,7 @@
 
   function matQtyText(v) { return typeof v === 'number' && isFinite(v) ? String(v) : (v == null ? '' : String(v)); }
 
-  // ── slice 6: Deliveries ──
+  // ── dates typed in a box ──
 
   // A date box's value worth saving: a whole YYYY-MM-DD in a four-figure year,
   // so a year still being typed (0002, 0020, 0202) is never sent.
@@ -1539,24 +1529,8 @@
     });
   }
 
-  // ── slice 4: Materials by supplier, its one read and six writes ──
-  // dispatch_materials is read once per job open, on Retry, and once after a
-  // "changed somewhere else" answer. Each write is sent once, on a person's
-  // edit or press; nothing here retries on its own.
-
+  // Make-safe jobs have no Materials, Arrival line or Install section.
   function isMakesafe(row) { return typeKey(row) === 'makesafe'; }
-
-  // ── slice 5: purchase orders and Emails, two reads and nine writes ──
-  // dispatch_order_emails is read once per job open, on Retry, and once after
-  // each slice 5 write; dispatch_order_pdf only on a press. Every write is sent
-  // once, on a person's press or on leaving a draft box. Nothing here retries,
-  // and nothing sends, on its own.
-
-  // ── slice 6: Deliveries, its three writes ──
-  // Each is sent once, on a person's change or press, against the order's
-  // updated_at the screen was showing. Its answer redraws the row, items ready,
-  // the open job's list counts and the rail line: no list re-read, and nothing
-  // here retries on its own.
 
   // ───────────────────────── render: sidebar ─────────────────────────
 
@@ -2890,6 +2864,11 @@
     paintV2If(jobId);
   }
 
+  // A refusal said without a Retry button, where Retry would do something else.
+  function v2NoRetry(e, jobId, key) {
+    if (e.msg[key] && e.msg[key].retry) { e.msg[key].retry = false; paintV2If(jobId); }
+  }
+
   // ── lines ──
 
   function v2AddLine(jobId, sid) {
@@ -3004,7 +2983,10 @@
       delete e.busy[key];
       var back = v2Line(e, id);
       if (back) { back.supplier_id = from; v2Place(e, back); }
-      v2Fail(jobId, key, err, 'Not moved.');
+      // No Retry button: the line's Retry saves its cells, so a failed move
+      // is simply made again.
+      v2Fail(jobId, key, err, 'Not moved. Move it again.');
+      v2NoRetry(e, jobId, key);
     });
   }
 
@@ -3226,7 +3208,8 @@
       paintV2If(jobId);
     }, function (err) {
       delete e.busy[key];
-      v2Fail(jobId, key, err, 'Not moved.');
+      v2Fail(jobId, key, err, 'Not moved. Move it again.');
+      v2NoRetry(e, jobId, key);
     });
   }
 
@@ -3243,7 +3226,8 @@
       paintV2If(jobId);
     }, function (err) {
       delete e.busy[key];
-      v2Fail(jobId, key, err, 'Not deleted.');
+      v2Fail(jobId, key, err, 'Not deleted. Press the cross again.');
+      v2NoRetry(e, jobId, key);
     });
   }
 

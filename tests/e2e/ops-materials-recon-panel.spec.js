@@ -18,6 +18,14 @@
 //    in it. A null xero_project, or a failed job_detail read, says Xero Projects is not confirmed
 //    and Place needs a second confirming press; a project with zero expenses places in one press.
 //  - A refused write keeps the bill on the list and shows the server's message.
+//  - Whole-bill placement (CFO, 21 Oct): the job numbers the bill's lines name are listed as evidence,
+//    never as a split. When they name a job other than the picked one, or the lines were not read,
+//    Place warns that all of the bill goes on the picked job and needs a second confirming press. It
+//    never refuses, and nothing is split for the operator.
+//  - The list never claims every bill is on no job: a bill held for a person (an installer bill, a
+//    Xero link its job number does not name, a duplicate, a withdrawn automatic placement) may
+//    already be linked to a job in Xero, says why it is here, and the not-job-related warning never
+//    promises the cost leaves a job Xero links the bill to (staff walk W1/W2, 21 Oct; JP-21 open).
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -61,6 +69,16 @@ function buildFixture() {
               tracking: [{ Name: 'Business Unit', Option: 'Fencing' }] },
           ],
         },
+      },
+      'xinv-q-small': {
+        ok: true,
+        invoice: { xero_invoice_id: 'xinv-q-small', invoice_number: 'BN-77', status: 'AUTHORISED', sub_total: 212.5, total: 233.75, amount_due: 233.75, line_amount_types: 'Exclusive',
+          line_items: [{ description: 'Tek screws and rivets', quantity: 1, unit_amount: 212.5, line_amount: 212.5, account_code: '305' }] },
+      },
+      'xinv-q-mid': {
+        ok: true,
+        invoice: { xero_invoice_id: 'xinv-q-mid', invoice_number: 'CP-310', status: 'AUTHORISED', sub_total: 1960, total: 2156, amount_due: 2156, line_amount_types: 'Exclusive',
+          line_items: [{ description: 'SWF-25500 colour panels', quantity: 1, unit_amount: 1960, line_amount: 1960, account_code: '305' }] },
       },
     },
     search: {
@@ -118,6 +136,8 @@ async function openMaterials(page, { fixture = buildFixture(), refuse = {}, expe
     };
     window.opsPost = (action, body) => {
       window.__mrqPosts.push({ action, body });
+      // { noAnswer: 'text' } stands in for a request that got no HTTP answer at all.
+      if (refuse[action] && refuse[action].noAnswer) return Promise.reject(new TypeError(refuse[action].noAnswer));
       if (refuse[action]) return fail(refuse[action]);
       if (action === 'materials_recon_assign') return copy({ ok: true, action: body.use_suggestion ? 'accept-suggestion' : 'assign-to-job' });
       if (action === 'materials_recon_not_job_related') return copy({ ok: true, action: 'mark-not-job-related' });
@@ -161,7 +181,7 @@ test('the list is largest first, with the exact open count and dollars and no ca
   await expect(row(page, 'q-big')).toContainText(/20 Sept? 2026/);
   await expect(row(page, 'q-mid')).toContainText('SWF-25500');
   await expect(page.locator('#matReconOpenCount')).toHaveText('3');
-  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST on no job · 4 placed · 2 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST waiting to be placed · 4 placed · 2 not job related');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
@@ -171,7 +191,7 @@ test('a well-worked queue (300 open of 1,200 rows ever) reads its open bills exa
   fixture.queue.stats = { open: 300, assigned: 850, not_job_related: 50, total_rows: 1200, open_total_ex: 25472.5 };
   await openMaterials(page, { fixture });
   await expect(page.locator('#matReconOpenCount')).toHaveText('300');
-  await expect(page.locator('#matReconSummary')).toHaveText('300 open bills · $25,472.50 ex GST on no job · at least 850 placed · at least 50 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('300 open bills · $25,472.50 ex GST waiting to be placed · at least 850 placed · at least 50 not job related');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
@@ -182,7 +202,7 @@ test('a full 1,000-row list reads "at least" for the open figures and says the l
   fixture.queue.stats = { open: 940, assigned: 400, not_job_related: 60, total_rows: 1400, open_total_ex: 40000 };
   await openMaterials(page, { fixture });
   await expect(page.locator('#matReconOpenCount')).toHaveText('1000+');
-  await expect(page.locator('#matReconSummary')).toHaveText('at least 1000 open bills · at least $60,472.50 ex GST on no job · at least 400 placed · at least 60 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('at least 1000 open bills · at least $60,472.50 ex GST waiting to be placed · at least 400 placed · at least 60 not job related');
   await expect(page.locator('#matReconCapNote')).toHaveText('This list holds the 1,000 newest open bills, largest first. There may be more open bills than it counts; older ones come in on Refresh as these are placed.');
 });
 
@@ -190,12 +210,14 @@ test('missing stats fall back to the loaded rows', async ({ page }) => {
   const fixture = buildFixture();
   delete fixture.queue.stats;
   await openMaterials(page, { fixture });
-  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST on no job');
+  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST waiting to be placed');
   await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
 test('opening a bill reads its lines with get_xero_invoice and shows each line and its Business Unit', async ({ page }) => {
-  await openMaterials(page);
+  const fixture = buildFixture();
+  delete fixture.invoices['xinv-q-small'];
+  await openMaterials(page, { fixture });
   await row(page, 'q-big').click();
   const d = detail(page, 'q-big');
   await expect(d.locator('tr[data-mrq-line]')).toHaveCount(2);
@@ -261,7 +283,7 @@ test('a job with a zero-expense Xero Project places in one press with { queue_id
   await d.locator('[data-mrq-act="place"]').click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
   await expect(row(page, 'q-big')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $2,172.50 ex GST on no job · 5 placed · 2 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $2,172.50 ex GST waiting to be placed · 5 placed · 2 not job related');
   await expect(page.locator('#matReconJustDone [data-mrq-done]')).toHaveText(['$8,450.00 Westside Steel WS-1001 placed on SWP-26050']);
 });
 
@@ -337,7 +359,7 @@ test('Not job related takes two presses, then posts materials_recon_not_job_rela
   await notjob.click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_not_job_related', body: { queue_id: 'q-small' } }]);
   await expect(row(page, 'q-small')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST on no job · 4 placed · 3 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST waiting to be placed · 4 placed · 3 not job related');
 });
 
 test('a refused write keeps the bill on the list and shows the server message', async ({ page }) => {
@@ -347,6 +369,122 @@ test('a refused write keeps the bill on the list and shows the server message', 
   const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
   await d.locator('[data-mrq-act="place"]').click();
   await expect(d.locator('[data-mrq-err]')).toHaveText('Not placed: ' + refusal);
+  await expect(d.locator('[data-mrq-err-next]')).toHaveText('The bill is still on this list. Fix what the message says, or pick another job, then press again.');
   await expect(row(page, 'q-big')).toHaveCount(1);
   await expect(page.locator('#matReconSummary')).toContainText('3 open bills');
+});
+
+function tenJobFixture() {
+  const fixture = buildFixture();
+  fixture.queue.rows.push(queueRow('q-ten', { contact_name: 'Installer EH', invoice_number: '31', sub_total: 5083.4, total: 5083.4 }));
+  const lines = [['SWF-26824 plinths and gate', 1519], ['SWF-26824 less work order paid in app', -1302], ['SWF-26824 less work order paid in app', -900]];
+  [820, 640, 455, 980, 300, 512, 734, 600, 400].forEach((a, i) => lines.push(['SWF-2700' + (i + 1) + ' install', a]));
+  [65.08, 65.08, 65.08, 65.08, 65.08].forEach((a) => lines.push(['Plinth sundries', a]));
+  fixture.invoices['xinv-q-ten'] = { ok: true, invoice: { xero_invoice_id: 'xinv-q-ten', invoice_number: '31', status: 'PAID', sub_total: 5083.4, total: 5083.4, amount_due: 0, line_amount_types: 'NoTax',
+    line_items: lines.map(([d, a]) => ({ description: d, quantity: 1, unit_amount: a, line_amount: a, account_code: '306' })) } };
+  return fixture;
+}
+
+test('a bill whose lines name ten jobs: they are listed as evidence, and placing it whole takes a warned second press', async ({ page }) => {
+  await openMaterials(page, { fixture: tenJobFixture() });
+  await row(page, 'q-ten').click();
+  const d = detail(page, 'q-ten');
+  await expect(d.locator('[data-mrq-named]')).toContainText("Jobs named on the bill's lines (inferred from the line text; evidence, not a split)");
+  await expect(d.locator('[data-mrq-named] [data-bill-ref]')).toHaveCount(10);
+  await expect(d.locator('[data-mrq-named] [data-bill-ref="SWF-26824"]')).toContainText('$-683.00 on 3 lines');
+  await expect(d.locator('[data-mrq-named]')).toContainText('No single job named: $325.40');
+  await pickSearched(page, 'q-ten', 'SWP-26050', 'job-empty'); // zero-expense project: one press without the bill check
+  await expect(d.locator('[data-mrq-whole="named"]')).toHaveText('Placing whole puts all $5,083.40 on SWP-26050, but its lines name 10 other jobs ($4,758.00 of the lines). Nothing is split for you. Leave it on this list to keep it held until a person confirms where it belongs.');
+  const place = d.locator('[data-mrq-act="place"]');
+  await expect(place).toHaveText('Place on SWP-26050');
+  await place.click();
+  await expect(place).toHaveText('Confirm: place all $5,083.40 on SWP-26050');
+  expect(await posts(page)).toEqual([]);
+  await page.waitForTimeout(ARM_GAP_MS);
+  await place.click();
+  expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-ten', job_id: 'job-empty' } }]);
+});
+
+test('placing the bill on a job its lines name still warns about the other named jobs', async ({ page }) => {
+  const fixture = tenJobFixture();
+  fixture.search.results.push({ id: 'job-27001', job_number: 'SWF-27001', client_name: 'Client One', type: 'fencing', status: 'complete' });
+  fixture.jobs['job-27001'] = { job: { id: 'job-27001', job_number: 'SWF-27001', client_name: 'Client One', type: 'fencing', status: 'complete' }, xero_project: { project_name: 'SWF-27001', total_invoiced: 0, total_expenses: 0 } };
+  await openMaterials(page, { fixture });
+  await row(page, 'q-ten').click();
+  const d = await pickSearched(page, 'q-ten', 'SWF-27001', 'job-27001');
+  await expect(d.locator('[data-mrq-named] [data-bill-ref="SWF-27001"]')).toContainText('SWF-27001 (this job): $820.00 on 1 line');
+  await expect(d.locator('[data-mrq-whole="named"]')).toContainText('its lines name 9 other jobs ($3,938.00 of the lines)');
+  await d.locator('[data-mrq-act="place"]').click();
+  expect(await posts(page)).toEqual([]);
+});
+
+test('a bill whose lines were not read warns that the named jobs are unknown and takes a second press', async ({ page }) => {
+  const fixture = buildFixture();
+  delete fixture.invoices['xinv-q-small'];
+  await openMaterials(page, { fixture });
+  await row(page, 'q-small').click();
+  const d = await pickSearched(page, 'q-small', 'SWP-26050', 'job-empty');
+  await expect(d.locator('[data-mrq-whole="unread"]')).toContainText("The bill's lines were not read, so which jobs they name is unknown. Placing puts all $212.50 on SWP-26050.");
+  await d.locator('[data-mrq-act="place"]').click();
+  expect(await posts(page)).toEqual([]);
+  await page.waitForTimeout(ARM_GAP_MS);
+  await d.locator('[data-mrq-act="place"]').click();
+  expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-small', job_id: 'job-empty' } }]);
+});
+
+test('lines that name no job, or only the picked job, place without the whole-bill warning', async ({ page }) => {
+  await openMaterials(page);
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'SWP-26050', 'job-empty');
+  await expect(d.locator('[data-mrq-named]')).toHaveCount(0);
+  await expect(d.locator('[data-mrq-whole]')).toHaveCount(0);
+  await d.locator('[data-mrq-act="place"]').click();
+  expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
+});
+
+test('a place that got no answer does not say "Not placed" and asks for a reload first', async ({ page }) => {
+  await openMaterials(page, { refuse: { materials_recon_assign: { noAnswer: 'Failed to fetch' } } });
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
+  await d.locator('[data-mrq-act="place"]').click();
+  await expect(d.locator('[data-mrq-err]')).toHaveText('Not known if it saved: Failed to fetch');
+  await expect(d.locator('[data-mrq-err-next]')).toHaveText('Reload the list before pressing again. If it saved, the bill will no longer be on the list.');
+  await expect(row(page, 'q-big')).toHaveCount(1);
+});
+
+test('phone width: each bill is a card with its amount on screen, and the page is no wider than the screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 860 });
+  await openMaterials(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expect(page.locator('.mrq-table thead')).toBeHidden();
+  for (const id of ['q-big', 'q-small', 'q-mid']) {
+    const amount = row(page, id).locator('td.num');
+    await expect(amount).toBeVisible();
+    const box = await amount.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  await row(page, 'q-big').click();
+  const d = await pickSearched(page, 'q-big', 'Ellis', 'job-empty');
+  const place = await d.locator('[data-mrq-act="place"]').boundingBox();
+  expect(place.x + place.width).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('a bill held for a person says why it is here, and not job related never promises the cost leaves its Xero job', async ({ page }) => {
+  const fixture = buildFixture();
+  fixture.queue.rows[0] = Object.assign(fixture.queue.rows[0], { suggestion_reason: 'installer_confirm' });
+  await openMaterials(page, { fixture });
+  const basis = page.locator('#matReconPanel .mrq-basis');
+  await expect(basis).toContainText('or because a person must confirm where it goes (the bill says which when you open it)');
+  await expect(basis).not.toContainText('only catches bills that are on no job');
+  await expect(basis).not.toContainText('materials cost');
+  await row(page, 'q-small').click();
+  await expect(detail(page, 'q-small').locator('[data-mrq-held-reason]')).toHaveText('Why it is here: Installer bill: a person confirms where it goes.');
+  await detail(page, 'q-small').locator('[data-mrq-act="notjob"]').click();
+  const armed = detail(page, 'q-small').locator('[data-mrq-notjob-armed]');
+  await expect(armed).toHaveText('Press again to file this bill as not job related. Bills to place will put no cost on any job. If Xero links this bill to a job, Job profit may still count it there until that rule is settled.');
+  await expect(armed).not.toContainText('No cost goes on any job');
+  expect(await posts(page)).toEqual([]);
+  await row(page, 'q-big').click();
+  await expect(detail(page, 'q-big').locator('[data-mrq-held-reason]')).toHaveCount(0);
 });

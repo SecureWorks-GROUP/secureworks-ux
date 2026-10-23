@@ -145,10 +145,6 @@
   };
   var NEXT_STEP_MAX = 40;
   var LS_ORDER = 'sw_dispatch_order_open';
-  var LS_WORKOUT = 'sw_dispatch_workout_open';
-  var WORKOUT_SAVE_MS = 1200; // the pad saves when typing stops this long
-  var LS_MAIL = 'sw_dispatch_mail_open';
-  var ORDERS_FROM = 'orders@secureworksgroup.app';
   var LS_SCHED = 'sw_dispatch_sched_open';
   var TABS = [
     { key: 'sources', label: 'Sources' },
@@ -768,22 +764,8 @@
     delivered: { label: 'Delivered', tone: 'ok' }
   };
   var MAT_QTY_MAX = 999999999.999;
-  var MAT_SKETCH_MAX = 400000;
 
   function matSettable(s) { return MAT_SETTABLE.indexOf(s) >= 0; }
-
-  // A display status the screen does not name is printed with its underscores
-  // as spaces, never dropped.
-  function matStatusLabel(s) {
-    if (Object.prototype.hasOwnProperty.call(MAT_STATUS, s)) return MAT_STATUS[s].label;
-    return orderStatusWord(s);
-  }
-
-  // An order's stored status: first letter capital, underscores as spaces.
-  function orderStatusWord(s) {
-    var words = text(s).replace(/_/g, ' ');
-    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Status not recorded';
-  }
 
   // A Qty cell: empty, or a plain number 0 or more. Nothing is sent otherwise.
   function matQty(v) {
@@ -798,78 +780,7 @@
 
   function matQtyText(v) { return typeof v === 'number' && isFinite(v) ? String(v) : (v == null ? '' : String(v)); }
 
-  // Names that are the same once case, spaces and punctuation are ignored.
-  function nameKey(v) { return text(v).toLowerCase().replace(/[^a-z0-9]/g, ''); }
-
-  // list_suppliers' answer as the Add supplier list: every active contact not
-  // already chosen, the ones tagged with a category (the material suppliers)
-  // first. Each reads its name, then its email or "no email on file"; where two
-  // active contacts share a name, each also says whether it is in Xero.
-  function supplierOptions(list, chosen) {
-    var active = list.filter(function (s) { return s && s.id && s.is_active !== false; });
-    var seen = {};
-    active.forEach(function (s) { var k = nameKey(s.name); seen[k] = (seen[k] || 0) + 1; });
-    var taken = {};
-    (chosen || []).forEach(function (id) { taken[id] = true; });
-    var out = { tagged: [], rest: [] };
-    active.forEach(function (s) {
-      if (taken[s.id]) return;
-      var label = (text(s.name) || 'Name not recorded') + ' · ' + (text(s.email) || 'no email on file');
-      if (seen[nameKey(s.name)] > 1) label += ' · ' + (text(s.xero_contact_id) ? 'in Xero' : 'not in Xero');
-      (Array.isArray(s.categories) && s.categories.length ? out.tagged : out.rest).push({ id: String(s.id), label: label });
-    });
-    return out;
-  }
-
-  function suppliersFrom(resp) {
-    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.suppliers)) throw new Error('Unexpected suppliers answer');
-    return resp.suppliers;
-  }
-
-  function isCounts(c) {
-    return !!c && typeof c === 'object' && typeof c.total === 'number' && typeof c.ready === 'number';
-  }
-
-  // dispatch_materials' answer. Throws on anything else, so the section shows
-  // its failed line and never an empty table.
-  function materialsFrom(resp) {
-    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.suppliers) || !Array.isArray(resp.lines) ||
-      !isCounts(resp.counts) || !resp.workings || typeof resp.workings !== 'object') {
-      throw new Error('Unexpected materials answer');
-    }
-    var ordersOk = resp.orders_status === 'ok' && Array.isArray(resp.orders);
-    return {
-      suppliers: resp.suppliers.filter(function (s) { return s && s.supplier_id; }),
-      lines: resp.lines.filter(function (l) { return l && l.id; }),
-      counts: resp.counts,
-      canSuggest: resp.can_suggest === true,
-      workings: resp.workings,
-      ordersOk: ordersOk,
-      orders: ordersOk ? resp.orders.filter(function (o) { return o && typeof o === 'object'; }) : [],
-      deliveries: ordersOk ? deliveriesFrom(resp.deliveries) : null
-    };
-  }
-
   // ── slice 6: Deliveries ──
-
-  // An order's delivery block as the server works it out (dispatch_deliveries.ts).
-  function delivOk(d) {
-    return !!d && typeof d === 'object' && typeof d.step === 'number' && typeof d.expected_editable === 'boolean' &&
-      !!d.confirmed && typeof d.confirmed === 'object' && typeof d.confirmed.state === 'string';
-  }
-
-  // The deliveries block of dispatch_materials, or null when it is missing or
-  // any row is not whole: the section then shows its failed line, never a short
-  // or empty table.
-  function deliveriesFrom(v) {
-    if (!v || typeof v !== 'object' || !Array.isArray(v.rows) || typeof v.counted !== 'number' || typeof v.sighted !== 'number') return null;
-    var ok = v.rows.every(function (r) {
-      if (!r || typeof r !== 'object') return false;
-      if (r.kind === 'not_ordered') return !!r.supplier_id;
-      return r.kind === 'order' && !!r.purchase_order_id && delivOk(r.delivery);
-    });
-    return ok ? { rows: v.rows.slice(), counted: v.counted, sighted: v.sighted, all_sighted: v.all_sighted === true } : null;
-  }
 
   // A date box's value worth saving: a whole YYYY-MM-DD in a four-figure year,
   // so a year still being typed (0002, 0020, 0202) is never sent.
@@ -998,37 +909,21 @@
     rep: { jobs: {}, tray: { open: false, status: 'idle', data: null, other: false, busy: {}, msg: null, pick: {}, hideAsk: null } },
     // Slice 4: the client text's "Text this to the client?" line, per job.
     smsAsk: {},
-    // Slice 4, Materials by supplier. jobs[jobId] holds that job's read and
-    // everything typed and not yet saved, so any repaint draws it back.
-    mat: {
+    // v2 slices 5 and 6, Materials: jobs[jobId] holds that job's
+    // dispatch_v2_materials read and everything typed and not yet saved, so
+    // any repaint draws it back. find is Add supplier's search, modal the one
+    // open send confirm, drag the line being dragged, and unrecorded the
+    // emails that went but could not be noted (never offered again).
+    v2m: {
       open: readStore('localStorage', LS_ORDER) !== '0',
-      workOpen: readStore('localStorage', LS_WORKOUT) === '1',
-      sup: { status: 'idle', list: [] },
-      jobs: {}
-    },
-    // Slice 5, orders and Emails. jobs[jobId] holds that job's
-    // dispatch_order_emails read, the open item, typed text not yet saved and
-    // each press's state. note is the strip under a card after a create or
-    // update, and goes when another job is opened.
-    mail: {
-      open: readStore('localStorage', LS_MAIL) !== '0',
       jobs: {},
-      note: null,
-      pdf: {}
+      find: { open: false, q: '', status: 'idle', data: null, token: 0, timer: null },
+      modal: null,
+      drag: null,
+      unrecorded: {}
     },
-    // Slice 6, Deliveries. The rows live in the job's materials read (mat.jobs);
-    // here is only what a person is doing: the press in flight per order, the
-    // one open inline line (a confirmed date, from the row or a thread), the
-    // open "Not sighted" confirm, the last line under the table, and what is
-    // typed in an expected date box per order until it is saved.
-    deliv: {
-      open: readStore('localStorage', LS_SCHED) !== '0',
-      busy: {},
-      typed: {},
-      edit: null,
-      ask: null,
-      msg: null
-    },
+    // The Install section, folded or open (kept per browser).
+    sched: { open: readStore('localStorage', LS_SCHED) !== '0' }
   };
   var tokens = { active: 0, archive: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -1175,7 +1070,7 @@
     if (!row || !row.id) return;
     var same = state.jobId === row.id;
     var stale = state.rowStale;
-    if (!same) closeMailPresses();
+    if (!same) v2Leave();
     state.jobId = row.id;
     state.row = row;
     state.rowStale = false;
@@ -1191,8 +1086,7 @@
     paintContext();
     loadDetail(row.id);
     loadNotes(row.id);
-    loadMat(row);
-    loadMail(row);
+    loadV2(row);
     loadArrival(row);
     loadReplies(row);
   }
@@ -1651,577 +1545,6 @@
   // edit or press; nothing here retries on its own.
 
   function isMakesafe(row) { return typeKey(row) === 'makesafe'; }
-  function matEntry(jobId) { return (jobId && state.mat.jobs[jobId]) || null; }
-  function matLine(e, id) {
-    if (!e) return null;
-    for (var i = 0; i < e.lines.length; i++) if (e.lines[i].id === id) return e.lines[i];
-    return null;
-  }
-  function removeLine(e, id) { e.lines = e.lines.filter(function (l) { return l.id !== id; }); }
-  function maxPos(e) { return e.lines.reduce(function (m, l) { return Math.max(m, Number(l.position) || 0); }, 0); }
-  function onOrder(l) { return !matSettable(l.display_status); }
-
-  // What the server holds for a line, to tell an edit from a cell left as it was.
-  function lineSaved(l) {
-    var q = l.quantity;
-    return {
-      supplier_id: String(l.supplier_id), description: text(l.description),
-      quantity: typeof q === 'number' && isFinite(q) ? q : (q == null || q === '' ? null : Number(q)),
-      unit: text(l.unit) || null, status: l.status, pos: Number(l.position) || 0
-    };
-  }
-
-  // What the cells say now, as the save sends it.
-  function lineOut(l) {
-    return { id: l.id, supplier_id: l.supplier_id, description: text(l.description), quantity: matQty(l.quantity).value, unit: text(l.unit) || null, status: l.status };
-  }
-
-  function sameLine(a, b) {
-    return a.supplier_id === b.supplier_id && a.description === b.description && a.quantity === b.quantity && a.unit === b.unit && a.status === b.status;
-  }
-
-  function lineDirty(l) { return !l.saved || !matQty(l.quantity).ok || !sameLine(lineOut(l), l.saved); }
-
-  function lineFrom(l) {
-    return {
-      id: String(l.id), supplier_id: String(l.supplier_id), description: text(l.description), quantity: matQtyText(l.quantity), unit: text(l.unit),
-      status: l.status, display_status: text(l.display_status) || l.status, purchase_order_id: l.purchase_order_id || null, source: l.source,
-      position: Number(l.position) || 0, updated_at: l.updated_at, saved: lineSaved(l),
-      busy: false, again: false, failed: false, delFailed: false, msg: '', retry: false, want: null, gone: false
-    };
-  }
-
-  function newEntry(jobId) {
-    return {
-      jobId: jobId, status: 'loading', token: 0, rereading: false,
-      suppliers: [], lines: [], counts: null, canSuggest: false, orders: [], ordersOk: true, deliveries: null,
-      w: {
-        loaded: false, text: '', textSaved: '', textStamp: null, textBusy: false, textAgain: false, textFailed: false, timer: null,
-        sketch: null, sketchSaved: null, sketchStamp: null, sketchBusy: false, sketchAgain: false, sketchFailed: false,
-        sketchMsg: '', sketchBroken: false, clearWanted: false
-      },
-      adding: null, addMsg: null, card: {}, busyCard: {}, notice: '', touched: false,
-      // Slice 5: an order press in flight per supplier, its failed line, and the open Cancel order confirm.
-      orderBusy: {}, orderMsg: {}, cancelAsk: null
-    };
-  }
-
-  // A fresh read over what the screen holds. A line typed and not yet saved
-  // keeps its text while the server's copy is the one it was typed over; a new
-  // line not yet saved is kept when it has text in it (an empty one only on a
-  // quiet re-read, so a job open drops it). Everything else is the server's.
-  function mergeMat(e, got, quiet) {
-    var mine = {};
-    e.lines.forEach(function (l) { mine[l.id] = l; });
-    // A line is only ever kept under a supplier still chosen for the job.
-    var chosen = {};
-    got.suppliers.forEach(function (s) { chosen[String(s.supplier_id)] = true; });
-    var seen = {};
-    var lines = got.lines.map(function (fresh) {
-      var id = String(fresh.id);
-      seen[id] = true;
-      var l = mine[id];
-      if (l && l.updated_at === fresh.updated_at && chosen[l.supplier_id] && (l.busy || l.gone || l.failed || l.delFailed || lineDirty(l))) return l;
-      return lineFrom(fresh);
-    });
-    e.lines.forEach(function (l) {
-      if (!seen[l.id] && !l.saved && chosen[l.supplier_id] && (l.busy || quiet || text(l.description))) lines.push(l);
-    });
-    e.lines = lines;
-    e.suppliers = got.suppliers;
-    e.counts = got.counts;
-    e.canSuggest = got.canSuggest;
-    e.orders = got.orders;
-    e.ordersOk = got.ordersOk;
-    e.deliveries = got.deliveries;
-    var w = e.w;
-    var wo = typeof got.workings.working_out === 'string' ? got.workings.working_out : '';
-    var woStamp = got.workings.working_out_updated_at || null;
-    if (!(w.loaded && w.textStamp === woStamp && (w.textBusy || w.text !== w.textSaved))) w.text = wo;
-    w.textSaved = wo;
-    w.textStamp = woStamp;
-    var sk = typeof got.workings.sketch_png === 'string' && got.workings.sketch_png ? got.workings.sketch_png : null;
-    var skStamp = got.workings.sketch_updated_at || null;
-    if (!(w.loaded && w.sketchStamp === skStamp && (w.sketchBusy || w.sketch !== w.sketchSaved))) { w.sketch = sk; w.sketchBroken = false; }
-    w.sketchSaved = sk;
-    w.sketchStamp = skStamp;
-    w.loaded = true;
-  }
-
-  function loadMat(row) {
-    if (!row || !row.id || isMakesafe(row)) return;
-    ensureSuppliers();
-    readMat(row.id, false);
-  }
-
-  function readMat(jobId, quiet) {
-    var e = matEntry(jobId) || (state.mat.jobs[jobId] = newEntry(jobId));
-    var token = ++e.token;
-    if (!quiet || e.status !== 'ok') { e.status = 'loading'; e.notice = quiet ? e.notice : ''; }
-    if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); paintSched(); }
-    return Promise.resolve().then(function () { return global.opsFetch('dispatch_materials', { job_id: jobId }); }).then(function (resp) {
-      if (token !== e.token) return;
-      mergeMat(e, materialsFrom(resp), quiet);
-      e.status = 'ok';
-      if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); paintSched(); paintMail(); }
-    }).catch(function () {
-      if (token !== e.token) return;
-      e.status = 'error';
-      if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); paintSched(); paintMail(); }
-    });
-  }
-
-  // Another tab or person changed what a write was based on: say so and show
-  // the latest, by one quiet re-read.
-  function matChanged(jobId) {
-    var e = matEntry(jobId);
-    if (!e) return;
-    e.notice = 'This changed somewhere else. Showing the latest.';
-    if (state.jobId === jobId) paintMat();
-    if (e.rereading) return;
-    e.rereading = true;
-    readMat(jobId, true).then(function () { e.rereading = false; });
-  }
-
-  // list_suppliers: once a session, on the first job opened with the section,
-  // and again only on Retry. Every column of every active contact (285 rows).
-  function ensureSuppliers(force) {
-    if (!force && state.mat.sup.status !== 'idle') return;
-    var mine = state.mat.sup = { status: 'loading', list: [] };
-    paintMat();
-    Promise.resolve().then(function () { return global.opsFetch('list_suppliers'); }).then(function (resp) {
-      if (state.mat.sup !== mine) return;
-      state.mat.sup = { status: 'ok', list: suppliersFrom(resp) };
-      paintMat();
-    }).catch(function () {
-      if (state.mat.sup !== mine) return;
-      state.mat.sup = { status: 'error', list: [] };
-      paintMat();
-    });
-  }
-
-  // A write's counts redraw "items ready" on the header and the job's card,
-  // without a list re-read. A null counts (the server's after-write count read
-  // failed) keeps the figure already shown.
-  function applyCounts(jobId, counts) {
-    var e = matEntry(jobId);
-    if (!e || !isCounts(counts)) return;
-    e.counts = { total: counts.total, ready: counts.ready };
-    [state.base.rows, state.arch.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
-      rows.forEach(function (r) {
-        if (r && r.id === jobId) { r.materials_lines_total = counts.total; r.materials_lines_ready = counts.ready; }
-      });
-    });
-    if (state.jobId === jobId) paintHead();
-    paintCard(jobId);
-  }
-
-  function writeOk(resp) {
-    if (!resp || typeof resp !== 'object' || resp.success !== true) throw new Error('Unexpected answer');
-    return resp;
-  }
-
-  function addSupplier(jobId, supplierId) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok' || !supplierId || e.adding) return;
-    e.adding = supplierId;
-    e.addMsg = null;
-    e.notice = '';
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_add_supplier', { job_id: jobId, supplier_id: supplierId });
-    }).then(writeOk).then(function (resp) {
-      if (!resp.supplier || !resp.supplier.supplier_id) throw new Error('Unexpected answer');
-      return resp;
-    }).then(function (resp) {
-      e.adding = null;
-      var s = resp.supplier;
-      if (!e.suppliers.some(function (x) { return String(x.supplier_id) === String(s.supplier_id); })) e.suppliers.push(s);
-      applyCounts(jobId, resp.counts);
-      paintMatIf(jobId);
-    }, function (err) {
-      e.adding = null;
-      e.addMsg = err && err.code === 'supplier_inactive'
-        ? { text: 'Supplier not added: that contact is no longer active.', id: null }
-        : { text: 'Supplier not added.', id: supplierId };
-      paintMatIf(jobId);
-    });
-  }
-
-  function removeSupplier(jobId, supplierId) {
-    var e = matEntry(jobId);
-    if (!e || e.busyCard[supplierId]) return;
-    e.busyCard[supplierId] = 'remove';
-    e.card[supplierId] = null;
-    e.notice = '';
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_remove_supplier', { job_id: jobId, supplier_id: supplierId });
-    }).then(writeOk).then(function (resp) {
-      delete e.busyCard[supplierId];
-      e.suppliers = e.suppliers.filter(function (s) { return String(s.supplier_id) !== supplierId; });
-      applyCounts(jobId, resp.counts);
-      paintMatIf(jobId);
-    }, function (err) {
-      delete e.busyCard[supplierId];
-      if (err && err.code === 'supplier_has_lines') { matChanged(jobId); return; }
-      e.card[supplierId] = err && err.code === 'supplier_has_orders'
-        ? { text: 'Supplier not removed: it has an order on this job.', retry: null }
-        : { text: 'Supplier not removed.', retry: 'remove' };
-      paintMatIf(jobId);
-    });
-  }
-
-  // The scope's suggested lines, under this supplier, on a press. The server
-  // reads the scope without its pricing, so no quote line or price comes over.
-  function suggestLines(jobId, supplierId) {
-    var e = matEntry(jobId);
-    if (!e || e.busyCard[supplierId]) return;
-    e.busyCard[supplierId] = 'suggest';
-    e.card[supplierId] = null;
-    e.notice = '';
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_suggest', { job_id: jobId, supplier_id: supplierId });
-    }).then(writeOk).then(function (resp) {
-      if (!Array.isArray(resp.lines)) throw new Error('Unexpected answer');
-      return resp;
-    }).then(function (resp) {
-      delete e.busyCard[supplierId];
-      var added = resp.lines.filter(function (l) { return l && l.id; }).map(lineFrom);
-      added.forEach(function (l) { if (!matLine(e, l.id)) e.lines.push(l); });
-      if (added.length) { e.canSuggest = false; e.touched = true; }
-      else e.card[supplierId] = { text: 'The scope has nothing to suggest.', retry: null };
-      applyCounts(jobId, resp.counts);
-      paintMatIf(jobId);
-    }, function (err) {
-      delete e.busyCard[supplierId];
-      var code = err && err.code;
-      if (code === 'lines_exist') { matChanged(jobId); return; }
-      e.card[supplierId] = code === 'scope_unreadable'
-        ? { text: 'The scope could not be read, so no lines were added.', retry: null }
-        : { text: 'Lines not added.', retry: 'suggest' };
-      paintMatIf(jobId);
-    });
-  }
-
-  function addLine(jobId, supplierId) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok') return;
-    var l = {
-      id: newId(), supplier_id: supplierId, description: '', quantity: '', unit: '', status: 'not_reviewed', display_status: 'not_reviewed',
-      purchase_order_id: null, source: 'manual', position: maxPos(e) + 1, updated_at: null, saved: null,
-      busy: false, again: false, failed: false, delFailed: false, msg: '', retry: false, want: null, gone: false
-    };
-    e.lines.push(l);
-    e.notice = '';
-    paintMat();
-    var r = region('mat');
-    var cell = r && r.querySelector('[data-dpc-mat-line="' + l.id + '"][data-dpc-mat-cell="description"]');
-    if (cell) cell.focus();
-  }
-
-  // One save in flight per line: a second edit waits for the answer and is
-  // then sent with the latest values. Sent when a cell is left, or a box changed.
-  function saveLine(jobId, id) {
-    var e = matEntry(jobId);
-    var l = matLine(e, id);
-    if (!l || l.gone || onOrder(l)) return;
-    if (l.busy) { l.again = true; return; }
-    var q = matQty(l.quantity);
-    if (!q.ok) { l.msg = q.msg; l.retry = false; paintMatIf(jobId); return; }
-    if (!text(l.description)) {
-      // A new row is saved the first time its Item is left with text in it.
-      if (l.saved) { l.msg = 'Item cannot be empty.'; l.retry = false; paintMatIf(jobId); }
-      return;
-    }
-    var out = lineOut(l);
-    if (l.saved && sameLine(out, l.saved)) {
-      if (l.msg && !l.retry) { l.msg = ''; paintMatIf(jobId); }
-      return;
-    }
-    var hadMsg = !!l.msg;
-    l.msg = '';
-    l.retry = false;
-    l.busy = true;
-    l.failed = false;
-    e.touched = true;
-    e.notice = '';
-    var body = { job_id: jobId, line: out };
-    if (l.saved) body.expected_updated_at = l.updated_at;
-    var wasSuggest = e.canSuggest;
-    if (hadMsg) paintMatIf(jobId); else paintMatSave(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_save_line', body);
-    }).then(writeOk).then(function (resp) {
-      if (!resp.line || String(resp.line.id) !== id) throw new Error('Unexpected answer');
-      return resp;
-    }).then(function (resp) {
-      e.canSuggest = false;
-      applyCounts(jobId, resp.counts);
-      var cur = matLine(e, id);
-      if (!cur) { paintMatIf(jobId); return; }
-      var got = resp.line;
-      cur.busy = false;
-      // A cell that still holds what was sent takes the stored form of it.
-      if (text(cur.description) === out.description) cur.description = text(got.description);
-      var cq = matQty(cur.quantity);
-      if (cq.ok && cq.value === out.quantity) cur.quantity = matQtyText(got.quantity);
-      if ((text(cur.unit) || null) === out.unit) cur.unit = text(got.unit);
-      if (cur.status === out.status) cur.status = got.status;
-      if (cur.supplier_id === out.supplier_id) cur.supplier_id = String(got.supplier_id);
-      cur.saved = lineSaved(got);
-      cur.updated_at = got.updated_at;
-      cur.position = Number(got.position) || cur.position;
-      cur.display_status = text(got.display_status) || got.status;
-      cur.purchase_order_id = got.purchase_order_id || null;
-      cur.source = got.source;
-      var again = cur.again;
-      cur.again = false;
-      if (cur.gone) { sendDelete(jobId, id); return; }
-      if (again && lineDirty(cur)) saveLine(jobId, id);
-      if (wasSuggest || onOrder(cur)) paintMatIf(jobId); else paintMatSave(jobId);
-    }, function (err) {
-      var cur = matLine(e, id);
-      if (cur) { cur.busy = false; cur.again = false; }
-      var code = err && err.code;
-      if (code === 'line_changed' || code === 'line_on_order') {
-        var stored = err.body && err.body.line;
-        if (stored && stored.id) e.lines = e.lines.map(function (x) { return x.id === id ? lineFrom(stored) : x; });
-        else removeLine(e, id);
-      }
-      if (code === 'line_changed' || code === 'line_on_order' || code === 'supplier_not_on_job') { matChanged(jobId); return; }
-      if (!cur) return;
-      if (cur.gone) {
-        if (cur.saved) sendDelete(jobId, id); else { removeLine(e, id); paintMatIf(jobId); }
-        return;
-      }
-      cur.failed = true;
-      // A moved line goes back under its supplier and a status back to what
-      // is stored; Retry sends the change again. Typed text stays in its cell.
-      var want = {};
-      if (cur.saved && cur.supplier_id !== cur.saved.supplier_id) {
-        want.supplier_id = cur.supplier_id;
-        cur.supplier_id = cur.saved.supplier_id;
-        cur.position = cur.saved.pos;
-        cur.msg = 'Line not moved.';
-        cur.retry = true;
-      }
-      if (cur.saved && cur.status !== cur.saved.status) {
-        want.status = cur.status;
-        cur.status = cur.saved.status;
-        cur.display_status = cur.saved.status;
-      }
-      cur.want = (want.supplier_id || want.status) ? want : null;
-      paintMatIf(jobId);
-    });
-  }
-
-  function moveLine(jobId, id, supplierId) {
-    var e = matEntry(jobId);
-    var l = matLine(e, id);
-    if (!l || !supplierId || l.supplier_id === supplierId) return;
-    l.supplier_id = supplierId;
-    l.position = maxPos(e) + 1;
-    l.msg = '';
-    l.retry = false;
-    l.want = null;
-    saveLine(jobId, id);
-    paintMatIf(jobId);
-  }
-
-  function setStatus(jobId, id, status) {
-    var l = matLine(matEntry(jobId), id);
-    if (!l || !matSettable(status)) return;
-    l.status = status;
-    l.display_status = status;
-    l.want = null;
-    saveLine(jobId, id);
-    paintMatIf(jobId);
-  }
-
-  // The cross: the line goes at once, and is deleted once.
-  function deleteLine(jobId, id) {
-    var e = matEntry(jobId);
-    var l = matLine(e, id);
-    if (!l || onOrder(l)) return;
-    e.notice = '';
-    if (!l.saved && !l.busy) { removeLine(e, id); paintMatIf(jobId); return; }
-    l.gone = true;
-    l.msg = '';
-    l.retry = false;
-    l.failed = false;
-    l.delFailed = false;
-    paintMatIf(jobId);
-    if (!l.busy) sendDelete(jobId, id); // else sent once its save is answered
-  }
-
-  function sendDelete(jobId, id) {
-    var e = matEntry(jobId);
-    var l = matLine(e, id);
-    if (!l) return;
-    if (!l.saved) { removeLine(e, id); paintMatIf(jobId); return; }
-    l.busy = true;
-    e.touched = true;
-    paintMatSave(jobId);
-    var stamp = l.updated_at;
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_delete_line', { job_id: jobId, id: id, expected_updated_at: stamp });
-    }).then(writeOk).then(function (resp) {
-      removeLine(e, id);
-      applyCounts(jobId, resp.counts);
-      paintMatIf(jobId);
-    }, function (err) {
-      var cur = matLine(e, id);
-      if (cur) cur.busy = false;
-      var code = err && err.code;
-      if (code === 'line_changed' || code === 'line_on_order') {
-        var stored = err.body && err.body.line;
-        if (stored && stored.id) e.lines = e.lines.map(function (x) { return x.id === id ? lineFrom(stored) : x; });
-        else removeLine(e, id);
-        matChanged(jobId);
-        return;
-      }
-      if (!cur) return;
-      cur.gone = false;
-      cur.delFailed = true;
-      cur.msg = 'Line not removed.';
-      cur.retry = true;
-      paintMatIf(jobId);
-    });
-  }
-
-  function retryLine(jobId, id) {
-    var e = matEntry(jobId);
-    var l = matLine(e, id);
-    if (!l || l.busy) return;
-    l.msg = '';
-    l.retry = false;
-    if (l.delFailed) { l.delFailed = false; deleteLine(jobId, id); return; }
-    if (l.want) {
-      if (l.want.supplier_id) { l.supplier_id = l.want.supplier_id; l.position = maxPos(e) + 1; }
-      if (l.want.status) { l.status = l.want.status; l.display_status = l.want.status; }
-      l.want = null;
-    }
-    l.failed = false;
-    saveLine(jobId, id);
-    paintMatIf(jobId);
-  }
-
-  // The save line's Retry: every failed save once more, once each.
-  function retrySaves(jobId) {
-    var e = matEntry(jobId);
-    if (!e) return;
-    e.lines.filter(function (l) { return l.failed || l.delFailed; }).forEach(function (l) { retryLine(jobId, l.id); });
-    if (e.w.textFailed) { e.w.textFailed = false; saveText(jobId); }
-    if (e.w.sketchFailed) { e.w.sketchFailed = false; if (e.w.clearWanted) clearSketch(jobId); else saveSketch(jobId); }
-    paintMatIf(jobId);
-  }
-
-  // The working out pad: saved when typing stops, and when the pad is left.
-  function padInput(jobId, value) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok') return;
-    e.w.text = value;
-    clearTimeout(e.w.timer);
-    e.w.timer = setTimeout(function () { saveText(jobId); }, WORKOUT_SAVE_MS);
-  }
-
-  function saveText(jobId) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok') return;
-    var w = e.w;
-    clearTimeout(w.timer);
-    w.timer = null;
-    if (w.textBusy) { w.textAgain = true; return; }
-    if (w.text === w.textSaved) { if (w.textFailed) { w.textFailed = false; paintMatSave(jobId); } return; }
-    var sent = w.text;
-    w.textBusy = true;
-    w.textFailed = false;
-    e.touched = true;
-    paintMatSave(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, working_out: sent, expected_working_out_updated_at: w.textStamp });
-    }).then(writeOk).then(function (resp) {
-      w.textBusy = false;
-      w.textSaved = sent;
-      w.textStamp = (resp.workings && resp.workings.working_out_updated_at) || null;
-      var again = w.textAgain;
-      w.textAgain = false;
-      if (again && w.text !== w.textSaved) saveText(jobId); else paintMatSave(jobId);
-    }, function (err) {
-      w.textBusy = false;
-      w.textAgain = false;
-      if (err && err.code === 'workings_changed') { matChanged(jobId); return; }
-      w.textFailed = true;
-      paintMatSave(jobId);
-    });
-  }
-
-  // The sketch: saved after each stroke, as the canvas's own PNG.
-  function sketchDrawn(jobId, dataUrl) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok') return;
-    e.w.sketch = dataUrl;
-    e.w.sketchBroken = false;
-    e.w.sketchMsg = '';
-    e.w.clearWanted = false;
-    saveSketch(jobId);
-    paintSketchMsg(jobId);
-  }
-
-  function clearSketch(jobId) {
-    var e = matEntry(jobId);
-    if (!e || e.status !== 'ok') return;
-    e.w.sketch = null;
-    e.w.sketchBroken = false;
-    e.w.sketchMsg = '';
-    if (state.jobId === jobId) redrawSketch();
-    saveSketch(jobId);
-    paintSketchMsg(jobId);
-  }
-
-  function saveSketch(jobId) {
-    var e = matEntry(jobId);
-    if (!e) return;
-    var w = e.w;
-    if (w.sketchBusy) { w.sketchAgain = true; return; }
-    var sent = w.sketch;
-    if (sent === w.sketchSaved) { if (w.sketchFailed) { w.sketchFailed = false; paintMatSave(jobId); } w.clearWanted = false; return; }
-    if (sent && sent.length > MAT_SKETCH_MAX) {
-      w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
-      paintSketchMsg(jobId);
-      return;
-    }
-    w.sketchBusy = true;
-    w.sketchFailed = false;
-    e.touched = true;
-    paintMatSave(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, sketch_png: sent, expected_sketch_updated_at: w.sketchStamp });
-    }).then(writeOk).then(function (resp) {
-      w.sketchBusy = false;
-      w.sketchSaved = sent;
-      w.sketchStamp = (resp.workings && resp.workings.sketch_updated_at) || null;
-      w.clearWanted = false;
-      var again = w.sketchAgain;
-      w.sketchAgain = false;
-      if (again && w.sketch !== w.sketchSaved) saveSketch(jobId); else paintMatSave(jobId);
-    }, function (err) {
-      w.sketchBusy = false;
-      w.sketchAgain = false;
-      if (err && err.code === 'workings_changed') { matChanged(jobId); return; }
-      if (err && err.status === 400 && sent && /too large|at most/i.test(String(err.message))) {
-        w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
-      } else {
-        w.sketchFailed = true;
-        // A failed Clear brings the drawing back; Retry clears it again.
-        if (sent === null) { w.clearWanted = true; w.sketch = w.sketchSaved; if (state.jobId === jobId) redrawSketch(); }
-      }
-      paintMatSave(jobId);
-      paintSketchMsg(jobId);
-    });
-  }
 
   // ── slice 5: purchase orders and Emails, two reads and nine writes ──
   // dispatch_order_emails is read once per job open, on Retry, and once after
@@ -2229,664 +1552,11 @@
   // once, on a person's press or on leaving a draft box. Nothing here retries,
   // and nothing sends, on its own.
 
-  function supById(e, sid) {
-    if (!e) return null;
-    for (var i = 0; i < e.suppliers.length; i++) if (String(e.suppliers[i].supplier_id) === sid) return e.suppliers[i];
-    return null;
-  }
-
-  // The supplier's open Dispatch order as the read gave it, or null. Known only
-  // when the orders read worked: then every supplier carries an `order` key.
-  function orderKnown(e, s) { return !!(e && e.ordersOk && s && Object.prototype.hasOwnProperty.call(s, 'order')); }
-  function supOrder(e, s) { return orderKnown(e, s) && s.order && typeof s.order === 'object' && s.order.id ? s.order : null; }
-  // The order a card can change: its open Dispatch order, while Xero does not hold it.
-  function changeableOrder(e, s) { var o = supOrder(e, s); return o && !o.in_xero && o.status !== 'cancelled' ? o : null; }
-  function orderStamp(e, o) {
-    if (o.updated_at) return o.updated_at;
-    for (var i = 0; i < e.orders.length; i++) if (e.orders[i] && e.orders[i].id === o.id && e.orders[i].updated_at) return e.orders[i].updated_at;
-    return null;
-  }
-
-  // The card's lines that go on its order: To order as stored and on no order,
-  // each as the server last gave it (build note section 4.1).
-  function orderableLines(e, sid) {
-    return e.lines.filter(function (l) {
-      return l.supplier_id === sid && l.saved && l.saved.supplier_id === sid && l.saved.status === 'to_order' && !l.purchase_order_id && !l.gone;
-    }).map(function (l) { return { id: l.id, updated_at: l.updated_at }; });
-  }
-
-  function cardSaving(e, sid) { return e.lines.some(function (l) { return (l.supplier_id === sid || (l.saved && l.saved.supplier_id === sid)) && l.busy; }); }
-
-  function mailEntry(jobId) { return (jobId && state.mail.jobs[jobId]) || null; }
-
-  function newMail(jobId) {
-    return {
-      jobId: jobId, status: 'loading', token: 0, drafts: [], threads: [], threadsOk: true, ordersForLink: [],
-      sel: null, edits: {}, ask: null, busy: {}, msg: {}, replies: {}, link: {}, notice: '', released: {}
-    };
-  }
-
-  // dispatch_order_emails' answer. Throws on anything else, so the section
-  // shows its failed line and never "No email on this job yet."
-  function mailFrom(resp) {
-    if (!resp || typeof resp !== 'object' || !Array.isArray(resp.drafts) ||
-      (resp.threads_status !== 'ok' && resp.threads_status !== 'failed') ||
-      (resp.threads_status === 'ok' && !Array.isArray(resp.threads))) {
-      throw new Error('Unexpected email answer');
-    }
-    var ok = resp.threads_status === 'ok';
-    return {
-      drafts: resp.drafts.filter(function (d) { return d && d.id; }),
-      threads: ok ? resp.threads.filter(function (t) { return t && t.key && Array.isArray(t.messages); }) : [],
-      threadsOk: ok,
-      ordersForLink: Array.isArray(resp.orders_for_link) ? resp.orders_for_link.filter(function (o) { return o && o.id; }) : []
-    };
-  }
-
-  function mailKeys(m) {
-    return m.drafts.map(function (d) { return 'd:' + d.id; }).concat(m.threads.map(function (t) { return 't:' + t.key; }));
-  }
-
-  function mergeMail(m, got) {
-    m.drafts = got.drafts;
-    m.threads = got.threads;
-    m.threadsOk = got.threadsOk;
-    m.ordersForLink = got.ordersForLink;
-    var keys = mailKeys(m);
-    if (keys.indexOf(m.sel) < 0) { m.sel = keys[0] || null; m.ask = null; }
-    // Typed text is kept only while it differs from what is stored.
-    Object.keys(m.edits).forEach(function (id) {
-      var d = draftById(m, id);
-      var ed = m.edits[id];
-      if (!d || d.status !== 'draft') { delete m.edits[id]; return; }
-      if (ed.saving) return;
-      if (ed.subject === d.subject) delete ed.subject;
-      if (ed.body === d.body_text) delete ed.body;
-    });
-  }
-
-  function loadMail(row) {
-    if (!row || !row.id || isMakesafe(row)) return;
-    readMail(row.id, false);
-  }
-
-  function readMail(jobId, quiet) {
-    var m = mailEntry(jobId) || (state.mail.jobs[jobId] = newMail(jobId));
-    var token = ++m.token;
-    if (!quiet || m.status !== 'ok') m.status = 'loading';
-    paintMailIf(jobId);
-    return Promise.resolve().then(function () { return global.opsFetch('dispatch_order_emails', { job_id: jobId }); }).then(function (resp) {
-      if (token !== m.token) return;
-      mergeMail(m, mailFrom(resp));
-      m.status = 'ok';
-      paintMailIf(jobId);
-    }).catch(function () {
-      if (token !== m.token) return;
-      m.status = 'error';
-      paintMailIf(jobId);
-    });
-  }
-
-  // Opening another job closes every confirm line and the notice strip.
-  function closeMailPresses() {
-    state.mail.note = null;
-    Object.keys(state.mail.jobs).forEach(function (id) { state.mail.jobs[id].ask = null; });
-    Object.keys(state.mat.jobs).forEach(function (id) { state.mat.jobs[id].cancelAsk = null; });
-    // Slice 6: the open inline line, the Not sighted confirm and the last line under the table.
-    state.deliv.edit = null;
-    state.deliv.ask = null;
-    state.deliv.msg = null;
-    state.deliv.typed = {};
-  }
-
-  function mailPick(jobId, key) {
-    var m = mailEntry(jobId) || (state.mail.jobs[jobId] = newMail(jobId));
-    m.sel = key;
-    m.ask = null;
-  }
-
-  // After every order or email write: both reads once each.
-  function afterOrderWrite(jobId, resp) {
-    if (resp) applyCounts(jobId, resp.counts);
-    readMat(jobId, true);
-    readMail(jobId, true);
-  }
-
-  function setSupOrder(e, sid, order) {
-    var s = supById(e, sid);
-    if (s && orderKnown(e, s)) s.order = order && order.id ? order : null;
-  }
-
-  // The strip under a card after a create or an update (row 6).
-  function orderNote(jobId, sid, resp, verb) {
-    var e = matEntry(jobId);
-    var po = text(resp.order && resp.order.po_number) || 'The PO';
-    var to = resp.draft && resp.draft.to;
-    var canSend = !resp.draft || (to && to.state === 'ok');
-    state.mail.note = {
-      jobId: jobId, sid: sid,
-      text: po + ' ' + verb + ' for ' + supplierName(e, sid) + '. ' + (canSend
-        ? 'Its email and PO PDF are waiting in Emails below for you to check and send.'
-        : 'There is no usable email on file for this supplier, so it cannot be sent yet.')
-    };
-  }
-
-  // A refused order write. "Changed somewhere else" answers re-read both
-  // reads once; the rest say what happened under the card.
-  var ORDER_CHANGED = ['lines_changed', 'order_changed', 'order_open', 'no_lines_to_order', 'order_cancelled', 'order_in_xero',
-    'order_sent', 'supplier_not_on_job', 'not_dispatch_order', 'order_not_found'];
-  function orderRefused(jobId, key, err, fail) {
-    var e = matEntry(jobId);
-    var code = err && err.code;
-    if (ORDER_CHANGED.indexOf(code) >= 0) { matChanged(jobId); readMail(jobId, true); return; }
-    if (code === 'not_dispatch_work') e.orderMsg[key] = { text: 'This job is not ordered through Dispatch.', retry: null };
-    else if (code === 'draft_sending') {
-      e.orderMsg[key] = { text: "This order's email is being sent or its send was not confirmed. Settle it in Emails below first.", retry: null };
-      readMail(jobId, true);
-    } else if (code === 'order_would_be_empty') e.orderMsg[key] = { text: 'Every line would come off. Cancel the order instead, if it was never sent.', retry: null };
-    else e.orderMsg[key] = fail;
-    paintMatIf(jobId);
-  }
-
-  function createOrder(jobId, sid) {
-    var e = matEntry(jobId);
-    var s = supById(e, sid);
-    if (!s || e.status !== 'ok' || e.orderBusy[sid] || changeableOrder(e, s) || !orderKnown(e, s)) return;
-    var lines = orderableLines(e, sid);
-    if (!lines.length) return;
-    e.orderBusy[sid] = 'create';
-    e.orderMsg[sid] = null;
-    e.notice = '';
-    state.mail.note = null;
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_create', { job_id: jobId, supplier_id: sid, lines: lines });
-    }).then(writeOk).then(function (resp) {
-      delete e.orderBusy[sid];
-      setSupOrder(e, sid, resp.order);
-      orderNote(jobId, sid, resp, 'created');
-      if (resp.draft && resp.draft.id) mailPick(jobId, 'd:' + resp.draft.id);
-      afterOrderWrite(jobId, resp);
-      paintMatIf(jobId);
-    }, function (err) {
-      delete e.orderBusy[sid];
-      orderRefused(jobId, sid, err, { text: 'PO not made.', retry: 'create' });
-    });
-  }
-
-  // Update PO and email, and a locked line's Take off (removeId).
-  function updateOrder(jobId, sid, removeId) {
-    var e = matEntry(jobId);
-    var s = supById(e, sid);
-    var o = s && changeableOrder(e, s);
-    if (!o || e.orderBusy[sid]) return;
-    var lines = orderableLines(e, sid);
-    if (!removeId && !lines.length) return;
-    var key = removeId ? 'line:' + removeId : sid;
-    e.orderBusy[sid] = removeId ? 'takeoff' : 'update';
-    e.orderMsg[key] = null;
-    e.notice = '';
-    state.mail.note = null;
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_update', {
-        job_id: jobId, purchase_order_id: o.id, expected_order_updated_at: orderStamp(e, o),
-        lines: lines, remove_line_ids: removeId ? [removeId] : []
-      });
-    }).then(writeOk).then(function (resp) {
-      delete e.orderBusy[sid];
-      if (resp.unchanged) e.orderMsg[sid] = { text: 'Nothing has changed on ' + (text(o.po_number) || 'this order') + '.', retry: null };
-      else {
-        setSupOrder(e, sid, resp.order);
-        orderNote(jobId, sid, resp, 'updated');
-        if (resp.draft && resp.draft.id) mailPick(jobId, 'd:' + resp.draft.id);
-      }
-      afterOrderWrite(jobId, resp);
-      paintMatIf(jobId);
-    }, function (err) {
-      delete e.orderBusy[sid];
-      orderRefused(jobId, key, err, removeId
-        ? { text: 'Line not taken off.', retry: 'takeoff:' + removeId }
-        : { text: 'PO not updated.', retry: 'update' });
-    });
-  }
-
-  function cancelOrder(jobId, sid) {
-    var e = matEntry(jobId);
-    var s = supById(e, sid);
-    var o = s && changeableOrder(e, s);
-    if (!o || o.last_sent_at || e.orderBusy[sid]) return;
-    e.cancelAsk = null;
-    e.orderBusy[sid] = 'cancel';
-    e.orderMsg[sid] = null;
-    e.notice = '';
-    state.mail.note = null;
-    paintMatIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_cancel', { job_id: jobId, purchase_order_id: o.id, expected_order_updated_at: orderStamp(e, o) });
-    }).then(writeOk).then(function (resp) {
-      delete e.orderBusy[sid];
-      setSupOrder(e, sid, null);
-      afterOrderWrite(jobId, resp);
-      paintMatIf(jobId);
-    }, function (err) {
-      delete e.orderBusy[sid];
-      orderRefused(jobId, sid, err, { text: 'Order not cancelled.', retry: 'cancel' });
-    });
-  }
-
-  // An order's PDF, through a 300 second link, opened in a new tab. The tab is
-  // opened on the press so the browser does not block it, then pointed at the link.
-  function openOrderPdf(poId, version, key) {
-    if (!poId || state.mail.pdf[key] === 'busy') return;
-    state.mail.pdf[key] = 'busy';
-    paintPdfLines();
-    var win = null;
-    try { win = global.open('', '_blank'); if (win) win.opener = null; } catch (x) { win = null; }
-    var params = { purchase_order_id: poId };
-    if (version) params.version = version;
-    Promise.resolve().then(function () { return global.opsFetch('dispatch_order_pdf', params); }).then(function (resp) {
-      var url = safeUrl(resp && resp.url);
-      if (!url) throw new Error('Unexpected PDF answer');
-      delete state.mail.pdf[key];
-      if (win && !win.closed) win.location.href = url; else global.open(url, '_blank', 'noopener');
-      paintPdfLines();
-    }).catch(function () {
-      if (win) { try { win.close(); } catch (x) { /* already gone */ } }
-      state.mail.pdf[key] = 'failed';
-      paintPdfLines();
-    });
-  }
-
-  function draftById(m, id) {
-    for (var i = 0; i < m.drafts.length; i++) if (m.drafts[i].id === id) return m.drafts[i];
-    return null;
-  }
-  function threadByKey(m, key) {
-    for (var i = 0; i < m.threads.length; i++) if (m.threads[i].key === key) return m.threads[i];
-    return null;
-  }
-
-  function draftText(m, d, field) {
-    var ed = m.edits[d.id];
-    if (ed && typeof ed[field] === 'string') return ed[field];
-    return String((field === 'subject' ? d.subject : d.body_text) || '');
-  }
-  function draftDirty(m, d) { return draftText(m, d, 'subject') !== String(d.subject || '') || draftText(m, d, 'body') !== String(d.body_text || ''); }
-
-  // Why Send is off, or '' when it can be pressed (row 24).
-  function sendBlock(m, d) {
-    var ed = m.edits[d.id] || {};
-    if (d.status !== 'draft') return 'status';
-    if (!d.to || d.to.state !== 'ok') return 'address';
-    if (ed.saving || ed.failed || draftDirty(m, d)) return 'save';
-    if (!draftText(m, d, 'subject').trim() || !draftText(m, d, 'body').trim()) return 'empty';
-    if (m.busy['send:' + d.id]) return 'busy';
-    return '';
-  }
-
-  // Subject and message are saved when their box is left, once, with the
-  // latest text if typing went on while a save was out.
-  function saveDraft(jobId, id) {
-    var m = mailEntry(jobId);
-    var d = m && draftById(m, id);
-    if (!d || d.status !== 'draft') return;
-    var ed = m.edits[id] || (m.edits[id] = {});
-    if (ed.saving) { ed.again = true; return; }
-    if (!draftDirty(m, d)) { if (ed.failed) { ed.failed = false; paintMailIf(jobId); } return; }
-    var subject = draftText(m, d, 'subject');
-    var body = draftText(m, d, 'body');
-    if (!subject.trim() || !body.trim()) { paintSendState(jobId); return; }
-    var out = { draft_id: id, expected_updated_at: d.updated_at };
-    if (subject !== d.subject) out.subject = subject;
-    if (body !== d.body_text) out.body_text = body;
-    ed.saving = true;
-    ed.failed = false;
-    m.ask = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_draft_save', out);
-    }).then(writeOk).then(function (resp) {
-      if (!resp.draft || resp.draft.id !== id) throw new Error('Unexpected answer');
-      return resp;
-    }).then(function (resp) {
-      ed.saving = false;
-      m.drafts = m.drafts.map(function (x) { return x.id === id ? resp.draft : x; });
-      // Text still as sent takes the stored form of it.
-      if (ed.subject === subject) delete ed.subject;
-      if (ed.body === body) delete ed.body;
-      var again = ed.again;
-      ed.again = false;
-      if (again && draftDirty(m, resp.draft)) saveDraft(jobId, id); else paintMailIf(jobId);
-    }, function (err) {
-      ed.saving = false;
-      ed.again = false;
-      var code = err && err.code;
-      if (code === 'draft_changed' || code === 'draft_not_editable') {
-        delete m.edits[id];
-        m.notice = 'This draft changed. Showing the latest.';
-        readMail(jobId, true);
-      } else ed.failed = true;
-      paintMailIf(jobId);
-    });
-  }
-
-  // The one route to a supplier email: the draft's Send now press, or Try the
-  // send again after a send whose result was not confirmed. It sends exactly
-  // the version on screen; the server refuses it if its hash has moved.
-  function sendDraft(jobId, id, retry) {
-    var m = mailEntry(jobId);
-    var d = m && draftById(m, id);
-    if (!d || m.busy['send:' + id]) return;
-    if (retry ? d.status !== 'send_unknown' : sendBlock(m, d)) return;
-    m.busy['send:' + id] = true;
-    m.msg['send:' + id] = null;
-    m.ask = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_send', { draft_id: id, expected_draft_hash: d.draft_hash });
-    }).then(writeOk).then(function (resp) {
-      delete m.busy['send:' + id];
-      m.notice = resp.filed === false ? 'Sent. It went to the supplier, but filing it on the order did not finish; it may not show below.' : '';
-      // The draft leaves the list; its thread comes in with the re-read.
-      m.drafts = m.drafts.filter(function (x) { return x.id !== id; });
-      m.sel = null;
-      afterOrderWrite(jobId, null);
-      paintMailIf(jobId);
-    }, function (err) {
-      delete m.busy['send:' + id];
-      var code = err && err.code;
-      if (code === 'send_unknown') m.msg['send:' + id] = { text: 'We could not tell whether this email went. Check the thread before trying again.', unknown: true };
-      else if (code === 'send_refused') m.msg['send:' + id] = { text: (text(err.message) || 'Not sent.').replace(/\.?$/, '.') };
-      else if (code === 'draft_changed' || code === 'draft_not_sendable' || code === 'order_cancelled' || code === 'pdf_changed') {
-        m.notice = 'This draft changed. Showing the latest.';
-      } else if (code === 'supplier_email_missing' || code === 'supplier_email_not_supplier' || code === 'supplier_email_malformed') {
-        m.notice = 'The supplier\'s email on file changed. Showing the latest.';
-      } else m.msg['send:' + id] = { text: 'Not sent. Nothing went to the supplier.' };
-      // The card's chip reads the draft's state too.
-      if (code === 'send_unknown') readMat(jobId, true);
-      readMail(jobId, true);
-      paintMailIf(jobId);
-    });
-  }
-
-  // A send whose result was not confirmed stays locked until a person, having
-  // checked the thread and the supplier's mailbox, says it did not go.
-  function releaseDraft(jobId, id) {
-    var m = mailEntry(jobId);
-    var d = m && draftById(m, id);
-    if (!d || m.busy['release:' + id]) return;
-    m.busy['release:' + id] = true;
-    m.msg['release:' + id] = null;
-    m.ask = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_release_unknown', { draft_id: id, expected_updated_at: d.updated_at });
-    }).then(writeOk).then(function (resp) {
-      delete m.busy['release:' + id];
-      m.msg['send:' + id] = null;
-      // When it was released: the release answer's stamp (the server keeps who).
-      m.released[id] = (resp.draft && resp.draft.updated_at) || new Date().toISOString();
-      afterOrderWrite(jobId, null);
-    }, function (err) {
-      delete m.busy['release:' + id];
-      var code = err && err.code;
-      if (code === 'draft_changed' || code === 'draft_not_unknown') { m.notice = 'This draft changed. Showing the latest.'; readMail(jobId, true); }
-      else m.msg['release:' + id] = { text: 'Draft not unlocked.' };
-      paintMailIf(jobId);
-    });
-  }
-
-  function discardDraft(jobId, id) {
-    var m = mailEntry(jobId);
-    var d = m && draftById(m, id);
-    if (!d || d.status !== 'draft' || m.busy['discard:' + id]) return;
-    m.busy['discard:' + id] = true;
-    m.msg['discard:' + id] = null;
-    m.ask = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_discard', { draft_id: id, expected_updated_at: d.updated_at });
-    }).then(writeOk).then(function () {
-      delete m.busy['discard:' + id];
-      m.drafts = m.drafts.filter(function (x) { return x.id !== id; });
-      delete m.edits[id];
-      m.sel = null;
-      afterOrderWrite(jobId, null);
-      paintMailIf(jobId);
-    }, function (err) {
-      delete m.busy['discard:' + id];
-      var code = err && err.code;
-      if (code === 'draft_changed' || code === 'draft_not_editable') { m.notice = 'This draft changed. Showing the latest.'; readMail(jobId, true); }
-      else m.msg['discard:' + id] = { text: 'Draft not discarded.', retry: true };
-      paintMailIf(jobId);
-    });
-  }
-
-  // The newest inbound sender on a supplier thread: who a reply goes to.
-  function replyTo(t) {
-    for (var i = t.messages.length - 1; i >= 0; i--) if (t.messages[i] && t.messages[i].direction === 'inbound') return text(t.messages[i].from_email);
-    return '';
-  }
-
-  function newestMessageId(t) { var last = t.messages[t.messages.length - 1]; return last ? last.id : null; }
-
-  // The thread's Send now press (or Try the send again after an unconfirmed
-  // reply). The address is the supplier's own, never typed.
-  function sendThreadReply(jobId, key, retry) {
-    var m = mailEntry(jobId);
-    var t = m && threadByKey(m, key);
-    var held = m && m.msg['reply:' + key];
-    if (!t || !t.can_reply || m.busy['reply:' + key]) return;
-    if (retry ? !(held && held.unknown) : held && held.unknown) return;
-    var attempt = retry ? held.attempt : { reply_to_message_id: newestMessageId(t), body_text: String(m.replies[key] || '') };
-    if (!attempt.body_text.trim()) return;
-    m.busy['reply:' + key] = true;
-    m.msg['reply:' + key] = null;
-    m.ask = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_order_reply', { job_id: jobId, thread_key: key, reply_to_message_id: attempt.reply_to_message_id, body_text: attempt.body_text });
-    }).then(writeOk).then(function () {
-      delete m.busy['reply:' + key];
-      m.replies[key] = '';
-      afterOrderWrite(jobId, null);
-      paintMailIf(jobId);
-    }, function (err) {
-      delete m.busy['reply:' + key];
-      var code = err && err.code;
-      var lost = !code && !(err && err.status >= 400 && err.status < 500);
-      if (code === 'send_unknown' || lost) m.msg['reply:' + key] = { text: 'We could not tell whether this reply went. Check the thread before trying again.', unknown: true, attempt: attempt };
-      else if (code === 'thread_changed' && retry) {
-        m.replies[key] = attempt.body_text;
-        m.msg['reply:' + key] = { text: 'This thread changed. Check it for your reply before sending again.' };
-        readMail(jobId, true);
-      } else if (code === 'thread_changed') { m.notice = 'This thread changed. Showing the latest. Your text is still here.'; readMail(jobId, true); }
-      else m.msg['reply:' + key] = { text: 'Reply not sent. Your text is still here.' };
-      paintMailIf(jobId);
-    });
-  }
-
-  function linkThread(jobId, key) {
-    var m = mailEntry(jobId);
-    var t = m && threadByKey(m, key);
-    var poId = m && m.link[key];
-    if (!t || !t.can_link || !poId || m.busy['link:' + key]) return;
-    m.busy['link:' + key] = true;
-    m.msg['link:' + key] = null;
-    paintMailIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('dispatch_email_link_po', { job_id: jobId, thread_key: key, purchase_order_id: poId });
-    }).then(writeOk).then(function () {
-      delete m.busy['link:' + key];
-      afterOrderWrite(jobId, null);
-    }, function (err) {
-      delete m.busy['link:' + key];
-      var code = err && err.code;
-      if (code === 'thread_has_order' || code === 'order_not_on_job' || code === 'thread_not_found') { m.notice = 'This changed somewhere else. Showing the latest.'; readMail(jobId, true); }
-      else m.msg['link:' + key] = { text: 'Not linked.', retry: true };
-      paintMailIf(jobId);
-    });
-  }
-
   // ── slice 6: Deliveries, its three writes ──
   // Each is sent once, on a person's change or press, against the order's
   // updated_at the screen was showing. Its answer redraws the row, items ready,
   // the open job's list counts and the rail line: no list re-read, and nothing
   // here retries on its own.
-
-  function delivRow(e, poId) {
-    var rows = e && e.deliveries ? e.deliveries.rows : [];
-    for (var i = 0; i < rows.length; i++) if (rows[i].kind === 'order' && rows[i].purchase_order_id === poId) return rows[i];
-    return null;
-  }
-
-  // An order as a write (or its order_changed refusal) answered it, onto the
-  // row, the job's orders and the lines on it. A line on an order that has been
-  // sighted reads Delivered, else On PO: the server's rule, kept until the next read.
-  function applyDelivOrder(e, poId, o) {
-    if (!e || !o || typeof o !== 'object' || o.id !== poId || !delivOk(o.delivery)) return false;
-    e.orders = e.orders.map(function (x) {
-      if (!x || x.id !== poId) return x;
-      var merged = Object.assign({}, x, o);
-      if (!Array.isArray(o.lines)) merged.lines = x.lines;
-      return merged;
-    });
-    var r = delivRow(e, poId);
-    if (r) {
-      r.updated_at = o.updated_at;
-      r.delivery = o.delivery;
-      if ('status' in o) r.status = o.status;
-      if ('in_xero' in o) r.in_xero = o.in_xero === true;
-    }
-    e.lines.forEach(function (l) {
-      if (l.purchase_order_id === poId && (l.display_status === 'on_po' || l.display_status === 'delivered')) l.display_status = o.delivery.sighted ? 'delivered' : 'on_po';
-    });
-    return true;
-  }
-
-  // The answer's counted and sighted, onto the section and onto every copy of
-  // the job's list row that carries the counts (the rail line reads them).
-  function applyDelivCounts(jobId, c) {
-    var e = matEntry(jobId);
-    if (!e || !e.deliveries || !c || typeof c.counted !== 'number' || typeof c.sighted !== 'number') return;
-    e.deliveries.counted = c.counted;
-    e.deliveries.sighted = c.sighted;
-    e.deliveries.all_sighted = c.all_sighted === true;
-    [state.base.rows, state.arch.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
-      rows.forEach(function (r) {
-        if (r && r.id === jobId && typeof r.deliveries_orders_total === 'number') { r.deliveries_orders_total = c.counted; r.deliveries_orders_sighted = c.sighted; }
-      });
-    });
-  }
-
-  // The order changed somewhere else, or cannot be changed here: say so, and
-  // show the latest by one quiet re-read.
-  function delivChanged(jobId, words) {
-    var e = matEntry(jobId);
-    state.deliv.msg = { jobId: jobId, text: words };
-    state.deliv.edit = null;
-    state.deliv.ask = null;
-    paintSchedIf(jobId);
-    paintMailIf(jobId);
-    if (!e || e.rereading) return;
-    e.rereading = true;
-    readMat(jobId, true).then(function () { e.rereading = false; });
-  }
-
-  var DELIV_REFUSED = ['order_in_xero', 'order_cancelled', 'not_material', 'not_dispatch_work', 'order_not_found'];
-
-  // One delivery write. onFail says what a failed press leaves on screen.
-  // Resolves true when it landed.
-  function delivSend(jobId, poId, action, body, onFail) {
-    var e = matEntry(jobId);
-    var r = delivRow(e, poId);
-    var d = state.deliv;
-    if (!r || d.busy[poId]) return Promise.resolve(false);
-    d.busy[poId] = action;
-    d.msg = null;
-    paintSchedIf(jobId);
-    paintMailIf(jobId);
-    return Promise.resolve().then(function () {
-      return global.opsPost(action, Object.assign({ purchase_order_id: poId, expected_updated_at: r.updated_at || null }, body));
-    }).then(writeOk).then(function (resp) {
-      delete d.busy[poId];
-      // Saved, but an answer without the order cannot redraw the row: one quiet re-read shows it.
-      if (!applyDelivOrder(e, poId, resp.order)) readMat(jobId, true);
-      applyDelivCounts(jobId, resp.deliveries);
-      applyCounts(jobId, resp.counts);
-      if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); }
-      paintCard(jobId);
-      return true;
-    }, function (err) {
-      delete d.busy[poId];
-      var code = err && err.code;
-      if (code === 'order_changed') {
-        if (err.body) applyDelivOrder(e, poId, err.body.order);
-        delivChanged(jobId, 'This order changed somewhere else. Showing the latest.');
-      } else if (DELIV_REFUSED.indexOf(code) >= 0) {
-        delivChanged(jobId, 'This order cannot be changed here.');
-      } else {
-        onFail();
-      }
-      return false;
-    }).then(function (landed) {
-      paintSchedIf(jobId);
-      paintMailIf(jobId);
-      return landed;
-    });
-  }
-
-  function setExpected(jobId, poId, value) {
-    var r = delivRow(matEntry(jobId), poId);
-    if (!r || !r.delivery.expected_editable || (r.delivery.expected || null) === value) {
-      delete state.deliv.typed[poId];
-      return;
-    }
-    delivSend(jobId, poId, 'dispatch_delivery_set_expected', { delivery_date: value }, function () {
-      state.deliv.msg = { jobId: jobId, text: 'Not saved.', retry: { kind: 'expected', poId: poId, value: value } };
-    }).then(function () {
-      delete state.deliv.typed[poId];
-      paintSchedIf(jobId);
-    });
-  }
-
-  function markSighted(jobId, poId, sighted) {
-    state.deliv.ask = null;
-    delivSend(jobId, poId, 'dispatch_delivery_mark_sighted', { sighted: sighted }, function () {
-      state.deliv.msg = { jobId: jobId, text: sighted ? 'Not saved.' : 'Sighting not cleared.', retry: { kind: 'sight', poId: poId, value: sighted } };
-    });
-  }
-
-  // The open inline line's Save (a date) or Clear (null). The line stays open
-  // with its date when the press fails.
-  function saveConfirmed(value) {
-    var ed = state.deliv.edit;
-    if (!ed || ed.busy || (value !== null && !wholeDay(value))) return;
-    ed.busy = true;
-    ed.fail = false;
-    ed.last = value;
-    delivSend(ed.jobId, ed.poId, 'dispatch_delivery_set_confirmed', { confirmed_delivery_date: value, via: ed.via }, function () {
-      ed.fail = true;
-    }).then(function (landed) {
-      ed.busy = false;
-      if (landed && state.deliv.edit === ed) state.deliv.edit = null;
-      paintSchedIf(ed.jobId);
-      paintMailIf(ed.jobId);
-    });
-  }
-
-  // Opens the one inline line: from the row (via deliveries) or a supplier
-  // thread (via thread). Nothing is sent until Save or Clear.
-  function openConfirmedLine(jobId, poId, via, key) {
-    var r = delivRow(matEntry(jobId), poId);
-    if (!r) return;
-    var c = r.delivery.confirmed;
-    var day = via === 'thread' ? (c.date || r.delivery.expected) : (c.by_hand ? c.date : r.delivery.expected);
-    state.deliv.edit = { jobId: jobId, poId: poId, via: via, key: key || null, date: wholeDay(day), busy: false, fail: false, last: null };
-    state.deliv.ask = null;
-    state.deliv.msg = null;
-  }
 
   // ───────────────────────── render: sidebar ─────────────────────────
 
@@ -3124,8 +1794,7 @@
     h += '<span class="dpc-pill">' + esc(b ? installWords(b, true) : 'Install not known') + '</span>';
     var days = daysText(b);
     if (days) h += '<span class="dpc-pill">' + esc(days) + '</span>';
-    var mat = isMakesafe(row) ? null : matEntry(row.id);
-    var ready = mat && mat.status === 'ok' && mat.counts ? readyText(mat.counts.total, mat.counts.ready) : '';
+    var ready = isMakesafe(row) ? '' : readyText(row.materials_lines_total, row.materials_lines_ready);
     if (ready) h += '<span class="dpc-pill">' + esc(ready) + '</span>';
     if (b) h += flagsOf(b).map(flagHtml).join('');
     // An unknown deposit (the invoice read failed) is said, never shown as paid or not paid.
@@ -3399,7 +2068,7 @@
 
   // Sources: quotes and invoices from job_detail, then the job's purchase
   // orders from the materials read already made on job open (slice 5).
-  function sourcesHtml() { return sourceDocsHtml() + poSourcesHtml(); }
+  function sourcesHtml() { return sourceDocsHtml(); }
 
   function sourceDocsHtml() {
     var d = state.detail;
@@ -3595,844 +2264,18 @@
     if (had) { var t = el.querySelector('[data-dpc-reply]'); if (t && !t.disabled) t.focus(); }
   }
 
-  // ───────────────────────── render: Materials by supplier (slice 4) ─────────────────────────
+  // ───────────────────────── render: shared marks ─────────────────────────
 
   var CHEV_SVG = '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var CHEV_SMALL = '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  function matFail(message, retry) {
-    return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(message) +
-      ' <button type="button" class="dpc-retry" data-dpc-mat-retry="' + esc(retry) + '">Retry</button></div>';
-  }
-
-  function addSupplierHtml(e) {
-    var s = state.mat.sup;
-    if (s.status === 'error') {
-      return '<div class="dpc-addsup-state dpc-mat-fail" role="alert">Could not load suppliers <button type="button" class="dpc-retry" data-dpc-mat-retry="suppliers">Retry</button></div>';
-    }
-    if (s.status !== 'ok') return '<select class="dpc-addsup" disabled aria-label="Add supplier"><option>Loading suppliers...</option></select>';
-    if (!s.list.some(function (x) { return x && x.id && x.is_active !== false; })) return '<div class="dpc-addsup-state">No supplier contacts on file.</div>';
-    var opts = supplierOptions(s.list, e.suppliers.map(function (x) { return String(x.supplier_id); }));
-    var h = '<select class="dpc-addsup" data-dpc-mat-addsup aria-label="Add supplier"' + (e.adding ? ' disabled' : '') + '>';
-    h += '<option value="">' + (e.adding ? 'Adding supplier...' : '+ Add supplier') + '</option>';
-    [['Material suppliers', opts.tagged], ['All supplier contacts', opts.rest]].forEach(function (g) {
-      if (!g[1].length) return;
-      h += '<optgroup label="' + esc(g[0]) + '">';
-      g[1].forEach(function (o) { h += '<option value="' + esc(o.id) + '">' + esc(o.label) + '</option>'; });
-      h += '</optgroup>';
-    });
-    return h + '</select>';
-  }
-
-  function supplierName(e, id) {
-    for (var i = 0; i < e.suppliers.length; i++) if (String(e.suppliers[i].supplier_id) === id) return text(e.suppliers[i].name) || 'Name not recorded';
-    return 'Supplier not recorded';
-  }
-
-  function lineHtml(e, l) {
-    var id = esc(l.id);
-    var h = '<div class="dpc-line-wrap" data-dpc-mat-row="' + id + '">';
-    if (onOrder(l)) {
-      // On an order (slice 5 stamps it): a plain label, no boxes and no cross.
-      var tone = (MAT_STATUS[l.display_status] || { tone: 'muted' }).tone;
-      h += '<div class="dpc-line dpc-line-ro"><span>' + esc(l.description) + '</span><span class="dpc-mono">' + esc(l.quantity) + '</span>';
-      h += '<span class="dpc-mono">' + esc(l.unit) + '</span><span>' + esc(supplierName(e, l.supplier_id)) + '</span>';
-      h += '<span><span class="dpc-status dpc-tone-' + tone + '">' + esc(matStatusLabel(l.display_status)) + '</span></span>' + takeOffHtml(e, l) + '</div>';
-      var off = e.orderMsg['line:' + l.id];
-      if (off) {
-        h += '<div class="dpc-line-msg' + (off.retry ? ' dpc-mat-fail' : '') + '" role="' + (off.retry ? 'alert' : 'status') + '">' + esc(off.text) +
-          (off.retry ? ' <button type="button" class="dpc-retry" data-dpc-order="retry" data-dpc-order-retry="' + esc(off.retry) + '" data-dpc-order-sid="' + esc(l.supplier_id) + '">Retry</button>' : '') + '</div>';
-      }
-      return h + '</div>';
-    }
-    var status = (MAT_STATUS[l.status] && matSettable(l.status)) ? l.status : 'not_reviewed';
-    // Slice 5: off while an order press is in flight on this card.
-    var off = e.orderBusy[l.supplier_id] ? ' disabled' : '';
-    h += '<div class="dpc-line">';
-    h += '<input type="text" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="description" maxlength="300" value="' + esc(l.description) + '" aria-label="Item"' + off + '>';
-    h += '<input type="text" inputmode="decimal" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="quantity" value="' + esc(l.quantity) + '" aria-label="Qty"' + (matQty(l.quantity).ok ? '' : ' aria-invalid="true"') + off + '>';
-    h += '<input type="text" data-dpc-mat-line="' + id + '" data-dpc-mat-cell="unit" maxlength="30" value="' + esc(l.unit) + '" aria-label="Unit"' + off + '>';
-    h += '<select data-dpc-mat-move="' + id + '" aria-label="Supplier"' + off + '>';
-    e.suppliers.forEach(function (s) {
-      var sid = String(s.supplier_id);
-      h += '<option value="' + esc(sid) + '"' + (sid === l.supplier_id ? ' selected' : '') + '>' + esc(text(s.name) || 'Name not recorded') + '</option>';
-    });
-    h += '</select>';
-    h += '<select class="dpc-status dpc-status-pick dpc-tone-' + MAT_STATUS[status].tone + '" data-dpc-mat-status="' + id + '" aria-label="Status"' + off + '>';
-    MAT_SETTABLE.forEach(function (k) { h += '<option value="' + k + '"' + (k === status ? ' selected' : '') + '>' + esc(MAT_STATUS[k].label) + '</option>'; });
-    h += '</select>';
-    h += '<button type="button" class="dpc-x" data-dpc-mat-del="' + id + '" aria-label="Remove line"' + off + '>&times;</button></div>';
-    if (l.msg) {
-      h += '<div class="dpc-line-msg dpc-mat-fail" role="alert">' + esc(l.msg) +
-        (l.retry ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="line:' + id + '">Retry</button>' : '') + '</div>';
-    }
-    return h + '</div>';
-  }
-
-  // ── slice 5 on the supplier card: the chip, the button and the strip ──
-
-  var TONES = ['muted', 'warn', 'info', 'ok'];
-
-  // The chip words without the order number in front (Sources' second line).
-  function chipWords(o) {
-    var t = text(o && o.chip && o.chip.text);
-    var po = text(o && o.po_number);
-    return po && t.indexOf(po + ' · ') === 0 ? t.slice(po.length + 3) : t;
-  }
-
-  // Row 2 and section 4.2: the server's chip, else "Not ordered". No chip at
-  // all when the orders read failed. Cancel order sits beside it (row 5).
-  function orderChipHtml(e, s) {
-    if (!orderKnown(e, s)) return '';
-    var o = supOrder(e, s);
-    if (!o) return '<span class="dpc-status dpc-tone-muted">Not ordered</span>';
-    var chip = o.chip && typeof o.chip === 'object' ? o.chip : {};
-    var tone = TONES.indexOf(chip.tone) >= 0 ? chip.tone : 'info';
-    var words = text(chip.text) || (text(o.po_number) || 'Order') + ' · ' + orderStatusWord(o.status);
-    var h = '<span class="dpc-status dpc-tone-' + tone + '">' + esc(words) + '</span>';
-    if (changeableOrder(e, s) && !o.last_sent_at) {
-      var sid = String(s.supplier_id);
-      h += '<button type="button" class="dpc-textbtn" data-dpc-order="cancel" data-dpc-order-sid="' + esc(sid) + '"' + (e.orderBusy[sid] ? ' disabled' : '') + '>Cancel order</button>';
-    }
-    return h;
-  }
-
-  // Rows 3 and 4: Create PO and email, or Update PO and email once the
-  // supplier has an open order Xero does not hold.
-  function orderButtonHtml(e, s) {
-    if (!orderKnown(e, s)) return '';
-    var sid = String(s.supplier_id);
-    var o = changeableOrder(e, s);
-    var busy = e.orderBusy[sid];
-    var ready = orderableLines(e, sid).length > 0;
-    var off = !!busy || !!e.busyCard[sid] || cardSaving(e, sid) || !ready;
-    var label = o ? (busy === 'update' ? 'Updating...' : 'Update PO and email') : (busy === 'create' ? 'Creating...' : 'Create PO and email');
-    var title = ready ? '' : (o ? 'Nothing new to add' : 'Mark lines To order first');
-    return '<button type="button" class="dpc-primary dpc-order-btn" data-dpc-order="' + (o ? 'update' : 'create') + '" data-dpc-order-sid="' + esc(sid) + '"' +
-      (title ? ' title="' + esc(title) + '"' : '') + (off ? ' disabled' : '') + '>' + label + '</button>';
-  }
-
-  // Under the lines: the Cancel order confirm, the notice strip after a
-  // create or update, and a failed press's line.
-  function orderStripHtml(e, s) {
-    var sid = String(s.supplier_id);
-    var h = '';
-    var o = changeableOrder(e, s);
-    if (e.cancelAsk === sid && o && !o.last_sent_at) {
-      h += '<div class="dpc-order-confirm" role="group" aria-label="Cancel order"><p class="dpc-empty dpc-empty-tight">Cancel ' + esc(text(o.po_number) || 'this order') + '? Its lines go back to To order.</p>';
-      h += '<div class="dpc-actions"><button type="button" data-dpc-order="cancel-go" data-dpc-order-sid="' + esc(sid) + '">Cancel order</button>';
-      h += '<button type="button" data-dpc-order="cancel-keep" data-dpc-order-sid="' + esc(sid) + '">Keep it</button></div></div>';
-    }
-    var n = state.mail.note;
-    if (n && n.jobId === e.jobId && n.sid === sid) h += '<div class="dpc-note dpc-order-note-strip" role="status">' + esc(n.text) + '</div>';
-    var msg = e.orderMsg[sid];
-    if (msg) {
-      h += '<div class="dpc-card-msg' + (msg.retry ? ' dpc-mat-fail' : '') + '" role="' + (msg.retry ? 'alert' : 'status') + '">' + esc(msg.text) +
-        (msg.retry ? ' <button type="button" class="dpc-retry" data-dpc-order="retry" data-dpc-order-retry="' + esc(msg.retry) + '" data-dpc-order-sid="' + esc(sid) + '">Retry</button>' : '') + '</div>';
-    }
-    return h;
-  }
-
-  // Row 7: a line on the supplier's open order, not in Xero, comes off with Take off.
-  function takeOffHtml(e, l) {
-    var s = supById(e, l.supplier_id);
-    var o = s && changeableOrder(e, s);
-    if (!o || l.purchase_order_id !== o.id) return '<span></span>';
-    return '<button type="button" class="dpc-takeoff" data-dpc-order="takeoff" data-dpc-order-sid="' + esc(l.supplier_id) + '" data-dpc-order-line="' + esc(l.id) + '"' +
-      (e.orderBusy[l.supplier_id] ? ' disabled' : '') + '>Take off</button>';
-  }
-
-  function suggestShown(e) {
-    return e.canSuggest && !e.lines.some(function (l) { return !!l.saved; });
-  }
-
-  function supCardHtml(e, s) {
-    var sid = String(s.supplier_id);
-    var name = text(s.name) || 'Name not recorded';
-    var hasLines = e.lines.some(function (l) { return l.supplier_id === sid; });
-    var lines = e.lines.filter(function (l) { return l.supplier_id === sid && !l.gone; })
-      .sort(function (a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
-    var busy = e.busyCard[sid];
-    var h = '<div class="dpc-supcard" data-dpc-mat-card="' + esc(sid) + '"><div class="dpc-suphead"><span class="dpc-supdot" aria-hidden="true"></span><strong>' + esc(name) + '</strong>';
-    h += s.email ? '<span class="dpc-supmail">' + esc(s.email) + '</span>' : '<span class="dpc-status dpc-tone-muted">No email on file</span>';
-    if (s.active === false) h += '<span class="dpc-status dpc-tone-muted">Contact no longer active</span>';
-    h += orderChipHtml(e, s);
-    h += '<span class="dpc-grow"></span>';
-    h += orderButtonHtml(e, s);
-    if (!hasLines) h += '<button type="button" class="dpc-x" data-dpc-mat-remove="' + esc(sid) + '" aria-label="Take ' + esc(name) + ' off this job"' + (busy ? ' disabled' : '') + '>&times;</button>';
-    h += '</div><div class="dpc-lines"><div class="dpc-line dpc-line-head"><span>Item</span><span>Qty</span><span>Unit</span><span>Supplier</span><span>Status</span><span></span></div>';
-    if (!lines.length) h += '<div class="dpc-line-empty">No lines yet. Move lines here or add one.</div>';
-    lines.forEach(function (l) { h += lineHtml(e, l); });
-    h += '</div>';
-    var msg = e.card[sid];
-    if (msg) {
-      h += '<div class="dpc-card-msg' + (msg.retry ? ' dpc-mat-fail' : '') + '" role="' + (msg.retry ? 'alert' : 'status') + '">' + esc(msg.text) +
-        (msg.retry ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="card:' + esc(sid) + '">Retry</button>' : '') + '</div>';
-    }
-    h += orderStripHtml(e, s);
-    h += '<div class="dpc-card-foot"><button type="button" class="dpc-addline" data-dpc-mat-addline="' + esc(sid) + '">+ Add line</button>';
-    if (suggestShown(e)) {
-      h += '<button type="button" class="dpc-addline" data-dpc-mat-suggest="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>' +
-        (busy === 'suggest' ? 'Suggesting...' : 'Suggest lines from the scope') + '</button>';
-    }
-    return h + '</div></div>';
-  }
-
-  // The save line under the cards.
-  function matSaveHtml(e) {
-    var busy = e.w.textBusy || e.w.sketchBusy || e.lines.some(function (l) { return l.busy; });
-    var failed = e.w.textFailed || e.w.sketchFailed || e.lines.some(function (l) { return l.failed || l.delFailed; });
-    if (failed) return '<span class="dpc-mat-fail" role="alert">Not saved. <button type="button" class="dpc-retry" data-dpc-mat-retry="saves">Retry</button></span>';
-    if (busy) return '<span role="status">Saving...</span>';
-    if (e.touched) return '<span role="status">All changes saved</span>';
-    return '';
-  }
-
-  // An order made in Dispatch carries its supplier and source (slice 5); any
-  // other order was made outside it.
-  function isDispatchOrder(o) { return !!(o && o.supplier_id && o.source); }
-
-  // The job's purchase orders made outside Dispatch, read only and never
-  // merged into a supplier card: an order names its supplier as typed text.
-  // No price is shown. Dispatch's own orders are on their supplier's card.
-  function ordersHtml(e) {
-    if (!e.ordersOk) return '<div class="dpc-orders">' + matFail("Could not load this job's orders.", 'orders') + '</div>';
-    var outside = e.orders.filter(function (o) { return !isDispatchOrder(o); });
-    if (!outside.length) return '';
-    var h = '<div class="dpc-orders"><h4 class="dpc-mat-h4">Orders on this job</h4>';
-    outside.forEach(function (o) {
-      h += '<div class="dpc-supcard dpc-ordercard"><div class="dpc-suphead"><strong>' + esc(text(o.supplier_name) || 'Supplier not recorded') + '</strong>';
-      h += '<span class="dpc-status dpc-tone-info">' + esc((text(o.po_number) || 'No order number') + ' · ' + orderStatusWord(o.status)) + '</span></div>';
-      h += '<div class="dpc-lines"><div class="dpc-line dpc-oline dpc-line-head"><span>Item</span><span>Qty</span><span>Unit</span></div>';
-      var lines = Array.isArray(o.lines) ? o.lines : [];
-      if (!lines.length) h += '<div class="dpc-line-empty">No lines on this order.</div>';
-      lines.forEach(function (l) {
-        l = l || {};
-        h += '<div class="dpc-line dpc-oline"><span>' + esc(text(l.description) || 'No item recorded') + '</span><span class="dpc-mono">' + esc(matQtyText(l.quantity)) + '</span><span class="dpc-mono">' + esc(text(l.unit)) + '</span></div>';
-      });
-      h += '</div><p class="dpc-order-note">Made outside this list. Read only.</p></div>';
-    });
-    return h + '</div>';
-  }
-
-  function sketchMsgHtml(e) {
-    if (e.w.sketchBroken) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">Could not show the saved sketch.</div>';
-    if (e.w.sketchMsg) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">' + esc(e.w.sketchMsg) + '</div>';
-    return '';
-  }
-
-  function workoutHtml(e) {
-    var h = '<details class="dpc-workout" data-dpc-mat-workout' + (state.mat.workOpen ? ' open' : '') + '><summary>Working out and sketch</summary>';
-    h += '<div class="dpc-scratch"><textarea class="dpc-textarea" data-dpc-mat-pad maxlength="20000" placeholder="42 m run / 2.4 m bays = 18 bays..." aria-label="Working out">' + esc(e.w.text) + '</textarea>';
-    h += '<div class="dpc-canvas-wrap"><canvas class="dpc-canvas" data-dpc-mat-canvas width="600" height="220" role="img" aria-label="Sketch pad"></canvas>';
-    h += '<button type="button" class="dpc-canvas-clear" data-dpc-mat-clear>Clear sketch</button></div></div>';
-    return h + '<div data-dpc-region="matsketch">' + sketchMsgHtml(e) + '</div></details>';
-  }
-
-  function matBodyHtml(e) {
-    if (!e || e.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading the materials...</div>';
-    if (e.status === 'error') return matFail('Could not load the materials.', 'read');
-    var h = '';
-    if (e.notice) h += '<div class="dpc-mat-notice" role="status">' + esc(e.notice) + '</div>';
-    if (e.addMsg) {
-      h += '<div class="dpc-mat-notice dpc-mat-fail" role="alert">' + esc(e.addMsg.text) +
-        (e.addMsg.id ? ' <button type="button" class="dpc-retry" data-dpc-mat-retry="add">Retry</button>' : '') + '</div>';
-    }
-    if (!e.suppliers.length) h += '<div class="dpc-empty dpc-empty-tight">No suppliers chosen for this job yet. Add one to start writing out the materials.</div>';
-    e.suppliers.forEach(function (s) { h += supCardHtml(e, s); });
-    h += '<div class="dpc-mat-save" data-dpc-region="matsave">' + matSaveHtml(e) + '</div>';
-    return h + ordersHtml(e) + workoutHtml(e);
-  }
-
-  // Drawn on every job except a make-safe one.
-  function matHtml() {
-    var row = state.row;
-    if (!row || isMakesafe(row)) return '';
-    var e = matEntry(row.id);
-    var open = state.mat.open;
-    var h = '<div class="dpc-sec dpc-mat' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="mat"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Order</span><h3>Materials by supplier</h3>';
-    if (open) h += '<p>Write out the materials, split them by supplier, then create the PO and email in one go</p>';
-    h += '</div>';
-    if (open && e && e.status === 'ok') h += addSupplierHtml(e);
-    h += '<button type="button" class="dpc-chev" data-dpc-toggle="order" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Materials by supplier">' + CHEV_SVG + '</button></div>';
-    if (open) h += '<div class="dpc-sec-body">' + matBodyHtml(e) + '</div>';
-    return h + '</div>';
-  }
-
-  // Where the keyboard was inside the section, to put it back after a repaint.
-  var MAT_FOCUS_KEYS = ['data-dpc-mat-line', 'data-dpc-mat-cell', 'data-dpc-mat-move', 'data-dpc-mat-status', 'data-dpc-mat-pad', 'data-dpc-mat-addsup',
-    'data-dpc-toggle', 'data-dpc-mat-addline', 'data-dpc-mat-suggest', 'data-dpc-mat-clear', 'data-dpc-mat-del', 'data-dpc-mat-retry'];
-  function matFocus(el) {
-    var a = document.activeElement;
-    if (!a || !el.contains(a)) return null;
-    var sel = MAT_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
-      return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
-    }).join('');
-    if (!sel) return null;
-    var f = { sel: sel };
-    try { f.start = a.selectionStart; f.end = a.selectionEnd; } catch (x) { /* not a text box */ }
-    return f;
-  }
-
+  // True while a section is redrawn, so the focus leaving a box that is being
+  // replaced is not taken as a person leaving it (which would save it).
   var painting = false;
-  function paintMat() {
-    var el = region('mat');
-    if (!el) return;
-    var f = matFocus(el);
-    painting = true;
-    try { el.outerHTML = matHtml(); } finally { painting = false; }
-    wireMat();
-    var now = f && region('mat') ? region('mat').querySelector(f.sel) : null;
-    if (!now) return;
-    now.focus({ preventScroll: true });
-    if (typeof f.start === 'number' && now.setSelectionRange) { try { now.setSelectionRange(f.start, f.end); } catch (x) { /* not a text box */ } }
-  }
-  function paintMatIf(jobId) { if (state.jobId === jobId) paintMat(); }
 
-  function paintMatSave(jobId) {
-    if (state.jobId !== jobId) return;
-    var el = region('matsave');
-    var e = matEntry(jobId);
-    if (el && e) el.innerHTML = matSaveHtml(e);
-  }
+  // ───────────────────────── render: Install ─────────────────────────
 
-  function paintSketchMsg(jobId) {
-    if (state.jobId !== jobId) return;
-    var el = region('matsketch');
-    var e = matEntry(jobId);
-    if (el && e) el.innerHTML = sketchMsgHtml(e);
-  }
-
-  // The open job's card, after a write changed its "items ready".
-  function paintCard(jobId) {
-    var list = region('list');
-    var row = rowById(jobId);
-    if (!list || !row || !state.leftOpen) return;
-    Array.prototype.forEach.call(list.querySelectorAll('.dpc-job[data-dpc-job]'), function (el) {
-      if (el.getAttribute('data-dpc-job') !== jobId) return;
-      var had = document.activeElement === el;
-      var tmp = document.createElement('div');
-      tmp.innerHTML = cardHtml(row);
-      var card = tmp.firstChild;
-      el.parentNode.replaceChild(card, el);
-      if (had) card.focus({ preventScroll: true });
-    });
-  }
-
-  // The saved sketch, drawn back onto the pad after every paint of the section.
-  function redrawSketch() {
-    var e = matEntry(state.jobId);
-    var r = region('mat');
-    var c = r && r.querySelector('[data-dpc-mat-canvas]');
-    var ctx = c && c.getContext && c.getContext('2d');
-    if (!e || !ctx) return;
-    ctx.clearRect(0, 0, c.width, c.height);
-    var src = e.w.sketch;
-    if (!src) return;
-    var img = new Image();
-    c.dpcLoading = src;
-    img.onload = function () {
-      if (c.dpcLoading === src) c.dpcLoading = null;
-      if (!c.isConnected) return;
-      if (e.w.sketch === src) { ctx.drawImage(img, 0, 0); return; }
-      // A stroke landed before the saved picture had drawn: put the picture
-      // under it and save the two together, so the stroke never wipes it.
-      if (c.dpcDrawnOver !== src) return;
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-over';
-      ctx.drawImage(img, 0, 0);
-      ctx.restore();
-      sketchDrawn(e.jobId, c.toDataURL('image/png'));
-    };
-    img.onerror = function () {
-      if (c.dpcLoading === src) c.dpcLoading = null;
-      if (e.w.sketch !== src) return;
-      // Nothing is saved over it until a stroke is drawn.
-      e.w.sketchBroken = true;
-      paintSketchMsg(e.jobId);
-    };
-    img.src = src;
-  }
-
-  // A mouse, a finger or a pen draws; the page does not scroll while drawing.
-  function wireMat() {
-    var r = region('mat');
-    var c = r && r.querySelector('[data-dpc-mat-canvas]');
-    var ctx = c && c.getContext && c.getContext('2d');
-    if (!ctx) return;
-    var jobId = state.jobId;
-    redrawSketch();
-    var drawing = false;
-    var at = function (ev) {
-      var b = c.getBoundingClientRect();
-      return [(ev.clientX - b.left) * c.width / (b.width || 1), (ev.clientY - b.top) * c.height / (b.height || 1)];
-    };
-    c.addEventListener('pointerdown', function (ev) {
-      if (ev.button > 0) return;
-      drawing = true;
-      if (c.dpcLoading) c.dpcDrawnOver = c.dpcLoading;
-      try { c.setPointerCapture(ev.pointerId); } catch (x) { /* already released */ }
-      ctx.lineWidth = 2;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#293C46';
-      var p = at(ev);
-      ctx.beginPath();
-      ctx.moveTo(p[0], p[1]);
-      ctx.lineTo(p[0] + 0.01, p[1]);
-      ctx.stroke();
-      ev.preventDefault();
-    });
-    c.addEventListener('pointermove', function (ev) {
-      if (!drawing) return;
-      var p = at(ev);
-      ctx.lineTo(p[0], p[1]);
-      ctx.stroke();
-      ev.preventDefault();
-    });
-    var end = function () {
-      if (!drawing) return;
-      drawing = false;
-      sketchDrawn(jobId, c.toDataURL('image/png'));
-    };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', end);
-  }
-
-  // ───────────────────────── render: Emails (slice 5) ─────────────────────────
-
-  var MAIL_FOOT = 'Email sent and received through the orders address, and system email to the client. Email in staff mailboxes is not listed here yet.';
-
-  function mailFail(message, retry) {
-    return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(message) +
-      ' <button type="button" class="dpc-retry" data-dpc-mail="retry" data-dpc-mail-key="' + esc(retry) + '">Retry</button></div>';
-  }
-
-  // "Now" for a draft made in the last two minutes, else when it was made.
-  function madeText(v) {
-    var t = Date.parse(text(v));
-    if (isFinite(t) && Date.now() - t < 120000) return 'Now';
-    return stampText(v);
-  }
-
-  function draftItemHtml(m, d) {
-    var key = 'd:' + d.id;
-    var unknown = d.status === 'send_unknown';
-    var h = '<button type="button" class="dpc-mail-item dpc-mail-draft" data-dpc-mail="pick" data-dpc-mail-key="' + esc(key) + '" aria-pressed="' + (m.sel === key) + '">';
-    h += '<span class="dpc-mail-top"><strong>' + esc(text(d.supplier_name) || 'Supplier not recorded') + '<span class="dpc-mail-drafttag">Draft</span></strong><small>' + esc(madeText(d.created_at)) + '</small></span>';
-    h += '<span class="dpc-mail-subj">' + esc(text(d.subject)) + '</span>';
-    return h + '<span class="' + (unknown ? 'dpc-mat-fail' : 'dpc-muted') + '">' + (unknown ? 'Send not confirmed' : d.status === 'sending' ? 'Sending...' : 'Draft ready to send') + '</span></button>';
-  }
-
-  function tagWord(t) { return t.tag === 'client' ? 'Client' : 'Supplier'; }
-
-  function threadItemHtml(m, t) {
-    var key = 't:' + t.key;
-    var who = t.tag === 'client' ? 'Client' : (text(t.counterpart) || 'Sender not recorded');
-    var h = '<button type="button" class="dpc-mail-item" data-dpc-mail="pick" data-dpc-mail-key="' + esc(key) + '" aria-pressed="' + (m.sel === key) + '">';
-    h += '<span class="dpc-mail-top"><strong>' + esc(who) + '</strong><small>' + esc(stampText(t.last_at)) + '</small></span>';
-    h += '<span class="dpc-mail-subj">' + esc(text(t.subject) || 'No subject') + '</span>';
-    if (text(t.last_preview)) h += '<span class="dpc-muted dpc-mail-prev">' + esc(text(t.last_preview)) + '</span>';
-    return h + '<span class="dpc-mail-tags"><span class="dpc-type">' + tagWord(t) + '</span></span></button>';
-  }
-
-  // Row 19: the address is fixed text from the supplier's contact, never a box.
-  function toHtml(d) {
-    var name = text(d.supplier_name) || 'this supplier';
-    var to = d.to || {};
-    if (to.state === 'ok') return '<strong class="dpc-mail-to">' + esc(text(to.email)) + '</strong><small>From the supplier\'s contact</small>';
-    var why = to.state === 'not_supplier'
-      ? 'The email on file for ' + name + ' is one of ours or a test address, not the supplier\'s. Fix the contact in Xero.'
-      : to.state === 'malformed'
-        ? 'The email on file for ' + name + ' is not a single address. Fix the contact in Xero.'
-        : 'No email on file for ' + name + '. Add it to the supplier\'s contact in Xero; it reaches here after the nightly sync.';
-    return '<span class="dpc-mat-fail">' + esc(why) + '</span>';
-  }
-
-  function pdfFailHtml(key, attrs) {
-    if (state.mail.pdf[key] !== 'failed') return '';
-    return '<div class="dpc-line-msg dpc-mat-fail dpc-pdf-fail" role="alert">Could not open the PDF. <button type="button" class="dpc-retry" ' + attrs + '>Retry</button></div>';
-  }
-
-  function confirmHtml(question, go, no, attrs) {
-    return '<div class="dpc-mail-confirm" role="group"><p class="dpc-empty dpc-empty-tight">' + esc(question) + '</p><div class="dpc-actions">' +
-      '<button type="button" class="dpc-primary" data-dpc-mail="' + go[0] + '" ' + attrs + '>' + go[1] + '</button>' +
-      '<button type="button" data-dpc-mail="' + no[0] + '" ' + attrs + '>' + no[1] + '</button></div></div>';
-  }
-
-  function msgHtml(msg, retryAttrs) {
-    if (!msg) return '';
-    return '<p class="dpc-mail-msg dpc-mat-fail" role="alert">' + esc(msg.text) +
-      (msg.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</p>';
-  }
-
-  // A released send (dispatch_order_release_unknown): the server writes who into
-  // last_error; when comes from the release answer's stamp, known only to the
-  // tab that released it. A later save moves the draft's own stamp, so it is
-  // never used as the release time. Follow-up: a back-end released_at on the
-  // draft read.
-  var RELEASED_RE = /^Released as not sent by (.+)$/;
-  function releasedHtml(m, d) {
-    var who = RELEASED_RE.exec(text(d.last_error));
-    if (!who || d.status !== 'draft') return '';
-    var at = m.released[d.id] || null;
-    var when = stampText(at);
-    return '<p class="dpc-mail-msg" role="status">Released as not sent by ' + esc(who[1]) + (when ? ', ' + esc(when) : '') + '. Nothing was sent by the release.</p>';
-  }
-
-  // A send not confirmed for more than a day: Resend's guard against a second
-  // copy has lapsed, so the person must check before trying again. Each retry
-  // moves updated_at, so this counts from when the draft was made: early, never
-  // late. Follow-up: a back-end first_attempt_at on the draft read.
-  var DAY_MS = 24 * 3600 * 1000;
-  function stuckOverDay(d) { var t = Date.parse(text(d.created_at)); return isFinite(t) && Date.now() - t > DAY_MS; }
-
-  function draftViewHtml(m, d) {
-    var id = esc(d.id);
-    var ref = 'data-dpc-mail-key="' + id + '"';
-    var unknown = d.status === 'send_unknown';
-    var sending = !!m.busy['send:' + d.id] || d.status === 'sending';
-    var editable = d.status === 'draft' && !sending;
-    var ed = m.edits[d.id] || {};
-    var po = text(d.po_number) || 'the order';
-    var h = '<div class="dpc-mail-head"><strong>Draft to ' + esc(text(d.supplier_name) || 'Supplier not recorded') + '</strong><span class="dpc-type">Draft</span></div>';
-    h += '<div class="dpc-field"><span>To</span><div class="dpc-field-val">' + toHtml(d) + '</div></div>';
-    h += '<div class="dpc-field"><label for="dpc-mail-subj">Subject</label><input type="text" id="dpc-mail-subj" data-dpc-mail-subject="' + id + '" maxlength="300" value="' +
-      esc(draftText(m, d, 'subject')) + '"' + (editable ? '' : ' disabled') + '></div>';
-    h += '<textarea class="dpc-textarea dpc-mail-body" data-dpc-mail-body="' + id + '" maxlength="20000" aria-label="Message"' + (editable ? '' : ' disabled') + '>' + esc(draftText(m, d, 'body')) + '</textarea>';
-    if (d.order_changed_since_edit) h += '<p class="dpc-mail-msg" role="status">The order changed after you edited this message. Check the lines in it.</p>';
-    h += '<div data-dpc-region="mailsave">' + (ed.saving ? '<p class="dpc-mail-msg" role="status">Saving...</p>' : ed.failed
-      ? '<p class="dpc-mail-msg dpc-mat-fail" role="alert">Not saved. <button type="button" class="dpc-retry" data-dpc-mail="save-retry" ' + ref + '>Retry</button></p>' : '') + '</div>';
-    var pdf = d.pdf || {};
-    var n = Number(pdf.line_count);
-    var file = text(pdf.file_name) || po + '.pdf';
-    var pdfAttrs = 'data-dpc-order-pdf="' + esc(d.purchase_order_id) + '" data-dpc-order-pdf-version="' + esc(pdf.version || '') + '" data-dpc-order-pdf-key="draft:' + id + '"';
-    h += '<div class="dpc-attach">' + docChip(file, 'PO with ' + (isFinite(n) ? n : '?') + ' line' + (n === 1 ? '' : 's') + ' and the delivery address' +
-      (state.mail.pdf['draft:' + d.id] === 'busy' ? ' · Opening...' : ''), pdfAttrs) + pdfFailHtml('draft:' + d.id, pdfAttrs) + '</div>';
-    var ask = m.ask && m.ask.id === d.id ? m.ask.kind : null;
-    if (d.status === 'sending') {
-      return h + '<div class="dpc-actions"><button type="button" class="dpc-primary" disabled>Sending...</button></div>';
-    }
-    if (unknown) {
-      h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">We could not tell whether this email went. Check the thread before trying again.</p>';
-      if (stuckOverDay(d)) {
-        h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">This send has not been confirmed for more than 24 hours. Check the supplier thread and ask the supplier before trying again: a retry now can send them a second copy.</p>';
-      }
-      h += msgHtml(m.msg['release:' + d.id]);
-      if (ask === 'release') {
-        h += confirmHtml('Unlock this draft? Only do this once you have checked the thread and the supplier\'s mailbox and the email did not go. Nothing is sent.',
-          ['release-go', 'Unlock draft'], ['release-no', 'Not yet'], ref);
-      } else {
-        h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="send-again" ' + ref + (sending ? ' disabled' : '') + '>' + (sending ? 'Sending...' : 'Try the send again') + '</button>';
-        h += '<button type="button" data-dpc-mail="release" ' + ref + (m.busy['release:' + d.id] ? ' disabled' : '') + '>It did not go</button></div>';
-      }
-      return h;
-    }
-    h += releasedHtml(m, d);
-    h += msgHtml(m.msg['send:' + d.id]);
-    h += msgHtml(m.msg['discard:' + d.id], 'data-dpc-mail="discard-go" ' + ref);
-    if (ask === 'send' && !sendBlock(m, d)) {
-      h += confirmHtml('Send ' + po + ' to ' + text(d.to.email) + ' with ' + file + '? It goes from ' + ORDERS_FROM + '.', ['send-go', 'Send now'], ['send-no', 'Not yet'], ref);
-    } else if (ask === 'discard') {
-      h += confirmHtml('Discard this email? The order stays.', ['discard-go', 'Discard'], ['discard-no', 'Keep'], ref);
-    } else {
-      h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="send" ' + ref + (sendBlock(m, d) ? ' disabled' : '') + '>' + (sending ? 'Sending...' : 'Send') + '</button>';
-      h += '<button type="button" data-dpc-mail="discard" ' + ref + (sending || m.busy['discard:' + d.id] ? ' disabled' : '') + '>Discard draft</button></div>';
-    }
-    return h;
-  }
-
-  function threadViewHtml(m, t) {
-    var key = esc(t.key);
-    var ref = 'data-dpc-mail-key="' + key + '"';
-    var h = '<div class="dpc-mail-head"><strong>' + esc(text(t.subject) || 'No subject') + '</strong><span class="dpc-mail-tags"><span class="dpc-type">' + tagWord(t) + '</span>' +
-      (text(t.po_number) ? '<span class="dpc-status dpc-tone-info">' + esc(text(t.po_number)) + '</span>' : '') + '</span></div>';
-    h += '<div class="dpc-chat dpc-mail-chat">';
-    t.messages.forEach(function (msg) {
-      msg = msg || {};
-      var out = msg.direction === 'outbound';
-      var when = stampText(msg.at);
-      h += '<div class="dpc-bubble ' + (out ? 'us' : 'them') + '">' + esc(text(msg.text) || 'No message text recorded.');
-      var atts = Array.isArray(msg.attachments) ? msg.attachments.filter(function (a) { return a && text(a.file_name); }) : [];
-      if (atts.length) {
-        h += '<span class="dpc-mail-atts">' + atts.map(function (a) { return '<span class="dpc-mail-att">' + esc(text(a.file_name)) + '</span>'; }).join('') + '</span>';
-      }
-      h += '<small>' + esc(out ? 'SecureWorks' : (text(msg.from_email) || 'Sender not recorded')) + (when ? ', ' + esc(when) : '') + '</small></div>';
-    });
-    h += '</div>';
-    if (t.tag !== 'supplier') return h;
-    if (t.can_reply) {
-      var busy = !!m.busy['reply:' + t.key];
-      var msg = m.msg['reply:' + t.key];
-      var held = !!(msg && msg.unknown);
-      var draft = held ? msg.attempt.body_text : String(m.replies[t.key] || '');
-      var to = replyTo(t);
-      h += '<div class="dpc-mail-reply"><textarea class="dpc-textarea dpc-mail-replybox" data-dpc-mail-reply="' + key + '" maxlength="20000" placeholder="Reply to the supplier..." aria-label="Reply to the supplier"' +
-        (busy || held ? ' disabled' : '') + '>' + esc(draft) + '</textarea>';
-      if (msg) {
-        h += '<p class="dpc-mail-msg dpc-mat-fail" role="alert">' + esc(msg.text) + '</p>';
-        if (msg.unknown) h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="reply-again" ' + ref + (busy ? ' disabled' : '') + '>Try the send again</button></div>';
-      }
-      if (m.ask && m.ask.kind === 'reply' && m.ask.id === t.key && draft.trim() && !busy) {
-        h += confirmHtml('Send this reply to ' + to + '?', ['reply-go', 'Send now'], ['reply-no', 'Not yet'], ref);
-      } else if (!held) {
-        h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-mail="reply" ' + ref + (busy || !draft.trim() ? ' disabled' : '') + '>' + (busy ? 'Sending...' : 'Send reply') + '</button></div>';
-      }
-      h += '</div>';
-    }
-    if (t.can_link) {
-      var chosen = m.link[t.key] || '';
-      var linking = !!m.busy['link:' + t.key];
-      h += '<div class="dpc-mail-link"><select data-dpc-mail-link="' + key + '" aria-label="Link to PO"' + (linking ? ' disabled' : '') + '><option value="">Link to PO...</option>';
-      m.ordersForLink.forEach(function (o) {
-        h += '<option value="' + esc(o.id) + '"' + (o.id === chosen ? ' selected' : '') + '>' + esc((text(o.po_number) || 'No order number') + ' · ' + (text(o.supplier_name) || 'Supplier not recorded')) + '</option>';
-      });
-      h += '</select><button type="button" data-dpc-mail="link" ' + ref + (linking || !chosen ? ' disabled' : '') + '>Link</button></div>';
-      h += msgHtml(m.msg['link:' + t.key], 'data-dpc-mail="link" ' + ref);
-    }
-    return h + threadDelivHtml(m, t);
-  }
-
-  // Slice 6: Mark delivery confirmed, on a supplier thread linked to one of the
-  // job's live orders (a row in its deliveries). Its inline line is the row's.
-  function threadDelivHtml(m, t) {
-    var e = matEntry(m.jobId);
-    var r = t.po_id && e && e.status === 'ok' ? delivRow(e, String(t.po_id)) : null;
-    if (!r) return '';
-    var ed = state.deliv.edit;
-    if (ed && ed.jobId === m.jobId && ed.via === 'thread' && ed.key === t.key && ed.poId === r.purchase_order_id) {
-      return '<div class="dpc-mail-deliv">' + delivEditHtml(r, ed) + '</div>';
-    }
-    return '<div class="dpc-actions dpc-mail-deliv"><button type="button" data-dpc-deliv-thread="' + esc(t.key) + '" data-dpc-deliv-po="' + esc(r.purchase_order_id) + '"' +
-      (state.deliv.busy[r.purchase_order_id] ? ' disabled' : '') + '>Mark delivery confirmed</button></div>';
-  }
-
-  function mailViewHtml(m) {
-    var sel = m.sel || '';
-    if (sel.indexOf('d:') === 0) { var d = draftById(m, sel.slice(2)); if (d) return draftViewHtml(m, d); }
-    if (sel.indexOf('t:') === 0) { var t = threadByKey(m, sel.slice(2)); if (t) return threadViewHtml(m, t); }
-    return '<div class="dpc-empty dpc-empty-tight">Nothing open.</div>';
-  }
-
-  function mailBodyHtml(m) {
-    var foot = '<p class="dpc-foot-line">' + esc(MAIL_FOOT) + '</p>';
-    if (!m || m.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading email...</div>';
-    if (m.status === 'error') return mailFail('Could not load email.', 'read');
-    var h = m.notice ? '<div class="dpc-mat-notice" role="status">' + esc(m.notice) + '</div>' : '';
-    if (!mailKeys(m).length && m.threadsOk) return h + '<div class="dpc-empty dpc-empty-tight">No email on this job yet.</div>' + foot;
-    h += '<div class="dpc-mail"><div class="dpc-mail-list">';
-    m.drafts.forEach(function (d) { h += draftItemHtml(m, d); });
-    if (!m.threadsOk) h += '<div class="dpc-mail-listfail">' + mailFail('Could not load the email threads.', 'threads') + '</div>';
-    m.threads.forEach(function (t) { h += threadItemHtml(m, t); });
-    h += '</div><div class="dpc-mail-view">' + mailViewHtml(m) + '</div></div>';
-    return h + foot;
-  }
-
-  // Drawn on every job except a make-safe one, under Materials by supplier.
-  function mailHtml() {
-    var row = state.row;
-    if (!row || isMakesafe(row)) return '';
-    var open = state.mail.open;
-    var h = '<div class="dpc-sec dpc-mailsec' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="mail"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Send</span><h3>Emails</h3>';
-    if (open) h += '<p>Supplier and client email for this job. A created PO lands here as a ready-to-send draft</p>';
-    h += '</div><button type="button" class="dpc-chev" data-dpc-toggle="mail" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Emails">' + CHEV_SVG + '</button></div>';
-    if (open) h += '<div class="dpc-sec-body">' + mailBodyHtml(mailEntry(row.id)) + '</div>';
-    return h + '</div>';
-  }
-
-  var MAIL_FOCUS_KEYS = ['data-dpc-mail-subject', 'data-dpc-mail-body', 'data-dpc-mail-reply', 'data-dpc-mail-link', 'data-dpc-mail', 'data-dpc-mail-key', 'data-dpc-toggle',
-    'data-dpc-deliv-thread', 'data-dpc-deliv-edit', 'data-dpc-deliv-edit-date'];
-  function paintMail() {
-    var el = region('mail');
-    if (!el) return;
-    var a = document.activeElement;
-    var f = null;
-    if (a && el.contains(a)) {
-      var sel = MAIL_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
-        return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
-      }).join('');
-      if (sel) { f = { sel: sel }; try { f.start = a.selectionStart; f.end = a.selectionEnd; } catch (x) { /* not a text box */ } }
-    }
-    painting = true;
-    try { el.outerHTML = mailHtml(); } finally { painting = false; }
-    var now = f && region('mail') ? region('mail').querySelector(f.sel) : null;
-    if (!now || now.disabled) return;
-    now.focus({ preventScroll: true });
-    if (typeof f.start === 'number' && now.setSelectionRange) { try { now.setSelectionRange(f.start, f.end); } catch (x) { /* not a text box */ } }
-  }
-  function paintMailIf(jobId) { if (state.jobId === jobId) paintMail(); }
-
-  // While typing in a draft: only the Send button's state, so the box keeps its place.
-  function paintSendState(jobId) {
-    var m = mailEntry(jobId);
-    var r = region('mail');
-    if (!m || !r || state.jobId !== jobId) return;
-    m.drafts.forEach(function (d) {
-      var b = r.querySelector('[data-dpc-mail="send"][data-dpc-mail-key="' + d.id + '"]');
-      if (b) b.disabled = !!sendBlock(m, d);
-    });
-  }
-
-  // ── Sources: the Purchase orders group (slice 5, rows 33 to 35) ──
-
-  function poSourceWords(e, o) {
-    if (o.status === 'cancelled') return 'Cancelled';
-    if (isDispatchOrder(o)) {
-      for (var i = 0; i < e.suppliers.length; i++) {
-        var so = supOrder(e, e.suppliers[i]);
-        if (so && so.id === o.id && chipWords(so)) return chipWords(so);
-      }
-    }
-    return orderStatusWord(o.status);
-  }
-
-  function poSourcesHtml() {
-    var row = state.row;
-    if (!row || isMakesafe(row)) return '';
-    var e = matEntry(row.id);
-    var h = '<h4 class="dpc-h4">Purchase orders</h4>';
-    if (!e || e.status === 'loading') return h + '<div class="dpc-empty dpc-empty-tight">Loading purchase orders...</div>';
-    if (e.status === 'error' || !e.ordersOk) {
-      return h + '<div class="dpc-empty dpc-empty-tight" role="alert">Could not load this job\'s orders. <button type="button" class="dpc-retry" data-dpc-order="sources-retry">Retry</button></div>';
-    }
-    if (!e.orders.length) return h + '<div class="dpc-empty dpc-empty-tight">No purchase order yet.</div>';
-    e.orders.forEach(function (o) {
-      var po = text(o.po_number);
-      var words = (text(o.supplier_name) || 'Supplier not recorded') + ', ' + poSourceWords(e, o);
-      if (isDispatchOrder(o) && o.pdf_version) {
-        var key = 'src:' + o.id;
-        var attrs = 'data-dpc-order-pdf="' + esc(o.id) + '" data-dpc-order-pdf-key="' + esc(key) + '"';
-        h += docChip((po || 'Order') + '.pdf', words + (state.mail.pdf[key] === 'busy' ? ' · Opening...' : ''), attrs) + pdfFailHtml(key, attrs);
-      } else {
-        h += '<div class="dpc-doc dpc-doc-nopdf"><span class="dpc-grow"><strong>' + esc(po || 'No order number') + '</strong><small>' + esc(words) + '</small><small>No PDF on file</small></span></div>';
-      }
-    });
-    return h;
-  }
-
-  // The Sources tab, redrawn when the materials read (its orders) lands.
-  function paintSources() {
-    if (!state.rightOpen || state.tab !== 'sources') return;
-    var el = region('panel');
-    if (el) el.innerHTML = panelHtml();
-  }
-
-  function paintPdfLines() { paintSources(); paintMail(); }
-
-  // ───────────────────────── render: Schedule (slice 6) ─────────────────────────
-
-  var DELIV_EMPTY = 'No orders on this job yet. Orders made in Materials by supplier show here.';
-  var PORTAL_TEXT = 'The real schedule lives in the Ops Calendar. These orders show there as material deliveries, next to the crews.';
-
-  function dayOf(v) { return dayText(parseDay(v)); }
-
-  // A date box styled as the approved dashed input. Empty, it reads "Set date".
-  function dateBoxHtml(value, attrs, label, off, asTyped) {
-    var v = asTyped ? value : wholeDay(value);
-    return '<span class="dpc-deliv-date' + (v ? '' : ' dpc-deliv-blank') + '"><input type="date" ' + attrs + ' value="' + esc(v) + '" aria-label="' + esc(label) + '"' +
-      (off ? ' disabled' : '') + '><span class="dpc-deliv-ph" aria-hidden="true">Set date</span></span>';
-  }
-
-  function delivExpectedHtml(r, busy) {
-    var d = r.delivery;
-    var po = text(r.po_number) || 'this order';
-    if (!d.expected_editable) {
-      return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' + (d.expected ? esc(dayOf(d.expected)) : '<em>No date in Xero</em>') + '<small>Set in Xero</small></span>';
-    }
-    var typed = state.deliv.typed[r.purchase_order_id];
-    var asTyped = Object.prototype.hasOwnProperty.call(state.deliv.typed, r.purchase_order_id) && (typed === '' || /^\d{4}-\d{2}-\d{2}$/.test(typed));
-    return '<span class="dpc-dstate' + (d.expected ? ' on' : '') + '">' +
-      dateBoxHtml(asTyped ? typed : d.expected, 'data-dpc-deliv-expected="' + esc(r.purchase_order_id) + '"', 'Expected date for ' + po, busy, asTyped) + '</span>';
-  }
-
-  function delivConfirmedHtml(r, busy) {
-    var c = r.delivery.confirmed;
-    var poId = esc(r.purchase_order_id);
-    var open = ' data-dpc-deliv-confirm="' + poId + '"' + (busy ? ' disabled' : '');
-    if (c.state === 'date') {
-      if (!c.by_hand) return '<span class="dpc-dstate on">' + esc(dayOf(c.date)) + '</span>';
-      var when = dayText(parseStamp(c.set_at));
-      return '<span class="dpc-dstate on"><button type="button" class="dpc-deliv-daybtn" aria-label="Change the confirmed date"' + open + '>' + esc(dayOf(c.date)) + '</button>' +
-        '<small>Set by ' + esc(text(c.set_by) || 'name not recorded') + (when ? ', ' + esc(when) : '') + '</small></span>';
-    }
-    if (c.state === 'status_only') return '<span class="dpc-dstate on">Confirmed, no date given</span>';
-    var words = c.state === 'not_confirmed' ? 'Not confirmed by supplier' : 'Waiting on supplier';
-    return '<span class="dpc-dstate"><em>' + words + '</em><button type="button" class="dpc-textbtn"' + open + '>Set confirmed date</button></span>';
-  }
-
-  function delivSightedHtml(r, busy) {
-    var s = r.delivery.sighted;
-    var poId = esc(r.purchase_order_id);
-    if (!s) {
-      return '<span class="dpc-dstate"><button type="button" class="dpc-deliv-btn" data-dpc-deliv-sight="' + poId + '"' + (busy ? ' disabled' : '') + '>' +
-        (busy === 'dispatch_delivery_mark_sighted' ? 'Saving...' : 'Mark sighted') + '</button></span>';
-    }
-    var who = [stampText(s.at), text(s.by)].filter(Boolean).join(', ');
-    return '<span class="dpc-dstate on">' + esc(who || 'Sighted') + '<button type="button" class="dpc-textbtn" data-dpc-deliv-unsight="ask" data-dpc-deliv-po="' + poId + '"' +
-      (busy ? ' disabled' : '') + '>Not sighted</button></span>';
-  }
-
-  // The inline confirmed-date line, shared by the row and a supplier thread.
-  function delivEditHtml(r, ed) {
-    var po = text(r.po_number) || 'this order';
-    var off = ed.busy ? ' disabled' : '';
-    var h = '<div class="dpc-deliv-edit" role="group" aria-label="Confirmed delivery date"><p class="dpc-empty dpc-empty-tight">Confirmed delivery for ' + esc(po) + ':</p><div class="dpc-actions">';
-    h += dateBoxHtml(ed.date, 'data-dpc-deliv-edit-date', 'Confirmed delivery date for ' + po, ed.busy);
-    h += '<button type="button" class="dpc-primary" data-dpc-deliv-edit="save"' + (ed.busy || !wholeDay(ed.date) ? ' disabled' : '') + '>' + (ed.busy && ed.last !== null ? 'Saving...' : 'Save') + '</button>';
-    if (ed.via === 'deliveries' && r.delivery.confirmed.by_hand) h += '<button type="button" class="dpc-primary" data-dpc-deliv-edit="clear"' + off + '>' + (ed.busy && ed.last === null ? 'Clearing...' : 'Clear') + '</button>';
-    h += '<button type="button" data-dpc-deliv-edit="cancel"' + off + '>Cancel</button></div>';
-    if (ed.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Confirmed date not saved. <button type="button" class="dpc-retry" data-dpc-deliv-edit="retry"' + off + '>Retry</button></p>';
-    return h + '</div>';
-  }
-
-  function delivRowHtml(jobId, r) {
-    var d = state.deliv;
-    if (r.kind === 'not_ordered') {
-      return '<div class="dpc-deliv-item"><div class="dpc-deliv-row" data-step="0"><span><strong>' + esc(text(r.supplier_name) || 'Name not recorded') + '</strong><small>Not ordered yet</small></span>' +
-        '<span class="dpc-dstate"><em>Order first</em></span><span class="dpc-dstate"><em>-</em></span><span class="dpc-dstate"><em>-</em></span></div></div>';
-    }
-    var poId = r.purchase_order_id;
-    var busy = d.busy[poId] || false;
-    var dl = r.delivery;
-    var h = '<div class="dpc-deliv-item" data-dpc-deliv-row="' + esc(poId) + '"><div class="dpc-deliv-row" data-step="' + esc(dl.step) + '">';
-    h += '<span><strong>' + esc(text(r.supplier_name) || 'Supplier not recorded') + '</strong><small>' + esc(text(r.po_number) || 'No order number') +
-      (r.made_in_dispatch ? '' : ' · Made outside Dispatch') + '</small></span>';
-    h += delivExpectedHtml(r, busy) + delivConfirmedHtml(r, busy) + delivSightedHtml(r, busy) + '</div>';
-    var confirmedDay = dl.confirmed.state === 'date' ? text(dl.confirmed.date) : '';
-    if (confirmedDay && text(dl.expected) && confirmedDay !== text(dl.expected)) {
-      h += '<p class="dpc-deliv-sub">The calendar shows this delivery on the expected day, ' + esc(dayOf(dl.expected)) + '.</p>';
-    }
-    if (d.edit && d.edit.jobId === jobId && d.edit.poId === poId && d.edit.via === 'deliveries') h += '<div class="dpc-deliv-sub">' + delivEditHtml(r, d.edit) + '</div>';
-    if (d.ask && d.ask.jobId === jobId && d.ask.poId === poId && dl.sighted) {
-      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Clear the sighting"><p class="dpc-empty dpc-empty-tight">Clear the sighting on ' +
-        esc(text(r.po_number) || 'this order') + '? It was marked by ' + esc(text(dl.sighted.by) || 'someone not recorded') + '.</p><div class="dpc-actions">' +
-        '<button type="button" class="dpc-primary" data-dpc-deliv-unsight="go" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Clear</button>' +
-        '<button type="button" data-dpc-deliv-unsight="keep" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Keep</button></div></div></div>';
-    }
-    return h + '</div>';
-  }
-
-  // The line under the table: a failed press with its Retry, or a notice.
-  function delivMsgHtml(jobId) {
-    var m = state.deliv.msg;
-    if (!m || m.jobId !== jobId) return '';
-    if (!m.retry) return '<p class="dpc-deliv-msg" role="status">' + esc(m.text) + '</p>';
-    return '<p class="dpc-deliv-msg dpc-mat-fail" role="alert">' + esc(m.text) + ' <button type="button" class="dpc-retry" data-dpc-deliv-retry="write">Retry</button></p>';
-  }
-
-  function delivBodyHtml(e) {
-    var jobId = state.jobId;
-    if (!e || e.status === 'loading') return '<div class="dpc-empty dpc-empty-tight">Loading the deliveries...</div>';
-    if (e.status === 'error' || !e.deliveries) {
-      return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Could not load the deliveries. <button type="button" class="dpc-retry" data-dpc-deliv-retry="read">Retry</button></div>';
-    }
-    if (!e.deliveries.rows.length) return '<div class="dpc-empty dpc-empty-tight">' + DELIV_EMPTY + '</div>' + delivMsgHtml(jobId);
-    var h = '<div class="dpc-deliv"><div class="dpc-deliv-row dpc-deliv-head"><span>Supplier and PO</span><span>Expected</span><span>Confirmed by supplier</span><span>Sighted on site</span></div>';
-    e.deliveries.rows.forEach(function (r) { h += delivRowHtml(jobId, r); });
-    return h + '</div>' + delivMsgHtml(jobId);
-  }
-
-  // ── slice 7: the install row, under the deliveries table ──
+  var PORTAL_TEXT = 'The real schedule lives in the Ops Calendar, with the material deliveries next to the crews.';
 
   // The install row (v2): the install day from the board, and who is booked
   // from the list row's booking names when they are for the same day. Mark
@@ -4466,20 +2309,21 @@
     return h + '</div>';
   }
 
-  // Drawn on every job except a make-safe one, under Emails.
+  // Drawn on every job except a make-safe one, under Supplier replies. v2 has
+  // no purchase orders, so the v1 deliveries table is gone: each supplier's
+  // delivery date is on the Arrival line in the header.
   function schedHtml() {
     var row = state.row;
     if (!row || isMakesafe(row)) return '';
-    var open = state.deliv.open;
-    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Deliveries and install</h3>';
-    if (open) h += '<p>Each PO to site, then the trade booked</p>';
-    h += '</div><button type="button" class="dpc-chev" data-dpc-toggle="sched" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Deliveries and install">' + CHEV_SVG + '</button></div>';
-    if (open) h += '<div class="dpc-sec-body">' + delivBodyHtml(matEntry(row.id)) + installHtml(row) + portalHtml() + '</div>';
+    var open = state.sched.open;
+    var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Install</h3>';
+    if (open) h += '<p>The trade booked for this job</p>';
+    h += '</div><button type="button" class="dpc-chev" data-dpc-sched-toggle aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Install">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + installHtml(row) + portalHtml() + '</div>';
     return h + '</div>';
   }
 
-  var SCHED_FOCUS_KEYS = ['data-dpc-deliv-expected', 'data-dpc-deliv-edit-date', 'data-dpc-deliv-sight', 'data-dpc-deliv-unsight', 'data-dpc-deliv-po',
-    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-toggle'];
+  var SCHED_FOCUS_KEYS = ['data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-sched-toggle'];
   function paintSched() {
     var el = region('sched');
     if (!el) return;
@@ -4735,6 +2579,1577 @@
     if (now && !now.disabled) now.focus({ preventScroll: true });
   }
 
+  // ───────────────────────── v2 Materials: draft list, supplier boxes and order emails (v2 slices 5 and 6) ─────────────────────────
+  //
+  // How a materials order goes out in Dispatch v2:
+  //   1. Type the list on the Draft list (or fill it from the scope), with a
+  //      photo of a handwritten list if there is one.
+  //   2. Add a supplier box per supplier and drag each line into its box (or
+  //      use the line's "Move to" box, which works on a phone).
+  //   3. Make email: a held email in Shaun's template, From admin@, To and CC
+  //      from the app-kept approved list. Every field can be edited.
+  //   4. Send now asks "Send this order to <Supplier>?" first. The very first
+  //      send must be a TEST copy to admin@ (Shaun's rule), and the server
+  //      refuses a supplier send until one has gone.
+  // One email per supplier box at a time. Nothing here makes a purchase order:
+  // v2 has none. Every read and write is an ops-api dispatch_v2_* action
+  // (secureworks-backend contract: Dispatch v2 supplier order emails). Each
+  // write is sent once, on a person's press or on leaving a box they changed;
+  // nothing sends or retries on its own. Only dispatch_v2_send_email sends.
+
+  var V2_FROM = 'admin@secureworkswa.com.au';
+  var V2_STANDING = ['4 x bags of quickset', 'Fixings, Post Caps and Screws as necessary'];
+  var V2_LINE_FIELDS = ['description', 'quantity', 'unit', 'detail', 'profile', 'colour'];
+  var V2_PHOTO_LIMIT = 3000000; // Outlook's limit per attachment; the server checks the real bytes
+  var V2_PHOTO_AIM = 2700000; // the screen shrinks a photo to under this first
+  var V2_PHOTO_SIDE = 2000; // longest side, in pixels, after shrinking
+  var V2_EMAIL_PHOTOS = 3; // the most photos one email carries
+  var V2_FIND_MS = 250;
+  var V2_DETAIL_WORDS = { date: 'Date', address: 'Address', contact: 'Contact' };
+  var V2_USED_FOR = { fencing: 'Fencing', patio: 'Patio', 'fencing+patio': 'Fencing and patio', any: 'Any job' };
+  var EMAIL_RE = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/;
+
+  // ── the read, made into what the screen draws ──
+
+  function v2Entry(jobId) { return (jobId && state.v2m.jobs[jobId]) || null; }
+
+  function v2Arr(v) { return Array.isArray(v) ? v.map(text).filter(Boolean) : []; }
+
+  // A long dash from the server is shown as a comma, never as itself.
+  function v2Plain(v) { return text(v).replace(/\s*[\u2013\u2014]\s*/g, ', '); }
+
+  function v2LineFrom(l) {
+    var q = l.quantity;
+    return {
+      id: String(l.id), supplier_id: l.supplier_id == null ? null : String(l.supplier_id),
+      description: text(l.description), quantity: typeof q === 'number' && isFinite(q) ? q : null, unit: text(l.unit),
+      detail: l.detail == null ? '' : String(l.detail).trim(), profile: text(l.profile), colour: text(l.colour),
+      status: matSettable(l.status) ? l.status : 'not_reviewed', source: text(l.source), position: Number(l.position) || 0,
+      locked: l.locked === true, sentOn: l.sent_on_email_id ? String(l.sent_on_email_id) : null, updated_at: l.updated_at || null
+    };
+  }
+
+  function v2PhotoFrom(p) {
+    return {
+      id: String(p.id), supplier_id: p.supplier_id == null ? null : String(p.supplier_id), file_name: text(p.file_name) || 'Photo',
+      size_bytes: Number(p.size_bytes) || 0, added_at: p.added_at || null
+    };
+  }
+
+  function v2EmailFrom(m) {
+    if (!isObj(m) || !m.id) return null;
+    return {
+      id: String(m.id), supplier_id: m.supplier_id == null ? null : String(m.supplier_id), supplier_name: text(m.supplier_name),
+      status: text(m.status), from: text(m.from) || V2_FROM, to: v2Arr(m.to), cc: v2Arr(m.cc), team_cc: text(m.team_cc),
+      subject: m.subject == null ? '' : String(m.subject), body: m.body_text == null ? '' : String(m.body_text), edited: m.edited === true,
+      delivery_date: text(m.delivery_date), is_main: m.is_main_supplier === true, standing: m.standing_lines_included === true,
+      line_count: Number(m.line_count) || 0, photo_ids: v2Arr(m.photo_ids), missing: v2Arr(m.empty_detail_lines),
+      test: isObj(m.test) && m.test.sent_at ? m.test : null, sent: isObj(m.sent) && m.sent.sent_at ? m.sent : null,
+      last_error: text(m.last_error), updated_at: m.updated_at || null
+    };
+  }
+
+  function v2ByPos(a, b) { return a.position - b.position; }
+
+  function v2BoxFrom(s) {
+    var ap = isObj(s.approved_email) ? s.approved_email : null;
+    return {
+      supplier_id: String(s.supplier_id), name: text(s.name) || 'Name not recorded', active: s.active !== false, position: Number(s.position) || 0,
+      is_main: s.is_main === true,
+      approved: ap ? { id: ap.id, name: text(ap.name), used_for: text(ap.used_for), to: v2Arr(ap.to), cc: v2Arr(ap.cc) } : null,
+      blocked: isObj(s.send_blocked) ? { code: text(s.send_blocked.code), message: v2Plain(s.send_blocked.message) } : null,
+      lines: (Array.isArray(s.lines) ? s.lines : []).filter(function (l) { return isObj(l) && l.id; }).map(v2LineFrom).sort(v2ByPos),
+      photos: (Array.isArray(s.photos) ? s.photos : []).filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom),
+      open: v2EmailFrom(s.open_email),
+      sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean)
+    };
+  }
+
+  // A dispatch_v2_materials answer missing its draft list or its boxes is a
+  // failed read, never an empty tab.
+  function v2From(resp) {
+    if (!isObj(resp) || !isObj(resp.draft_list) || !Array.isArray(resp.draft_list.lines) || !Array.isArray(resp.draft_list.photos) ||
+      !Array.isArray(resp.suppliers)) throw new Error('Unexpected materials answer');
+    var team = isObj(resp.team_cc) ? resp.team_cc : {};
+    return {
+      jobNumber: text(resp.job_number), workType: text(resp.work_type).toLowerCase(),
+      teamCc: { email: text(team.email), question: v2Plain(team.open_question) },
+      from: text(resp.from) || V2_FROM, testDone: resp.test_send_done === true,
+      mainId: resp.main_supplier_id ? String(resp.main_supplier_id) : null, mainTicked: resp.main_supplier_ticked === true,
+      canSuggest: resp.can_suggest === true,
+      draft: {
+        lines: resp.draft_list.lines.filter(function (l) { return isObj(l) && l.id; }).map(v2LineFrom).sort(v2ByPos),
+        photos: resp.draft_list.photos.filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom)
+      },
+      boxes: resp.suppliers.filter(function (s) { return isObj(s) && s.supplier_id; }).map(v2BoxFrom).sort(v2ByPos)
+    };
+  }
+
+  function v2New(jobId) {
+    return {
+      jobId: jobId, status: 'loading', token: 0, d: null, rereading: false,
+      // Lines added and not saved yet: { id, supplier_id, status }. What is
+      // typed in any line (saved or not) is in typed[id][field] until saved,
+      // and typedAt[id] is the line's stamp when the typing began.
+      local: [], typed: {}, typedAt: {}, again: {}, more: {},
+      mailTyped: {}, mailAt: {}, mailAgain: {},
+      dates: {}, busy: {}, msg: {}, notice: '', ask: null
+    };
+  }
+
+  // Every box key: null is the draft list.
+  function v2Key(sid) { return sid == null || sid === '' || sid === 'draft' ? null : String(sid); }
+  function v2KeyAttr(sid) { return sid == null ? 'draft' : sid; }
+
+  function v2Box(e, sid) {
+    if (!e || !e.d || sid == null) return null;
+    for (var i = 0; i < e.d.boxes.length; i++) if (e.d.boxes[i].supplier_id === sid) return e.d.boxes[i];
+    return null;
+  }
+
+  function v2ListOf(e, sid) { var b = v2Box(e, sid); return sid == null ? e.d.draft.lines : b ? b.lines : null; }
+  function v2PhotosOf(e, sid) { var b = v2Box(e, sid); return sid == null ? e.d.draft.photos : b ? b.photos : null; }
+
+  // A saved line, wherever it sits.
+  function v2Line(e, id) {
+    if (!e || !e.d) return null;
+    var lists = [e.d.draft.lines].concat(e.d.boxes.map(function (b) { return b.lines; }));
+    for (var i = 0; i < lists.length; i++) for (var j = 0; j < lists[i].length; j++) if (lists[i][j].id === id) return lists[i][j];
+    return null;
+  }
+
+  function v2Local(e, id) {
+    for (var i = 0; i < e.local.length; i++) if (e.local[i].id === id) return e.local[i];
+    return null;
+  }
+
+  function v2Photo(e, id) {
+    if (!e || !e.d) return null;
+    var lists = [e.d.draft.photos].concat(e.d.boxes.map(function (b) { return b.photos; }));
+    for (var i = 0; i < lists.length; i++) for (var j = 0; j < lists[i].length; j++) if (lists[i][j].id === id) return lists[i][j];
+    return null;
+  }
+
+  // Take a saved line out of its list; put it at the end of another.
+  function v2Unlist(e, id) {
+    var lists = [e.d.draft.lines].concat(e.d.boxes.map(function (b) { return b.lines; }));
+    lists.forEach(function (list) { for (var i = list.length - 1; i >= 0; i--) if (list[i].id === id) list.splice(i, 1); });
+  }
+  function v2Place(e, l) {
+    v2Unlist(e, l.id);
+    var list = v2ListOf(e, l.supplier_id);
+    if (!list) return;
+    list.push(l);
+    list.sort(v2ByPos);
+  }
+
+  function v2Unphoto(e, id) {
+    var lists = [e.d.draft.photos].concat(e.d.boxes.map(function (b) { return b.photos; }));
+    lists.forEach(function (list) { for (var i = list.length - 1; i >= 0; i--) if (list[i].id === id) list.splice(i, 1); });
+  }
+
+  // A cell's text as the box shows it: what is typed, else what is saved.
+  function v2Saved(l, f) {
+    if (!l || l.local) return '';
+    return f === 'quantity' ? matQtyText(l.quantity) : String(l[f] == null ? '' : l[f]);
+  }
+  function v2Cell(e, l, f) {
+    var t = e.typed[l.id];
+    return t && Object.prototype.hasOwnProperty.call(t, f) ? t[f] : v2Saved(l, f);
+  }
+
+  // The fields typed that differ from the saved line.
+  function v2Changed(e, l) {
+    var t = e.typed[l.id] || {};
+    return V2_LINE_FIELDS.filter(function (f) {
+      return Object.prototype.hasOwnProperty.call(t, f) && text(t[f]) !== text(v2Saved(l, f));
+    });
+  }
+
+  // A fresh read over what the screen holds: lines still being typed in keep
+  // their text while the saved line is the one it was typed over.
+  function v2Merge(e, d) {
+    var keep = {};
+    e.local = e.local.filter(function (l) { return l.supplier_id == null || d.boxes.some(function (b) { return b.supplier_id === l.supplier_id; }); });
+    e.local.forEach(function (l) { keep[l.id] = true; });
+    var old = e.d;
+    e.d = d;
+    Object.keys(e.typed).forEach(function (id) {
+      if (keep[id]) return;
+      var now = v2Line(e, id);
+      if (!now || now.locked || (e.typedAt[id] !== undefined && e.typedAt[id] !== now.updated_at && !e.busy['line:' + id])) {
+        delete e.typed[id];
+        delete e.typedAt[id];
+      }
+    });
+    Object.keys(e.mailTyped).forEach(function (id) {
+      var m = v2OpenById(e, id);
+      if (!m || m.status !== 'draft' || (e.mailAt[id] !== m.updated_at && !e.busy['mail:' + id])) { delete e.mailTyped[id]; delete e.mailAt[id]; }
+    });
+    return old;
+  }
+
+  function v2OpenById(e, id) {
+    if (!e || !e.d) return null;
+    for (var i = 0; i < e.d.boxes.length; i++) { var m = e.d.boxes[i].open; if (m && m.id === id) return m; }
+    return null;
+  }
+  function v2BoxOfEmail(e, id) {
+    if (!e || !e.d) return null;
+    for (var i = 0; i < e.d.boxes.length; i++) { var m = e.d.boxes[i].open; if (m && m.id === id) return e.d.boxes[i]; }
+    return null;
+  }
+
+  // The lines a Make email takes: not In stock, not sent.
+  function v2Orderable(box) { return box.lines.filter(function (l) { return !l.locked && l.status !== 'in_stock'; }); }
+
+  // The supplier's short name from the approved list, for "Send this order to Stratco?".
+  function v2SupWord(box) { return (box && box.approved && box.approved.name) || (box && box.name) || 'this supplier'; }
+
+  function v2Mb(bytes) {
+    var mb = (Number(bytes) || 0) / 1000000;
+    return (mb > 0 && mb < 0.1 ? '0.1' : mb.toFixed(1)) + ' MB';
+  }
+  function v2Count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  // ── reads ──
+
+  function loadV2(row) {
+    if (!row || !row.id || isMakesafe(row)) return;
+    if (!v2Entry(row.id)) state.v2m.jobs[row.id] = v2New(row.id);
+    readV2(row.id, false);
+  }
+
+  // quiet keeps what is drawn until the new answer lands (a re-read after a write).
+  function readV2(jobId, quiet) {
+    var e = v2Entry(jobId) || (state.v2m.jobs[jobId] = v2New(jobId));
+    var token = ++e.token;
+    if (!quiet || e.status !== 'ok') { e.status = 'loading'; paintV2If(jobId); }
+    return Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_materials', { job_id: jobId }); }).then(function (resp) {
+      if (token !== e.token) return;
+      v2Merge(e, v2From(resp));
+      e.status = 'ok';
+      paintV2If(jobId);
+    }).catch(function () {
+      if (token !== e.token) return;
+      // A quiet re-read that fails keeps the last good answer on screen.
+      if (!(quiet && e.d)) e.status = 'error';
+      else e.notice = 'Could not load the latest materials. What is shown may be out of date.';
+      paintV2If(jobId);
+    });
+  }
+
+  // A write was refused because something changed elsewhere: say so, then
+  // one quiet re-read shows the latest.
+  function v2Changed409(jobId, words) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    e.notice = words || 'This changed somewhere else. Showing the latest.';
+    paintV2If(jobId);
+    if (e.rereading) return;
+    e.rereading = true;
+    readV2(jobId, true).then(function () { e.rereading = false; }, function () { e.rereading = false; });
+  }
+
+  function v2Ok(resp) {
+    if (!isObj(resp) || resp.success !== true) throw new Error('Unexpected answer');
+    return resp;
+  }
+
+  // A refusal the screen words itself. changed: re-read, the screen was out of date.
+  var V2_CHANGED = ['line_changed', 'line_not_on_job', 'supplier_not_on_job', 'email_changed', 'email_not_editable', 'email_not_discardable',
+    'email_not_sendable', 'job_not_found'];
+  function v2Words(err, fallback) {
+    var code = err && err.code;
+    if (code === 'line_locked') return { changed: true, text: 'That line went out on a sent order, so it cannot be changed.' };
+    if (V2_CHANGED.indexOf(code) >= 0) return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
+    if (code === 'too_many_lines') return { text: 'A job can hold 500 lines at most.' };
+    if (code === 'too_many_photos') return { text: 'A job can hold 20 photos at most. Delete one first.' };
+    if (code === 'photo_on_email') return { text: 'That photo is on an order email. Take it off the email, or discard the email, first.' };
+    if (code === 'supplier_has_lines') return { text: 'Move this box\'s lines and photos out first, then take the supplier off.' };
+    if (code === 'supplier_has_emails') return { text: 'This supplier has an email on this job, so the box stays.' };
+    if (code === 'supplier_inactive') return { text: 'That supplier contact is no longer active in Xero, so it cannot be added.' };
+    if (code === 'supplier_not_found') return { text: 'That supplier was not found. Search again.' };
+    if (code === 'no_suggestion_for_work_type') return { text: 'Fill from the scope works on fencing and patio jobs only. Type the lines in.' };
+    if (code === 'lines_exist') return { changed: true, text: 'This job already has lines, so nothing was filled in. Showing the latest.' };
+    if (code === 'scope_unreadable') return { text: 'The scope on this job could not be read, so nothing was filled in. Type the lines in.' };
+    if (code === 'no_approved_email') return { text: 'This supplier has no approved order email, so Dispatch cannot send to it. Ask Shaun to add one.' };
+    if (code === 'no_lines_to_order') return { text: 'Nothing in this box to order. In stock lines and lines already sent are left off.' };
+    if (code === 'not_dispatch_work') return { text: 'Make-safe jobs are not ordered from Dispatch.' };
+    if (code === 'invalid_request' && err && text(err.message) && !/^API error/.test(err.message)) return { text: v2Plain(err.message) };
+    return fallback ? { text: fallback, retry: true } : null;
+  }
+
+  // Put a refusal on the screen: the line or box it belongs to, or the notice.
+  function v2Fail(jobId, key, err, fallback) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    var w = v2Words(err, fallback) || { text: fallback || 'Not done.', retry: true };
+    if (w.changed) { e.msg[key] = { bad: true, text: w.text }; v2Changed409(jobId, w.text); return; }
+    e.msg[key] = { bad: true, text: w.text, retry: !!w.retry };
+    paintV2If(jobId);
+  }
+
+  // ── lines ──
+
+  function v2AddLine(jobId, sid) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return;
+    var id = newId();
+    e.local.push({ id: id, supplier_id: sid, status: 'to_order', local: true });
+    e.typed[id] = {};
+    paintV2();
+    refocus('[data-dpc-v2-cell="description"][data-dpc-v2-id="' + id + '"]');
+  }
+
+  // Save one line: a new one (no stamp) once it has an item, or the changed
+  // cells of a saved one against its stamp. Never two at once for a line: an
+  // edit made while one is in flight goes after it.
+  function v2SaveLine(jobId, id) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return;
+    var loc = v2Local(e, id);
+    var l = loc || v2Line(e, id);
+    if (!l || l.locked) return;
+    var key = 'line:' + id;
+    if (e.busy[key]) { e.again[id] = true; return; }
+    var t = e.typed[id] || {};
+    var changed = loc ? V2_LINE_FIELDS.filter(function (f) { return text(t[f]) !== ''; }) : v2Changed(e, l);
+    var statusWanted = loc ? null : t.status !== undefined && t.status !== l.status ? t.status : null;
+    if (!changed.length && !statusWanted && !loc) return;
+    var desc = text(v2Cell(e, l, 'description'));
+    if (!desc) {
+      if (loc) return; // an empty new row is never saved
+      e.msg[key] = { bad: true, text: 'An item needs a name. To take the line off, press the cross.' };
+      paintV2();
+      return;
+    }
+    var q = matQty(v2Cell(e, l, 'quantity'));
+    if (!q.ok) { e.msg[key] = { bad: true, text: q.msg + ' For example 14 or 2.5.' }; paintV2(); return; }
+    var sentText = {};
+    V2_LINE_FIELDS.forEach(function (f) { sentText[f] = v2Cell(e, l, f); });
+    var status = loc ? (t.status || loc.status) : (statusWanted || l.status);
+    var line = {
+      id: id, description: desc, quantity: q.value, unit: text(sentText.unit) || null, detail: text(sentText.detail) || null,
+      profile: text(sentText.profile) || null, colour: text(sentText.colour) || null, status: status
+    };
+    var body = { job_id: jobId, line: line };
+    if (loc) line.supplier_id = loc.supplier_id; else body.expected_updated_at = l.updated_at;
+    e.busy[key] = true;
+    e.again[id] = false;
+    delete e.msg[key];
+    e.notice = '';
+    paintV2If(jobId);
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_save_line', body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      if (!isObj(resp.line) || !resp.line.id) throw new Error('Unexpected answer');
+      var fresh = v2LineFrom(resp.line);
+      if (loc) e.local = e.local.filter(function (x) { return x.id !== id; });
+      v2Place(e, fresh);
+      // Keep only what was typed after this save went.
+      var now = e.typed[id] || {};
+      Object.keys(now).forEach(function (f) { if (f === 'status' ? now[f] === status : now[f] === sentText[f]) delete now[f]; });
+      e.typedAt[id] = fresh.updated_at;
+      if (e.again[id] || v2Changed(e, fresh).length) { e.again[id] = false; v2SaveLine(jobId, id); }
+      paintV2If(jobId);
+    }, function (err) {
+      delete e.busy[key];
+      e.again[id] = false;
+      v2Fail(jobId, key, err, 'Not saved.');
+    });
+  }
+
+  function v2SetStatus(jobId, id, status) {
+    var e = v2Entry(jobId);
+    if (!e || !matSettable(status)) return;
+    var loc = v2Local(e, id);
+    (e.typed[id] = e.typed[id] || {}).status = status;
+    if (loc) { loc.status = status; return; }
+    v2SaveLine(jobId, id);
+  }
+
+  // Move a line into a box, between boxes, or back to the draft list. A line
+  // not saved yet just changes box; a saved one is moved by one write.
+  function v2MoveLine(jobId, id, sid) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return;
+    if (sid != null && !v2Box(e, sid)) return;
+    var loc = v2Local(e, id);
+    if (loc) { loc.supplier_id = sid; paintV2(); return; }
+    var l = v2Line(e, id);
+    var key = 'line:' + id;
+    if (!l || l.locked || e.busy[key] || l.supplier_id === sid) { paintV2(); return; }
+    var from = l.supplier_id;
+    e.busy[key] = true;
+    delete e.msg[key];
+    e.notice = '';
+    // Shown in its new box at once; put back if the move is refused.
+    l.supplier_id = sid;
+    v2Place(e, l);
+    paintV2();
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_v2_move_line', { job_id: jobId, id: id, supplier_id: sid, expected_updated_at: l.updated_at });
+    }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      if (isObj(resp.line) && resp.line.id) {
+        var fresh = v2LineFrom(resp.line);
+        v2Place(e, fresh);
+        if (e.typedAt[id] !== undefined) e.typedAt[id] = fresh.updated_at;
+      }
+      paintV2If(jobId);
+      // Anything typed in the line while it moved goes now, on the new stamp.
+      var moved = v2Line(e, id);
+      if (moved && v2Changed(e, moved).length) v2SaveLine(jobId, id);
+    }, function (err) {
+      delete e.busy[key];
+      var back = v2Line(e, id);
+      if (back) { back.supplier_id = from; v2Place(e, back); }
+      v2Fail(jobId, key, err, 'Not moved.');
+    });
+  }
+
+  function v2DeleteLine(jobId, id) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return;
+    if (v2Local(e, id)) {
+      e.local = e.local.filter(function (x) { return x.id !== id; });
+      delete e.typed[id];
+      paintV2();
+      return;
+    }
+    var l = v2Line(e, id);
+    var key = 'line:' + id;
+    if (!l || l.locked || e.busy[key]) return;
+    e.busy[key] = 'delete';
+    delete e.msg[key];
+    paintV2();
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_v2_delete_line', { job_id: jobId, id: id, expected_updated_at: l.updated_at });
+    }).then(v2Ok).then(function () {
+      delete e.busy[key];
+      v2Unlist(e, id);
+      delete e.typed[id];
+      delete e.typedAt[id];
+      paintV2If(jobId);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'Not taken off.');
+    });
+  }
+
+  function v2Suggest(jobId) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || e.busy.suggest) return;
+    e.busy.suggest = true;
+    delete e.msg.draft;
+    paintV2();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_suggest_draft', { job_id: jobId }); }).then(v2Ok).then(function (resp) {
+      delete e.busy.suggest;
+      var n = Number(resp.added) || 0;
+      e.msg.draft = { text: n ? v2Count(n, 'line', 'lines') + ' filled in from the scope. Check each one before ordering.' : 'The scope had nothing to fill in. Type the lines in.' };
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy.suggest;
+      v2Fail(jobId, 'draft', err, 'Nothing was filled in.');
+    });
+  }
+
+  // ── supplier boxes ──
+
+  function v2AddSupplier(jobId, supplierId) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || !supplierId || e.busy.add) return;
+    e.busy.add = supplierId;
+    delete e.msg.add;
+    paintV2Find();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_add_supplier', { job_id: jobId, supplier_id: supplierId }); }).then(v2Ok).then(function (resp) {
+      delete e.busy.add;
+      var s = isObj(resp.supplier) ? resp.supplier : {};
+      state.v2m.find.open = false;
+      paintV2If(jobId);
+      e.msg['box:' + supplierId] = {
+        text: resp.unchanged ? 'Already on this job.' : isObj(s.send_blocked)
+          ? 'Added. This supplier has no approved order email, so you can split lines to it but Dispatch will not send to it.'
+          : 'Added. Drag lines into this box, or use Move to on a line.'
+      };
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy.add;
+      var w = v2Words(err, 'Not added.') || { text: 'Not added.', retry: true };
+      e.msg.add = { bad: true, text: w.text, retry: w.retry ? supplierId : null };
+      if (w.changed) v2Changed409(jobId, w.text);
+      paintV2If(jobId);
+    });
+  }
+
+  function v2RemoveSupplier(jobId, sid) {
+    var e = v2Entry(jobId);
+    var key = 'box:' + sid;
+    if (!e || e.status !== 'ok' || e.busy[key]) return;
+    e.busy[key] = 'remove';
+    delete e.msg[key];
+    paintV2();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_remove_supplier', { job_id: jobId, supplier_id: sid }); }).then(v2Ok).then(function () {
+      delete e.busy[key];
+      e.d.boxes = e.d.boxes.filter(function (b) { return b.supplier_id !== sid; });
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'Not taken off.');
+    });
+  }
+
+  // The main supplier tick (fencing only): the box whose email gets the two
+  // standing lines. Unticking the ticked box clears the tick, and the server's
+  // default (the box with the panels, else the first box) applies again.
+  function v2SetMain(jobId, sid, on) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || e.busy.main) return;
+    e.busy.main = true;
+    delete e.msg['box:' + sid];
+    paintV2();
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_v2_set_main_supplier', { job_id: jobId, supplier_id: on ? sid : null });
+    }).then(v2Ok).then(function () {
+      delete e.busy.main;
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy.main;
+      v2Fail(jobId, 'box:' + sid, err, 'The main supplier was not changed.');
+    });
+  }
+
+  // ── photos ──
+
+  // A photo shrunk to a JPEG under the limit, as a data: URL. Null when the
+  // browser cannot open the file as a picture (an iPhone HEIC on a PC, a PDF):
+  // that file goes as it is, and the server says plainly why it cannot take it.
+  function v2Shrink(file) {
+    return new Promise(function (resolve) {
+      var url = null;
+      try { url = global.URL.createObjectURL(file); } catch (x) { /* no object URLs */ }
+      if (!url) { resolve(null); return; }
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var side = V2_PHOTO_SIDE, quality = 0.85, data = null;
+          for (var i = 0; i < 6; i++) {
+            var scale = Math.min(1, side / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+            var c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+            c.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+            var g = c.getContext('2d');
+            g.fillStyle = '#fff';
+            g.fillRect(0, 0, c.width, c.height);
+            g.drawImage(img, 0, 0, c.width, c.height);
+            data = c.toDataURL('image/jpeg', quality);
+            if (v2DataBytes(data) <= V2_PHOTO_AIM) break;
+            side = Math.round(side * 0.8);
+            quality = Math.max(0.5, quality - 0.08);
+          }
+          resolve(data);
+        } catch (x) { resolve(null); }
+        global.URL.revokeObjectURL(url);
+      };
+      img.onerror = function () { global.URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  function v2DataBytes(dataUrl) {
+    var b64 = String(dataUrl).slice(String(dataUrl).indexOf(',') + 1);
+    return Math.floor(b64.length * 3 / 4) - (/==$/.test(b64) ? 2 : /=$/.test(b64) ? 1 : 0);
+  }
+
+  function v2RawFile(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result)); };
+      r.onerror = function () { reject(new Error('Could not read the file')); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  var V2_PHOTO_WORDS = {
+    photo_type_not_allowed: 'Dispatch can only send JPEG, PNG or WebP photos, and this file is another kind (an iPhone HEIC photo or a PDF, for example). ' +
+      'Take a screenshot of it and add that, or on the iPhone set Camera, Formats to Most Compatible.'
+  };
+
+  function v2UploadPhoto(jobId, sid, file) {
+    var e = v2Entry(jobId);
+    var key = 'photo:' + v2KeyAttr(sid);
+    if (!e || e.status !== 'ok' || !file || e.busy[key]) return;
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    var base = text(file.name).replace(/\.[^.]+$/, '') || 'photo';
+    v2Shrink(file).then(function (jpeg) {
+      return jpeg ? { name: base + '.jpg', data: jpeg } : v2RawFile(file).then(function (raw) { return { name: text(file.name) || 'photo', data: raw }; });
+    }).then(function (p) {
+      return global.opsPost('dispatch_v2_upload_photo', { job_id: jobId, supplier_id: sid, file_name: p.name, data_base64: p.data });
+    }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      if (!isObj(resp.photo) || !resp.photo.id) throw new Error('Unexpected answer');
+      var ph = v2PhotoFrom(resp.photo);
+      var list = v2PhotosOf(e, ph.supplier_id);
+      if (list && !list.some(function (x) { return x.id === ph.id; })) list.push(ph);
+      e.msg[key] = { text: 'Photo added: ' + ph.file_name + ', ' + v2Mb(ph.size_bytes) + '.' };
+      paintV2If(jobId);
+    }).catch(function (err) {
+      delete e.busy[key];
+      var code = err && err.code;
+      if (code === 'photo_too_large') {
+        var size = err.body && Number(err.body.size_bytes);
+        e.msg[key] = { bad: true, text: 'This photo is too big to send' + (size ? ' (' + v2Mb(size) + ')' : '') + '. Outlook takes 3 MB at most. Take a smaller photo, or a screenshot of it, and add that.' };
+        paintV2If(jobId);
+        return;
+      }
+      if (V2_PHOTO_WORDS[code]) { e.msg[key] = { bad: true, text: V2_PHOTO_WORDS[code] }; paintV2If(jobId); return; }
+      v2Fail(jobId, key, err, 'The photo was not added.');
+    });
+  }
+
+  function v2MovePhoto(jobId, photoId, sid) {
+    var e = v2Entry(jobId);
+    var key = 'ph:' + photoId;
+    var p = v2Photo(e, photoId);
+    if (!p || e.busy[key] || p.supplier_id === sid) { paintV2(); return; }
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_move_photo', { job_id: jobId, photo_id: photoId, supplier_id: sid }); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      var ph = isObj(resp.photo) && resp.photo.id ? v2PhotoFrom(resp.photo) : null;
+      v2Unphoto(e, photoId);
+      if (ph) { var list = v2PhotosOf(e, ph.supplier_id); if (list) list.push(ph); }
+      paintV2If(jobId);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'Not moved.');
+    });
+  }
+
+  function v2DeletePhoto(jobId, photoId) {
+    var e = v2Entry(jobId);
+    var key = 'ph:' + photoId;
+    if (!e || e.busy[key]) return;
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_delete_photo', { job_id: jobId, photo_id: photoId }); }).then(v2Ok).then(function () {
+      delete e.busy[key];
+      v2Unphoto(e, photoId);
+      paintV2If(jobId);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'Not deleted.');
+    });
+  }
+
+  // A 600 second link to the photo, read only on a press.
+  function v2ViewPhoto(jobId, photoId) {
+    var e = v2Entry(jobId);
+    var key = 'ph:' + photoId;
+    if (!e || e.busy[key]) return;
+    e.busy[key] = 'view';
+    delete e.msg[key];
+    paintV2();
+    Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_photo_url', { job_id: jobId, photo_id: photoId }); }).then(function (resp) {
+      delete e.busy[key];
+      var url = safeUrl(resp && resp.url);
+      if (!url) throw new Error('No link');
+      paintV2If(jobId);
+      if (typeof global.openOpsLightbox === 'function') global.openOpsLightbox(url); else global.open(url, '_blank', 'noopener');
+    }).catch(function () {
+      delete e.busy[key];
+      e.msg[key] = { bad: true, text: 'Could not open the photo.', retry: true };
+      paintV2If(jobId);
+    });
+  }
+
+  // ── the order email ──
+
+  // One held email per box. A press while the box already holds one answers
+  // "unchanged" with that email: it is shown, with why a second cannot be made.
+  function v2MakeEmail(jobId, sid, rebuild) {
+    var e = v2Entry(jobId);
+    var box = v2Box(e, sid);
+    var key = 'make:' + sid;
+    if (!box || e.busy[key]) return;
+    var date = wholeDay(e.dates[sid] || '') || null;
+    if (!rebuild && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That delivery date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
+    e.busy[key] = true;
+    delete e.msg[key];
+    e.ask = null;
+    paintV2();
+    var body = { job_id: jobId, supplier_id: sid, delivery_date: rebuild ? (box.open && box.open.delivery_date) || null : date, rebuild: !!rebuild };
+    if (rebuild && box.open) body.expected_updated_at = box.open.updated_at;
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_make_email', body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      var m = v2EmailFrom(resp.email);
+      if (!m) throw new Error('Unexpected answer');
+      box.open = m;
+      delete e.mailTyped[m.id];
+      if (resp.unchanged) {
+        e.msg[key] = { text: 'One email per supplier at a time. ' + v2SupWord(box) + ' already has an email waiting on this job: send it or discard it, then make the next one.' };
+      } else {
+        e.msg[key] = { text: rebuild ? 'Rebuilt from the lines. Your edits to it were lost.' : 'Held email made. Nothing has been sent. Check it, then send.' };
+      }
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'The email was not made.');
+    });
+  }
+
+  function v2AddrText(list) { return list.join(', '); }
+  function v2Addrs(v) { return text(v).split(/[\s,;]+/).map(function (a) { return a.toLowerCase(); }).filter(Boolean); }
+
+  function v2MailField(e, m, f) {
+    var t = e.mailTyped[m.id];
+    if (t && Object.prototype.hasOwnProperty.call(t, f)) return t[f];
+    return f === 'to' || f === 'cc' ? v2AddrText(m[f]) : f === 'body' ? m.body : m.subject;
+  }
+
+  // The held email's fields typed and not yet saved.
+  function v2MailChanges(e, m) {
+    var t = e.mailTyped[m.id] || {};
+    var out = {};
+    if (t.to !== undefined && v2Addrs(t.to).join(',') !== m.to.join(',')) out.to = v2Addrs(t.to);
+    if (t.cc !== undefined && v2Addrs(t.cc).join(',') !== m.cc.join(',')) out.cc = v2Addrs(t.cc);
+    if (t.subject !== undefined && t.subject !== m.subject) out.subject = t.subject;
+    if (t.body !== undefined && t.body !== m.body) out.body_text = t.body;
+    if (t.photo_ids !== undefined && t.photo_ids.join(',') !== m.photo_ids.join(',')) out.photo_ids = t.photo_ids.slice();
+    return out;
+  }
+
+  // Save the held email's edits against its stamp. Resolves true when it is
+  // saved (or nothing needed saving), false when it was not.
+  function v2SaveMail(jobId, emailId) {
+    var e = v2Entry(jobId);
+    var m = v2OpenById(e, emailId);
+    var key = 'mail:' + emailId;
+    if (!m || m.status !== 'draft') return Promise.resolve(false);
+    if (e.busy[key]) { e.mailAgain[emailId] = true; return e.busy[key]; }
+    var out = v2MailChanges(e, m);
+    if (!Object.keys(out).length) return Promise.resolve(true);
+    var bad = (out.to || []).concat(out.cc || []).filter(function (a) { return !EMAIL_RE.test(a); });
+    if (bad.length) { e.msg[key] = { bad: true, text: 'Not saved: ' + bad.join(', ') + (bad.length === 1 ? ' is' : ' are') + ' not an email address.' }; paintV2(); return Promise.resolve(false); }
+    if (out.to && !out.to.length) { e.msg[key] = { bad: true, text: 'Not saved: the email needs at least one To address.' }; paintV2(); return Promise.resolve(false); }
+    out.email_id = emailId;
+    out.expected_updated_at = m.updated_at;
+    delete e.msg[key];
+    var p = Promise.resolve().then(function () { return global.opsPost('dispatch_v2_save_email', out); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      var fresh = v2EmailFrom(resp.email);
+      var box = v2BoxOfEmail(e, emailId);
+      if (fresh && box) box.open = fresh;
+      // Keep only what was typed after this save went.
+      var t = e.mailTyped[emailId] || {};
+      if (fresh) {
+        if (t.to !== undefined && v2Addrs(t.to).join(',') === fresh.to.join(',')) delete t.to;
+        if (t.cc !== undefined && v2Addrs(t.cc).join(',') === fresh.cc.join(',')) delete t.cc;
+        if (t.subject === fresh.subject) delete t.subject;
+        if (t.body === fresh.body) delete t.body;
+        if (t.photo_ids && t.photo_ids.join(',') === fresh.photo_ids.join(',')) delete t.photo_ids;
+        e.mailAt[emailId] = fresh.updated_at;
+      }
+      e.msg[key] = { text: 'Saved.' };
+      paintV2If(jobId);
+      if (e.mailAgain[emailId]) { e.mailAgain[emailId] = false; return v2SaveMail(jobId, emailId); }
+      return true;
+    }, function (err) {
+      delete e.busy[key];
+      e.mailAgain[emailId] = false;
+      if (err && err.code === 'email_changed' && err.body && err.body.email) {
+        var box = v2BoxOfEmail(e, emailId);
+        var fresh = v2EmailFrom(err.body.email);
+        if (box && fresh) box.open = fresh;
+        delete e.mailTyped[emailId];
+      }
+      v2Fail(jobId, key, err, 'Not saved.');
+      return false;
+    });
+    e.busy[key] = p;
+    paintV2();
+    return p;
+  }
+
+  function v2Discard(jobId, emailId) {
+    var e = v2Entry(jobId);
+    var m = v2OpenById(e, emailId);
+    var box = v2BoxOfEmail(e, emailId);
+    var key = 'mail:' + emailId;
+    if (!m || !box || e.busy[key]) return;
+    e.busy[key] = true;
+    e.ask = null;
+    paintV2();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_discard_email', { email_id: emailId, expected_updated_at: m.updated_at }); }).then(v2Ok).then(function () {
+      delete e.busy[key];
+      box.open = null;
+      delete e.mailTyped[emailId];
+      e.msg['make:' + box.supplier_id] = { text: 'Email discarded. Nothing was sent.' };
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'Not discarded.');
+    });
+  }
+
+  // Send now and Send a test copy both save any edits first, then open the
+  // confirm. The confirm's own Send is the only press that sends.
+  function v2AskSend(jobId, emailId, mode) {
+    var e = v2Entry(jobId);
+    // A send that may have gone has nothing to save: it is not held.
+    var saved = mode === 'resend' ? Promise.resolve(true) : v2SaveMail(jobId, emailId);
+    saved.then(function (ok) {
+      var m = v2OpenById(e, emailId);
+      if (!ok || !m) return;
+      if (mode !== 'resend' && m.status !== 'draft') return;
+      var key = 'mail:' + emailId;
+      if (m.missing.length) {
+        e.msg[key] = { bad: true, text: 'Fill in the ' + v2MissingWords(m.missing) + ' in the email first. Dispatch will not send it with a blank one.' };
+        paintV2If(jobId);
+        return;
+      }
+      if (mode === 'real' && !e.d.testDone) {
+        e.msg[key] = { bad: true, text: 'Send a test copy to admin@ first. Dispatch sends to a supplier only after one test has gone to our own address.' };
+        paintV2If(jobId);
+        return;
+      }
+      state.v2m.modal = { jobId: jobId, emailId: emailId, mode: mode, busy: false, msg: null };
+      paintV2Modal();
+      refocus('[data-dpc-v2="modal-go"]');
+    });
+  }
+
+  function v2MissingWords(list) {
+    var words = list.map(function (k) { return V2_DETAIL_WORDS[k] || k; });
+    var tail = words.length > 1 ? words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1] : words[0];
+    return tail + (words.length > 1 ? ' lines' : ' line');
+  }
+
+  function v2CloseModal() {
+    var md = state.v2m.modal;
+    if (!md || md.busy) return;
+    state.v2m.modal = null;
+    paintV2Modal();
+    var back = root() && root().querySelector('[data-dpc-v2="' + (md.mode === 'test' ? 'test' : md.mode === 'resend' ? 'resend' : 'send') + '"][data-dpc-v2-id="' + md.emailId + '"]');
+    if (back) back.focus();
+  }
+
+  // The one press that sends. test: one copy to admin@ only, marked TEST ONLY.
+  // resend: an email whose first send could not be confirmed, sent again only
+  // after a person checked admin@ Sent Items.
+  function v2Send() {
+    var md = state.v2m.modal;
+    if (!md || md.busy) return;
+    var jobId = md.jobId, emailId = md.emailId;
+    var e = v2Entry(jobId);
+    var m = v2OpenById(e, emailId);
+    var box = v2BoxOfEmail(e, emailId);
+    if (!m || !box || state.v2m.unrecorded[emailId]) return;
+    md.busy = true;
+    md.msg = null;
+    paintV2Modal();
+    var test = md.mode === 'test';
+    var body = { email_id: emailId, expected_updated_at: m.updated_at, test: test, confirm_resend: md.mode === 'resend' };
+    var key = 'mail:' + emailId, sup = v2SupWord(box);
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_send_email', body); }).then(v2Ok).then(function (resp) {
+      md.busy = false;
+      state.v2m.modal = null;
+      paintV2Modal();
+      if (test) {
+        e.d.testDone = true;
+        e.msg[key] = { text: 'Test copy sent to ' + (text(resp.sent_to) || V2_FROM) + ' only. Check it in admin@, then press Send now.' };
+      } else if (resp.recorded === false) {
+        // It went, but noting it failed: never offer a second send of it.
+        state.v2m.unrecorded[emailId] = true;
+        e.msg['make:' + box.supplier_id] = { bad: true, text: 'The email went to ' + sup + ', but Dispatch could not note it on the order. Do not send it again. Tell Shaun so it can be put right.' };
+      } else {
+        e.msg['make:' + box.supplier_id] = { text: 'Sent to ' + sup + ' from admin@. A copy is in admin@ Sent Items. Its lines are now locked.' };
+      }
+      var fresh = v2EmailFrom(resp.email);
+      if (fresh && fresh.status === 'draft') box.open = fresh;
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      md.busy = false;
+      var code = err && err.code;
+      var stay = null; // a line in the confirm, which stays open
+      var after = null; // a line on the box once the confirm closes
+      if (code === 'test_send_first') stay = 'Send a test copy to admin@ first. Dispatch sends to a supplier only after one test has gone to our own address.';
+      else if (code === 'no_approved_email') stay = 'This supplier has no approved order email any more, so Dispatch cannot send to it. Ask Shaun.';
+      else if (code === 'order_lines_changed') stay = 'The lines in this box changed after the email was made. Go back, press Rebuild from the lines, check the email, then send.';
+      else if (code === 'email_details_missing') stay = 'Fill in the ' + v2MissingWords(v2Arr(err.body && err.body.missing).length ? v2Arr(err.body.missing) : ['date']) + ' in the email first.';
+      else if (code === 'photo_not_found' || code === 'photo_changed') stay = 'A photo on this email changed or is gone. Go back and change its photos, or rebuild it.';
+      else if (code === 'operator_email_required') stay = 'Dispatch cannot tell who is signed in, so it did not send. Sign in again, then send.';
+      else if (code === 'test_send_refused') stay = 'Outlook refused the test copy, so nothing was sent.' + (err.message ? ' ' + v2Plain(err.message) : '') + ' You can try again.';
+      else if (code === 'test_send_unknown') after = { bad: true, text: 'We could not tell whether the test copy went. Look for it in admin@. If it is not there, send the test again.' };
+      else if (code === 'send_refused') after = { bad: true, text: 'Outlook refused the email, so nothing was sent.' + (err.message ? ' ' + v2Plain(err.message) : '') + ' Check the email, then press Send now again.' };
+      else if (code === 'send_unknown') after = { bad: true, text: 'We could not tell whether the email went to ' + sup + '. Check admin@ Sent Items before doing anything else.' };
+      else if (V2_CHANGED.indexOf(code) >= 0) after = { bad: true, text: 'This email changed somewhere else. Showing the latest. Nothing was sent.' };
+      else if (test) after = { bad: true, text: 'No clear answer came back for the test copy. Look for it in admin@ before sending it again.' };
+      else after = { bad: true, text: 'No clear answer came back, so we cannot tell whether it went to ' + sup + '. Check admin@ Sent Items before sending again.' };
+      if (stay) {
+        md.msg = stay;
+        paintV2Modal();
+        return;
+      }
+      state.v2m.modal = null;
+      paintV2Modal();
+      e.msg[key] = after;
+      // A send that may have gone shows on the box (its email reads "may have
+      // gone" after the re-read); nothing here sends it again.
+      e.msg['make:' + box.supplier_id] = after;
+      paintV2If(jobId);
+      readV2(jobId, true);
+    });
+  }
+
+  // ── supplier search (Add supplier) ──
+
+  function v2OpenFind() {
+    var f = state.v2m.find;
+    f.open = !f.open;
+    paintV2();
+    if (f.open) {
+      refocus('[data-dpc-v2-q]');
+      if (f.status === 'idle' || f.status === 'error' || f.q) { f.q = ''; v2RunFind(); }
+    }
+  }
+
+  function v2RunFind() {
+    var f = state.v2m.find;
+    var token = ++f.token;
+    f.status = 'loading';
+    paintV2FindRes();
+    var params = { limit: 25 };
+    if (text(f.q)) params.q = text(f.q);
+    Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_supplier_search', params); }).then(function (resp) {
+      if (token !== f.token) return;
+      if (!isObj(resp) || !Array.isArray(resp.approved) || !Array.isArray(resp.others)) throw new Error('Unexpected search answer');
+      f.data = { approved: resp.approved.filter(isObj), others: resp.others.filter(isObj) };
+      f.status = 'ok';
+      paintV2FindRes();
+    }).catch(function () {
+      if (token !== f.token) return;
+      f.status = 'error';
+      paintV2FindRes();
+    });
+  }
+
+  // ───────────────────────── render: v2 Materials ─────────────────────────
+
+  function v2Fail1(text1, retryAttrs) {
+    return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(text1) +
+      (retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</div>';
+  }
+
+  // A line under a box or the draft list: what a press said.
+  function v2MsgHtml(m, retryAttrs, cls) {
+    if (!m) return '';
+    return '<div class="' + (cls || 'dpc-card-msg') + (m.bad ? ' dpc-mat-fail' : '') + '" role="' + (m.bad ? 'alert' : 'status') + '">' + esc(m.text) +
+      (m.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</div>';
+  }
+
+  function v2MoveOptions(e, current) {
+    var h = '<option value="draft"' + (current == null ? ' selected' : '') + '>Draft list</option>';
+    e.d.boxes.forEach(function (b) {
+      h += '<option value="' + esc(b.supplier_id) + '"' + (b.supplier_id === current ? ' selected' : '') + '>' + esc(b.name) + '</option>';
+    });
+    return h;
+  }
+
+  // "14 x 1800H panels", as the email will read it.
+  function v2LineText(l) {
+    var q = matQtyText(l.quantity);
+    return (q ? q + (l.unit ? ' ' + l.unit : '') + ' x ' : '') + l.description;
+  }
+
+  function v2SentWhen(box, emailId) {
+    for (var i = 0; i < box.sent.length; i++) if (box.sent[i].id === emailId) return stampText(box.sent[i].sent.sent_at);
+    return '';
+  }
+
+  function v2LineHtml(e, l, box) {
+    var id = esc(l.id);
+    var key = 'line:' + l.id;
+    var busy = e.busy[key];
+    var h = '<div class="dpc-line-wrap dpc-v2-wrap" data-dpc-v2-row="' + id + '">';
+    if (l.locked) {
+      var when = box && l.sentOn ? v2SentWhen(box, l.sentOn) : '';
+      var extra = [l.profile ? 'Profile: ' + l.profile : '', l.colour ? 'Colour: ' + l.colour : '', l.detail].filter(Boolean).join(' · ');
+      h += '<div class="dpc-v2-line dpc-v2-ro"><span class="dpc-v2-grip dpc-v2-grip-off" aria-hidden="true"></span><span class="dpc-v2-rotext">' + esc(v2LineText(l)) +
+        (extra ? '<small>' + esc(extra) + '</small>' : '') + '</span><span class="dpc-status dpc-tone-ok">' + esc(when ? 'Sent ' + when : 'Sent') + '</span></div>';
+      return h + '</div>';
+    }
+    var cell = function (f) { return esc(v2Cell(e, l, f)); };
+    var status = (e.typed[l.id] && e.typed[l.id].status) || l.status;
+    if (!matSettable(status)) status = 'not_reviewed';
+    var q = matQty(v2Cell(e, l, 'quantity'));
+    var off = busy ? ' disabled' : '';
+    h += '<div class="dpc-v2-line">';
+    h += '<span class="dpc-v2-grip" draggable="true" data-dpc-v2-grip="' + id + '" title="Drag to a supplier box" aria-hidden="true"></span>';
+    h += '<input type="text" data-dpc-v2-cell="description" data-dpc-v2-id="' + id + '" maxlength="300" value="' + cell('description') + '" placeholder="Item" aria-label="Item">';
+    h += '<input type="text" inputmode="decimal" data-dpc-v2-cell="quantity" data-dpc-v2-id="' + id + '" value="' + cell('quantity') + '" placeholder="Qty" aria-label="Qty"' + (q.ok ? '' : ' aria-invalid="true"') + '>';
+    h += '<input type="text" data-dpc-v2-cell="unit" data-dpc-v2-id="' + id + '" maxlength="30" value="' + cell('unit') + '" placeholder="Unit" aria-label="Unit">';
+    h += '<select class="dpc-status dpc-status-pick dpc-tone-' + MAT_STATUS[status].tone + '" data-dpc-v2-status="' + id + '" aria-label="Status"' + off + '>';
+    MAT_SETTABLE.forEach(function (k) { h += '<option value="' + k + '"' + (k === status ? ' selected' : '') + '>' + esc(MAT_STATUS[k].label) + '</option>'; });
+    h += '</select>';
+    h += '<select class="dpc-v2-move" data-dpc-v2-move="' + id + '" aria-label="Move to"' + off + '>' + v2MoveOptions(e, l.supplier_id) + '</select>';
+    h += '<button type="button" class="dpc-x" data-dpc-v2="del" data-dpc-v2-id="' + id + '" aria-label="Take this line off"' + off + '>&times;</button>';
+    h += '</div>';
+    var extraOpen = e.more[l.id] || ['detail', 'profile', 'colour'].some(function (f) { return text(v2Cell(e, l, f)); });
+    if (extraOpen) {
+      h += '<div class="dpc-v2-extra">';
+      h += '<input type="text" data-dpc-v2-cell="profile" data-dpc-v2-id="' + id + '" maxlength="80" value="' + cell('profile') + '" placeholder="Profile" aria-label="Profile">';
+      h += '<input type="text" data-dpc-v2-cell="colour" data-dpc-v2-id="' + id + '" maxlength="80" value="' + cell('colour') + '" placeholder="Colour" aria-label="Colour">';
+      h += '<input type="text" data-dpc-v2-cell="detail" data-dpc-v2-id="' + id + '" maxlength="300" value="' + cell('detail') + '" placeholder="Detail, for example Gate: pedestrian gate 1270mm" aria-label="Detail">';
+      h += '</div>';
+    } else {
+      h += '<button type="button" class="dpc-textbtn dpc-v2-morebtn" data-dpc-v2="more" data-dpc-v2-id="' + id + '">+ Profile, colour, detail</button>';
+    }
+    if (busy === 'delete') h += '<div class="dpc-line-msg" role="status">Taking off...</div>';
+    h += v2MsgHtml(e.msg[key], 'data-dpc-v2="line-retry" data-dpc-v2-id="' + id + '"', 'dpc-line-msg');
+    return h + '</div>';
+  }
+
+  function v2PhotosHtml(e, sid, photos, lockedIds) {
+    var k = v2KeyAttr(sid);
+    var h = '';
+    if (photos.length) {
+      h += '<div class="dpc-v2-photos">';
+      photos.forEach(function (p) {
+        var key = 'ph:' + p.id;
+        var busy = e.busy[key];
+        var onMail = lockedIds[p.id];
+        h += '<div class="dpc-v2-photo"><button type="button" class="dpc-textbtn dpc-v2-photoname" data-dpc-v2="photo-view" data-dpc-v2-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>' +
+          esc(p.file_name) + ' <small>' + esc(v2Mb(p.size_bytes)) + (busy === 'view' ? ', opening...' : '') + '</small></button>';
+        if (!onMail) {
+          h += '<select class="dpc-v2-move" data-dpc-v2-pmove="' + esc(p.id) + '" aria-label="Move photo to"' + (busy ? ' disabled' : '') + '>' + v2MoveOptions(e, sid) + '</select>';
+          h += '<button type="button" class="dpc-x" data-dpc-v2="photo-del" data-dpc-v2-id="' + esc(p.id) + '" aria-label="Delete photo ' + esc(p.file_name) + '"' + (busy ? ' disabled' : '') + '>&times;</button>';
+        } else {
+          h += '<small class="dpc-muted">' + esc(onMail) + '</small>';
+        }
+        h += v2MsgHtml(e.msg[key], 'data-dpc-v2="photo-view" data-dpc-v2-id="' + esc(p.id) + '"', 'dpc-line-msg');
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    var pkey = 'photo:' + k;
+    if (e.busy[pkey]) h += '<div class="dpc-card-msg" role="status">Shrinking and adding the photo...</div>';
+    h += v2MsgHtml(e.msg[pkey]);
+    return h;
+  }
+
+  // The photos an email names can only be changed on the email.
+  function v2PhotoUse(box) {
+    var use = {};
+    if (!box) return use;
+    if (box.open) box.open.photo_ids.forEach(function (id) { use[id] = 'On the held email'; });
+    box.sent.forEach(function (m) { m.photo_ids.forEach(function (id) { use[id] = 'Sent'; }); });
+    return use;
+  }
+
+  function v2FootHtml(e, sid, extra) {
+    var k = esc(v2KeyAttr(sid));
+    var h = '<div class="dpc-card-foot"><button type="button" class="dpc-addline" data-dpc-v2="addline" data-dpc-v2-sid="' + k + '">+ Add line</button>';
+    h += '<button type="button" class="dpc-addline" data-dpc-v2="photo-add" data-dpc-v2-sid="' + k + '"' + (e.busy['photo:' + v2KeyAttr(sid)] ? ' disabled' : '') + '>+ Add photo</button>';
+    h += '<input type="file" accept="image/*" hidden data-dpc-v2-file="' + k + '" aria-label="Add photo">';
+    return h + (extra || '') + '</div>';
+  }
+
+  function v2LinesHtml(e, sid, saved, box) {
+    var lines = saved.concat(e.local.filter(function (l) { return l.supplier_id === sid; }));
+    var h = '<div class="dpc-lines dpc-v2-lines" data-dpc-v2-drop="' + esc(v2KeyAttr(sid)) + '">';
+    if (!lines.length) h += '<div class="dpc-line-empty">' + (sid == null ? 'No lines yet. Add one, or fill the list from the scope.' : 'No lines yet. Drag lines here, or use Move to on a line.') + '</div>';
+    lines.forEach(function (l) { h += v2LineHtml(e, l, box); });
+    return h + '</div>';
+  }
+
+  function v2DraftHtml(e) {
+    var d = e.d;
+    var h = '<div class="dpc-supcard dpc-v2-draft" data-dpc-v2-box="draft"><div class="dpc-suphead"><strong>Draft list</strong>';
+    h += '<span class="dpc-supmail">Type the materials, then move each line to its supplier.</span></div>';
+    h += v2LinesHtml(e, null, d.draft.lines, null);
+    h += v2PhotosHtml(e, null, d.draft.photos, {});
+    h += v2MsgHtml(e.msg.draft, 'data-dpc-v2="suggest"');
+    var suggest = d.canSuggest && !d.draft.lines.length && !e.local.length && !d.boxes.some(function (b) { return b.lines.length; })
+      ? '<button type="button" class="dpc-addline" data-dpc-v2="suggest"' + (e.busy.suggest ? ' disabled' : '') + '>' + (e.busy.suggest ? 'Filling in...' : 'Fill from the scope') + '</button>' : '';
+    return h + v2FootHtml(e, null, suggest) + '</div>';
+  }
+
+  // The two fencing lines the main supplier's email ends with. Shown on the
+  // box, never editable: the server adds them when it makes the email.
+  function v2StandingHtml() {
+    return V2_STANDING.map(function (t) {
+      return '<div class="dpc-line-wrap dpc-v2-wrap"><div class="dpc-v2-line dpc-v2-ro dpc-v2-standing"><span class="dpc-v2-grip dpc-v2-grip-off" aria-hidden="true"></span>' +
+        '<span class="dpc-v2-rotext">' + esc(t) + '</span><span class="dpc-status dpc-tone-muted">Fencing standing line</span></div></div>';
+    }).join('');
+  }
+
+  function v2BoxHtml(e, b) {
+    var d = e.d;
+    var sid = b.supplier_id;
+    var key = 'box:' + sid;
+    var fencing = d.workType === 'fencing';
+    var h = '<div class="dpc-supcard dpc-v2-box' + (b.blocked ? ' dpc-v2-isblocked' : '') + '" data-dpc-v2-box="' + esc(sid) + '"><div class="dpc-suphead">';
+    h += '<span class="dpc-supdot" aria-hidden="true"></span><strong>' + esc(b.name) + '</strong>';
+    if (b.approved) {
+      h += '<span class="dpc-supmail">' + esc(b.approved.to.join(', ')) + (b.approved.cc.length ? ', CC ' + esc(b.approved.cc.join(', ')) : '') + '</span>';
+    } else {
+      h += '<span class="dpc-status dpc-tone-warn">No approved order email</span>';
+    }
+    if (!b.active) h += '<span class="dpc-status dpc-tone-muted">Contact no longer active</span>';
+    h += '<span class="dpc-grow"></span>';
+    if (fencing) {
+      h += '<label class="dpc-v2-main"><input type="checkbox" data-dpc-v2-main="' + esc(sid) + '"' + (b.is_main ? ' checked' : '') + (e.busy.main ? ' disabled' : '') + '> Main supplier' +
+        (b.is_main && !d.mainTicked ? ' <small>(default)</small>' : '') + '</label>';
+    }
+    var empty = !b.lines.length && !b.photos.length && !b.open && !b.sent.length && !e.local.some(function (l) { return l.supplier_id === sid; });
+    if (empty) h += '<button type="button" class="dpc-x" data-dpc-v2="remove-sup" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Take ' + esc(b.name) + ' off this job"' + (e.busy[key] ? ' disabled' : '') + '>&times;</button>';
+    h += '</div>';
+    if (b.blocked) {
+      h += '<div class="dpc-v2-blocked" role="note"><strong>Send blocked.</strong> ' + esc(b.blocked.message || 'This supplier has no approved order email. Ask Shaun to add one before sending.') +
+        ' You can still split lines to it.</div>';
+    }
+    if (fencing && b.is_main) h += '<p class="dpc-v2-hint">Main supplier: its email ends with 4 x bags of quickset, then Fixings, Post Caps and Screws as necessary.</p>';
+    h += v2LinesHtml(e, sid, b.lines, b);
+    if (fencing && b.is_main) h += '<div class="dpc-lines dpc-v2-lines">' + v2StandingHtml() + '</div>';
+    h += v2PhotosHtml(e, sid, b.photos, v2PhotoUse(b));
+    h += v2MsgHtml(e.msg[key], 'data-dpc-v2="retry"');
+    h += v2FootHtml(e, sid, '');
+    h += v2OrderHtml(e, b);
+    h += v2SentHtml(b);
+    return h + '</div>';
+  }
+
+  // The order email part of a box: Make email, the held email, or the
+  // send that may have gone.
+  function v2OrderHtml(e, b) {
+    var sid = b.supplier_id;
+    var mkey = 'make:' + sid;
+    var m = b.open;
+    var h = '<div class="dpc-v2-order">';
+    if (!m) {
+      var n = v2Orderable(b).length;
+      var off = !!b.blocked || !n || !!e.busy[mkey];
+      h += '<div class="dpc-v2-make"><label class="dpc-v2-date"><span>Delivery date</span><input type="date" data-dpc-v2-date="' + esc(sid) + '" value="' + esc(e.dates[sid] || '') + '"' + (b.blocked ? ' disabled' : '') + '></label>';
+      h += '<button type="button" class="dpc-primary" data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' + (e.busy[mkey] ? 'Making the email...' : 'Make email') + '</button></div>';
+      if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
+      else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
+      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.</p>';
+      h += v2MsgHtml(e.msg[mkey], 'data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"');
+      return h + '</div>';
+    }
+    h += v2MsgHtml(e.msg[mkey]);
+    if (state.v2m.unrecorded[m.id]) {
+      return h + '<div class="dpc-v2-callout dpc-v2-bad" role="alert">This email went to ' + esc(v2SupWord(b)) + ', but Dispatch could not note it. Do not send it again.</div></div>';
+    }
+    if (m.status === 'sending') {
+      h += '<div class="dpc-v2-callout" role="status">Sending now. If this stays for more than 2 minutes, check admin@ Sent Items. <button type="button" class="dpc-retry" data-dpc-v2="retry">Check again</button></div>';
+      return h + '</div>';
+    }
+    if (m.status === 'send_unknown') {
+      h += '<div class="dpc-v2-callout dpc-v2-bad" role="alert"><strong>This email may have gone.</strong> We could not tell whether it reached ' + esc(v2SupWord(b)) +
+        '. Look in admin@ Sent Items for "' + esc(m.subject) + '". If it is there, do nothing more. If it is not, send it again.';
+      h += '<div class="dpc-actions"><button type="button" data-dpc-v2="resend" data-dpc-v2-id="' + esc(m.id) + '"' + (e.busy['mail:' + m.id] ? ' disabled' : '') + '>It is not in Sent Items: send again</button></div>';
+      h += v2MsgHtml(e.msg['mail:' + m.id], null, 'dpc-mail-msg');
+      return h + '</div></div>';
+    }
+    if (m.status !== 'draft') return h + '</div>';
+    return h + v2EditorHtml(e, b, m) + '</div>';
+  }
+
+  // The held email: From fixed, every other field editable, saved when left.
+  function v2EditorHtml(e, b, m) {
+    var id = esc(m.id);
+    var key = 'mail:' + m.id;
+    var busy = !!e.busy[key];
+    var d = e.d;
+    var f = function (name) { return esc(v2MailField(e, m, name)); };
+    var h = '<div class="dpc-v2-mail" data-dpc-v2-mail="' + id + '">';
+    h += '<div class="dpc-v2-mailhead"><span class="dpc-status dpc-tone-info">Held email, nothing sent yet</span>' + (m.edited ? '<span class="dpc-status dpc-tone-muted">Edited</span>' : '') + '</div>';
+    h += '<div class="dpc-field"><span>From</span><span class="dpc-field-val"><strong>' + esc(m.from || V2_FROM) + '</strong> <small>Fixed. Sent through Outlook.</small></span></div>';
+    h += '<div class="dpc-field"><label for="dpcV2To' + id + '">To</label><input id="dpcV2To' + id + '" type="text" data-dpc-v2-mf="to" data-dpc-v2-mid="' + id + '" value="' + f('to') + '"></div>';
+    h += '<div class="dpc-field"><label for="dpcV2Cc' + id + '">CC</label><input id="dpcV2Cc' + id + '" type="text" data-dpc-v2-mf="cc" data-dpc-v2-mid="' + id + '" value="' + f('cc') + '"></div>';
+    var team = m.team_cc || d.teamCc.email;
+    h += '<p class="dpc-v2-hint">' + (team ? 'Team mailbox on the CC: ' + esc(team) + '.' : 'No team mailbox on the CC for this kind of job.') +
+      (d.teamCc.question ? ' <strong>Open question:</strong> ' + esc(d.teamCc.question) : '') + '</p>';
+    h += '<div class="dpc-field"><label for="dpcV2Sub' + id + '">Subject</label><input id="dpcV2Sub' + id + '" type="text" maxlength="250" data-dpc-v2-mf="subject" data-dpc-v2-mid="' + id + '" value="' + f('subject') + '"></div>';
+    h += '<textarea class="dpc-textarea dpc-v2-body" maxlength="20000" data-dpc-v2-mf="body" data-dpc-v2-mid="' + id + '" aria-label="Email body">' + f('body') + '</textarea>';
+    // Photos: the box's photos, three at most on one email.
+    var typedPh = e.mailTyped[m.id] && e.mailTyped[m.id].photo_ids;
+    var chosen = typedPh || m.photo_ids;
+    if (b.photos.length) {
+      h += '<div class="dpc-v2-attach"><span class="dpc-v2-attlabel">Attach</span>';
+      b.photos.forEach(function (p) {
+        var on = chosen.indexOf(p.id) >= 0;
+        h += '<label><input type="checkbox" data-dpc-v2-attach="' + esc(p.id) + '" data-dpc-v2-mid="' + id + '"' + (on ? ' checked' : '') +
+          (!on && chosen.length >= V2_EMAIL_PHOTOS ? ' disabled' : '') + '> ' + esc(p.file_name) + ' <small>' + esc(v2Mb(p.size_bytes)) + '</small></label>';
+      });
+      h += '</div>';
+    } else {
+      h += '<p class="dpc-v2-hint">No photo attached. Add one to this box to attach it.</p>';
+    }
+    if (m.missing.length) h += '<p class="dpc-v2-warn" role="note">The ' + esc(v2MissingWords(m.missing)) + (m.missing.length > 1 ? ' are' : ' is') + ' blank. Fill ' + (m.missing.length > 1 ? 'them' : 'it') + ' in before sending.</p>';
+    if (m.last_error) h += '<p class="dpc-v2-warn" role="note">Last try: ' + esc(v2Plain(m.last_error)) + '</p>';
+    if (m.test) h += '<p class="dpc-v2-hint">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';
+    h += v2MsgHtml(e.msg[key], null, 'dpc-mail-msg');
+    if (e.ask && e.ask.emailId === m.id) {
+      var rebuild = e.ask.kind === 'rebuild';
+      h += '<div class="dpc-v2-ask" role="group" aria-label="Confirm"><span>' + (rebuild ? 'Rebuild this email from the lines? Any edits to it are lost.' : 'Discard this email? Nothing has been sent.') + '</span>';
+      h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-v2="' + (rebuild ? 'rebuild-go' : 'discard-go') + '" data-dpc-v2-id="' + id + '">' + (rebuild ? 'Rebuild' : 'Discard') + '</button>';
+      h += '<button type="button" data-dpc-v2="ask-no">Keep it</button></div></div>';
+    }
+    var testDone = d.testDone;
+    h += '<div class="dpc-actions dpc-v2-sendrow">';
+    h += '<button type="button" class="dpc-v2-testbtn" data-dpc-v2="test" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '><span class="dpc-v2-testtag">Test</span> Send a test copy to admin@</button>';
+    h += '<button type="button" class="dpc-primary" data-dpc-v2="send" data-dpc-v2-id="' + id + '"' + (busy || !testDone || !!b.blocked ? ' disabled' : '') + '>Send now</button>';
+    h += '<button type="button" data-dpc-v2="rebuild" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '>Rebuild from the lines</button>';
+    h += '<button type="button" data-dpc-v2="discard" data-dpc-v2-id="' + id + '"' + (busy ? ' disabled' : '') + '>Discard</button>';
+    h += '</div>';
+    if (!testDone) h += '<p class="dpc-v2-warn" role="note"><strong>Test first.</strong> Send now stays off until one test copy has gone to admin@. The test goes to admin@ only, marked TEST ONLY; the supplier gets nothing.</p>';
+    h += '<p class="dpc-v2-hint">One email per supplier at a time. Lines added to this box now need Rebuild from the lines, or go on the next email.</p>';
+    return h + '</div>';
+  }
+
+  function v2SentHtml(b) {
+    if (!b.sent.length) return '';
+    var h = '<div class="dpc-v2-sent"><h4 class="dpc-mat-h4">Sent</h4>';
+    b.sent.forEach(function (m) {
+      var s = m.sent || {};
+      var to = v2Arr(s.to).length ? v2Arr(s.to) : m.to;
+      var cc = v2Arr(s.cc).length ? v2Arr(s.cc) : m.cc;
+      h += '<details class="dpc-v2-sentitem"><summary><strong>' + esc(m.subject) + '</strong> <small>' + esc(stampText(s.sent_at)) + (text(s.sent_by_email) ? ' by ' + esc(s.sent_by_email) : '') + '</small></summary>';
+      h += '<p class="dpc-v2-hint">From ' + esc(text(s.from) || m.from) + ' to ' + esc(to.join(', ')) + (cc.length ? ', CC ' + esc(cc.join(', ')) : '') + '. ' +
+        esc(v2Count(m.line_count, 'line', 'lines')) + (m.photo_ids.length ? ', ' + esc(v2Count(m.photo_ids.length, 'photo', 'photos')) : '') + '.</p>';
+      h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre></details>';
+    });
+    return h + '</div>';
+  }
+
+  function v2FindResHtml() {
+    var f = state.v2m.find;
+    var e = v2Entry(state.jobId);
+    if (f.status === 'loading' || f.status === 'idle') return '<div class="dpc-empty dpc-empty-tight">Searching...</div>';
+    if (f.status === 'error') return v2Fail1('Could not search the suppliers.', 'data-dpc-v2="find-retry"');
+    var on = {};
+    if (e && e.d) e.d.boxes.forEach(function (b) { on[b.supplier_id] = true; });
+    var adding = e && e.busy.add;
+    var item = function (r, approved) {
+      var sid = r.supplier_id ? String(r.supplier_id) : '';
+      var note = !sid ? 'Not linked to a Xero contact yet. Ask Shaun to name the contact.' : on[sid] ? 'On this job' : r.has_approved_email ? '' : v2Plain(r.note) || 'No approved order email: Dispatch will not send to this supplier';
+      var off = !sid || r.can_add === false || on[sid] || !!adding;
+      var sub = approved
+        ? [text(r.approved_name) && text(r.approved_name) !== text(r.name) ? text(r.approved_name) : '', V2_USED_FOR[text(r.used_for)] || text(r.used_for), v2Arr(r.to).join(', ')].filter(Boolean).join(' · ')
+        : '';
+      return '<button type="button" class="dpc-v2-res' + (r.has_approved_email ? '' : ' dpc-v2-res-noemail') + '" data-dpc-v2="addsup" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' +
+        '<strong>' + esc(text(r.name) || text(r.approved_name) || 'Name not recorded') + (adding && adding === sid ? ' <small>Adding...</small>' : '') + '</strong>' +
+        (sub ? '<small>' + esc(sub) + '</small>' : '') + (note ? '<small class="dpc-v2-resnote">' + esc(note) + '</small>' : '') + '</button>';
+    };
+    var h = '';
+    h += '<h4 class="dpc-mat-h4">Approved order emails</h4>';
+    h += f.data.approved.length ? f.data.approved.map(function (r) { return item(r, true); }).join('') : '<div class="dpc-empty dpc-empty-tight">No approved supplier matches.</div>';
+    h += '<h4 class="dpc-mat-h4">All other suppliers</h4>';
+    h += f.data.others.length ? f.data.others.map(function (r) { return item(r, false); }).join('') : '<div class="dpc-empty dpc-empty-tight">No other supplier matches.</div>';
+    if (e && e.msg.add) h += v2MsgHtml(e.msg.add, e.msg.add.retry ? 'data-dpc-v2="addsup" data-dpc-v2-sid="' + esc(e.msg.add.retry) + '"' : null);
+    return h;
+  }
+
+  function v2FindHtml() {
+    var f = state.v2m.find;
+    if (!f.open) return '';
+    var h = '<div class="dpc-v2-find" data-dpc-region="v2find"><div class="dpc-row"><input type="search" class="dpc-v2-q" data-dpc-v2-q value="' + esc(f.q) + '" placeholder="Search suppliers by name" aria-label="Search suppliers">';
+    h += '<button type="button" data-dpc-v2="find-close">Close</button></div>';
+    h += '<p class="dpc-v2-hint">Approved suppliers come first. Any other supplier can be added to split lines to, but Dispatch will not send to it.</p>';
+    return h + '<div class="dpc-v2-findres" data-dpc-region="v2findres">' + v2FindResHtml() + '</div></div>';
+  }
+
+  function v2BodyHtml(e) {
+    if (!e || e.status === 'loading' || (e.status === 'idle')) return '<div class="dpc-empty dpc-empty-tight">Loading the materials...</div>';
+    if (e.status === 'error' || !e.d) return v2Fail1('Could not load the materials.', 'data-dpc-v2="retry"');
+    var h = '';
+    if (e.notice) h += '<div class="dpc-mat-notice" role="status">' + esc(e.notice) + '</div>';
+    h += v2FindHtml();
+    h += v2DraftHtml(e);
+    if (!e.d.boxes.length) h += '<div class="dpc-empty dpc-v2-nobox">No supplier boxes yet. Press Add supplier to make one, then move lines into it.</div>';
+    e.d.boxes.forEach(function (b) { h += v2BoxHtml(e, b); });
+    return h;
+  }
+
+  // Drawn on every job except a make-safe one, under Scope and notes.
+  function v2Html() {
+    var row = state.row;
+    if (!row || isMakesafe(row)) return '';
+    var e = v2Entry(row.id);
+    var open = state.v2m.open;
+    var h = '<div class="dpc-sec dpc-mat dpc-v2m' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="v2mat"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Order</span><h3>Materials</h3>';
+    if (open) h += '<p>Write the list, split it by supplier, then make and send one email per supplier</p>';
+    h += '</div>';
+    if (open && e && e.status === 'ok') h += '<button type="button" class="dpc-addsup" data-dpc-v2="find" aria-expanded="' + state.v2m.find.open + '">+ Add supplier</button>';
+    h += '<button type="button" class="dpc-chev" data-dpc-v2="toggle" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Materials">' + CHEV_SVG + '</button></div>';
+    if (open) h += '<div class="dpc-sec-body">' + v2BodyHtml(e) + '</div>';
+    return h + '</div>';
+  }
+
+  // The confirm before anything is sent. Drawn over the page.
+  function v2ModalHtml() {
+    var md = state.v2m.modal;
+    if (!md) return '';
+    var e = v2Entry(md.jobId);
+    var m = v2OpenById(e, md.emailId);
+    var b = v2BoxOfEmail(e, md.emailId);
+    if (!m || !b) return '';
+    var test = md.mode === 'test', again = md.mode === 'resend';
+    var sup = v2SupWord(b);
+    var photos = m.photo_ids.length;
+    var h = '<div class="dpc-v2-back"><div class="dpc-v2-modal' + (test ? ' dpc-v2-modal-test' : '') + '" role="dialog" aria-modal="true" aria-labelledby="dpcV2ModalTitle">';
+    if (test) h += '<span class="dpc-v2-testtag dpc-v2-testtag-big">TEST ONLY</span>';
+    h += '<h3 id="dpcV2ModalTitle">' + esc(test ? 'Send a test copy to admin@?' : again ? 'Send this order to ' + sup + ' again?' : 'Send this order to ' + sup + '?') + '</h3>';
+    h += '<div class="dpc-v2-mfields">';
+    h += '<span>From</span><span>' + esc(m.from || V2_FROM) + '</span>';
+    h += '<span>To</span><span>' + esc(test ? V2_FROM : m.to.join(', ')) + '</span>';
+    h += '<span>CC</span><span>' + esc(test ? 'None' : (m.cc.join(', ') || 'None')) + '</span>';
+    h += '<span>Subject</span><span>' + esc((test ? 'TEST ONLY: ' : '') + m.subject) + '</span>';
+    h += '<span>Lines</span><span>' + esc(v2Count(m.line_count, 'line', 'lines') + ', ' + (photos ? v2Count(photos, 'photo', 'photos') : 'no photo')) + '</span>';
+    h += '</div>';
+    if (test) h += '<p class="dpc-v2-hint">Only admin@ gets this copy, marked TEST ONLY. ' + esc(sup) + ' gets nothing. Check it in admin@, then come back and press Send now.</p>';
+    if (again) h += '<p class="dpc-v2-warn">Only send again if the email is not in admin@ Sent Items. If it did go, ' + esc(sup) + ' gets it twice.</p>';
+    if (md.msg) h += '<p class="dpc-v2-warn" role="alert">' + esc(md.msg) + '</p>';
+    h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-v2="modal-go"' + (md.busy ? ' disabled' : '') + '>' +
+      esc(md.busy ? 'Sending...' : test ? 'Send test' : again ? 'Send again' : 'Send') + '</button>';
+    h += '<button type="button" data-dpc-v2="modal-no"' + (md.busy ? ' disabled' : '') + '>Back to the email</button></div>';
+    return h + '</div></div>';
+  }
+
+  // Where the keyboard was inside the section, to put it back after a repaint.
+  var V2_FOCUS_KEYS = ['data-dpc-v2-cell', 'data-dpc-v2-id', 'data-dpc-v2-mf', 'data-dpc-v2-mid', 'data-dpc-v2', 'data-dpc-v2-sid', 'data-dpc-v2-status',
+    'data-dpc-v2-move', 'data-dpc-v2-pmove', 'data-dpc-v2-main', 'data-dpc-v2-date', 'data-dpc-v2-attach', 'data-dpc-v2-q'];
+  function v2Focus(el) {
+    var a = document.activeElement;
+    if (!a || !el.contains(a)) return null;
+    var sel = V2_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+      return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
+    }).join('');
+    if (!sel) return null;
+    var f = { sel: sel };
+    try { f.start = a.selectionStart; f.end = a.selectionEnd; } catch (x) { /* not a text box */ }
+    return f;
+  }
+
+  function paintV2() {
+    var el = region('v2mat');
+    if (!el) return;
+    var f = v2Focus(el);
+    painting = true;
+    try { el.outerHTML = v2Html(); } finally { painting = false; }
+    var now = f && region('v2mat') ? region('v2mat').querySelector(f.sel) : null;
+    if (!now || now.disabled) return;
+    now.focus({ preventScroll: true });
+    if (typeof f.start === 'number' && now.setSelectionRange) { try { now.setSelectionRange(f.start, f.end); } catch (x) { /* not a text box */ } }
+  }
+  function paintV2If(jobId) { if (state.jobId === jobId) paintV2(); }
+  function paintV2Find() { var el = region('v2findres'); if (el) el.innerHTML = v2FindResHtml(); else paintV2(); }
+  function paintV2FindRes() { var el = region('v2findres'); if (el) el.innerHTML = v2FindResHtml(); }
+  function paintV2Modal() {
+    var el = region('v2modal');
+    if (el) el.innerHTML = v2ModalHtml();
+  }
+
+  // ── v2 Materials: events ──
+
+  // Opening another job closes the send confirm (never while it is sending),
+  // the supplier search and any open Rebuild or Discard question.
+  function v2Leave() {
+    if (state.v2m.modal && !state.v2m.modal.busy) { state.v2m.modal = null; paintV2Modal(); }
+    state.v2m.find.open = false;
+    Object.keys(state.v2m.jobs).forEach(function (id) { state.v2m.jobs[id].ask = null; });
+  }
+
+  function onV2Click(t) {
+    var verb = t.getAttribute('data-dpc-v2');
+    if (verb == null) return false;
+    var jobId = state.jobId;
+    var id = t.getAttribute('data-dpc-v2-id');
+    var sid = v2Key(t.getAttribute('data-dpc-v2-sid'));
+    var e = v2Entry(jobId);
+    if (verb === 'modal-go') { v2Send(); return true; }
+    if (verb === 'modal-no') { v2CloseModal(); return true; }
+    if (verb === 'toggle') {
+      state.v2m.open = !state.v2m.open;
+      writeStore('localStorage', LS_ORDER, state.v2m.open ? '1' : '0');
+      paintV2();
+      refocus('[data-dpc-v2="toggle"]');
+      return true;
+    }
+    if (verb === 'find') { v2OpenFind(); return true; }
+    if (verb === 'find-close') { state.v2m.find.open = false; paintV2(); refocus('[data-dpc-v2="find"]'); return true; }
+    if (verb === 'find-retry') { v2RunFind(); return true; }
+    if (!jobId) return true;
+    if (verb === 'retry') { readV2(jobId, !!(e && e.d)); return true; }
+    if (!e || e.status !== 'ok') return true;
+    if (verb === 'addsup') v2AddSupplier(jobId, sid);
+    else if (verb === 'addline') v2AddLine(jobId, sid);
+    else if (verb === 'suggest') v2Suggest(jobId);
+    else if (verb === 'del') v2DeleteLine(jobId, id);
+    else if (verb === 'line-retry') {
+      if (e.busy['line:' + id] === 'delete' || (e.msg['line:' + id] && /taken off/i.test(e.msg['line:' + id].text))) v2DeleteLine(jobId, id); else v2SaveLine(jobId, id);
+    }
+    else if (verb === 'more') { e.more[id] = true; paintV2(); refocus('[data-dpc-v2-cell="profile"][data-dpc-v2-id="' + id + '"]'); }
+    else if (verb === 'remove-sup') v2RemoveSupplier(jobId, sid);
+    else if (verb === 'photo-add') {
+      var input = region('v2mat') && region('v2mat').querySelector('[data-dpc-v2-file="' + v2KeyAttr(sid) + '"]');
+      if (input) input.click();
+    }
+    else if (verb === 'photo-view') v2ViewPhoto(jobId, id);
+    else if (verb === 'photo-del') v2DeletePhoto(jobId, id);
+    else if (verb === 'make') v2MakeEmail(jobId, sid, false);
+    else if (verb === 'test') v2AskSend(jobId, id, 'test');
+    else if (verb === 'send') v2AskSend(jobId, id, 'real');
+    else if (verb === 'resend') v2AskSend(jobId, id, 'resend');
+    else if (verb === 'rebuild' || verb === 'discard') { e.ask = { kind: verb, emailId: id }; paintV2(); refocus('[data-dpc-v2="' + verb + '-go"]'); }
+    else if (verb === 'ask-no') { var was = e.ask; e.ask = null; paintV2(); if (was) refocus('[data-dpc-v2="' + was.kind + '"][data-dpc-v2-id="' + was.emailId + '"]'); }
+    else if (verb === 'rebuild-go') { var bx = v2BoxOfEmail(e, id); if (bx) v2MakeEmail(jobId, bx.supplier_id, true); }
+    else if (verb === 'discard-go') v2Discard(jobId, id);
+    return true;
+  }
+
+  // True when the change was one of v2 Materials' boxes.
+  function onV2Change(t) {
+    var jobId = state.jobId;
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return false;
+    if (t.hasAttribute('data-dpc-v2-status')) { v2SetStatus(jobId, t.getAttribute('data-dpc-v2-status'), t.value); return true; }
+    if (t.hasAttribute('data-dpc-v2-move')) { v2MoveLine(jobId, t.getAttribute('data-dpc-v2-move'), v2Key(t.value)); return true; }
+    if (t.hasAttribute('data-dpc-v2-pmove')) { v2MovePhoto(jobId, t.getAttribute('data-dpc-v2-pmove'), v2Key(t.value)); return true; }
+    if (t.hasAttribute('data-dpc-v2-main')) { v2SetMain(jobId, t.getAttribute('data-dpc-v2-main'), !!t.checked); return true; }
+    if (t.hasAttribute('data-dpc-v2-date')) { e.dates[t.getAttribute('data-dpc-v2-date')] = t.value; return true; }
+    if (t.hasAttribute('data-dpc-v2-file')) {
+      var file = t.files && t.files[0];
+      var where = v2Key(t.getAttribute('data-dpc-v2-file'));
+      t.value = '';
+      if (file) v2UploadPhoto(jobId, where, file);
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-v2-attach')) {
+      var mid = t.getAttribute('data-dpc-v2-mid');
+      var m = v2OpenById(e, mid);
+      if (!m) return true;
+      var typed = e.mailTyped[mid] || (e.mailTyped[mid] = {});
+      if (e.mailAt[mid] === undefined) e.mailAt[mid] = m.updated_at;
+      var ids = (typed.photo_ids || m.photo_ids).filter(function (x) { return x !== t.getAttribute('data-dpc-v2-attach'); });
+      if (t.checked) ids.push(t.getAttribute('data-dpc-v2-attach'));
+      typed.photo_ids = ids.slice(0, V2_EMAIL_PHOTOS);
+      v2SaveMail(jobId, mid);
+      return true;
+    }
+    return false;
+  }
+
+  function onV2Input(t) {
+    var jobId = state.jobId;
+    if (t.hasAttribute('data-dpc-v2-q')) {
+      var f = state.v2m.find;
+      f.q = t.value || '';
+      clearTimeout(f.timer);
+      f.timer = setTimeout(v2RunFind, V2_FIND_MS);
+      return true;
+    }
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok') return false;
+    if (t.hasAttribute('data-dpc-v2-cell')) {
+      var id = t.getAttribute('data-dpc-v2-id');
+      var l = v2Local(e, id) || v2Line(e, id);
+      if (!l) return true;
+      if (e.typed[id] === undefined) e.typed[id] = {};
+      if (e.typedAt[id] === undefined && !l.local) e.typedAt[id] = l.updated_at;
+      e.typed[id][t.getAttribute('data-dpc-v2-cell')] = t.value;
+      if (t.getAttribute('data-dpc-v2-cell') === 'quantity') {
+        if (matQty(t.value).ok) t.removeAttribute('aria-invalid'); else t.setAttribute('aria-invalid', 'true');
+      }
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-v2-mf')) {
+      var mid = t.getAttribute('data-dpc-v2-mid');
+      var m = v2OpenById(e, mid);
+      if (!m) return true;
+      if (e.mailTyped[mid] === undefined) e.mailTyped[mid] = {};
+      if (e.mailAt[mid] === undefined) e.mailAt[mid] = m.updated_at;
+      e.mailTyped[mid][t.getAttribute('data-dpc-v2-mf')] = t.value;
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-v2-date')) { e.dates[t.getAttribute('data-dpc-v2-date')] = t.value; return true; }
+    return false;
+  }
+
+  // A line's cell or the held email's field is saved when it is left. A
+  // repaint that takes the focused box away is not the person leaving it.
+  function onV2FocusOut(t) {
+    var jobId = state.jobId;
+    if (t.hasAttribute('data-dpc-v2-cell')) {
+      var id = t.getAttribute('data-dpc-v2-id');
+      setTimeout(function () { v2SaveLine(jobId, id); }, 0);
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-v2-mf')) {
+      var mid = t.getAttribute('data-dpc-v2-mid');
+      // A press on Send now or the test button saves first itself.
+      setTimeout(function () { v2SaveMail(jobId, mid); }, 0);
+      return true;
+    }
+    return false;
+  }
+
+  // Drag a line by its grip into a box, between boxes or back to the draft
+  // list. Phones use the line's Move to box instead.
+  function onV2DragStart(ev) {
+    var g = ev.target && ev.target.closest ? ev.target.closest('[data-dpc-v2-grip]') : null;
+    if (!g) return;
+    state.v2m.drag = g.getAttribute('data-dpc-v2-grip');
+    try {
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', state.v2m.drag);
+      var row = g.closest('[data-dpc-v2-row]');
+      if (row && ev.dataTransfer.setDragImage) ev.dataTransfer.setDragImage(row, 12, 12);
+    } catch (x) { /* an old browser */ }
+    var r = root();
+    if (r) r.classList.add('dpc-v2-dragging');
+  }
+  function v2DropZone(ev) {
+    var z = ev.target && ev.target.closest ? ev.target.closest('[data-dpc-v2-box]') : null;
+    return z && root() && root().contains(z) ? z : null;
+  }
+  function onV2DragOver(ev) {
+    if (!state.v2m.drag) return;
+    var z = v2DropZone(ev);
+    if (!z) return;
+    ev.preventDefault();
+    try { ev.dataTransfer.dropEffect = 'move'; } catch (x) { /* an old browser */ }
+    var r = root();
+    Array.prototype.forEach.call(r.querySelectorAll('.dpc-v2-over'), function (x) { if (x !== z) x.classList.remove('dpc-v2-over'); });
+    z.classList.add('dpc-v2-over');
+  }
+  function onV2Drop(ev) {
+    var id = state.v2m.drag;
+    var z = v2DropZone(ev);
+    if (!id || !z) return;
+    ev.preventDefault();
+    v2DragEnd();
+    v2MoveLine(state.jobId, id, v2Key(z.getAttribute('data-dpc-v2-box')));
+  }
+  function v2DragEnd() {
+    state.v2m.drag = null;
+    var r = root();
+    if (!r) return;
+    r.classList.remove('dpc-v2-dragging');
+    Array.prototype.forEach.call(r.querySelectorAll('.dpc-v2-over'), function (x) { x.classList.remove('dpc-v2-over'); });
+  }
+
   function workspaceHtml() {
     var h = '<section class="dpc-workspace" data-dpc-region="workspace" aria-label="Job">';
     if (state.base.status === 'error' && state.rowStale) {
@@ -4744,7 +4159,7 @@
     } else if (!state.row) {
       h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
     } else {
-      h += headHtml(state.row) + sectionHtml() + matHtml() + repHtml() + mailHtml() + schedHtml();
+      h += headHtml(state.row) + sectionHtml() + v2Html() + repHtml() + schedHtml();
     }
     return h + '</section>';
   }
@@ -4752,7 +4167,6 @@
   function paintWorkspace() {
     var w = region('workspace');
     if (w) w.outerHTML = workspaceHtml();
-    wireMat();
   }
   function paintHead() { var el = region('head'); if (el) keepNextFocus(function () { el.outerHTML = headHtml(state.row); }); }
   function paintCouncil() { var el = region('council'); if (el) el.innerHTML = councilHtml(); }
@@ -4771,9 +4185,9 @@
     if (!r) return;
     var h = '<div class="dpc"><div class="dpc-header"><div class="dpc-row"><div class="dpc-grow"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>' + trayBtnHtml() + '</div></div>';
     h += trayHtml();
-    h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div></div>';
+    h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div>';
+    h += '<div data-dpc-region="v2modal">' + v2ModalHtml() + '</div></div>';
     r.innerHTML = h;
-    wireMat();
     paintList();
   }
 
@@ -4795,20 +4209,28 @@
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
       '[data-dpc-mode],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
-      '[data-dpc-mat-retry],[data-dpc-mat-addline],[data-dpc-mat-suggest],[data-dpc-mat-remove],[data-dpc-mat-del],[data-dpc-mat-clear],' +
-      '[data-dpc-order],[data-dpc-order-pdf],[data-dpc-mail],' +
-      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install],' +
+      '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
-      '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no]') : null;
+      '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
+      '[data-dpc-v2]') : null;
     if (!t || t.disabled) return;
+    if (onV2Click(t)) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
     if (onRepClick(t)) return;
-    if (onMatClick(t)) return;
-    if (onOrderClick(t)) return;
-    if (onMailClick(t)) return;
-    if (onDelivClick(t)) return;
     if (onInstallClick(t)) return;
+    if (t.hasAttribute('data-dpc-deliv-cal')) {
+      // The Calendar tab's own call, once: the calendar opens as it was left.
+      if (typeof global.showView === 'function') global.showView('calendar');
+      return;
+    }
+    if (t.hasAttribute('data-dpc-sched-toggle')) {
+      state.sched.open = !state.sched.open;
+      writeStore('localStorage', LS_SCHED, state.sched.open ? '1' : '0');
+      paintSched();
+      refocus('[data-dpc-sched-toggle]');
+      return;
+    }
     if (t.hasAttribute('data-dpc-job')) {
       if (t.getAttribute('data-dpc-job') !== state.jobId) state.stage.confirm = null;
       selectJob(rowById(t.getAttribute('data-dpc-job')));
@@ -5014,198 +4436,10 @@
     return true;
   }
 
-  // Materials by supplier's controls. True when the press was one of them.
-  function onMatClick(t) {
-    var jobId = state.jobId;
-    if (t.getAttribute('data-dpc-toggle') === 'order') {
-      state.mat.open = !state.mat.open;
-      writeStore('localStorage', LS_ORDER, state.mat.open ? '1' : '0');
-      paintMat();
-      refocus('[data-dpc-toggle="order"]');
-    } else if (t.hasAttribute('data-dpc-mat-retry')) {
-      var what = t.getAttribute('data-dpc-mat-retry');
-      var e = matEntry(jobId);
-      if (what === 'suppliers') ensureSuppliers(true);
-      else if (!jobId) return true;
-      else if (what === 'read') readMat(jobId, false);
-      else if (what === 'orders') readMat(jobId, true);
-      else if (what === 'saves') retrySaves(jobId);
-      else if (what === 'add' && e && e.addMsg && e.addMsg.id) addSupplier(jobId, e.addMsg.id);
-      else if (what.indexOf('line:') === 0) retryLine(jobId, what.slice(5));
-      else if (what.indexOf('card:') === 0 && e) {
-        var sid = what.slice(5);
-        var msg = e.card[sid];
-        if (msg && msg.retry === 'remove') removeSupplier(jobId, sid);
-        else if (msg && msg.retry === 'suggest') suggestLines(jobId, sid);
-      }
-    } else if (t.hasAttribute('data-dpc-mat-addline')) {
-      addLine(jobId, t.getAttribute('data-dpc-mat-addline'));
-    } else if (t.hasAttribute('data-dpc-mat-suggest')) {
-      suggestLines(jobId, t.getAttribute('data-dpc-mat-suggest'));
-    } else if (t.hasAttribute('data-dpc-mat-remove')) {
-      removeSupplier(jobId, t.getAttribute('data-dpc-mat-remove'));
-    } else if (t.hasAttribute('data-dpc-mat-del')) {
-      deleteLine(jobId, t.getAttribute('data-dpc-mat-del'));
-    } else if (t.hasAttribute('data-dpc-mat-clear')) {
-      clearSketch(jobId);
-    } else {
-      return false;
-    }
-    return true;
-  }
-
-  // Slice 5's presses on a supplier card, a locked line and an order PDF.
-  // True when the press was one of them.
-  function onOrderClick(t) {
-    var jobId = state.jobId;
-    if (t.hasAttribute('data-dpc-order-pdf')) {
-      openOrderPdf(t.getAttribute('data-dpc-order-pdf'), t.getAttribute('data-dpc-order-pdf-version'), t.getAttribute('data-dpc-order-pdf-key'));
-      return true;
-    }
-    if (!t.hasAttribute('data-dpc-order')) return false;
-    var act = t.getAttribute('data-dpc-order');
-    var sid = t.getAttribute('data-dpc-order-sid');
-    var e = matEntry(jobId);
-    if (!jobId) return true;
-    if (act === 'sources-retry') { readMat(jobId, true); return true; }
-    if (!e) return true;
-    if (act === 'create') createOrder(jobId, sid);
-    else if (act === 'update') updateOrder(jobId, sid, null);
-    else if (act === 'takeoff') updateOrder(jobId, sid, t.getAttribute('data-dpc-order-line'));
-    else if (act === 'cancel') { e.cancelAsk = sid; paintMat(); refocus('[data-dpc-order="cancel-keep"]'); }
-    else if (act === 'cancel-keep') { e.cancelAsk = null; paintMat(); refocus('[data-dpc-order="cancel"][data-dpc-order-sid="' + sid + '"]'); }
-    else if (act === 'cancel-go') cancelOrder(jobId, sid);
-    else if (act === 'retry') {
-      var what = t.getAttribute('data-dpc-order-retry') || '';
-      if (what === 'create') createOrder(jobId, sid);
-      else if (what === 'update') updateOrder(jobId, sid, null);
-      else if (what === 'cancel') cancelOrder(jobId, sid);
-      else if (what.indexOf('takeoff:') === 0) updateOrder(jobId, sid, what.slice(8));
-    }
-    return true;
-  }
-
-  // The Emails section's presses. True when the press was one of them. Only
-  // send-go and send-again reach dispatch_order_send, and only reply-go and
-  // reply-again reach dispatch_order_reply.
-  function onMailClick(t) {
-    var jobId = state.jobId;
-    if (t.getAttribute('data-dpc-toggle') === 'mail') {
-      state.mail.open = !state.mail.open;
-      writeStore('localStorage', LS_MAIL, state.mail.open ? '1' : '0');
-      Object.keys(state.mail.jobs).forEach(function (id) { state.mail.jobs[id].ask = null; });
-      paintMail();
-      refocus('[data-dpc-toggle="mail"]');
-      return true;
-    }
-    if (!t.hasAttribute('data-dpc-mail')) return false;
-    var act = t.getAttribute('data-dpc-mail');
-    var key = t.getAttribute('data-dpc-mail-key') || '';
-    var m = mailEntry(jobId);
-    if (!jobId || !m) return true;
-    var ask = function (kind, focus) { m.ask = { kind: kind, id: key }; paintMail(); refocus('[data-dpc-mail="' + focus + '"]'); };
-    var unask = function (focus) { m.ask = null; paintMail(); refocus('[data-dpc-mail="' + focus + '"][data-dpc-mail-key="' + key + '"]'); };
-    if (act === 'retry') readMail(jobId, key === 'threads');
-    else if (act === 'pick') {
-      if (m.sel !== key) { m.sel = key; m.ask = null; m.notice = ''; paintMail(); refocus('[data-dpc-mail="pick"][data-dpc-mail-key="' + key + '"]'); }
-    }
-    else if (act === 'send') ask('send', 'send-no');
-    else if (act === 'send-no') unask('send');
-    else if (act === 'send-go') sendDraft(jobId, key, false);
-    else if (act === 'send-again') sendDraft(jobId, key, true);
-    else if (act === 'release') ask('release', 'release-no');
-    else if (act === 'release-no') unask('release');
-    else if (act === 'release-go') releaseDraft(jobId, key);
-    else if (act === 'discard') ask('discard', 'discard-no');
-    else if (act === 'discard-no') unask('discard');
-    else if (act === 'discard-go') discardDraft(jobId, key);
-    else if (act === 'save-retry') saveDraft(jobId, key);
-    else if (act === 'reply') ask('reply', 'reply-no');
-    else if (act === 'reply-no') unask('reply');
-    else if (act === 'reply-go') sendThreadReply(jobId, key, false);
-    else if (act === 'reply-again') sendThreadReply(jobId, key, true);
-    else if (act === 'link') linkThread(jobId, key);
-    return true;
-  }
-
   // The install row has one press left: Retry when the bookings did not load.
   function onInstallClick(t) {
     if (!t.hasAttribute('data-dpc-install')) return false;
     if (t.getAttribute('data-dpc-install') === 'retry-read') loadBase();
-    return true;
-  }
-
-  // The Schedule section's presses, and a thread's Mark delivery confirmed.
-  // True when the press was one of them. Only Mark sighted, Clear, Save, Clear
-  // (a hand-set date) and Retry send anything; opening and cancelling a line
-  // writes nothing.
-  function onDelivClick(t) {
-    var jobId = state.jobId;
-    var d = state.deliv;
-    var paintBoth = function () { paintSched(); paintMail(); };
-    if (t.getAttribute('data-dpc-toggle') === 'sched') {
-      d.open = !d.open;
-      writeStore('localStorage', LS_SCHED, d.open ? '1' : '0');
-      if (d.edit && d.edit.via === 'deliveries') d.edit = null;
-      d.ask = null;
-      paintSched();
-      refocus('[data-dpc-toggle="sched"]');
-      return true;
-    }
-    if (t.hasAttribute('data-dpc-deliv-cal')) {
-      // The Calendar tab's own call, once: the calendar opens as it was left.
-      if (typeof global.showView === 'function') global.showView('calendar');
-      return true;
-    }
-    var poId = t.getAttribute('data-dpc-deliv-po') || t.getAttribute('data-dpc-deliv-sight') || t.getAttribute('data-dpc-deliv-confirm') || '';
-    if (t.hasAttribute('data-dpc-deliv-sight')) {
-      if (jobId) markSighted(jobId, poId, true);
-    } else if (t.hasAttribute('data-dpc-deliv-unsight')) {
-      var u = t.getAttribute('data-dpc-deliv-unsight');
-      if (!jobId) return true;
-      if (u === 'ask') {
-        d.ask = { jobId: jobId, poId: poId };
-        d.edit = null;
-        d.msg = null;
-        paintBoth();
-        refocus('[data-dpc-deliv-unsight="keep"]');
-      } else if (u === 'keep') {
-        d.ask = null;
-        paintSched();
-        refocus('[data-dpc-deliv-unsight="ask"][data-dpc-deliv-po="' + poId + '"]');
-      } else if (u === 'go') {
-        markSighted(jobId, poId, false);
-      }
-    } else if (t.hasAttribute('data-dpc-deliv-confirm') || t.hasAttribute('data-dpc-deliv-thread')) {
-      if (!jobId) return true;
-      openConfirmedLine(jobId, poId, t.hasAttribute('data-dpc-deliv-thread') ? 'thread' : 'deliveries', t.getAttribute('data-dpc-deliv-thread'));
-      paintBoth();
-      refocus('[data-dpc-deliv-edit-date]');
-    } else if (t.hasAttribute('data-dpc-deliv-edit')) {
-      var ed = d.edit;
-      var act = t.getAttribute('data-dpc-deliv-edit');
-      if (!ed) return true;
-      if (act === 'save') { if (wholeDay(ed.date)) saveConfirmed(ed.date); }
-      else if (act === 'clear') saveConfirmed(null);
-      else if (act === 'retry') saveConfirmed(ed.last);
-      else if (act === 'cancel') {
-        d.edit = null;
-        paintBoth();
-        refocus(ed.via === 'thread' ? '[data-dpc-deliv-thread="' + ed.key + '"]' : '[data-dpc-deliv-confirm="' + ed.poId + '"]');
-      }
-    } else if (t.hasAttribute('data-dpc-deliv-retry')) {
-      if (!jobId) return true;
-      if (t.getAttribute('data-dpc-deliv-retry') === 'read') {
-        var e = matEntry(jobId);
-        readMat(jobId, !!e && e.status === 'ok');
-      } else {
-        var m = d.msg && d.msg.jobId === jobId ? d.msg.retry : null;
-        if (m && m.kind === 'expected') setExpected(jobId, m.poId, m.value);
-        else if (m && m.kind === 'sight') markSighted(jobId, m.poId, m.value);
-      }
-    } else {
-      return false;
-    }
     return true;
   }
 
@@ -5229,6 +4463,7 @@
       return;
     }
     if (!state.jobId) return;
+    if (onV2Change(t)) return;
     if (t.hasAttribute('data-dpc-sug-order')) {
       var e2 = repEntry(state.jobId);
       if (!e2) return;
@@ -5238,76 +4473,27 @@
       if (acc) acc.disabled = !t.value || !!e2.busy[sid];
       return;
     }
-    if (t.hasAttribute('data-dpc-mat-addsup')) {
-      var id = t.value;
-      t.value = '';
-      if (id) addSupplier(state.jobId, id);
-    } else if (t.hasAttribute('data-dpc-mat-move')) {
-      moveLine(state.jobId, t.getAttribute('data-dpc-mat-move'), t.value);
-    } else if (t.hasAttribute('data-dpc-mat-status')) {
-      setStatus(state.jobId, t.getAttribute('data-dpc-mat-status'), t.value);
-    } else if (t.hasAttribute('data-dpc-mail-link')) {
-      var m = mailEntry(state.jobId);
-      if (!m) return;
-      var key = t.getAttribute('data-dpc-mail-link');
-      m.link[key] = t.value;
-      var btn = region('mail') && region('mail').querySelector('[data-dpc-mail="link"][data-dpc-mail-key="' + key + '"]');
-      if (btn) btn.disabled = !t.value || !!m.busy['link:' + key];
-    }
-  }
-
-  // The expected date box is saved when it is left or Enter is pressed, never
-  // while a segment is still being typed. A box only part filled is not a date
-  // and is never sent; an emptied box clears the date.
-  function commitExpected(jobId, t) {
-    var poId = t.getAttribute('data-dpc-deliv-expected');
-    var v = text(t.value);
-    if ((!v && t.validity && t.validity.badInput) || (v && !wholeDay(v))) {
-      delete state.deliv.typed[poId];
-      var r = delivRow(matEntry(jobId), poId);
-      t.value = r ? wholeDay(r.delivery.expected) : '';
-      if (t.parentNode && t.parentNode.classList) t.parentNode.classList.toggle('dpc-deliv-blank', !t.value);
-      return;
-    }
-    setExpected(jobId, poId, v || null);
   }
 
   function onKeyDown(e) {
     var t = e.target;
-    if (e.key !== 'Enter' || !t || !t.hasAttribute || !state.jobId || !t.hasAttribute('data-dpc-deliv-expected')) return;
-    e.preventDefault();
-    commitExpected(state.jobId, t);
+    // Escape closes the send confirm (never while it is sending) and the supplier search.
+    if (e.key === 'Escape' && state.v2m.modal) { e.preventDefault(); v2CloseModal(); return; }
+    if (e.key === 'Escape' && t && t.hasAttribute && t.hasAttribute('data-dpc-v2-q')) { state.v2m.find.open = false; paintV2(); refocus('[data-dpc-v2="find"]'); return; }
   }
 
-  // A cell or the pad is saved when it is left. A repaint that takes the
-  // focused cell away is not the person leaving it.
+  // A cell or the held email is saved when it is left. A repaint that takes
+  // the focused box away is not the person leaving it.
   function onFocusOut(e) {
     var t = e.target;
     if (painting || !t || !t.hasAttribute || !state.jobId) return;
-    var jobId = state.jobId;
-    if (t.hasAttribute('data-dpc-mat-cell')) {
-      var id = t.getAttribute('data-dpc-mat-line');
-      setTimeout(function () { saveLine(jobId, id); }, 0);
-    } else if (t.hasAttribute('data-dpc-mat-pad')) {
-      saveText(jobId);
-    } else if (t.hasAttribute('data-dpc-mail-subject') || t.hasAttribute('data-dpc-mail-body')) {
-      var draftId = t.getAttribute('data-dpc-mail-subject') || t.getAttribute('data-dpc-mail-body');
-      setTimeout(function () { saveDraft(jobId, draftId); }, 0);
-    } else if (t.hasAttribute('data-dpc-deliv-expected')) {
-      commitExpected(jobId, t);
-    }
-  }
-
-  function onToggle(e) {
-    var t = e.target;
-    if (!t || !t.hasAttribute || !t.hasAttribute('data-dpc-mat-workout') || state.mat.workOpen === t.open) return;
-    state.mat.workOpen = t.open;
-    writeStore('localStorage', LS_WORKOUT, t.open ? '1' : '0');
+    onV2FocusOut(t);
   }
 
   function onInput(e) {
     var t = e.target;
     if (!t || !t.hasAttribute) return;
+    if (onV2Input(t)) return;
     if (t.hasAttribute('data-dpc-search')) {
       state.search = t.value || '';
       clearTimeout(searchTimer);
@@ -5337,48 +4523,6 @@
         var said = tape && tape.querySelector('.dpc-tape-next + .dpc-note-msg');
         if (said) said.remove();
       }
-      return;
-    }
-    if (t.hasAttribute('data-dpc-mat-cell') && state.jobId) {
-      var matRow = matLine(matEntry(state.jobId), t.getAttribute('data-dpc-mat-line'));
-      var field = t.getAttribute('data-dpc-mat-cell');
-      if (matRow && (field === 'description' || field === 'quantity' || field === 'unit')) matRow[field] = t.value;
-      return;
-    }
-    if (t.hasAttribute('data-dpc-mat-pad') && state.jobId) { padInput(state.jobId, t.value); return; }
-    if (t.hasAttribute('data-dpc-deliv-edit-date') || t.hasAttribute('data-dpc-deliv-expected')) {
-      var wrap = t.parentNode;
-      if (wrap && wrap.classList) wrap.classList.toggle('dpc-deliv-blank', !t.value);
-      if (t.hasAttribute('data-dpc-deliv-expected') && state.jobId && !(!t.value && t.validity && t.validity.badInput)) {
-        var poId = t.getAttribute('data-dpc-deliv-expected');
-        var dr = delivRow(matEntry(state.jobId), poId);
-        if (dr && (dr.delivery.expected || '') === t.value) delete state.deliv.typed[poId];
-        else state.deliv.typed[poId] = t.value;
-      }
-      if (t.hasAttribute('data-dpc-deliv-edit-date') && state.deliv.edit) {
-        state.deliv.edit.date = t.value;
-        var line = t.closest('.dpc-deliv-edit');
-        var saveBtn = line && line.querySelector('[data-dpc-deliv-edit="save"]');
-        if (saveBtn) saveBtn.disabled = !!state.deliv.edit.busy || !wholeDay(t.value);
-      }
-      return;
-    }
-    if ((t.hasAttribute('data-dpc-mail-subject') || t.hasAttribute('data-dpc-mail-body')) && state.jobId) {
-      var mm = mailEntry(state.jobId);
-      var draftId = t.getAttribute('data-dpc-mail-subject') || t.getAttribute('data-dpc-mail-body');
-      if (!mm) return;
-      var ed = mm.edits[draftId] || (mm.edits[draftId] = {});
-      ed[t.hasAttribute('data-dpc-mail-subject') ? 'subject' : 'body'] = t.value;
-      paintSendState(state.jobId);
-      return;
-    }
-    if (t.hasAttribute('data-dpc-mail-reply') && state.jobId) {
-      var mr = mailEntry(state.jobId);
-      var tk = t.getAttribute('data-dpc-mail-reply');
-      if (!mr) return;
-      mr.replies[tk] = t.value;
-      var rb = region('mail') && region('mail').querySelector('[data-dpc-mail="reply"][data-dpc-mail-key="' + tk + '"]');
-      if (rb) rb.disabled = !t.value.trim() || !!mr.busy['reply:' + tk];
       return;
     }
     if (t.hasAttribute('data-dpc-note') && state.jobId) {
@@ -5414,7 +4558,10 @@
       r.addEventListener('change', onChange);
       r.addEventListener('focusout', onFocusOut);
       r.addEventListener('keydown', onKeyDown);
-      r.addEventListener('toggle', onToggle, true);
+      r.addEventListener('dragstart', onV2DragStart);
+      r.addEventListener('dragover', onV2DragOver);
+      r.addEventListener('drop', onV2Drop);
+      r.addEventListener('dragend', v2DragEnd);
       wired = true;
     }
     if (!r.firstChild) render();

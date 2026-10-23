@@ -113,12 +113,6 @@ async function boot(page, api = {}, { viewport = { width: 1440, height: 900 } } 
     job_detail: (url) => DETAIL(url.searchParams.get('jobId')),
     job_notes: (url) => ({ job_id: url.searchParams.get('jobId'), total: 0, notes: [] }),
     list_pos: () => ({ purchase_orders: [] }),
-    list_suppliers: () => ({ suppliers: [] }),
-    dispatch_materials: (url) => ({
-      job_id: url.searchParams.get('job_id'), suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
-      workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
-    }),
-    dispatch_order_emails: (url) => ({ job_id: url.searchParams.get('job_id'), drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }),
     ...V2_EMPTY_READS,
   }, api);
   await page.setViewportSize(viewport);

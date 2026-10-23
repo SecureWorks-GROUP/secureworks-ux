@@ -625,3 +625,134 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
   .dpc .dpc-grp-head { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .dpc-grp-chev svg { transition: none; } }
+
+/* ---------- v2 slices 5 and 6: Materials (Draft list, supplier boxes, order emails) ---------- */
+/* A line: grip | item | qty | unit | status | move to | cross. */
+.dpc-v2-line { display: grid; grid-template-columns: 16px minmax(0, 2.2fr) 56px 64px 112px minmax(0, 1fr) 28px; gap: 6px; align-items: center; padding: 1px 6px; border-radius: 6px; }
+.dpc-v2-line:hover { background: var(--galv-2); }
+.dpc-v2-line input, .dpc-v2-line select, .dpc-v2-extra input { width: 100%; min-width: 0; font-size: 13px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.dpc-v2-line input[data-dpc-v2-cell="quantity"], .dpc-v2-line input[data-dpc-v2-cell="unit"] { font-family: var(--mono); font-size: 12.5px; }
+.dpc-v2-line input:hover, .dpc-v2-line select:hover, .dpc-v2-extra input:hover { border-color: var(--line); }
+.dpc-v2-line input:focus, .dpc-v2-line select:focus, .dpc-v2-extra input:focus { border-color: var(--signal); background: #fff; outline: none; }
+.dpc-v2-line input[aria-invalid="true"] { border-color: var(--signal-deep); }
+.dpc .dpc-v2-line select.dpc-status-pick { width: auto; max-width: 100%; justify-self: start; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 7px; border: 0; border-radius: 4px; cursor: pointer; }
+.dpc .dpc-v2-line select.dpc-tone-muted { background: var(--galv); color: var(--mute); }
+.dpc .dpc-v2-line select.dpc-tone-warn { background: #FCE7DE; color: #A83C16; }
+.dpc .dpc-v2-line select.dpc-tone-ok { background: #E4EFE6; color: var(--sage); }
+.dpc .dpc-v2-line select.dpc-v2-move { font-size: 12px; color: var(--steel-2); border-color: var(--line); background: #fff; }
+/* The grip: a block of dots, held to drag the line to another box. */
+.dpc-v2-grip { width: 12px; height: 26px; justify-self: center; cursor: grab; border-radius: 3px; background: radial-gradient(circle, #9DB0BC 1.4px, transparent 1.6px) 0 0 / 6px 6px; }
+.dpc-v2-grip:active { cursor: grabbing; }
+.dpc-v2-grip-off { cursor: default; background: none; }
+.dpc-v2-ro { grid-template-columns: 16px minmax(0, 1fr) auto; min-height: 36px; }
+.dpc-v2-rotext { font-size: 13px; padding: 7px 8px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-v2-rotext small { display: block; font-size: 11.5px; color: var(--mute); }
+.dpc-v2-standing .dpc-v2-rotext { color: var(--steel-2); font-style: italic; }
+.dpc-v2-extra { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 6px; padding: 0 40px 6px 28px; }
+.dpc .dpc-v2-morebtn { margin: -2px 0 4px 26px; }
+/* Photos under the lines of a box. */
+.dpc-v2-photos { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px 2px; }
+.dpc-v2-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 6px; border-radius: 6px; background: var(--galv-2); font-size: 12.5px; }
+.dpc .dpc-v2-photoname { flex: 1 1 160px; min-width: 0; text-align: left; font-size: 12.5px; color: var(--steel-2); overflow-wrap: anywhere; }
+.dpc-v2-photoname small { color: var(--mute); }
+.dpc-v2-photo select.dpc-v2-move { max-width: 180px; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-v2-photo .dpc-line-msg { flex: 1 1 100%; padding: 0; }
+/* The boxes. */
+.dpc-v2-draft { border-color: #C9D6DD; }
+.dpc-v2-draft .dpc-suphead { background: #FBF8F5; }
+.dpc-v2-isblocked { border-color: #E9C98A; }
+.dpc-v2-blocked { margin: 10px 12px 0; padding: 9px 12px; border-radius: 8px; background: #FDF3E1; color: #7A4D00; font-size: 13px; }
+.dpc-v2-main { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--steel-2); cursor: pointer; white-space: nowrap; }
+.dpc-v2-main small { font-weight: 400; color: var(--mute); }
+.dpc-v2-main input { width: 16px; height: 16px; accent-color: var(--signal); }
+.dpc-v2-hint { margin: 6px 12px; font-size: 12.5px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc-v2-warn { margin: 6px 12px; padding: 8px 10px; border-radius: 8px; background: #FCE7DE; color: #8C3413; font-size: 12.5px; overflow-wrap: anywhere; }
+.dpc-v2-nobox { margin-top: 12px; }
+/* The order part of a box: Make email, the held email, a send that may have gone. */
+.dpc-v2-order { border-top: 1px solid var(--galv); padding: 10px 12px 12px; }
+.dpc-v2-order .dpc-v2-hint, .dpc-v2-order .dpc-v2-warn, .dpc-v2-mail .dpc-v2-hint, .dpc-v2-mail .dpc-v2-warn { margin: 6px 0; }
+.dpc-v2-order > .dpc-card-msg { padding: 0 0 6px; }
+.dpc-v2-make { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.dpc-v2-date { display: flex; flex-direction: column; gap: 3px; }
+.dpc-v2-date span { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-v2-date input { font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-v2-date input:focus { border-color: var(--signal); outline: none; }
+.dpc-v2-callout { padding: 10px 12px; border: 1px solid #C3D8EA; border-radius: 8px; background: #E7F0F7; color: #2C5D86; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-v2-callout.dpc-v2-bad { border-color: #F0C2BD; background: #FBEAE8; color: #8C1D16; }
+.dpc-v2-callout .dpc-actions { margin-top: 8px; }
+/* The held email. */
+.dpc-v2-mail { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; min-width: 0; }
+.dpc-v2-mailhead { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }
+.dpc-v2-body { min-height: 230px; font-size: 13px; line-height: 1.5; background: #fff; resize: vertical; margin-top: 6px; }
+.dpc-v2-attach { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 12.5px; margin-top: 4px; }
+.dpc-v2-attach label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-v2-attach small { color: var(--mute); }
+.dpc-v2-attlabel { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-v2-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--galv-2); font-size: 13px; }
+.dpc-v2-sendrow { margin-top: 8px; }
+/* A test send is marked plainly, so nobody mistakes it for the real one. */
+.dpc .dpc-v2-testbtn { border: 1px dashed #C99A3B; background: #FFF8EA; color: #6E4700; }
+.dpc-v2-testtag { display: inline-block; font: 700 9.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; margin-right: 4px; border-radius: 4px; background: #F2B33D; color: #3E2A00; vertical-align: 1px; }
+.dpc-v2-testtag-big { font-size: 12px; padding: 4px 10px; margin: 0 0 10px; }
+/* Sent emails, folded. */
+.dpc-v2-sent { padding: 10px 12px 12px; border-top: 1px solid var(--galv); }
+.dpc-v2-sentitem { border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; background: #fff; }
+.dpc-v2-sentitem summary { cursor: pointer; padding: 8px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-v2-sentitem summary small { color: var(--mute); }
+.dpc-v2-sentitem .dpc-v2-hint { margin: 0 10px 6px; }
+.dpc-v2-pre { margin: 0 10px 10px; padding: 10px; border-radius: 6px; background: var(--galv-2); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+/* Add supplier search. */
+.dpc-v2-find { margin: 0 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--galv-2); }
+.dpc-v2-find > .dpc-row { display: flex; gap: 8px; }
+.dpc-v2-find .dpc-v2-hint { margin: 6px 0 8px; }
+.dpc-v2-q { flex: 1; min-width: 0; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.dpc-v2-q:focus { border-color: var(--signal); outline: none; }
+.dpc-v2-findres { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow: auto; }
+.dpc-v2-findres .dpc-mat-h4 { margin: 8px 0 2px; }
+.dpc-v2-findres .dpc-mat-h4:first-child { margin-top: 0; }
+.dpc .dpc-v2-res { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px; background: #fff; }
+.dpc-v2-res strong { display: block; font-size: 13.5px; overflow-wrap: anywhere; }
+.dpc-v2-res small { display: block; font-size: 12px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc .dpc-v2-res-noemail { border-style: dashed; background: #FCFCFB; }
+.dpc-v2-res .dpc-v2-resnote { color: #8A5A00; }
+.dpc .dpc-v2-res:disabled { opacity: .6; }
+/* Dragging a line: every box shows it can take it; the one under the pointer lights up. */
+.dpc-v2-dragging [data-dpc-v2-box] { border-style: dashed; }
+.dpc-v2-dragging .dpc-v2-lines { min-height: 40px; }
+.dpc [data-dpc-v2-box].dpc-v2-over { border-color: var(--signal); background: #FFF6F2; }
+/* The confirm before a send, over the page. */
+.dpc-v2-back { position: fixed; inset: 0; z-index: 600; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(26,39,46,.55); }
+.dpc-v2-modal { width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; border-radius: 12px; background: #fff; box-shadow: 0 20px 60px -20px rgba(26,39,46,.6); }
+.dpc-v2-modal-test { border-top: 6px solid #F2B33D; }
+.dpc-v2-modal h3 { font: 700 22px/1.1 var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); overflow-wrap: anywhere; }
+.dpc-v2-mfields { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 12px; margin: 14px 0 10px; font-size: 13px; }
+.dpc-v2-mfields > span:nth-child(odd) { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); padding-top: 2px; }
+.dpc-v2-mfields > span:nth-child(even) { overflow-wrap: anywhere; }
+.dpc-v2-modal .dpc-v2-hint, .dpc-v2-modal .dpc-v2-warn { margin: 8px 0; }
+.dpc-v2-modal .dpc-actions { margin-top: 14px; }
+@media (max-width: 768px) {
+  /* Item and the cross on top; Qty, Unit and the status; then Move to. */
+  .dpc-v2-line { grid-template-columns: 16px 56px 64px minmax(0, 1fr) 36px; gap: 4px 6px; padding: 6px 4px; border-radius: 0; }
+  .dpc-v2-line > .dpc-v2-grip { grid-column: 1; grid-row: 1 / span 3; align-self: start; margin-top: 8px; }
+  .dpc-v2-line > [data-dpc-v2-cell="description"] { grid-column: 2 / 5; grid-row: 1; }
+  .dpc-v2-line > [data-dpc-v2-cell="quantity"] { grid-column: 2; grid-row: 2; }
+  .dpc-v2-line > [data-dpc-v2-cell="unit"] { grid-column: 3; grid-row: 2; }
+  .dpc-v2-line > [data-dpc-v2-status] { grid-column: 4 / 6; grid-row: 2; align-self: center; }
+  .dpc-v2-line > [data-dpc-v2-move] { grid-column: 2 / 6; grid-row: 3; }
+  .dpc-v2-line > .dpc-x { grid-column: 5; grid-row: 1; }
+  .dpc-v2-ro { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .dpc-v2-extra { grid-template-columns: 1fr 1fr; padding: 0 4px 6px 26px; }
+  .dpc-v2-extra > [data-dpc-v2-cell="detail"] { grid-column: 1 / -1; }
+  .dpc .dpc-v2-line input, .dpc .dpc-v2-line select.dpc-v2-move, .dpc .dpc-v2-extra input, .dpc .dpc-v2-line .dpc-x { min-height: 44px; }
+  .dpc .dpc-v2-line select.dpc-status-pick { min-height: 32px; }
+  .dpc .dpc-v2-photo select.dpc-v2-move { flex: 1 1 auto; max-width: none; min-height: 44px; }
+  .dpc .dpc-v2-photo .dpc-x { min-width: 44px; min-height: 44px; }
+  .dpc-v2-make > * { flex: 1 1 100%; }
+  .dpc-v2-date input { min-height: 44px; }
+  .dpc .dpc-v2-order button, .dpc .dpc-v2-mail button, .dpc .dpc-v2-modal button, .dpc .dpc-v2-find button, .dpc .dpc-v2-box .dpc-suphead .dpc-x, .dpc .dpc-card-foot .dpc-addline { min-height: 44px; }
+  .dpc-v2-sendrow > button { flex: 1 1 100%; }
+  .dpc-v2-main { min-height: 44px; }
+  .dpc-v2-modal { padding: 16px; }
+  .dpc-v2-modal h3 { font-size: 19px; }
+  .dpc-v2-modal .dpc-actions > button { flex: 1 1 100%; }
+}

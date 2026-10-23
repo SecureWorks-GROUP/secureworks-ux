@@ -111,13 +111,7 @@ async function boot(page, { ops = {}, ghl = {}, viewport = null } = {}) {
     get_job_conversation: () => EMAILS,
     get_invoice_pdf: () => ({ success: true, pdf_base64: Buffer.from('%PDF-1.4 e2e').toString('base64'), content_type: 'application/pdf' }),
     list_pos: () => ({ purchase_orders: [] }),
-    // Slices 4 and 5: no materials and no order email on these jobs.
-    dispatch_materials: (url) => ({
-      job_id: url.searchParams.get('job_id'), suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
-      workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
-    }),
-    dispatch_order_emails: (url) => ({ job_id: url.searchParams.get('job_id'), drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }),
-    // Dispatch v2: no Arrival line, supplier reply or tray email.
+    // Dispatch v2: no materials, Arrival line, supplier reply or tray email.
     ...V2_EMPTY_READS,
   }, ops);
   const ghlHandlers = Object.assign({
@@ -265,8 +259,9 @@ test('Dispatch panel: under 1200 it drops under the middle; at 390 it follows th
 test('Dispatch panel Sources: quotes sent to the client, and this job\'s client invoices only', async ({ page }) => {
   const { root, panel, of } = await boot(page);
   const groups = panel.locator('.dpc-h4');
-  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices', 'Purchase orders']);
-  await expect(panel).toContainText('No purchase order yet.');
+  // Dispatch v2 has no purchase orders, so Sources lists none.
+  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices']);
+  await expect(panel).not.toContainText(/purchase order/i);
 
   // Newest first; never the unsent quote or a work order.
   const quotes = panel.locator('.dpc-h4:has-text("Quotes") ~ .dpc-doc').filter({ hasText: 'Quote' });
@@ -334,7 +329,7 @@ test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', a
   await expect(page.locator('#viewDispatch a[href*="send-quote"], #viewDispatch a[href*="tok-e2e"]')).toHaveCount(0);
 
   await openJob(root, 'SWR-900503');
-  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.', 'No purchase order yet.']);
+  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.']);
 });
 
 test('Dispatch panel Sources: a failed job read is an error in both groups, never an empty one', async ({ page }) => {
@@ -645,8 +640,8 @@ test('Dispatch panel: every call it makes is one of job_story, get_conversation,
   const since = calls.slice(mark).map((c) => c.fn + ':' + c.action);
   expect([...new Set(since)].sort()).toEqual(['ghl-proxy:get_conversation', 'ops-api:get_invoice_pdf', 'ops-api:get_job_conversation', 'ops-api:job_story']);
   expect(since.length).toBe(4);
-  // The panel draws no supplier card or email item (slices 3 to 7 are guarded in tests/e2e/ops-tab-set.spec.js).
-  await expect(root.locator('.dpc-supcard, .dpc-mail')).toHaveCount(0);
+  // The panel draws no supplier card or email item (Materials is guarded in tests/e2e/ops-dispatch-v2-materials.spec.js).
+  await expect(panel.locator('.dpc-supcard, .dpc-mail, .dpc-v2-mail')).toHaveCount(0);
   const panelText = await root.locator('.dpc-context').innerText();
   expect(panelText).not.toMatch(/—|template|attach|recording|transcript/i);
 });

@@ -1,7 +1,7 @@
 /**
  * Dispatch v2 test helpers: the board answer (pipeline&dispatch=1&board=v2)
  * built from a v1-shaped stub answer, and the empty answers of the v2 reads
- * (the Arrival line, Supplier replies and the Unmatched tray).
+ * (the Arrival line, Supplier replies, the Unmatched tray and Materials).
  *
  * Shared by ops-tab-set.spec.js, ops-dispatch-panel.spec.js and
  * ops-dispatch-v2.spec.js so each spec keeps its own job rows.
@@ -72,6 +72,12 @@ const V2_EMPTY_READS = {
   dispatch_arrival: (url) => ({ job_id: url.searchParams.get('job_id'), install: null, installs: [], arrival: null, arrival_read: 'ok' }),
   dispatch_v2_replies: (url) => ({ ok: true, job_id: url.searchParams.get('job_id'), emails: [], suggestions: [], orders: [], orders_wired: true, scan: { enabled: true } }),
   dispatch_v2_replies_unmatched: () => ({ ok: true, include_other: false, emails: [], counts: { needs_confirmation: 0, unmatched_order_desk: 0, unmatched_other: 0 } }),
+  // Materials (slices 5 and 6): an empty Draft list and no supplier boxes.
+  dispatch_v2_materials: (url) => ({
+    job_id: url.searchParams.get('job_id'), job_number: null, work_type: 'fencing', team_cc: { email: 'fencing@secureworkswa.com.au', open_question: null },
+    from: 'admin@secureworkswa.com.au', test_send_done: false, main_supplier_id: null, main_supplier_ticked: false, can_suggest: false,
+    draft_list: { lines: [], photos: [] }, suppliers: [],
+  }),
 };
 
 module.exports = { V2_STAGES, PERTH_TODAY, V2_BOARD_ROW, V2_ANSWER, V2_EMPTY_READS };

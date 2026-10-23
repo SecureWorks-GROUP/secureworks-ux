@@ -1979,6 +1979,29 @@ test.describe('Dispatch slice 4: Materials by supplier', () => {
     expect(fake.store['job-f1'].lines[0]).toMatchObject({ quantity: 20, unit: 'lengths' });
   });
 
+  // fill() focuses the next cell and types in separate turns, so the leave-save
+  // timer can win or lose that race. This does both in one turn, which is the
+  // order that posted a save while Qty was still focused.
+  test('typing into a cell in the same turn it is focused sends nothing until that cell is left', async ({ page }) => {
+    const { mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)], lines: [MLINE(1, 1, 'Steel posts 65x65', { quantity: 18, unit: 'posts' })] } });
+    await cell(mat, 1, 'description').click();
+    expect(writes()).toEqual([]);
+    await page.evaluate((sel) => {
+      const qty = document.querySelector(sel);
+      qty.focus();
+      qty.value = '20';
+      qty.dispatchEvent(new Event('input', { bubbles: true }));
+    }, `[data-dpc-mat-line="${LID(1)}"][data-dpc-mat-cell="quantity"]`);
+    await page.waitForTimeout(150);
+    expect(writes()).toEqual([]);
+    await expect(cell(mat, 1, 'quantity')).toHaveValue('20');
+    await cell(mat, 1, 'unit').click();
+    await expect(mat.locator('[data-dpc-region="matsave"]')).toHaveText('All changes saved');
+    expect(writes().map((c) => c.body.line)).toEqual([{
+      id: LID(1), supplier_id: SID(1), description: 'Steel posts 65x65', quantity: 20, unit: 'posts', status: 'not_reviewed',
+    }]);
+  });
+
   test('+ Add line sends nothing; its first save carries a new id and no stamp; an empty row is never saved', async ({ page }) => {
     const { root, mat, writes } = await bootMaterials(page, { 'job-f1': { suppliers: [MSUP(1)] } });
     await card(mat, 'Acacia Steel').locator('[data-dpc-mat-addline]').click();

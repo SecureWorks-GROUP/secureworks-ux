@@ -1290,6 +1290,15 @@
     return { id: l.id, supplier_id: l.supplier_id, description: text(l.description), quantity: matQty(l.quantity).value, unit: text(l.unit) || null, status: l.status };
   }
 
+  // The line as it stood when a cell was left. The save runs a turn later so
+  // Tab can land before a repaint; reading it here keeps a value typed into
+  // the next cell during that turn out of this leave.
+  function lineAtLeave(l) {
+    if (!l) return null;
+    var q = matQty(l.quantity);
+    return { out: lineOut(l), ok: q.ok, msg: q.msg || '' };
+  }
+
   function sameLine(a, b) {
     return a.supplier_id === b.supplier_id && a.description === b.description && a.quantity === b.quantity && a.unit === b.unit && a.status === b.status;
   }
@@ -1537,19 +1546,21 @@
 
   // One save in flight per line: a second edit waits for the answer and is
   // then sent with the latest values. Sent when a cell is left, or a box changed.
-  function saveLine(jobId, id) {
+  // `held` is the line at the moment a cell was left. Callers that commit the
+  // line as it stands now (a move, a status, Retry) pass none.
+  function saveLine(jobId, id, held) {
     var e = matEntry(jobId);
     var l = matLine(e, id);
     if (!l || l.gone || onOrder(l)) return;
     if (l.busy) { l.again = true; return; }
-    var q = matQty(l.quantity);
-    if (!q.ok) { l.msg = q.msg; l.retry = false; paintMatIf(jobId); return; }
-    if (!text(l.description)) {
+    if (!held) held = lineAtLeave(l);
+    if (!held.ok) { l.msg = held.msg; l.retry = false; paintMatIf(jobId); return; }
+    if (!held.out.description) {
       // A new row is saved the first time its Item is left with text in it.
       if (l.saved) { l.msg = 'Item cannot be empty.'; l.retry = false; paintMatIf(jobId); }
       return;
     }
-    var out = lineOut(l);
+    var out = held.out;
     if (l.saved && sameLine(out, l.saved)) {
       if (l.msg && !l.retry) { l.msg = ''; paintMatIf(jobId); }
       return;
@@ -4547,14 +4558,16 @@
   }
 
   // A cell or the pad is saved when it is left. A repaint that takes the
-  // focused cell away is not the person leaving it.
+  // focused cell away is not the person leaving it. The line is read here,
+  // not when the deferred save runs, so typing into the next cell waits.
   function onFocusOut(e) {
     var t = e.target;
     if (painting || !t || !t.hasAttribute || !state.jobId) return;
     var jobId = state.jobId;
     if (t.hasAttribute('data-dpc-mat-cell')) {
       var id = t.getAttribute('data-dpc-mat-line');
-      setTimeout(function () { saveLine(jobId, id); }, 0);
+      var held = lineAtLeave(matLine(matEntry(jobId), id));
+      setTimeout(function () { saveLine(jobId, id, held); }, 0);
     } else if (t.hasAttribute('data-dpc-mat-pad')) {
       saveText(jobId);
     } else if (t.hasAttribute('data-dpc-mail-subject') || t.hasAttribute('data-dpc-mail-body')) {

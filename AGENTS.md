@@ -48,18 +48,25 @@ moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
 section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-to 7 of the approved design: job list with To do beside All jobs, job header
-with the six-stop stage rail, Scope and notes, the right panel of Sources,
+to 7 of the approved design, rebuilt as Dispatch v2 in Oct 2026: job list with
+Active beside Archive in folding pipeline-stage sections, job header with the
+real pipeline (or Repairs) stage rail and the Arrival line, Scope and notes,
+Supplier replies with the Unmatched supplier emails tray, the right panel of Sources,
 Context story and Messages, Materials by supplier, Emails, and Deliveries and
 install, the last three never drawn on a make-safe). It reads
-`pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
+`pipeline&dispatch=1&board=v2` (Active and Archive), `dispatch_arrival` and
+`dispatch_v2_replies` once per job open, `dispatch_v2_replies_unmatched` for the
+tray, `job_detail` (once per job open; the panel reuses it, never
 a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
 Materials by supplier reads `dispatch_materials` once per job open and
 `list_suppliers` once a session.
 Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
-`send_sms` from `+61489267771`, the rail's `set_dispatch_stage` (after a
-confirm line) and `set_dispatch_next_step`, and the six `dispatch_materials_*`
+`send_sms` from `+61489267771` (after "Text this to the client?"), the rail's
+`update_job_status` (compare-and-set, `source 'dispatch'`) or
+`update_repair_stage` (each after a confirm line; never `set_dispatch_stage` or
+`set_dispatch_install_confirmed`), `set_dispatch_next_step`, the six
+`dispatch_v2_replies_*` / `dispatch_v2_suggestion_*` presses, and the six `dispatch_materials_*`
 writes on a person's edit or press, which touch only Dispatch's own tables (no
 order, message or job status). Slice 5 (back-end contract
 `docs/dispatch-slice-5-contract.md` in secureworks-backend): Create PO and email
@@ -83,7 +90,8 @@ renders as empty, and a later slice is not drawn until it is real. Below
 it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guards:
-`tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`.
+`tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`,
+`tests/e2e/ops-dispatch-v2.spec.js`.
 
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /

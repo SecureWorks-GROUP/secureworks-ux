@@ -239,9 +239,9 @@ const D_MANY = () => Array.from({ length: 420 }, (_, i) => D_ROW({
 
 // Boots Ops on the Dispatch tab against a stubbed ops-api. `api[action]` is a
 // function (url, postBody) returning the JSON body, or { status, body }.
-// `mode` seeds the list the tab first opens on ('all' for the slice 1 tests,
-// which check the All jobs list; null leaves the tab's own default, To do).
-async function bootDispatch(page, api = {}, { viewport = null, open = true, mode = 'all' } = {}) {
+// `mode` seeds the list the tab first opens on ('active', the v2 default;
+// null leaves whatever the tab remembers).
+async function bootDispatch(page, api = {}, { viewport = null, open = true, mode = 'active' } = {}) {
   const calls = [];
   const handlers = Object.assign({
     pipeline: (url) => (url.searchParams.get('search') ? D_FOUND([]) : D_LIST()),
@@ -258,7 +258,7 @@ async function bootDispatch(page, api = {}, { viewport = null, open = true, mode
   }, api);
   if (viewport) await page.setViewportSize(viewport);
   if (mode) {
-    await page.addInitScript((m) => { if (localStorage.getItem('sw_dispatch_mode') === null) localStorage.setItem('sw_dispatch_mode', m); }, mode);
+    await page.addInitScript((m) => { if (localStorage.getItem('sw_dispatch_view') === null) localStorage.setItem('sw_dispatch_view', m); }, mode);
   }
   await installOpsSessionStub(page);
   await page.route('**/*', async (route) => {

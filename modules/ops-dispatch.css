@@ -483,3 +483,21 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 @media (max-width: 768px) {
   .dpc-install-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* S5: partial deliveries, what arrived per line and the Record what arrived form */
+.dpc-recv { display: flex; flex-direction: column; gap: 8px; }
+.dpc-recv-list, .dpc-recv-parts { list-style: none; margin: 0; padding: 0; }
+.dpc-recv-line { font-size: 13px; color: var(--ink); }
+.dpc-recv-name { font-weight: 500; }
+.dpc-recv-parts { padding-left: 12px; color: var(--mute); }
+.dpc-recv-parts li { margin-top: 2px; }
+.dpc-recv-void { text-decoration: line-through; }
+.dpc .dpc-recv > .dpc-deliv-btn { align-self: flex-start; }
+.dpc-recv-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 2px 8px; align-items: center; font-size: 13px; }
+.dpc-recv-row small { grid-column: 1 / -1; color: var(--mute); }
+.dpc-recv-qty { width: 90px; font: 13px var(--mono); padding: 4px 6px; }
+.dpc-recv-daylabel { font-size: 12.5px; color: var(--mute); align-self: center; }
+@media (max-width: 640px) {
+  .dpc-recv-qty { min-height: 44px; }
+  .dpc .dpc-recv .dpc-textbtn { min-height: 44px; }
+}

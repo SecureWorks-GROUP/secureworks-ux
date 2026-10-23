@@ -23,19 +23,34 @@
  * get_conversation (a live GoHighLevel read, never polled) and ops-api
  * get_job_conversation (limit 200, email rows only). get_invoice_pdf is called
  * only when an invoice is pressed. Its one write is ghl-proxy send_sms, from
- * +61489267771, when a person presses Send; it never resends on its own.
+ * +61489267771, when a person presses Send and then Send text on the "Text
+ * this to the client?" line; it never resends on its own.
  *
- * Slice 3 adds the To do list beside All jobs and the six-stop stage rail
- * (the tape) in the job header. The pipeline dispatch=1 read carries each
- * row's Dispatch stage, To do flag and next-step line, and todo_total. The
- * rail's stage is Dispatch's own record and never the job status (ruling T1).
- * Its two writes, each only on a person's press: ops-api set_dispatch_stage
- * (job_id, stage, expected_stage) after a confirm line, and
- * set_dispatch_next_step (job_id, text). Each writes one job_dispatch_state
- * row and one job_events row and nothing else. This module never calls
- * update_job_status, update_repair_stage or update_job_field. A stage read
- * that failed, or an answer without the stage fields, shows the failed line
- * for To do and the rail, never an empty To do or a rail at Not started.
+ * Dispatch v2 (slices 2 and 3 of the v2 build) replaces the v1 To do list
+ * and six-stop Dispatch stage. The list reads pipeline with dispatch=1,
+ * board=v2 and view=active or view=archive, and draws only each row's board
+ * block (the v1 dispatch_stage / dispatch_todo fields and todo_total are
+ * ignored). Active lists accepted jobs in folding stage sections in pipeline
+ * order (Order Materials to Scheduled; repairs: Materials and Scheduled);
+ * Archive lists jobs that left Scheduled in the last 30 days, and a search of
+ * Archive finds older ones. The header rail shows the job's real pipeline
+ * stage. A press on a stop asks "Move SWF-x to <Stage>?" and only Move
+ * writes, through the same action the Ops Dash uses: update_job_status with
+ * expected_statuses [the stage shown] and source 'dispatch' (compare and set:
+ * a job moved meanwhile is not written), or update_repair_stage for a repair.
+ * set_dispatch_stage and set_dispatch_install_confirmed are never called.
+ * The next-step line still saves with set_dispatch_next_step (job_id, text).
+ *
+ * v2 slice 7 draws the Arrival line: a thin line under each list card from the
+ * row's board.arrival, and the full line in the open job from ops-api
+ * dispatch_arrival (read only, once per job open). v2 slice 8 adds Supplier
+ * replies to the job (dispatch_v2_replies, read only) and the Unmatched
+ * supplier emails tray (dispatch_v2_replies_unmatched, read only). Its six
+ * presses, each sent once on a person's press: dispatch_v2_replies_confirm_guess,
+ * _reject_guess, _assign, _hide, dispatch_v2_suggestion_accept and
+ * _dismiss. Accept saves the supplier's delivery date on the supplier box and
+ * never moves the job: when its answer offers a stage move, the rail's own
+ * confirm line asks first.
  *
  * Slice 4 adds Materials by supplier under Scope and notes (never on a
  * make-safe job). Reads: ops-api dispatch_materials once per job open (the
@@ -60,8 +75,7 @@
  * now presses (sendDraft, sendThreadReply below) or Try the send again after a send
  * whose result was not confirmed; nothing sends on create, on open or on its
  * own. Never called: create_po, update_po, delete_po, email_po,
- * push_po_to_xero, send-po-email, update_supplier_email, sync_suppliers,
- * update_job_status.
+ * push_po_to_xero, send-po-email, update_supplier_email and sync_suppliers.
  *
  * Slice 6 adds the Schedule section (Deliveries) under Emails (never on a
  * make-safe job): one row per purchase order per chosen supplier, each from
@@ -78,18 +92,16 @@
  * own showView('calendar') once, the same as the Calendar tab.
  *
  * Slice 7 finishes that section as Deliveries and install: under the
- * deliveries table, the install row (who is booked on which day, from the list
- * row's dispatch_install; no new read) and Mark confirmed. Its one write, on a
- * person's press: ops-api set_dispatch_install_confirmed (job_id, confirmed,
- * expected_install_day, expected_confirmed_at), which writes Dispatch's own
- * mark on job_dispatch_state and one job_events row. It makes, moves, locks or
- * confirms no booking (never create_assignment, update_assignment,
- * confirm_assignment or bulk_confirm), sends nothing and moves no job status
- * or Dispatch stage. A stop 6 job stays in To do until its install is
- * confirmed; the card and the rail say why.
+ * deliveries table, the install row (the install day from the board, and who
+ * is booked from the list row's dispatch_install; no new read). In v2 it has
+ * no write: Mark confirmed is gone. It makes, moves, locks or confirms no
+ * booking (never create_assignment, update_assignment, confirm_assignment or
+ * bulk_confirm).
  *
- * Guards: tests/e2e/ops-tab-set.spec.js (slices 1, 3, 4 and 5) and
- * tests/e2e/ops-dispatch-panel.spec.js (slice 2).
+ * Guards: tests/e2e/ops-tab-set.spec.js (slices 1, 3, 4 and 5),
+ * tests/e2e/ops-dispatch-panel.spec.js (slice 2) and
+ * tests/e2e/ops-dispatch-v2.spec.js (the v2 list, rail, Arrival line and
+ * supplier replies).
  * Contracts: secureworks-backend docs/dispatch-slice-1-read-contract.md,
  * docs/dispatch-slice-3-contract.md, docs/dispatch-slice-4-contract.md,
  * docs/dispatch-slice-5-contract.md and docs/dispatch-slice-6-contract.md.
@@ -112,21 +124,24 @@
   var SS_JOB = 'sw_dispatch_job';
   var LS_RIGHT = 'sw_dispatch_right';
   var LS_TAB = 'sw_dispatch_tab';
-  var LS_MODE = 'sw_dispatch_mode';
-  // The stage rail's six stops, in order (slice 3 build note section 4.1).
-  var STAGES = [
-    { key: 'accepted', label: 'Accepted' },
-    { key: 'deposit_paid', label: 'Deposit paid' },
-    { key: 'materials_ordered', label: 'Materials ordered' },
-    { key: 'supplier_confirmed', label: 'Supplier confirmed' },
-    { key: 'materials_on_site', label: 'Materials on site' },
-    { key: 'trade_scheduled', label: 'Trade scheduled' }
-  ];
-  var STAGE_SOURCES = ['set', 'job_status', 'repairs_board'];
-  var TODO_OUT = {
-    in_council: 'Not in To do: in council.',
-    council_to_come: 'Not in To do: council approval still to come.',
-    council_not_decided: 'Not in To do: council not decided on the Jobs tab.'
+  // Which list is showing: Active or Archive. (v1 kept To do / All jobs under
+  // sw_dispatch_mode; that key is no longer read.)
+  var LS_MODE = 'sw_dispatch_view';
+  var LS_FOLDS = 'sw_dispatch_folds'; // the stage sections folded shut
+  // The board's stages, used only when an answer's board summary has none. The
+  // live list always sends them (board.stages), in pipeline order.
+  var BOARD_STAGES = {
+    pipeline: [
+      { key: 'order_materials', label: 'Order Materials' },
+      { key: 'awaiting_supplier', label: 'Awaiting Supplier' },
+      { key: 'order_confirmed', label: 'Order Confirmed' },
+      { key: 'schedule_install', label: 'Schedule Install' },
+      { key: 'scheduled', label: 'Scheduled' }
+    ],
+    repairs: [
+      { key: 'materials', label: 'Materials' },
+      { key: 'scheduled', label: 'Scheduled' }
+    ]
   };
   var NEXT_STEP_MAX = 40;
   var LS_ORDER = 'sw_dispatch_order_open';
@@ -190,14 +205,6 @@
     return p.d + '/' + p.m + (p.y !== (yearNow || perthYearNow()) ? '/' + p.y : '');
   }
 
-  function installText(row, yearNow) {
-    var next = parseDay(row && row.next_scheduled_date);
-    if (next) return 'Install ' + DOW[next.dow] + ' ' + dayMonth(next, yearNow);
-    var last = parseDay(row && row.last_scheduled_date);
-    if (last) return 'Last booked ' + dayMonth(last, yearNow);
-    return 'Not booked';
-  }
-
   function stampText(v, yearNow) {
     var p = parseStamp(v);
     if (!p) return '';
@@ -217,7 +224,7 @@
 
   // A list row's work type is the server's work_type, never its stored type: a
   // repair-family job stored as make-safe arrives as work_type 'repair'. A row
-  // without one is a failed read (rowsFromPipeline), so there is no fallback.
+  // without one is a failed read (rowsFromBoard), so there is no fallback.
   function typeKey(row) {
     var t = text(row && row.work_type).toLowerCase();
     return /^[a-z0-9_-]+$/.test(t) ? t : '';
@@ -240,114 +247,239 @@
     return sub ? num + ' · ' + sub : num;
   }
 
-  // Merge the status columns of a dispatch=1 answer into one newest-first
-  // list. Throws when the answer is not the dispatch read, so the caller shows
-  // the failed-read line instead of a short or mislabelled list.
-  function rowsFromPipeline(resp) {
-    if (!resp || typeof resp !== 'object' || !resp.columns || typeof resp.columns !== 'object') {
-      throw new Error('Unexpected job list answer');
+  // ── v2 slice 2: the board answer ──
+
+  // The v2 board answer (pipeline with dispatch=1&board=v2): every row in the
+  // order the board's stage groups give, and the groups themselves. Throws when
+  // the answer carries no v2 board summary or a row has no board object, so the
+  // caller shows the failed-read line instead of an old-style list. The v1 row
+  // fields (dispatch_stage, dispatch_todo, todo_total and the rest) are never
+  // read here: the board decides what is listed and where.
+  function rowsFromBoard(resp) {
+    var b = resp && typeof resp === 'object' ? resp.board : null;
+    if (!b || typeof b !== 'object' || b.version !== 'v2' || !Array.isArray(b.groups) || !resp.columns || typeof resp.columns !== 'object') {
+      throw new Error('Job list answer is not the Dispatch v2 board');
     }
-    var rows = [];
+    var byId = {};
     Object.keys(resp.columns).forEach(function (col) {
       var list = resp.columns[col];
-      if (Array.isArray(list)) list.forEach(function (r) { if (r && typeof r === 'object') rows.push(r); });
+      if (Array.isArray(list)) list.forEach(function (r) { if (r && typeof r === 'object' && r.id) byId[r.id] = r; });
     });
-    rows.forEach(function (r) {
-      if (typeof r.value_inc_gst !== 'boolean' || !('description' in r) || typeof r.work_type !== 'string' || !r.work_type.trim()) {
+    Object.keys(byId).forEach(function (id) {
+      var r = byId[id];
+      if (!boardRowOk(r.board)) throw new Error('Job list answer is missing the board fields');
+      // The dispatch=1 row fields are still needed (as in v1): an ops-api
+      // without them is a failed read, never a list with gaps. The work type
+      // is the row's or the board's, never the stored type.
+      if (!text(r.work_type)) r.work_type = text(r.board.work_type);
+      if (typeof r.value_inc_gst !== 'boolean' || !('description' in r) || !r.work_type) {
         throw new Error('Job list answer is missing the Dispatch fields');
       }
       // Slice 4's materials_lines_total / materials_lines_ready are only real
       // when the list's materials read worked; a failed one is never 0 of 0.
       if (resp.dispatch_materials !== 'ok') { delete r.materials_lines_total; delete r.materials_lines_ready; }
-      // Slice 6: the rail's sightings counts, the same way.
+      // The rail's sightings counts, the same way.
       if (resp.dispatch_deliveries !== 'ok') { delete r.deliveries_orders_total; delete r.deliveries_orders_sighted; }
-      // Slice 7: a failed bookings read is never "Not booked".
-      if (resp.dispatch_installs !== 'ok') { delete r.dispatch_install; delete r.dispatch_install_open; }
+      // Who is booked (names only; the day comes from the board).
+      if (resp.dispatch_installs !== 'ok') delete r.dispatch_install;
     });
-    rows.sort(function (a, b) {
-      var ta = Date.parse(a.updated_at) || 0, tb = Date.parse(b.updated_at) || 0;
-      return tb - ta;
-    });
-    // Slice 3: the stage fields are trusted only when the answer says the stage
-    // read worked and every row carries them. Otherwise they are dropped from
-    // every row, so no card, list or rail can draw a stage the read did not give.
-    var stages = resp.dispatch_stages === 'ok' && typeof resp.todo_total === 'number' &&
-      rows.every(function (r) { return typeof r.dispatch_todo === 'boolean' && stageOf(r) !== null; }) ? 'ok' : 'failed';
-    // A todo_total that does not match the To do rows fails To do only: the
-    // stage fields stay on the rows, and All jobs, the cards and the rail draw.
-    var todo = 'failed';
-    if (stages === 'ok') {
-      var marked = rows.filter(function (r) { return r.dispatch_todo === true; }).length;
-      todo = marked === resp.todo_total ? 'ok' : 'failed';
-    } else {
-      rows.forEach(function (r) {
-        Object.keys(r).forEach(function (k) { if (k.indexOf('dispatch_') === 0) delete r[k]; });
+    var used = {};
+    var groups = b.groups.map(function (g) {
+      var ids = g && Array.isArray(g.job_ids) ? g.job_ids : [];
+      var rows = ids.map(function (id) { return byId[id]; }).filter(function (r) {
+        if (!r || used[r.id]) return false;
+        used[r.id] = true;
+        return true;
       });
-    }
+      return { key: text(g && g.key), track: text(g && g.track), label: text(g && g.label) || keyWords(g && g.key), rows: rows };
+    });
+    // A row no group names is still listed, never hidden.
+    var rest = Object.keys(byId).filter(function (id) { return !used[id]; }).map(function (id) { return byId[id]; });
+    if (rest.length) groups.push({ key: 'other', track: 'other', label: 'Other', rows: rest });
+    var rows = [];
+    groups.forEach(function (g) { rows.push.apply(rows, g.rows); });
+    var reads = b.reads && typeof b.reads === 'object' ? b.reads : {};
     return {
       rows: rows,
-      total: typeof resp.total === 'number' ? resp.total : rows.length,
-      degraded: resp.degraded === true,
-      stages: stages,
-      todo: todo,
-      todoTotal: todo === 'ok' ? resp.todo_total : null
+      groups: groups,
+      total: typeof b.total === 'number' ? b.total : rows.length,
+      stages: b.stages && typeof b.stages === 'object' ? b.stages : null,
+      archiveDays: typeof b.archive_days === 'number' ? b.archive_days : 30,
+      failedReads: READ_NAMES.filter(function (r) { return reads[r.key] === 'failed'; }).map(function (r) { return r.words; }),
+      degraded: resp.degraded === true
     };
   }
 
-  // ── slice 3: the stage rail's rules ──
+  // The side reads the board makes, in the words the list's notice uses.
+  var READ_NAMES = [
+    { key: 'installs', words: 'install bookings' },
+    { key: 'days_in_stage', words: 'days in stage' },
+    { key: 'deposits', words: 'deposits' },
+    { key: 'arrival', words: 'Arrival lines' }
+  ];
 
-  // 0 for not_started, 1 to 6 for the stops, -1 for anything else.
-  function stageIndex(key) {
-    if (key === 'not_started') return 0;
-    for (var i = 0; i < STAGES.length; i++) if (STAGES[i].key === key) return i + 1;
-    return -1;
+  function boardRowOk(b) {
+    return !!b && typeof b === 'object' && (b.track === 'pipeline' || b.track === 'repairs') && typeof b.stage_key === 'string' && !!b.stage_key &&
+      typeof b.title === 'string' && (b.stage_phase === 'window' || b.stage_phase === 'after');
   }
 
-  // A row's Dispatch stage as the read gave it: { none: true } for a make-safe
-  // row (no rail), null when the fields are missing or do not agree.
-  function stageOf(row) {
-    if (!row || !('dispatch_stage' in row) || !('dispatch_stage_index' in row)) return null;
-    if (row.dispatch_stage === null && row.dispatch_stage_index === null) return { none: true };
-    var i = stageIndex(row.dispatch_stage);
-    if (i < 0 || row.dispatch_stage_index !== i || STAGE_SOURCES.indexOf(row.dispatch_stage_source) < 0) return null;
-    return {
-      key: row.dispatch_stage,
-      index: i,
-      name: i ? STAGES[i - 1].label : 'Not started',
-      source: row.dispatch_stage_source,
-      from: text(row.dispatch_stage_from),
-      setAt: row.dispatch_stage_set_at,
-      setBy: text(row.dispatch_stage_set_by)
-    };
+  // A row's board object, or null when the row did not come from the v2 board.
+  function boardOf(row) { return row && boardRowOk(row.board) ? row.board : null; }
+
+  // "SWF-xxxxx · Full Name" as the board writes it.
+  function cardTitle(row) {
+    var b = boardOf(row);
+    return (b && text(b.title)) || jobTitle(row);
   }
 
-  // A label from a table the page already has, else the key in words.
+  // A key in words, for a stage the page has no label for.
   function keyWords(key) { return text(key).replace(/_/g, ' ') || 'not recorded'; }
 
-  function statusLabel(key) {
-    var sm = global.SW_STATE_MACHINE;
-    var labels = sm && sm.STATUS_LABELS;
-    return (labels && Object.prototype.hasOwnProperty.call(labels, key) && labels[key]) || keyWords(key);
+  // Whole days from one calendar day to another.
+  function dayNum(p) { return Math.round(Date.UTC(p.y, p.m - 1, p.d) / 86400000); }
+
+  // "3 days in stage", or '' when the events read gave no count.
+  function daysText(b) {
+    var n = b && b.days_in_stage;
+    if (typeof n !== 'number' || !isFinite(n) || n < 0) return '';
+    if (n < 1) return 'In stage since today';
+    return Math.floor(n) + (Math.floor(n) === 1 ? ' day' : ' days') + ' in stage';
   }
 
-  function repairStageLabel(key) {
-    var list = Array.isArray(global.REPAIR_STAGES) ? global.REPAIR_STAGES : [];
-    for (var i = 0; i < list.length; i++) if (list[i] && list[i].key === key && list[i].label) return list[i].label;
-    return keyWords(key);
+  // The install day in words. long adds the last day of a run of days and
+  // "tentative". A failed bookings read is never "Not booked".
+  function installWords(b, long) {
+    var ins = b && b.install;
+    if (!ins || typeof ins !== 'object') return 'Install not known';
+    if (!ins.booked) return 'Not booked';
+    var day = parseDay(ins.day);
+    if (!day) return 'Install not known';
+    var lead = ins.passed ? 'Install was ' : 'Install ';
+    var first = parseDay(ins.first_day), last = parseDay(ins.last_day);
+    var w = lead + dayText(day);
+    if (long && first && last && text(ins.first_day) !== text(ins.last_day)) w = lead + dayText(first) + ' to ' + dayText(last);
+    if (long && ins.tentative === true && !ins.passed) w += ', tentative';
+    return w;
   }
 
-  // Where the rail's place came from, in one line (build note row 15).
-  function stageSourceText(s, yearNow) {
-    if (s.source === 'set') {
-      var when = parseStamp(s.setAt);
-      var day = when ? dayText(when, yearNow) : '';
-      if (s.setBy) return 'Set by ' + s.setBy + (day ? ', ' + day : '');
-      return 'Set' + (day ? ' ' + day : '');
+  // An archived card's line: "Installed Wed 21/10 · archived 22/10".
+  function archiveWords(b) {
+    var ins = b && b.install;
+    var last = ins ? parseDay(ins.last_day) || parseDay(ins.day) : null;
+    var on = ins ? parseDay(ins.archive_on) : null;
+    var parts = [];
+    if (last) parts.push('Installed ' + dayText(last));
+    if (on) parts.push('archived ' + dayMonth(on));
+    if (b.stage_phase === 'after') parts.push('Ops Dash: ' + (text(b.stage_label) || keyWords(b.stage_key)));
+    return parts.join(' · ') || 'Install not known';
+  }
+
+  // The red and amber flags, in the order they show. Deposit not paid is never
+  // hidden; an unknown deposit (the invoice read failed) is not a red flag.
+  function flagsOf(b) {
+    var f = b && b.flags && typeof b.flags === 'object' ? b.flags : {};
+    var out = [];
+    if (f.deposit_not_paid === true) out.push({ tone: 'red', text: 'Deposit not paid' });
+    if (f.no_install_booked === true) out.push({ tone: 'amber', text: 'No install booked' });
+    if (f.install_date_passed === true) out.push({ tone: 'amber', text: 'Install day passed' });
+    return out;
+  }
+
+  function flagHtml(f) { return '<span class="dpc-flag dpc-flag-' + f.tone + '">' + esc(f.text) + '</span>'; }
+
+  // ── v2 slice 3: the header rail's rules ──
+
+  // A track's stages from the latest board answer, else the fixed lists.
+  function trackStages(b) {
+    var seen = state.stagesSeen && state.stagesSeen[b.track];
+    var list = Array.isArray(seen) && seen.length ? seen : (BOARD_STAGES[b.track] || []);
+    return list.filter(function (s) { return s && text(s.key); }).map(function (s) { return { key: text(s.key), label: text(s.label) || keyWords(s.key) }; });
+  }
+
+  // The stop a press may move the job to, from the board's moves, or null.
+  function moveTarget(b, key) {
+    var mv = b && b.moves;
+    if (!mv || typeof mv !== 'object' || !Array.isArray(mv.targets) || !text(mv.current)) return null;
+    if (mv.action !== 'update_job_status' && mv.action !== 'update_repair_stage') return null;
+    for (var i = 0; i < mv.targets.length; i++) {
+      var t = mv.targets[i];
+      if (t && t.key === key && key !== mv.current) return { key: key, label: text(t.label) || keyWords(key), direction: t.direction === 'back' ? 'back' : 'forward' };
     }
-    if (s.source === 'repairs_board') return 'From the Repairs board: ' + repairStageLabel(s.from) + '. Not set in Dispatch yet.';
-    return 'From the job status: ' + statusLabel(s.from) + '. Not set in Dispatch yet.';
+    return null;
   }
 
+  // Where a move shows besides Dispatch.
+  function moveWhere(b) { return b && b.track === 'repairs' ? 'the Repairs board' : 'the Ops Dash'; }
+
+  // ── v2 slice 7: the Arrival line's rules ──
+
+  var ARR_INSTALL = 80; // the install line sits at 80% of the width
+  var ARR_OUT = 92; // anything not in time sits past it
+
+  function arrivalOk(a) { return !!a && typeof a === 'object' && Array.isArray(a.orders) && !!parseDay(a.today); }
+
+  function arrivalLate(o) { return !!o && (o.flag === 'no_date' || o.flag === 'after_install'); }
+
+  // One order's words: "Tue 27/10", "Mon 2/11, not confirmed", "no date yet".
+  function arrivalWords(o) {
+    var d = parseDay(o.delivery_date);
+    if (o.flag === 'no_date') return 'no date yet';
+    if (o.flag === 'after_install') return (d ? dayText(d) + ', ' : '') + 'after the install';
+    if (o.flag === 'not_sent') return d ? dayText(d) + ', not sent yet' : 'not sent yet';
+    if (!d) return 'no date yet';
+    return dayText(d) + (o.mark === 'solid' ? '' : ', not confirmed');
+  }
+
+  // solid (ok), ring (wait), red (late), grey ring (draft: not sent, or no date).
+  function arrivalClass(o) {
+    if (arrivalLate(o)) return 'late';
+    if (o.flag === 'not_sent' || !parseDay(o.delivery_date)) return 'draft';
+    return o.mark === 'solid' ? 'ok' : 'wait';
+  }
+
+  // Places each order on the line: today at 0%, the install day at 80%, an
+  // order with no date or arriving after the install past the line at 92%.
+  // With nothing booked the line runs to the latest delivery date, or a week.
+  // Labels that would sit on top of each other drop to a second row.
+  function arrivalPlot(a) {
+    var today = parseDay(a.today);
+    var inst = parseDay(a.install_day);
+    var t0 = dayNum(today);
+    var dated = a.orders.map(function (o) { return parseDay(o.delivery_date); }).filter(Boolean).map(dayNum);
+    var end = inst ? dayNum(inst) : Math.max.apply(null, [t0 + 7].concat(dated));
+    var span = Math.max(1, end - t0);
+    var marks = [], outs = [];
+    a.orders.forEach(function (o) {
+      if (!o || typeof o !== 'object') return;
+      var d = parseDay(o.delivery_date);
+      var m = { order: o, cls: arrivalClass(o), name: text(o.supplier_name) || 'Supplier', words: arrivalWords(o), row: 0 };
+      if (arrivalLate(o) || !d) { m.pct = ARR_OUT; outs.push(m); return; }
+      m.pct = Math.max(0, Math.min(ARR_INSTALL, (dayNum(d) - t0) / span * ARR_INSTALL));
+      marks.push(m);
+    });
+    marks.sort(function (x, y) { return x.pct - y.pct; });
+    var last = [-100, -100];
+    marks.forEach(function (m) {
+      // The label of the marker past the line takes the right of row 0.
+      var blockedRight = outs.length && m.pct > 64;
+      var row = !blockedRight && m.pct - last[0] >= 18 ? 0 : m.pct - last[1] >= 18 ? 1 : (blockedRight ? 1 : 0);
+      m.row = row;
+      last[row] = m.pct;
+    });
+    return { today: today, inst: inst, marks: marks, outs: outs, outCls: outs.some(function (m) { return m.cls === 'late'; }) ? 'late' : 'draft' };
+  }
+
+  // "2 orders: 1 confirmed, 1 not in time", or "All 3 confirmed in time".
+  function arrivalSummary(a) {
+    var n = a.orders.length;
+    if (!n) return 'No orders yet';
+    if (a.all_confirmed_in_time === true) return n === 1 ? 'Confirmed in time' : 'All ' + n + ' confirmed in time';
+    var conf = a.orders.filter(function (o) { return o && o.mark === 'solid' && !arrivalLate(o); }).length;
+    var late = a.orders.filter(arrivalLate).length;
+    var parts = [conf + ' confirmed'];
+    if (late) parts.push(late + ' not in time');
+    return n + (n === 1 ? ' order: ' : ' orders: ') + parts.join(', ');
+  }
   // The next-step line as the server stores it: trimmed, runs of space as one.
   function cleanNextStep(v) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
 
@@ -746,17 +878,11 @@
     return p && p.y >= 2000 && p.y <= 2099 && /^\d{4}-\d{2}-\d{2}$/.test(text(v)) ? text(v) : '';
   }
 
-  // ── slice 7: the install row's rules ──
+  // ── the install row's rules ──
 
-  // Why a stop 6 job is in To do (the read's dispatch_install_open).
-  var INSTALL_OPEN = {
-    not_confirmed: 'In To do until the install is confirmed.',
-    moved: 'In To do: the install booking moved after it was confirmed.',
-    booked_after: 'In To do: the install was booked after it was confirmed.'
-  };
-
-  // The list row's install block as the server works it out
-  // (dispatch_install.ts), or null when it is missing or not whole.
+  // The list row's v1 install block (dispatch_install.ts), read only for who
+  // is booked: the day itself comes from the board. Null when it is missing or
+  // not whole.
   function installOf(row) {
     var d = row && row.dispatch_install;
     if (!d || typeof d !== 'object' || ['ahead', 'past', 'none'].indexOf(d.state) < 0 || !Array.isArray(d.people) || !Array.isArray(d.also_days) ||
@@ -779,16 +905,13 @@
     return '';
   }
 
-  // The rail panel's sightings line (build note section 4.4), from the list
-  // row's two counts; '' when the job has no counted order or the counts did
-  // not come.
-  function deliveriesRailLine(row, s) {
+  // The rail panel's sightings line, from the list row's two counts; '' when
+  // the job has no counted order or the counts did not come.
+  function deliveriesRailLine(row) {
     var total = row && row.deliveries_orders_total, seen = row && row.deliveries_orders_sighted;
     if (typeof total !== 'number' || typeof seen !== 'number' || !(total > 0)) return '';
     if (seen < total) return seen + ' of ' + total + ' orders sighted on site.';
-    return s && (s.index === 5 || s.index === 6)
-      ? 'Every order on this job is sighted on site.'
-      : 'Every order on this job is sighted on site. Press Materials on site to move the job.';
+    return 'Every order on this job is sighted on site.';
   }
 
   // "x of y items ready", or '' when the job has no line or the count is not known.
@@ -810,6 +933,19 @@
 
   // ───────────────────────── state ─────────────────────────
 
+  // One view's board read before it lands, or after it failed.
+  function emptyView() {
+    return { status: 'idle', rows: [], groups: [], total: null, stages: null, archiveDays: 30, failedReads: [], degraded: false, q: '', view: 'active' };
+  }
+
+  // The folded stage sections, kept per browser: { group key: true }.
+  function readFolds() {
+    try {
+      var v = JSON.parse(readStore('localStorage', LS_FOLDS) || '{}');
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    } catch (e) { return {}; }
+  }
+
   function tabKey(v) {
     for (var i = 0; i < TABS.length; i++) if (TABS[i].key === v) return v;
     return 'sources';
@@ -823,8 +959,11 @@
     search: '',
     leftOpen: readStore('localStorage', LS_LEFT) !== '0',
     scopeOpen: readStore('localStorage', LS_SCOPE) !== '0',
-    base: { status: 'idle', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null },
-    found: { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null },
+    // v2: each view's own board read (Active and Archive), and a search of
+    // the view that is showing. found.view says which view it searched.
+    base: emptyView(),
+    arch: emptyView(),
+    found: emptyView(),
     jobId: null,
     row: null,
     rowStale: false,
@@ -844,11 +983,21 @@
     sending: {},
     replyMsg: {},
     pdfLoading: {},
-    // Slice 3: which list is showing (opens on To do), and the rail's press
-    // state: the one open confirm line, the move in flight, the last answer's
-    // line, and the next-step box per job.
-    mode: readStore('localStorage', LS_MODE) === 'all' ? 'all' : 'todo',
+    // v2 slices 2 and 3: which list is showing (opens on Active), the stage
+    // sections folded shut, the latest board's stage lists, and the rail's
+    // press state: the one open confirm line ({ jobId, to, label, offer }),
+    // the move in flight, the last answer's line, and the next-step box per job.
+    mode: readStore('localStorage', LS_MODE) === 'archive' ? 'archive' : 'active',
+    folds: readFolds(),
+    stagesSeen: null,
     stage: { confirm: null, moving: null, msg: null, drafts: {}, saving: {}, nextMsg: {} },
+    // v2 slice 7: each open job's dispatch_arrival read, kept for the session.
+    arrival: {},
+    // v2 slice 8: each job's supplier replies read and its presses, and the
+    // Unmatched supplier emails tray.
+    rep: { jobs: {}, tray: { open: false, status: 'idle', data: null, other: false, busy: {}, msg: null, pick: {}, hideAsk: null } },
+    // Slice 4: the client text's "Text this to the client?" line, per job.
+    smsAsk: {},
     // Slice 4, Materials by supplier. jobs[jobId] holds that job's read and
     // everything typed and not yet saved, so any repaint draws it back.
     mat: {
@@ -880,11 +1029,8 @@
       ask: null,
       msg: null
     },
-    // Slice 7, the install row: the job whose press is in flight, the open
-    // confirm line ({ jobId, kind: 'none' | 'clear' }) and the line under the table.
-    install: { busy: null, ask: null, msg: null }
   };
-  var tokens = { base: 0, found: 0, fill: 0 };
+  var tokens = { active: 0, archive: 0, found: 0, fill: 0 };
   var searchTimer = null;
   var photoUrls = [];
 
@@ -892,42 +1038,48 @@
   function region(name) { var r = root(); return r ? r.querySelector('[data-dpc-region="' + name + '"]') : null; }
   function searching() { return state.search.trim() !== ''; }
 
-  // To do keeps the rows the read marks dispatch_todo, and none at all when
-  // the stage read failed: that shows the failed line, never an empty To do.
-  // To do is drawn only from an answer whose stage read worked and whose
-  // todo_total matches its To do rows.
-  function todoOk(from) { return from.stages === 'ok' && from.todo === 'ok'; }
+  // The view that is showing: a search of it while the search box has words.
+  function viewData(view) { return view === 'archive' ? state.arch : state.base; }
+  function current() { return searching() ? state.found : viewData(state.mode); }
 
-  function listedRows() {
-    var from = searching() ? state.found : state.base;
-    var rows = from.rows;
-    if (state.mode === 'todo') {
-      rows = todoOk(from) ? rows.filter(function (r) { return r.dispatch_todo === true && typeKey(r) !== 'makesafe'; }) : [];
-    }
-    return filterByType(rows, state.type);
-  }
+  // The listed rows of the view that is showing, through the work type buttons.
+  function listedRows() { return filterByType(current().rows, state.type); }
 
-  // The list that is showing has its rows, or failed (a failed stage read
-  // fails To do).
-  function listFailed() {
-    var from = searching() ? state.found : state.base;
-    if (from.status === 'error') return true;
-    return state.mode === 'todo' && from.status === 'ok' && !todoOk(from);
-  }
+  function listFailed() { return current().status === 'error'; }
 
   // ───────────────────────── reads ─────────────────────────
 
-  function loadBase() {
-    var token = ++tokens.base;
-    if (state.base.status !== 'ok') { state.base.status = 'loading'; paintList(); paintWorkspace(); }
-    return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1 }); }).then(function (resp) {
-      if (token !== tokens.base) return;
-      var got = rowsFromPipeline(resp);
-      state.base = { status: 'ok', rows: got.rows, total: got.total, degraded: got.degraded, stages: got.stages, todo: got.todo, todoTotal: got.todoTotal };
+  // One board read of a view ('active' or 'archive'). Each view keeps its own
+  // answer, so a failed Archive read never empties Active.
+  function loadView(view) {
+    var token = ++tokens[view];
+    var cur = viewData(view);
+    if (cur.status !== 'ok') {
+      cur.status = 'loading';
+      if (view === state.mode && !searching()) paintList();
+      if (view === 'active') paintWorkspace();
+    }
+    return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, board: 'v2', view: view }); }).then(function (resp) {
+      if (token !== tokens[view]) return;
+      var got = rowsFromBoard(resp);
+      var next = Object.assign(emptyView(), got, { status: 'ok' });
+      if (got.stages) state.stagesSeen = got.stages;
+      if (view === 'archive') {
+        state.arch = next;
+        refreshOpenRow();
+        paintList(true);
+        return;
+      }
+      state.base = next;
       adoptSelection();
     }).catch(function () {
-      if (token !== tokens.base) return;
-      state.base = { status: 'error', rows: [], total: null, degraded: false, stages: null, todo: null, todoTotal: null };
+      if (token !== tokens[view]) return;
+      if (view === 'archive') {
+        state.arch = Object.assign(emptyView(), { status: 'error' });
+        paintList();
+        return;
+      }
+      state.base = Object.assign(emptyView(), { status: 'error' });
       state.rowStale = true;
       paintList();
       paintWorkspace();
@@ -935,38 +1087,47 @@
     });
   }
 
-  // After a list read: keep the open job if it is still known, else open the
-  // one remembered for this session, else the first job in the list. An open
-  // job (one reached by search included) keeps its section as drawn: only the
-  // list, the header and the Council line (the facts the list carries) are
-  // redrawn, so typing and the list's place are kept.
+  function loadBase() { return loadView('active'); }
+
+  // After an Archive read: the open job's header facts from the new row.
+  function refreshOpenRow() {
+    var r = state.jobId ? rowById(state.jobId) : null;
+    if (r && r !== state.row) { state.row = r; paintHead(); }
+  }
+
+  // After an Active read: keep the open job if it is still known, else open
+  // the one remembered for this session, else the first Active job. An open
+  // job keeps its sections as drawn: only the list, the header, the Council
+  // line and the install row (the facts the list carries) are redrawn, so
+  // typing and the list's place are kept.
   function adoptSelection() {
     state.rowStale = false;
-    var rows = state.base.rows;
-    var byId = function (id) { for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]; return null; };
-    var current = state.jobId ? byId(state.jobId) : null;
-    if (current) state.row = current;
+    var now = state.jobId ? rowById(state.jobId) : null;
+    if (now) state.row = now;
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); paintSched(); return; }
-    var todo = state.mode === 'todo' && todoOk(state.base) ? rows.filter(function (r) { return r.dispatch_todo === true; }) : [];
-    var pick = byId(readStore('sessionStorage', SS_JOB)) || todo[0] || rows[0] || null;
+    var pick = rowById(readStore('sessionStorage', SS_JOB)) || state.base.rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
 
+  // A search of the view that is showing. In Archive it finds every archived
+  // job, however old.
   function runSearch() {
     var q = state.search.trim();
+    var view = state.mode;
     var token = ++tokens.found;
-    if (!q) { state.found = { status: 'idle', rows: [], degraded: false, q: '', stages: null, todo: null }; paintList(); return; }
-    state.found = { status: 'loading', rows: [], degraded: false, q: q, stages: null, todo: null };
+    if (!q) { state.found = emptyView(); paintList(); return; }
+    state.found = Object.assign(emptyView(), { status: 'loading', q: q, view: view });
     paintList();
-    Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, search: q }); }).then(function (resp) {
+    Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, board: 'v2', view: view, search: q }); }).then(function (resp) {
       if (token !== tokens.found) return;
-      var got = rowsFromPipeline(resp);
-      state.found = { status: 'ok', rows: got.rows, degraded: got.degraded, q: q, stages: got.stages, todo: got.todo };
+      var got = rowsFromBoard(resp);
+      if (got.stages) state.stagesSeen = got.stages;
+      state.found = Object.assign(emptyView(), got, { status: 'ok', q: q, view: view });
       paintList();
     }).catch(function () {
       if (token !== tokens.found) return;
-      state.found = { status: 'error', rows: [], degraded: false, q: q, stages: null, todo: null };
+      state.found = Object.assign(emptyView(), { status: 'error', q: q, view: view });
       paintList();
     });
   }
@@ -1032,6 +1193,8 @@
     loadNotes(row.id);
     loadMat(row);
     loadMail(row);
+    loadArrival(row);
+    loadReplies(row);
   }
 
   // The one write this module makes.
@@ -1136,6 +1299,7 @@
     var contactId = contactOf(jobId);
     var body = (state.replies[jobId] || '').trim();
     if (!jobId || !contactId || !body || state.sending[jobId]) return;
+    state.smsAsk[jobId] = false;
     state.sending[jobId] = true;
     state.replyMsg[jobId] = null;
     paintReply();
@@ -1166,57 +1330,66 @@
     });
   }
 
-  // ── slice 3 writes: the rail's stage and the next-step line ──
+  // ── v2 slice 3 writes: moving the job, and the next-step line ──
 
-  // Puts what a write answered onto every copy of the job's row (the list, the
-  // search and the open job), so the card and the rail redraw at once. Only
-  // when the merged row still reads as a whole stage.
+  // Puts what a write answered onto every copy of the job's row (Active,
+  // Archive, the search and the open job), so the card and the rail redraw at
+  // once. Only when the merged row still reads as a whole board row.
   function applyStageFields(jobId, fields) {
     var merge = function (r) { return r && r.id === jobId ? Object.assign({}, r, fields) : r; };
     var next = merge(rowById(jobId) || state.row);
-    if (!next || next.id !== jobId || !stageOf(next)) return;
-    state.base.rows = state.base.rows.map(merge);
-    state.found.rows = state.found.rows.map(merge);
+    if (!next || next.id !== jobId || !boardOf(next)) return;
+    [state.base, state.arch, state.found].forEach(function (v) {
+      v.rows = v.rows.map(merge);
+      v.groups = v.groups.map(function (g) { return Object.assign({}, g, { rows: g.rows.map(merge) }); });
+    });
     if (state.row && state.row.id === jobId) state.row = merge(state.row);
   }
 
-  function pickStageFields(answer) {
-    var out = {};
-    Object.keys(answer || {}).forEach(function (k) { if (k.indexOf('dispatch_') === 0) out[k] = answer[k]; });
-    return out;
-  }
-
-  // One set_dispatch_stage per confirmed press. The rail is locked while it is
-  // in flight and is never re-sent on its own.
-  function moveStage(jobId, to) {
+  // One move per confirmed press, through the same action the Ops Dash (or the
+  // Repairs board) uses, so the GHL stage and the manager texts follow as they
+  // do there. A pipeline move is compare-and-set against the stage the screen
+  // showed (expected_statuses): if the job moved meanwhile nothing is written.
+  // The rail is locked while the move is in flight and nothing is re-sent on
+  // its own. c is the confirm line: { jobId, to, label, offer }, where offer
+  // is a supplier reply's stage-move offer ({ from_status }).
+  function moveStage(c) {
     var row = state.row;
-    var s = row && row.id === jobId ? stageOf(row) : null;
-    if (!s || s.none || state.stage.moving || stageIndex(to) < 1) return;
+    var b = boardOf(row);
+    if (!c || !b || row.id !== c.jobId || state.stage.moving) return;
+    var body, action;
+    if (c.offer) {
+      action = 'update_job_status';
+      body = { jobId: c.jobId, status: c.to, expected_statuses: [c.offer.from_status], source: 'dispatch' };
+    } else {
+      if (!moveTarget(b, c.to)) return;
+      action = b.moves.action;
+      body = action === 'update_repair_stage'
+        ? { jobId: c.jobId, stage: c.to }
+        : { jobId: c.jobId, status: c.to, expected_statuses: [b.moves.current], source: 'dispatch' };
+    }
+    var jobId = c.jobId;
     state.stage.moving = jobId;
     state.stage.msg = null;
     paintTape();
-    Promise.resolve().then(function () {
-      return global.opsPost('set_dispatch_stage', { job_id: jobId, stage: to, expected_stage: s.key });
-    }).then(function (resp) {
-      if (!resp || resp.success !== true || resp.dispatch_stage !== to) throw new Error('Unexpected stage answer');
+    Promise.resolve().then(function () { return global.opsPost(action, body); }).then(function (resp) {
       state.stage.moving = null;
       state.stage.confirm = null;
-      applyStageFields(jobId, Object.assign(pickStageFields(resp), { dispatch_stage_from: null }));
-      paintTape();
-      paintList(true);
-      loadBase();
-    }).catch(function (e) {
-      state.stage.moving = null;
-      state.stage.confirm = null;
-      if (e && e.status === 409 && e.code === 'stage_changed') {
-        if (e.body) applyStageFields(jobId, pickStageFields(e.body));
-        state.stage.msg = { jobId: jobId, kind: 'changed', text: "This job's stage changed. Showing the latest." };
+      if (resp && resp.success === false && resp.skipped === 'status_changed') {
+        state.stage.msg = { jobId: jobId, kind: 'changed', text: 'This job moved somewhere else. Showing the latest.' };
         paintTape();
-        paintList(true);
         loadBase();
         return;
       }
-      state.stage.msg = { jobId: jobId, kind: 'fail', text: 'Stage not moved.', to: to };
+      if (!resp || resp.success !== true) throw new Error('Unexpected move answer');
+      state.stage.msg = { jobId: jobId, kind: 'ok', text: 'Moved to ' + c.label + '.' };
+      paintTape();
+      loadBase();
+      if (state.arch.status !== 'idle') loadView('archive');
+    }).catch(function () {
+      state.stage.moving = null;
+      state.stage.confirm = null;
+      state.stage.msg = { jobId: jobId, kind: 'fail', text: 'Not moved. The job is still in ' + (text(b.stage_label) || keyWords(b.stage_key)) + '.', retry: c };
       paintTape();
     });
   }
@@ -1231,11 +1404,11 @@
   }
 
   // One set_dispatch_next_step per press of Save. An empty line clears it.
+  // The line is a note on the card only: it moves nothing.
   function saveNextStep() {
     var jobId = state.jobId;
     var row = state.row;
-    var s = stageOf(row);
-    if (!jobId || !row || row.id !== jobId || !s || s.none || state.stage.saving[jobId] || nextUnchanged(jobId, row)) return;
+    if (!jobId || !row || row.id !== jobId || !boardOf(row) || state.stage.saving[jobId] || nextUnchanged(jobId, row)) return;
     var body = cleanNextStep(nextDraft(jobId, row));
     if (body.length > NEXT_STEP_MAX) return;
     state.stage.saving[jobId] = true;
@@ -1256,6 +1429,219 @@
       state.stage.saving[jobId] = false;
       state.stage.nextMsg[jobId] = { ok: false, text: 'Next step not saved. Your text is still here.' };
       paintTape();
+    });
+  }
+
+  // ── v2 slice 7: the job's full Arrival line ──
+  // dispatch_arrival writes nothing. Read once per job open and once after a
+  // delivery date is accepted; until it lands (or if it fails) the list row's
+  // own Arrival line is drawn.
+  function loadArrival(row) {
+    if (!row || !row.id || isMakesafe(row)) return;
+    var jobId = row.id;
+    var entry = { status: 'loading', data: null };
+    state.arrival[jobId] = entry;
+    paintArrival();
+    Promise.resolve().then(function () { return global.opsFetch('dispatch_arrival', { job_id: jobId }); }).then(function (resp) {
+      if (state.arrival[jobId] !== entry) return;
+      if (!resp || typeof resp !== 'object' || resp.job_id !== jobId) throw new Error('Unexpected arrival answer');
+      state.arrival[jobId] = { status: 'ok', data: resp };
+      paintArrival();
+    }).catch(function () {
+      if (state.arrival[jobId] !== entry) return;
+      state.arrival[jobId] = { status: 'error', data: null };
+      paintArrival();
+    });
+  }
+
+  // The Arrival line to draw: the job's own read when it worked, else the list
+  // row's, else nothing (loading, or failed).
+  function arrivalFor(row) {
+    var e = state.arrival[row.id];
+    if (e && e.status === 'ok' && e.data.arrival_read !== 'failed' && arrivalOk(e.data.arrival)) return { arrival: e.data.arrival };
+    var b = boardOf(row);
+    if (b && arrivalOk(b.arrival)) return { arrival: b.arrival };
+    return { arrival: null, loading: !e || e.status === 'loading' };
+  }
+
+  // ── v2 slice 8: supplier replies and suggested delivery dates ──
+  // Two reads, each writing nothing: dispatch_v2_replies once per job open
+  // (and once after each press on it), and dispatch_v2_replies_unmatched once
+  // each time the tab is shown (and after each tray press). Six presses, each
+  // sent once on a person's press, never on their own: confirm_guess,
+  // reject_guess, assign, hide, suggestion_accept and suggestion_dismiss.
+  // Accept saves the supplier's delivery date on the supplier box and moves no
+  // stage: when its answer offers a stage move, the rail's own confirm line
+  // asks first, and only Move sends update_job_status.
+
+  var REP_ACTIONS = {
+    confirm: 'dispatch_v2_replies_confirm_guess',
+    reject: 'dispatch_v2_replies_reject_guess',
+    assign: 'dispatch_v2_replies_assign',
+    hide: 'dispatch_v2_replies_hide',
+    accept: 'dispatch_v2_suggestion_accept',
+    dismiss: 'dispatch_v2_suggestion_dismiss'
+  };
+
+  function isObj(v) { return !!v && typeof v === 'object'; }
+
+  function repEntry(jobId) { return (jobId && state.rep.jobs[jobId]) || null; }
+
+  function repliesFrom(resp) {
+    if (!isObj(resp) || resp.ok !== true || !Array.isArray(resp.emails) || !Array.isArray(resp.suggestions)) throw new Error('Unexpected replies answer');
+    return {
+      emails: resp.emails.filter(function (m) { return isObj(m) && m.id; }),
+      suggestions: resp.suggestions.filter(function (s) { return isObj(s) && s.id; }),
+      orders: Array.isArray(resp.orders) ? resp.orders.filter(function (o) { return isObj(o) && o.order_id; }) : [],
+      ordersWired: resp.orders_wired !== false,
+      scan: isObj(resp.scan) ? resp.scan : null
+    };
+  }
+
+  function loadReplies(row) {
+    if (!row || !row.id || isMakesafe(row)) return;
+    state.rep.jobs[row.id] = { status: 'loading', data: null, busy: {}, msg: {}, pick: {} };
+    readReplies(row.id, false);
+  }
+
+  // quiet keeps what is drawn until the new answer lands.
+  function readReplies(jobId, quiet) {
+    var e = repEntry(jobId);
+    if (!e) return;
+    var token = e.token = {};
+    if (!quiet || e.status !== 'ok') { e.status = 'loading'; paintRepIf(jobId); }
+    Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_replies', { job_id: jobId }); }).then(function (resp) {
+      if (e.token !== token || state.rep.jobs[jobId] !== e) return;
+      e.data = repliesFrom(resp);
+      e.status = 'ok';
+      paintRepIf(jobId);
+    }).catch(function () {
+      if (e.token !== token || state.rep.jobs[jobId] !== e) return;
+      e.status = 'error';
+      paintRepIf(jobId);
+    });
+  }
+
+  // A refusal in plain words. changed: re-read, the screen was out of date.
+  function repWords(err) {
+    var code = err && err.code;
+    if (['email_changed', 'suggestion_changed', 'suggestion_not_open', 'not_a_best_guess', 'not_unmatched'].indexOf(code) >= 0) {
+      return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
+    }
+    if (code === 'order_required') return { changed: true, text: 'Pick the order this date is for, then press Accept again.' };
+    if (code === 'order_not_on_job' || code === 'order_mismatch') return { changed: true, text: 'That order is not on this job any more. Showing the latest.' };
+    if (code === 'orders_not_wired') return { text: 'Supplier orders are not switched on yet, so a delivery date cannot be saved.' };
+    if (code === 'supplier_box_not_found' || code === 'order_has_no_supplier_box') return { text: "That order's supplier box is no longer on the job, so the date was not saved." };
+    if (code === 'job_not_found') return { changed: true, text: 'That job was not found. Showing the latest.' };
+    return null;
+  }
+
+  function repDoneWords(kind, resp) {
+    if (kind === 'confirm') return 'Put on this job.';
+    if (kind === 'reject') return 'Sent back to the Unmatched supplier emails tray.';
+    if (kind === 'hide') return 'Hidden from the tray. The email stays in admin@.';
+    if (kind === 'dismiss') return 'Dismissed. No date was saved.';
+    if (kind === 'assign') return 'Put on ' + (text(resp && resp.job_number) || 'the job') + '.';
+    var o = resp && resp.order;
+    var d = o && parseDay(o.confirmed_delivery_date);
+    return 'Delivery date saved' + (o && text(o.supplier_name) ? ': ' + text(o.supplier_name) : '') + (d ? ', ' + dayText(d) : '') + '.';
+  }
+
+  var REP_NOT_DONE = {
+    confirm: 'Not put on the job.', reject: 'Not sent back.', hide: 'Not hidden.',
+    dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.'
+  };
+
+  // A stage's label, from the latest board answer, for a stage-move offer.
+  function pipelineLabel(key) {
+    var list = trackStages({ track: 'pipeline' });
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i].label;
+    return keyWords(key);
+  }
+
+  // One press on the job's Supplier replies. id is the email's id (confirm,
+  // reject) or the suggestion's (accept, dismiss).
+  function repPress(jobId, kind, id, extra) {
+    var e = repEntry(jobId);
+    if (!e || !id || e.busy[id] || !REP_ACTIONS[kind]) return;
+    e.busy[id] = kind;
+    e.msg[id] = null;
+    paintRepIf(jobId);
+    var body = kind === 'accept' || kind === 'dismiss' ? { suggestion_id: id } : { email_id: id };
+    if (extra) Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
+    Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
+      if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
+      delete e.busy[id];
+      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) };
+      readReplies(jobId, true);
+      if (kind === 'confirm' || kind === 'reject') trayReread();
+      if (kind !== 'accept') return;
+      // The date is on the supplier box now: redraw the Arrival line and the list.
+      if (state.row && state.row.id === jobId) loadArrival(state.row);
+      loadBase();
+      var offer = resp.stage_move_offer;
+      if (isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
+        state.stage.confirm = { jobId: jobId, to: text(offer.to_status), label: pipelineLabel(text(offer.to_status)), offer: { from_status: text(offer.from_status) } };
+        state.stage.msg = null;
+        paintTape();
+        refocus('[data-dpc-stage-go]');
+      }
+    }, function (err) {
+      delete e.busy[id];
+      var w = repWords(err);
+      e.msg[id] = { ok: false, text: w ? w.text : REP_NOT_DONE[kind], retry: w ? null : { kind: kind, extra: extra || null } };
+      if (w && w.changed) readReplies(jobId, true); else paintRepIf(jobId);
+    });
+  }
+
+  // ── the Unmatched supplier emails tray ──
+
+  function loadTray() {
+    var t = state.rep.tray;
+    var token = t.token = {};
+    if (t.status !== 'ok') t.status = 'loading';
+    paintTray();
+    Promise.resolve().then(function () {
+      return global.opsFetch('dispatch_v2_replies_unmatched', t.other ? { include_other: 1 } : {});
+    }).then(function (resp) {
+      if (t.token !== token) return;
+      if (!isObj(resp) || resp.ok !== true || !Array.isArray(resp.emails)) throw new Error('Unexpected tray answer');
+      t.data = { emails: resp.emails.filter(function (m) { return isObj(m) && m.id; }), counts: isObj(resp.counts) ? resp.counts : {} };
+      t.status = 'ok';
+      paintTray();
+    }).catch(function () {
+      if (t.token !== token) return;
+      t.status = 'error';
+      t.data = null;
+      paintTray();
+    });
+  }
+
+  // After a press elsewhere that can change the tray, only when it was read.
+  function trayReread() { if (state.rep.tray.status !== 'idle') loadTray(); }
+
+  // One press in the tray, on one email.
+  function trayPress(kind, emailId, extra) {
+    var t = state.rep.tray;
+    if (!emailId || t.busy[emailId] || !REP_ACTIONS[kind]) return;
+    t.busy[emailId] = kind;
+    t.msg = null;
+    paintTray();
+    var body = { email_id: emailId };
+    if (extra) Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
+    Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
+      if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
+      delete t.busy[emailId];
+      t.hideAsk = null;
+      t.msg = { ok: true, text: repDoneWords(kind, resp) };
+      loadTray();
+      var jobId = (extra && extra.job_id) || (resp.email && resp.email.job_id) || null;
+      if (jobId && state.jobId === jobId && repEntry(jobId)) readReplies(jobId, true);
+    }, function (err) {
+      delete t.busy[emailId];
+      var w = repWords(err);
+      t.msg = { ok: false, text: w ? w.text : REP_NOT_DONE[kind] };
+      if (w && w.changed) loadTray(); else paintTray();
     });
   }
 
@@ -1421,7 +1807,7 @@
     var e = matEntry(jobId);
     if (!e || !isCounts(counts)) return;
     e.counts = { total: counts.total, ready: counts.ready };
-    [state.base.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
+    [state.base.rows, state.arch.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
       rows.forEach(function (r) {
         if (r && r.id === jobId) { r.materials_lines_total = counts.total; r.materials_lines_ready = counts.ready; }
       });
@@ -1951,9 +2337,6 @@
     state.deliv.ask = null;
     state.deliv.msg = null;
     state.deliv.typed = {};
-    // Slice 7: the install row's confirm line and its last line.
-    state.install.ask = null;
-    state.install.msg = null;
   }
 
   function mailPick(jobId, key) {
@@ -2390,7 +2773,7 @@
     e.deliveries.counted = c.counted;
     e.deliveries.sighted = c.sighted;
     e.deliveries.all_sighted = c.all_sighted === true;
-    [state.base.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
+    [state.base.rows, state.arch.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
       rows.forEach(function (r) {
         if (r && r.id === jobId && typeof r.deliveries_orders_total === 'number') { r.deliveries_orders_total = c.counted; r.deliveries_orders_sighted = c.sighted; }
       });
@@ -2505,63 +2888,6 @@
     state.deliv.msg = null;
   }
 
-  // ── slice 7: Mark confirmed, its one write ──
-  // Sent once per press, against the install day and mark the screen showed.
-  // Its answer redraws the row, the open job's list row, To do's count, the
-  // card and the rail line: no list re-read, the open job stays open, and
-  // nothing here retries on its own.
-
-  // A write's (or a refusal's) install fields onto every copy of the job's row.
-  function applyInstallFields(jobId, src) {
-    if (!src || typeof src !== 'object') return;
-    var f = {};
-    if (installOf({ dispatch_install: src.dispatch_install })) f.dispatch_install = src.dispatch_install;
-    if (src.dispatch_install_open === null || INSTALL_OPEN[src.dispatch_install_open]) f.dispatch_install_open = src.dispatch_install_open;
-    if (typeof src.dispatch_todo === 'boolean') f.dispatch_todo = src.dispatch_todo;
-    if (src.dispatch_todo_out === null || typeof src.dispatch_todo_out === 'string') f.dispatch_todo_out = src.dispatch_todo_out;
-    applyStageFields(jobId, f);
-    // To do's number, counted again from the rows the list read gave.
-    if (state.base.status === 'ok' && todoOk(state.base)) {
-      state.base.todoTotal = state.base.rows.filter(function (r) { return r.dispatch_todo === true; }).length;
-    }
-    paintList(true);
-    if (state.jobId === jobId) paintHead();
-  }
-
-  var INSTALL_CHANGED = ['install_changed', 'confirmation_changed'];
-
-  function confirmInstall(jobId, confirmed) {
-    var row = state.row;
-    var d = row && row.id === jobId ? installOf(row) : null;
-    var ins = state.install;
-    if (!d || ins.busy) return;
-    ins.busy = jobId;
-    ins.ask = null;
-    ins.msg = null;
-    paintSchedIf(jobId);
-    Promise.resolve().then(function () {
-      return global.opsPost('set_dispatch_install_confirmed', {
-        job_id: jobId, confirmed: confirmed, expected_install_day: d.state === 'none' ? null : d.day, expected_confirmed_at: d.confirmed ? d.confirmed.at : null
-      });
-    }).then(writeOk).then(function (resp) {
-      ins.busy = null;
-      if (installOf({ dispatch_install: resp.dispatch_install })) applyInstallFields(jobId, resp);
-      else loadBase(); // saved, but the answer cannot redraw the row: one list read shows it
-      paintSchedIf(jobId);
-    }, function (err) {
-      ins.busy = null;
-      if (err && INSTALL_CHANGED.indexOf(err.code) >= 0) {
-        applyInstallFields(jobId, err.body);
-        ins.msg = { jobId: jobId, text: 'This booking changed somewhere else. Showing the latest.' };
-        paintSchedIf(jobId);
-        loadBase();
-        return;
-      }
-      ins.msg = { jobId: jobId, text: confirmed ? 'Not saved.' : 'Confirmation not cleared.', retry: confirmed };
-      paintSchedIf(jobId);
-    });
-  }
-
   // ───────────────────────── render: sidebar ─────────────────────────
 
   function failLine(message, retry, tight) {
@@ -2569,40 +2895,51 @@
       ' <button type="button" class="dpc-retry" data-dpc-retry="' + retry + '">Retry</button></div>';
   }
 
+  // A list card (approved mock m02): type and next step, "SWF-xxxxx · Full
+  // Name", suburb and what the job is, days in stage and the install day (an
+  // archived card: when it was installed and archived), the red and amber
+  // flags, and the thin Arrival line.
   function cardHtml(row) {
+    var b = boardOf(row);
     var k = typeKey(row);
-    var h = '<button type="button" class="dpc-job" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) + '">';
-    var s = stageOf(row);
-    var next = s && !s.none ? text(row.dispatch_next_step) : '';
+    var archived = !!b && b.view === 'archive';
+    var h = '<button type="button" class="dpc-job' + (archived ? ' dpc-job-archived' : '') + '" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) + '">';
+    var next = text(row.dispatch_next_step);
     h += '<span class="dpc-job-top"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>' +
       (next ? '<span class="dpc-next">' + esc(next) + '</span>' : '') + '</span>';
-    h += '<strong>' + esc(jobTitle(row)) + '</strong>';
-    if (text(row.description)) h += '<span>' + esc(text(row.description)) + '</span>';
-    h += stageLineHtml(s, row);
+    h += '<strong>' + esc(cardTitle(row)) + '</strong>';
+    var sub = [b ? text(b.suburb) : text(row.site_suburb), text(row.description)].filter(Boolean).join(' · ');
+    if (sub) h += '<span>' + esc(sub) + '</span>';
+    // Items ready (slice 4, kept from v1), days in stage and the install day.
     var ready = readyText(row.materials_lines_total, row.materials_lines_ready);
-    h += '<span class="dpc-muted">' + esc((ready ? ready + ' · ' : '') + installText(row)) + '</span>';
+    var meta = !b ? '' : archived ? archiveWords(b) : [ready, daysText(b), installWords(b)].filter(Boolean).join(' · ');
+    if (meta) h += '<span class="dpc-muted">' + esc(meta) + '</span>';
+    var flags = b ? flagsOf(b) : [];
+    if (flags.length) h += '<span class="dpc-flags">' + flags.map(flagHtml).join('') + '</span>';
+    if (b && !archived) h += arrivalThinHtml(b.arrival);
     return h + '</button>';
   }
 
-  // The card's stage line (build note row 7). No line for a make-safe row or
-  // when the read gave no stage.
-  function stageLineHtml(s, row) {
-    if (!s || s.none) return '';
-    // Slice 7: a stop 6 job back in To do until its install is confirmed, in the to-come look.
-    if (s.index === 6 && row && row.dispatch_todo === true && INSTALL_OPEN[row.dispatch_install_open]) return '<span class="dpc-stage">Stage: Trade scheduled · install not confirmed</span>';
-    if (s.index === 6) return '<span class="dpc-stage dpc-stage-done">Done: trade scheduled</span>';
-    if (s.index === 0) return '<span class="dpc-stage">Not on the rail yet</span>';
-    return '<span class="dpc-stage">Stage: ' + esc(s.name) + '</span>';
+  // The card's Arrival line: one thin line, a dot per order. Its words are for
+  // screen readers; the full line is in the open job.
+  function arrivalThinHtml(a) {
+    if (!arrivalOk(a) || !a.orders.length) return '';
+    var p = arrivalPlot(a);
+    var h = '<span class="dpc-arrthin" aria-hidden="true"><span class="dpc-arrthin-rail"></span>';
+    if (p.inst) h += '<span class="dpc-arrthin-inst"></span>';
+    p.marks.forEach(function (m) { h += '<i class="dpc-arrthin-dot ' + m.cls + '" style="left:' + m.pct.toFixed(1) + '%"></i>'; });
+    if (p.outs.length) h += '<i class="dpc-arrthin-dot ' + p.outCls + '" style="left:' + ARR_OUT + '%"></i>';
+    return h + '</span><span class="dpc-vh">Arrival: ' + esc(arrivalSummary(a)) + '.</span>';
   }
 
   function railHtml(row, labels) {
     var k = typeKey(row);
     return '<button type="button" class="dpc-rail-job' + (k ? ' dpc-rail-' + k : '') + '" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) +
-      '" title="' + esc(jobTitle(row)) + '" aria-label="' + esc(jobTitle(row)) + '">' + esc(labels[row.id]) + '</button>';
+      '" title="' + esc(cardTitle(row)) + '" aria-label="' + esc(cardTitle(row)) + '">' + esc(labels[row.id]) + '</button>';
   }
 
-  // The whole list is always drawn, never capped: the first cards at once and
-  // the rest over the next frames, so a long list does not stall the tab.
+  // The whole strip is always drawn, never capped: the first buttons at once
+  // and the rest over the next frames, so a long list does not stall the tab.
   function fill(container, rows, toHtml, first) {
     var token = ++tokens.fill;
     var at = Math.max(FIRST_CHUNK, first || 0);
@@ -2616,46 +2953,68 @@
     if (at < rows.length) global.requestAnimationFrame(step);
   }
 
+  function retryKey() { return searching() ? 'search' : state.mode === 'archive' ? 'archive' : 'list'; }
+
   // What the list area says when it is not showing jobs, or '' when it is.
   function listState() {
-    if (state.mode === 'todo') return todoState();
-    if (searching()) {
-      if (state.found.status === 'error') return failLine('Search failed.', 'search');
-      if (state.found.status !== 'ok') return '<div class="dpc-empty">Searching...</div>';
-      return listedRows().length ? '' : '<div class="dpc-empty">No jobs match.</div>';
-    }
-    if (state.base.status === 'error') return failLine('Could not load jobs.', 'list');
-    if (state.base.status !== 'ok') return '<div class="dpc-empty">Loading jobs...</div>';
-    if (listedRows().length) return '';
-    if (state.type === 'all') return '<div class="dpc-empty">No jobs to show.</div>';
-    return '<div class="dpc-empty">No ' + esc((TYPE_LABELS[state.type] || state.type).toLowerCase()) + ' jobs.</div>';
-  }
-
-  function todoState() {
-    var from = searching() ? state.found : state.base;
-    var retry = searching() ? 'search' : 'list';
-    if (searching() && from.status === 'error') return failLine('Search failed.', 'search');
-    if (from.status === 'error') return failLine('Could not load jobs.', 'list');
+    var from = current();
+    var archive = state.mode === 'archive';
+    if (from.status === 'error') return failLine(searching() ? 'Search failed.' : archive ? 'Could not load the archive.' : 'Could not load jobs.', retryKey());
     if (from.status !== 'ok') return '<div class="dpc-empty">' + (searching() ? 'Searching...' : 'Loading jobs...') + '</div>';
-    if (from.stages !== 'ok') return failLine('Could not load Dispatch stages.', retry);
-    if (!todoOk(from)) return failLine('Could not load To do.', retry);
     if (listedRows().length) return '';
-    if (searching()) return '<div class="dpc-empty">No To do jobs match.</div>';
-    if (state.type === 'all') return '<div class="dpc-empty">Nothing in To do.</div>';
-    return '<div class="dpc-empty">No ' + esc((TYPE_LABELS[state.type] || state.type).toLowerCase()) + ' jobs in To do.</div>';
+    var kind = state.type === 'all' ? '' : (TYPE_LABELS[state.type] || state.type).toLowerCase() + ' ';
+    if (searching()) return '<div class="dpc-empty">No ' + (archive ? 'archived ' : '') + 'jobs match.</div>';
+    if (archive) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs archived in the last ' + esc(from.archiveDays) + ' days.</div>';
+    if (kind) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs.</div>';
+    // Active with no jobs at all: says so, and still shows its stage
+    // sections, each at 0 (paintList draws them under this line).
+    return '';
   }
 
-  function degradedNow() {
-    return searching() ? (state.found.status === 'ok' && state.found.degraded) : (state.base.status === 'ok' && state.base.degraded);
+  // A read beside the board's own (bookings, days in stage, deposits, Arrival)
+  // failed: the jobs are all listed, and the list says what is missing.
+  function listNotice() {
+    var from = current();
+    if (from.status !== 'ok') return '';
+    var missing = from.failedReads.slice();
+    if (!missing.length && !from.degraded) return '';
+    var what = missing.length ? 'Some details did not load: ' + missing.join(', ') + '.' : 'Some job details did not load.';
+    return failLine(what, retryKey());
   }
 
-  // The two list buttons. To do's number is the read's todo_total, shown only
-  // when the stage read worked.
+  // The stage sections (approved mock m02 and m07): each a folding header with
+  // its count, in pipeline order. An empty section shows its header at 0 while
+  // nothing narrows the list, and is left out of a search or a type.
+  function groupsHtml() {
+    var from = current();
+    var narrowed = searching() || state.type !== 'all';
+    var h = '';
+    from.groups.forEach(function (g) {
+      var rows = filterByType(g.rows, state.type);
+      if (!rows.length && narrowed) return;
+      var archive = g.key === 'archive';
+      var label = archive ? 'Dispatch archive' : g.label;
+      var folded = !!state.folds[g.key];
+      h += '<div class="dpc-grp" data-dpc-grp="' + esc(g.key) + '">';
+      var inner = '<span class="dpc-grp-name">' + esc(label) + '</span><span class="dpc-grp-count">' + rows.length + '</span><span class="dpc-grow dpc-grp-rule"></span>';
+      if (rows.length) {
+        h += '<button type="button" class="dpc-grp-head" data-dpc-fold="' + esc(g.key) + '" aria-expanded="' + !folded + '" aria-label="' + esc(label + ', ' + rows.length + (rows.length === 1 ? ' job' : ' jobs')) + '">' +
+          inner + '<span class="dpc-grp-chev">' + CHEV_SMALL + '</span></button>';
+      } else {
+        h += '<div class="dpc-grp-head dpc-grp-empty">' + inner + '</div>';
+      }
+      if (archive) h += '<span class="dpc-grp-sub">' + esc(searching() ? 'Every archived job that matches, newest first' : 'Last ' + from.archiveDays + ' days, newest first') + '</span>';
+      if (rows.length && !folded) h += '<div class="dpc-grp-body">' + rows.map(cardHtml).join('') + '</div>';
+      h += '</div>';
+    });
+    return h;
+  }
+
+  // The two list buttons, each with its view's count once read.
   function modeHtml() {
-    var todo = state.base.status === 'ok' && todoOk(state.base) ? ' <b>' + esc(state.base.todoTotal) + '</b>' : '';
-    var all = state.base.status === 'ok' ? ' <b>' + esc(state.base.total) + '</b>' : '';
-    return '<button type="button" data-dpc-mode="todo" aria-pressed="' + (state.mode === 'todo') + '">To do' + todo + '</button>' +
-      '<button type="button" data-dpc-mode="all" aria-pressed="' + (state.mode === 'all') + '">All jobs' + all + '</button>';
+    var count = function (v) { return v.status === 'ok' ? ' <b>' + esc(v.total) + '</b>' : ''; };
+    return '<button type="button" data-dpc-mode="active" aria-pressed="' + (state.mode === 'active') + '">Active' + count(state.base) + '</button>' +
+      '<button type="button" data-dpc-mode="archive" aria-pressed="' + (state.mode === 'archive') + '">Archive' + count(state.arch) + '</button>';
   }
 
   function chipsHtml() {
@@ -2678,20 +3037,21 @@
     h += '<div class="dpc-chips" role="group" aria-label="Work type" data-dpc-region="chips">' + chipsHtml() + '</div>';
     h += '<input type="search" class="dpc-search" data-dpc-search placeholder="Search job, suburb or client" value="' + esc(state.search) + '" aria-label="Search jobs">';
     h += '</div><div class="dpc-job-list" data-dpc-region="list"></div>';
-    h += '<div class="dpc-foot">To do: jobs from Accepted until the trade is scheduled and the install confirmed. All jobs: any job through the Dispatch lens, to check what was ordered and sent.</div>';
+    h += '<div class="dpc-foot">Active: accepted jobs in pipeline order, from Order Materials to Scheduled. Archive: jobs that left Scheduled in the last 30 days.</div>';
     return h + '</aside>';
   }
 
   // Repaints the list (or the strip's buttons) without touching the search
-  // box, so typing is never interrupted. keepPlace redraws as many jobs at
-  // once as were drawn and puts the list back where it was scrolled to.
+  // box, so typing is never interrupted. keepPlace puts the list back where it
+  // was scrolled to.
   function paintList(keepPlace) {
     var list = region('list');
     if (!list) return;
     tokens.fill++;
     var drawn = keepPlace ? list.querySelectorAll('[data-dpc-job]').length : 0;
     var top = list.scrollTop;
-    var focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('data-dpc-job') : null;
+    var a = list.contains(document.activeElement) ? document.activeElement : null;
+    var focused = a ? (a.hasAttribute('data-dpc-job') ? '[data-dpc-job="' + a.getAttribute('data-dpc-job') + '"]' : a.hasAttribute('data-dpc-fold') ? '[data-dpc-fold="' + a.getAttribute('data-dpc-fold') + '"]' : null) : null;
     // Updated in place so a pressed button keeps the keyboard focus.
     var mode = region('mode');
     if (mode && mode.innerHTML !== modeHtml()) {
@@ -2706,37 +3066,26 @@
     var stateHtml = listState();
     var rows = stateHtml ? [] : listedRows();
     if (!state.leftOpen) {
-      var failed = listFailed();
-      var ready = searching() ? state.found.status === 'ok' : state.base.status === 'ok';
       var head = region('railhead');
       if (head) {
-        var from = searching() ? state.found : state.base;
-        var failText = from.status !== 'error' ? (from.stages !== 'ok' ? 'Could not load Dispatch stages. Retry' : 'Could not load To do. Retry')
-          : searching() ? 'Search failed. Retry' : 'Could not load jobs. Retry';
-        head.innerHTML = failed
-          ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + (searching() ? 'search' : 'list') + '" aria-label="' + failText + '" title="' + failText + '">&#8635;</button>'
-          : ready ? '<span class="dpc-rail-count" title="' + (state.mode === 'todo' ? 'Jobs in To do' : 'Jobs listed') + '">' + rows.length + '</span>' : '';
+        var from = current();
+        var failText = searching() ? 'Search failed. Retry' : state.mode === 'archive' ? 'Could not load the archive. Retry' : 'Could not load jobs. Retry';
+        head.innerHTML = listFailed()
+          ? '<button type="button" class="dpc-side-btn" data-dpc-retry="' + retryKey() + '" aria-label="' + failText + '" title="' + failText + '">&#8635;</button>'
+          : from.status === 'ok' ? '<span class="dpc-rail-count" title="Jobs listed">' + rows.length + '</span>' : '';
       }
       list.innerHTML = '';
       if (rows.length) { var labels = railLabels(rows); fill(list, rows, function (row) { return railHtml(row, labels); }, drawn); }
-      refocusJob(list, focused);
+      if (focused) { var f = list.querySelector(focused); if (f) f.focus({ preventScroll: true }); }
       if (keepPlace) list.scrollTop = top;
       return;
     }
-    list.innerHTML = stateHtml || (degradedNow() ? failLine('Some job details did not load.', searching() ? 'search' : 'list') : '');
-    if (rows.length) fill(list, rows, cardHtml, drawn);
-    refocusJob(list, focused);
+    var none = !rows.length && state.mode === 'active' ? '<div class="dpc-empty">No jobs to show.</div>' : '';
+    list.innerHTML = stateHtml || (listNotice() + none + groupsHtml());
+    if (focused) { var el = list.querySelector(focused); if (el) el.focus({ preventScroll: true }); }
     if (keepPlace) list.scrollTop = top;
   }
 
-  // The list was rebuilt: put the keyboard focus back on the job it was on.
-  function refocusJob(list, jobId) {
-    if (!jobId) return;
-    var cards = list.querySelectorAll('[data-dpc-job]');
-    for (var i = 0; i < cards.length; i++) {
-      if (cards[i].getAttribute('data-dpc-job') === jobId) { cards[i].focus({ preventScroll: true }); return; }
-    }
-  }
 
   function paintQueue() {
     var q = region('queue');
@@ -2757,62 +3106,89 @@
 
   // ───────────────────────── render: the job ─────────────────────────
 
+  // The job header: "SWF-xxxxx · Full Name", the price, suburb and what the
+  // job is, the facts as pills (with the red and amber flags), the rail, the
+  // Arrival line, and a line pointing at any delivery date waiting below.
   function headHtml(row) {
+    var b = boardOf(row);
     var price = priceText(row);
     var k = typeKey(row);
-    var h = '<div class="dpc-jobhead" data-dpc-region="head"><div class="dpc-row"><h2 class="dpc-grow">' + esc(jobTitle(row)) + '</h2>';
+    var h = '<div class="dpc-jobhead" data-dpc-region="head"><div class="dpc-row"><h2 class="dpc-grow">' + esc(cardTitle(row)) + '</h2>';
     h += price
       ? '<span class="dpc-price">' + esc(price) + (row.value_inc_gst === true ? ' <small>inc GST</small>' : '') + '</span>'
       : '<span class="dpc-price-none">No price on record</span>';
     h += '</div>';
-    if (text(row.description)) h += '<p>' + esc(text(row.description)) + '</p>';
+    var sub = [b ? text(b.suburb) : text(row.site_suburb), text(row.description)].filter(Boolean).join(' · ');
+    if (sub) h += '<p>' + esc(sub) + '</p>';
     h += '<div class="dpc-pills"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>';
-    h += '<span class="dpc-pill">' + esc(installText(row)) + '</span>';
+    h += '<span class="dpc-pill">' + esc(b ? installWords(b, true) : 'Install not known') + '</span>';
+    var days = daysText(b);
+    if (days) h += '<span class="dpc-pill">' + esc(days) + '</span>';
     var mat = isMakesafe(row) ? null : matEntry(row.id);
     var ready = mat && mat.status === 'ok' && mat.counts ? readyText(mat.counts.total, mat.counts.ready) : '';
     if (ready) h += '<span class="dpc-pill">' + esc(ready) + '</span>';
-    return h + '</div>' + tapeHtml(row) + '</div>';
+    if (b) h += flagsOf(b).map(flagHtml).join('');
+    // An unknown deposit (the invoice read failed) is said, never shown as paid or not paid.
+    if (b && b.deposit && b.deposit.state === 'unknown') h += '<span class="dpc-flag dpc-flag-grey">Deposit not checked</span>';
+    h += '</div>' + tapeHtml(row) + arrivalHtml(row) + sugNoteHtml(row);
+    return h + '</div>';
   }
 
-  // The stage rail, the tape (approved still B). Drawn for every job but a
-  // make-safe one. A press opens the confirm line; only Move or Set writes.
+  function tapeNote(words, attrs) {
+    return '<p class="dpc-empty dpc-empty-tight dpc-tape-note"' + (attrs || '') + '>' + esc(words) + '</p>';
+  }
+
+  // The header rail (approved mock m03, m04 and m06): the job's real pipeline
+  // stages (repairs: the Repairs board's Materials and Scheduled). Only a stop
+  // the board says the job can move to can be pressed; a press opens the
+  // confirm line, and only Move writes. Backwards moves ask the same way.
   function tapeHtml(row) {
     if (typeKey(row) === 'makesafe') return '';
-    var s = stageOf(row);
+    var b = boardOf(row);
     var h = '<div class="dpc-tape" data-dpc-region="tape"';
-    if (!s || s.none) return h + '>' + failLine("Could not load this job's stage.", 'list', true) + '</div>';
+    if (!b) return h + '>' + failLine("Could not load this job's stage.", 'list', true) + '</div>';
     var jobId = row.id;
+    var repairs = b.track === 'repairs';
+    var where = moveWhere(b);
+    var stops = trackStages(b);
+    var now = 0;
+    stops.forEach(function (st, i) { if (st.key === b.stage_key) now = i + 1; });
+    var label = text(b.stage_label) || keyWords(b.stage_key);
     var busy = !!state.stage.moving;
     var confirm = state.stage.confirm && state.stage.confirm.jobId === jobId ? state.stage.confirm : null;
-    h += ' role="group" aria-label="Dispatch stage: ' + esc(s.name) + '"><div class="dpc-tape-meta"><span>Dispatch stage</span><strong>' + esc(s.name) + '</strong>';
-    h += '<span class="dpc-grow"></span><span>' + s.index + ' of ' + STAGES.length + '</span></div>';
-    h += '<div class="dpc-tape-track">';
-    if (s.index > 1) h += '<div class="dpc-tape-fill" style="width:' + ((s.index - 1) / (STAGES.length - 1) * 100) + '%"></div>';
-    h += '</div><ol class="dpc-tape-stops">';
-    STAGES.forEach(function (st, i) {
-      var n = i + 1;
-      var cls = n < s.index ? 'done' : n === s.index ? 'now' : '';
-      var left = i / (STAGES.length - 1) * 100;
-      h += '<li class="' + cls + '" style="left:' + left + '%"><button type="button" class="dpc-tape-stop" data-dpc-stage="' + st.key + '"' +
-        (n === s.index ? ' aria-current="step"' : '') + (busy ? ' disabled' : '') + '>' +
-        '<span class="dpc-tape-mark' + (cls ? ' ' + cls : '') + '" aria-hidden="true"></span><span class="dpc-tape-label">' + esc(st.label) + '</span></button></li>';
-    });
-    h += '</ol>';
-    h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note">' + esc(stageSourceText(s)) + '</p>';
-    if (TODO_OUT[row.dispatch_todo_out]) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note">' + esc(TODO_OUT[row.dispatch_todo_out]) + '</p>';
-    var sightings = deliveriesRailLine(row, s);
-    if (sightings) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note" data-dpc-deliv-rail>' + esc(sightings) + '</p>';
-    if (INSTALL_OPEN[row.dispatch_install_open]) h += '<p class="dpc-empty dpc-empty-tight dpc-tape-note" data-dpc-install-rail>' + esc(INSTALL_OPEN[row.dispatch_install_open]) + '</p>';
+    var kind = repairs ? 'Repairs stage' : 'Pipeline stage';
+    h += ' role="group" aria-label="' + esc(kind + ': ' + label) + '"><div class="dpc-tape-meta"><span>' + kind + '</span><strong>' + esc(label) + '</strong>';
+    h += '<span class="dpc-grow"></span>' + (now ? '<span>' + now + ' of ' + stops.length + '</span>' : '') + '</div>';
+    if (b.stage_phase === 'after' || !now) {
+      h += tapeNote('Moved past Scheduled on ' + where + '. Dispatch does not move it from here.');
+    } else {
+      var last = Math.max(1, stops.length - 1);
+      h += '<div class="dpc-tape-track">';
+      if (now > 1) h += '<div class="dpc-tape-fill" style="width:' + ((now - 1) / last * 100) + '%"></div>';
+      h += '</div><ol class="dpc-tape-stops">';
+      stops.forEach(function (st, i) {
+        var n = i + 1;
+        var cls = n < now ? 'done' : n === now ? 'now' : '';
+        var can = !!moveTarget(b, st.key);
+        h += '<li class="' + cls + '" style="left:' + (i / last * 100) + '%"><button type="button" class="dpc-tape-stop" data-dpc-stage="' + esc(st.key) + '"' +
+          (n === now ? ' aria-current="step"' : '') + (busy || !can ? ' disabled' : '') + '>' +
+          '<span class="dpc-tape-mark' + (cls ? ' ' + cls : '') + '" aria-hidden="true"></span><span class="dpc-tape-label">' + esc(st.label) + '</span></button></li>';
+      });
+      h += '</ol>';
+      h += tapeNote(repairs ? 'Same as the Repairs board. Moving here moves the job there too.' : 'Same as the Ops Dash pipeline. Moving here moves the job there too.');
+      if (!b.moves) h += tapeNote('This job cannot be moved from Dispatch.');
+    }
+    var sightings = deliveriesRailLine(row);
+    if (sightings) h += tapeNote(sightings, ' data-dpc-deliv-rail');
     if (confirm) {
-      var num = text(row.job_number) || 'this job';
-      var to = STAGES[stageIndex(confirm.to) - 1].label;
-      var ask = confirm.to === s.key ? 'Set ' + num + ' at ' + to + '?' : 'Move ' + num + ' from ' + s.name + ' to ' + to + '?';
-      // Slice 7: Move still works with nothing booked; the line says so.
-      var inst = installOf(row);
-      if (confirm.to === 'trade_scheduled' && inst && inst.state === 'none') ask += ' No install is booked on this job.';
-      h += '<div class="dpc-tape-confirm" role="group" aria-label="Confirm the stage"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
-      h += '<button type="button" class="dpc-primary" data-dpc-stage-go' + (busy ? ' disabled' : '') + '>' + (busy ? 'Moving...' : confirm.to === s.key ? 'Set' : 'Move') + '</button>';
-      h += '<button type="button" data-dpc-stage-cancel' + (busy ? ' disabled' : '') + '>Cancel</button></div>';
+      var num = text(b.job_number) || text(row.job_number) || 'this job';
+      var ask = 'Move ' + num + ' to ' + confirm.label + '? It moves on ' + where + ' too.';
+      if (confirm.offer) ask = 'The supplier confirmed the delivery. ' + ask;
+      // Move still works with nothing booked; the line says so.
+      if (confirm.to === 'scheduled' && b.install && b.install.booked === false) ask += ' No install is booked on this job.';
+      h += '<div class="dpc-tape-confirm" role="group" aria-label="Confirm the move"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
+      h += '<button type="button" class="dpc-primary" data-dpc-stage-go' + (busy ? ' disabled' : '') + '>' + (busy ? 'Moving...' : 'Move') + '</button>';
+      h += '<button type="button" data-dpc-stage-cancel' + (busy ? ' disabled' : '') + '>' + (confirm.offer ? 'Not now' : 'Cancel') + '</button></div>';
     }
     var msg = state.stage.msg && state.stage.msg.jobId === jobId ? state.stage.msg : null;
     if (msg && msg.kind === 'fail') {
@@ -2829,6 +3205,72 @@
     h += '<button type="button" data-dpc-next-save' + (saving || nextUnchanged(jobId, row) ? ' disabled' : '') + '>' + (saving ? 'Saving...' : 'Save') + '</button></div>';
     if (nmsg) h += '<div class="dpc-note-msg' + (nmsg.ok ? '' : ' dpc-note-msg-fail') + '" role="' + (nmsg.ok ? 'status' : 'alert') + '">' + esc(nmsg.text) + '</div>';
     return h + '</div>';
+  }
+
+  // ── v2 slice 7: the full Arrival line in the open job ──
+  // The approved page's .arr: today at the left, the install line at 80%, each
+  // supplier order on its delivery date. Solid green = the supplier confirmed
+  // the date; amber ring = a date, not confirmed; red past the install line =
+  // no date yet, or arriving after the install; grey ring = not sent yet.
+  // A narrow screen hides the labels and lists the orders under the line.
+  function arrivalHtml(row) {
+    if (!row || isMakesafe(row)) return '';
+    var got = arrivalFor(row);
+    var a = got.arrival;
+    var h = '<div class="dpc-arrival" data-dpc-region="arrival"><div class="dpc-arr-head"><span class="dpc-arr-title">Arrival line</span>' +
+      '<span class="dpc-arr-q">Will it all be on site before the install?</span>';
+    if (a && a.orders.length) h += '<span class="dpc-arr-count' + (a.all_confirmed_in_time === true ? ' ok' : a.orders.some(arrivalLate) ? ' late' : '') + '">' + esc(arrivalSummary(a)) + '</span>';
+    h += '</div>';
+    if (!a) {
+      return h + (got.loading ? '<p class="dpc-empty dpc-empty-tight">Reading the orders...</p>' : failLine('Could not load the Arrival line.', 'arrival', true)) + '</div>';
+    }
+    if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
+    var p = arrivalPlot(a);
+    var two = p.marks.some(function (m) { return m.row === 1; });
+    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + '"><span class="dpc-arr-rail"></span>';
+    h += '<span class="dpc-arr-tod">Today ' + esc(dayText(p.today)) + '</span>';
+    h += p.inst ? '<span class="dpc-arr-inst"><span>Install ' + esc(dayText(p.inst)) + '</span></span>' : '<span class="dpc-arr-noinst">No install booked</span>';
+    p.marks.forEach(function (m) {
+      var edge = m.pct < 7 ? ' dpc-arr-edge' : '';
+      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small></span>';
+    });
+    if (p.outs.length) {
+      var one = p.outs.length === 1 ? p.outs[0] : null;
+      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small></span>';
+    }
+    h += '</div><ul class="dpc-arr-list' + (p.outs.length > 1 ? ' dpc-arr-list-outs' : '') + '">';
+    p.marks.concat(p.outs).forEach(function (m) {
+      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + '</li>';
+    });
+    h += '</ul></div>';
+    h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
+    return h + '</div>';
+  }
+
+  function paintArrival() {
+    var el = region('arrival');
+    if (el && state.row) el.outerHTML = arrivalHtml(state.row);
+  }
+
+  // Under the Arrival line: how many supplier delivery dates wait for Accept
+  // or Dismiss in Supplier replies, with a button that goes to them.
+  function sugNoteHtml(row) {
+    var e = row ? repEntry(row.id) : null;
+    var open = e && e.status === 'ok' ? e.data.suggestions.filter(function (s) { return s.state === 'open'; }) : [];
+    var guesses = e && e.status === 'ok' ? e.data.emails.filter(function (m) { return m.state === 'needs_confirmation'; }) : [];
+    var h = '<div data-dpc-region="sugnote">';
+    if (open.length || guesses.length) {
+      var parts = [];
+      if (open.length) parts.push(open.length === 1 ? '1 supplier delivery date to check' : open.length + ' supplier delivery dates to check');
+      if (guesses.length) parts.push(guesses.length === 1 ? '1 best guess email to confirm' : guesses.length + ' best guess emails to confirm');
+      h += '<div class="dpc-sugnote" role="status"><span class="dpc-grow">' + esc(parts.join(', ') + '.') + '</span><button type="button" data-dpc-rep-goto>Show in Supplier replies</button></div>';
+    }
+    return h + '</div>';
+  }
+
+  function paintSugNote() {
+    var el = region('sugnote');
+    if (el && state.row) el.outerHTML = sugNoteHtml(state.row);
   }
 
   // Redraws the rail in place, keeping the next-step box's typing and focus.
@@ -3048,8 +3490,16 @@
     var sending = !!state.sending[jobId];
     var draft = state.replies[jobId] || '';
     var msg = state.replyMsg[jobId];
-    var h = '<div class="dpc-compose"><textarea class="dpc-reply" data-dpc-reply placeholder="Reply to client..." aria-label="Reply to client by text"' + (sending ? ' disabled' : '') + '>' + esc(draft) + '</textarea>';
-    h += '<button type="button" class="dpc-primary" data-dpc-send' + (sending || !draft.trim() ? ' disabled' : '') + '>' + (sending ? 'Sending...' : 'Send') + '</button></div>';
+    // Slice 4: Send only asks. The text goes on "Send text"; while asking,
+    // the box is read only so what is sent is what was asked about.
+    var asking = !!state.smsAsk[jobId] && !sending;
+    var h = '<div class="dpc-compose"><textarea class="dpc-reply" data-dpc-reply placeholder="Reply to client..." aria-label="Reply to client by text"' + (sending ? ' disabled' : '') + (asking ? ' readonly' : '') + '>' + esc(draft) + '</textarea>';
+    if (!asking) h += '<button type="button" class="dpc-primary" data-dpc-send' + (sending || !draft.trim() ? ' disabled' : '') + '>' + (sending ? 'Sending...' : 'Send') + '</button>';
+    h += '</div>';
+    if (asking) {
+      h += '<div class="dpc-sms-ask" role="group" aria-label="Confirm the text"><span class="dpc-grow">Text this to the client? It sends from the admin line.</span>' +
+        '<button type="button" class="dpc-primary" data-dpc-send-go>Send text</button><button type="button" data-dpc-send-no>Cancel</button></div>';
+    }
     if (msg) h += '<div class="dpc-note-msg' + (msg.ok ? '' : ' dpc-note-msg-fail') + '" role="' + (msg.ok ? 'status' : 'alert') + '">' + esc(msg.text) + '</div>';
     return h;
   }
@@ -3148,6 +3598,7 @@
   // ───────────────────────── render: Materials by supplier (slice 4) ─────────────────────────
 
   var CHEV_SVG = '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEV_SMALL = '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   function matFail(message, retry) {
     return '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(message) +
@@ -3983,62 +4434,28 @@
 
   // ── slice 7: the install row, under the deliveries table ──
 
-  function installMarkBtn(busy) {
-    return '<button type="button" class="dpc-deliv-btn" data-dpc-install="mark"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Saving...' : 'Mark confirmed') + '</button>';
-  }
-
-  function installConfirmedHtml(d, busy) {
-    var c = d.confirmed;
-    var by = c ? text(c.by) || 'someone not recorded' : '';
-    if (c && d.confirmed_current) {
-      return '<span class="dpc-dstate on">' + esc(stampText(c.at) + ', ' + by) + '<button type="button" class="dpc-textbtn" data-dpc-install="clear-ask"' + (busy ? ' disabled' : '') + '>Not confirmed</button></span>';
-    }
-    if (c) {
-      var why = parseDay(c.for_day)
-        ? 'Confirmed for ' + dayText(parseDay(c.for_day)) + ' by ' + by + '. The booking has moved.'
-        : 'Confirmed with nothing booked, by ' + by + '. A booking has been made since.';
-      return '<span class="dpc-dstate"><em>' + esc(why) + '</em>' + installMarkBtn(busy) + '</span>';
-    }
-    return '<span class="dpc-dstate">' + installMarkBtn(busy) + '</span>';
-  }
-
-  function installMsgHtml(jobId) {
-    var m = state.install.msg;
-    if (!m || m.jobId !== jobId) return '';
-    if (typeof m.retry !== 'boolean') return '<p class="dpc-deliv-msg" role="status">' + esc(m.text) + '</p>';
-    return '<p class="dpc-deliv-msg dpc-mat-fail" role="alert">' + esc(m.text) + ' <button type="button" class="dpc-retry" data-dpc-install="retry">Retry</button></p>';
-  }
-
+  // The install row (v2): the install day from the board, and who is booked
+  // from the list row's booking names when they are for the same day. Mark
+  // confirmed is gone: a booked install shows as booked, nothing more.
   function installHtml(row) {
-    var h = '<div class="dpc-deliv dpc-install"><div class="dpc-deliv-row dpc-install-row dpc-deliv-head"><span>Install</span><span>Trade booked</span><span>Install confirmed</span></div>';
-    var d = installOf(row);
-    if (!d) {
+    var h = '<div class="dpc-deliv dpc-install"><div class="dpc-deliv-row dpc-install-row dpc-deliv-head"><span>Install</span><span>Trade booked</span></div>';
+    var b = boardOf(row);
+    var ins = b && b.install && typeof b.install === 'object' ? b.install : null;
+    if (!ins) {
       return h + '<div class="dpc-deliv-item"><div class="dpc-empty dpc-mat-fail" role="alert">Could not load the bookings. <button type="button" class="dpc-retry" data-dpc-install="retry-read">Retry</button></div></div></div>';
     }
-    var ins = state.install;
-    var busy = ins.busy === row.id;
-    var current = !!(d.confirmed && d.confirmed_current);
-    var booked = bookedText(d);
-    h += '<div class="dpc-deliv-item"><div class="dpc-deliv-row dpc-install-row" data-step="' + (current ? 3 : 1) + '">';
-    h += '<span><strong>Install</strong><small>' + esc(text(row.job_number) || 'No job number') + '</small></span>';
-    h += '<span class="dpc-dstate' + (booked ? ' on' : '') + '">' + (booked ? esc(booked) : '<em>Not booked</em>') + '</span>';
-    h += installConfirmedHtml(d, busy) + '</div>';
-    if (d.also_days.length) {
-      h += '<p class="dpc-deliv-sub">Also booked: ' + esc(d.also_days.map(function (v) { return dayText(parseDay(v)); }).filter(Boolean).join(', ')) + '.</p>';
+    var v1 = installOf(row);
+    var names = v1 && v1.state !== 'none' && text(v1.day) === text(ins.day)
+      ? v1.people.map(function (p) { return text(p && p.name) || 'Name not on record'; }).join(', ') : '';
+    var booked = ins.booked ? installWords(b, true) + (names ? ', ' + names : '') : '';
+    h += '<div class="dpc-deliv-item"><div class="dpc-deliv-row dpc-install-row" data-step="' + (booked ? 2 : 1) + '">';
+    h += '<span><strong>Install</strong><small>' + esc(text(b.job_number) || text(row.job_number) || 'No job number') + '</small></span>';
+    h += '<span class="dpc-dstate' + (booked ? ' on' : '') + '">' + (booked ? esc(booked) : '<em>Not booked</em>') + '</span></div>';
+    if (v1 && v1.also_days.length) {
+      h += '<p class="dpc-deliv-sub">Also booked: ' + esc(v1.also_days.map(function (v) { return dayText(parseDay(v)); }).filter(Boolean).join(', ')) + '.</p>';
     }
-    if (d.calendar_confirmed) h += '<p class="dpc-deliv-sub">The calendar shows this booking as confirmed.</p>';
-    var ask = ins.ask && ins.ask.jobId === row.id ? ins.ask.kind : null;
-    var off = busy ? ' disabled' : '';
-    if (ask === 'none' && !d.confirmed_current) {
-      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Mark the install confirmed"><p class="dpc-empty dpc-empty-tight">No install is booked on this job. Mark the install confirmed anyway?</p>' +
-        '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-install="go"' + off + '>' + (busy ? 'Saving...' : 'Mark confirmed') + '</button>' +
-        '<button type="button" data-dpc-install="cancel"' + off + '>Cancel</button></div></div></div>';
-    } else if (ask === 'clear' && current) {
-      h += '<div class="dpc-deliv-sub"><div class="dpc-deliv-edit" role="group" aria-label="Clear the install confirmation"><p class="dpc-empty dpc-empty-tight">Clear the install confirmation? It was marked by ' +
-        esc(text(d.confirmed.by) || 'someone not recorded') + '.</p><div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-install="clear-go"' + off + '>' + (busy ? 'Clearing...' : 'Clear') + '</button>' +
-        '<button type="button" data-dpc-install="keep"' + off + '>Keep</button></div></div></div>';
-    }
-    return h + '</div></div>' + installMsgHtml(row.id);
+    if (v1 && v1.calendar_confirmed) h += '<p class="dpc-deliv-sub">The calendar shows this booking as confirmed.</p>';
+    return h + '</div></div>';
   }
 
   // The one way into the live calendar, at the foot of the section. Not drawn
@@ -4055,7 +4472,7 @@
     if (!row || isMakesafe(row)) return '';
     var open = state.deliv.open;
     var h = '<div class="dpc-sec dpc-sched' + (open ? '' : ' dpc-collapsed') + '" data-dpc-region="sched"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">Schedule</span><h3>Deliveries and install</h3>';
-    if (open) h += '<p>Each PO to site, then the trade booked and the install confirmed</p>';
+    if (open) h += '<p>Each PO to site, then the trade booked</p>';
     h += '</div><button type="button" class="dpc-chev" data-dpc-toggle="sched" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + ' Deliveries and install">' + CHEV_SVG + '</button></div>';
     if (open) h += '<div class="dpc-sec-body">' + delivBodyHtml(matEntry(row.id)) + installHtml(row) + portalHtml() + '</div>';
     return h + '</div>';
@@ -4077,6 +4494,247 @@
   }
   function paintSchedIf(jobId) { if (state.jobId === jobId) paintSched(); }
 
+  // ───────────────────────── render: supplier replies (slice 8) ─────────────────────────
+
+  // The rung pill: how the email was put on the job.
+  var RUNG_WORDS = { thread: 'Same thread', job_number: 'Job number', supplier_ref: 'Their number', best_guess: 'Best guess', manual: 'Picked by hand' };
+  function rungHtml(m) {
+    var w = RUNG_WORDS[m.rung];
+    if (!w) return '';
+    if (m.rung === 'best_guess' && m.decision === 'confirmed') w = 'Best guess, confirmed';
+    var tone = m.rung === 'best_guess' && m.state === 'needs_confirmation' ? ' dpc-rung-guess' : '';
+    return '<span class="dpc-rung' + tone + '">' + esc(w) + '</span>';
+  }
+
+  // A press's answer under the thing pressed.
+  function repMsgHtml(msg, retryAttrs) {
+    if (!msg) return '';
+    if (msg.ok) return '<p class="dpc-rep-msg" role="status">' + esc(msg.text) + '</p>';
+    return '<p class="dpc-rep-msg dpc-mat-fail" role="alert">' + esc(msg.text) +
+      (msg.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</p>';
+  }
+
+  // "Check this" hints from the date reader, in plain words.
+  function sugHints(s) {
+    var out = [];
+    if (s.weekday_mismatch) out.push('The email named a weekday that is not on this date. The date was used.');
+    if (s.day_word_only) out.push('The email gave only a day word, such as "Thursday" or "tomorrow".');
+    var others = Array.isArray(s.other_dates) ? s.other_dates.map(function (d) { return dayText(parseDay(d)); }).filter(Boolean) : [];
+    if (others.length) out.push('The email also named ' + others.join(', ') + '.');
+    return out;
+  }
+
+  var SUG_STATE = { accepted: 'Accepted', dismissed: 'Dismissed', superseded: 'Replaced by a newer date' };
+
+  // The suggestion card under its email (approved #senddemo .sug): the label,
+  // the sentence it was read from, the hints, and Accept / Dismiss.
+  function sugHtml(e, s) {
+    var busy = e.busy[s.id];
+    var off = busy ? ' disabled' : '';
+    var open = s.state === 'open';
+    var h = '<div class="dpc-sug' + (open ? '' : ' dpc-sug-done') + '" data-dpc-sug="' + esc(s.id) + '"><div class="dpc-sug-top"><span class="dpc-sug-eyebrow">Suggested</span><strong>' + esc(text(s.label) || 'A delivery date') + '</strong></div>';
+    if (text(s.quote)) h += '<p class="dpc-sug-quote">"' + esc(text(s.quote)) + '"</p>';
+    var hints = open ? sugHints(s) : [];
+    if (hints.length) h += '<ul class="dpc-sug-hints">' + hints.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+    if (open) {
+      var orders = e.data.orders;
+      if (s.needs_order_pick) {
+        if (!e.data.ordersWired) {
+          h += '<p class="dpc-empty dpc-empty-tight">Supplier orders are not switched on yet, so this date cannot be saved.</p>';
+        } else if (!orders.length) {
+          h += '<p class="dpc-empty dpc-empty-tight">This job has no sent order to put this date on.</p>';
+        } else {
+          h += '<label class="dpc-sug-pick">Which order is this for? <select data-dpc-sug-order="' + esc(s.id) + '"' + off + '><option value="">Pick the order</option>' +
+            orders.map(function (o) {
+              return '<option value="' + esc(o.order_id) + '"' + (e.pick[s.id] === o.order_id ? ' selected' : '') + '>' + esc((text(o.supplier_name) || 'Supplier') + (parseStamp(o.sent_at) ? ', sent ' + stampText(o.sent_at) : '')) + '</option>';
+            }).join('') + '</select></label>';
+        }
+      }
+      var canAccept = s.can_accept !== false && (!s.needs_order_pick || !!e.pick[s.id]);
+      h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-sug-accept="' + esc(s.id) + '"' + (busy || !canAccept ? ' disabled' : '') + '>' + (busy === 'accept' ? 'Saving...' : 'Accept') + '</button>';
+      h += '<button type="button" data-dpc-sug-dismiss="' + esc(s.id) + '"' + off + '>' + (busy === 'dismiss' ? 'Dismissing...' : 'Dismiss') + '</button></div>';
+      h += '<p class="dpc-sug-foot">Accept saves this date on the supplier box. It does not move the job.</p>';
+    } else {
+      var who = text(s.acted_by_email);
+      h += '<p class="dpc-sug-state">' + esc((SUG_STATE[s.state] || 'Done') + (who ? ' by ' + who : '') + (parseStamp(s.acted_at) ? ', ' + stampText(s.acted_at) : '') + '.') + '</p>';
+    }
+    return h + repMsgHtml(e.msg[s.id], 'data-dpc-sug-retry="' + esc(s.id) + '"') + '</div>';
+  }
+
+  function repEmailHtml(e, m, sugs) {
+    var guess = m.state === 'needs_confirmation';
+    var busy = e.busy[m.id];
+    var off = busy ? ' disabled' : '';
+    var h = '<li class="dpc-rep' + (guess ? ' dpc-rep-guess' : '') + '" data-dpc-rep="' + esc(m.id) + '"><div class="dpc-rep-top"><strong>' + esc(text(m.supplier_name) || text(m.from_email) || 'Supplier') + '</strong>' + rungHtml(m) +
+      '<span class="dpc-grow"></span><span class="dpc-muted">' + esc(parseStamp(m.received_at) ? stampText(m.received_at) : '') + '</span></div>';
+    if (text(m.subject)) h += '<p class="dpc-rep-subj">' + esc(text(m.subject)) + '</p>';
+    if (text(m.snippet)) h += '<p class="dpc-rep-snip">' + esc(text(m.snippet)) + '</p>';
+    if (text(m.match_reason)) h += '<p class="dpc-rep-why">' + esc(text(m.match_reason)) + '</p>';
+    if (guess) {
+      h += '<div class="dpc-rep-ask"><span class="dpc-grow">Is this email about this job?</span>' +
+        '<button type="button" class="dpc-primary" data-dpc-rep-confirm="' + esc(m.id) + '"' + off + '>' + (busy === 'confirm' ? 'Saving...' : 'Yes, this job') + '</button>' +
+        '<button type="button" data-dpc-rep-reject="' + esc(m.id) + '"' + off + '>' + (busy === 'reject' ? 'Saving...' : 'Not this one') + '</button></div>';
+    }
+    h += repMsgHtml(e.msg[m.id], 'data-dpc-rep-retry="' + esc(m.id) + '"');
+    sugs.forEach(function (s) { h += sugHtml(e, s); });
+    return h + '</li>';
+  }
+
+  function repBodyHtml(e) {
+    if (!e || e.status === 'loading' && !e.data) return '<p class="dpc-empty">Reading supplier replies...</p>';
+    if (e.status === 'error') return failLine('Could not load the supplier replies.', 'replies', true);
+    var d = e.data;
+    var h = '';
+    if (d.scan && d.scan.enabled === false) h += '<p class="dpc-empty dpc-empty-tight dpc-rep-off">Supplier emails are not being read yet. Nothing new will show here until reading is switched on.</p>';
+    // A press whose email has gone from the list (put on another job, sent back) keeps its answer at the top.
+    var shown = {};
+    d.emails.forEach(function (m) { shown[m.id] = true; });
+    d.suggestions.forEach(function (s) { shown[s.id] = true; });
+    Object.keys(e.msg).forEach(function (id) { if (!shown[id] && e.msg[id]) h += repMsgHtml(e.msg[id]); });
+    if (!d.emails.length && !d.suggestions.length) return h + '<p class="dpc-empty">No supplier emails on this job yet. Replies to our order emails show here.</p>';
+    var byEmail = {};
+    var loose = [];
+    d.suggestions.forEach(function (s) {
+      var on = d.emails.some(function (m) { return m.id === s.email_id; });
+      if (on) (byEmail[s.email_id] = byEmail[s.email_id] || []).push(s); else loose.push(s);
+    });
+    h += '<ul class="dpc-rep-list">';
+    d.emails.forEach(function (m) { h += repEmailHtml(e, m, byEmail[m.id] || []); });
+    h += '</ul>';
+    // A suggestion whose email is not listed (it is older than the newest 100) still shows.
+    loose.forEach(function (s) { h += sugHtml(e, s); });
+    return h;
+  }
+
+  function repHtml() {
+    var row = state.row;
+    if (!row || isMakesafe(row)) return '';
+    var e = repEntry(row.id);
+    var h = '<div class="dpc-sec dpc-replies" data-dpc-region="rep" id="dpc-replies"><div class="dpc-sec-head"><div class="dpc-grow"><span class="dpc-eyebrow">From suppliers</span><h3>Supplier replies</h3>';
+    h += '<p>Supplier emails matched to this job, and delivery dates read from them</p></div></div>';
+    return h + '<div class="dpc-sec-body">' + repBodyHtml(e) + '</div></div>';
+  }
+
+  var REP_FOCUS_KEYS = ['data-dpc-rep-confirm', 'data-dpc-rep-reject', 'data-dpc-rep-retry', 'data-dpc-sug-accept', 'data-dpc-sug-dismiss', 'data-dpc-sug-order', 'data-dpc-sug-retry', 'data-dpc-retry'];
+  function paintRep() {
+    var el = region('rep');
+    if (!el) return;
+    var a = document.activeElement;
+    var sel = a && el.contains(a) ? REP_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+      return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
+    }).join('') : '';
+    painting = true;
+    try { el.outerHTML = repHtml(); } finally { painting = false; }
+    var now = sel && region('rep') ? region('rep').querySelector(sel) : null;
+    if (now && !now.disabled) now.focus({ preventScroll: true });
+  }
+
+  function paintRepIf(jobId) {
+    if (state.jobId !== jobId) return;
+    paintRep();
+    paintSugNote();
+  }
+
+  // ── the Unmatched supplier emails tray ──
+
+  function trayCount() {
+    var t = state.rep.tray;
+    var c = t.data && t.data.counts;
+    if (!c) return null;
+    return (Number(c.needs_confirmation) || 0) + (Number(c.unmatched_order_desk) || 0);
+  }
+
+  function trayBtnHtml() {
+    var t = state.rep.tray;
+    var n = trayCount();
+    var count = t.status === 'error' ? ' <b class="dpc-tray-n dpc-tray-n-fail">?</b>' : n === null ? '' : ' <b class="dpc-tray-n' + (n ? ' on' : '') + '">' + n + '</b>';
+    return '<button type="button" class="dpc-tray-btn" data-dpc-tray-toggle aria-expanded="' + t.open + '" aria-controls="dpc-tray">Unmatched supplier emails' + count + '</button>';
+  }
+
+  // Every job listed in Active and Archive, for "Put on job".
+  function trayJobs() {
+    var seen = {};
+    var out = [];
+    state.base.rows.concat(state.arch.rows).forEach(function (r) {
+      if (!r || seen[r.id] || isMakesafe(r)) return;
+      seen[r.id] = true;
+      out.push(r);
+    });
+    return out;
+  }
+
+  function trayItemHtml(t, m) {
+    var busy = t.busy[m.id];
+    var off = busy ? ' disabled' : '';
+    var guess = m.state === 'needs_confirmation';
+    var h = '<li class="dpc-rep' + (guess ? ' dpc-rep-guess' : '') + '" data-dpc-tray-item="' + esc(m.id) + '"><div class="dpc-rep-top"><strong>' + esc(text(m.supplier_name) || text(m.from_email) || 'Unknown sender') + '</strong>' + rungHtml(m) +
+      '<span class="dpc-grow"></span><span class="dpc-muted">' + esc(parseStamp(m.received_at) ? stampText(m.received_at) : '') + '</span></div>';
+    if (text(m.from_email)) h += '<p class="dpc-rep-why">' + esc(text(m.from_email)) + '</p>';
+    if (text(m.subject)) h += '<p class="dpc-rep-subj">' + esc(text(m.subject)) + '</p>';
+    if (text(m.snippet)) h += '<p class="dpc-rep-snip">' + esc(text(m.snippet)) + '</p>';
+    if (text(m.delivery_label)) h += '<p class="dpc-rep-why">Delivery date in the email: ' + esc(text(m.delivery_label)) + '</p>';
+    if (guess) {
+      h += '<div class="dpc-rep-ask"><span class="dpc-grow">Best guess: ' + esc(text(m.job_number) || 'a job') + (text(m.match_reason) ? '. ' + esc(text(m.match_reason)) + '.' : '.') + '</span>' +
+        '<button type="button" class="dpc-primary" data-dpc-tray-confirm="' + esc(m.id) + '"' + off + '>' + (busy === 'confirm' ? 'Saving...' : 'Yes, this job') + '</button>' +
+        '<button type="button" data-dpc-tray-reject="' + esc(m.id) + '"' + off + '>' + (busy === 'reject' ? 'Saving...' : 'Not this one') + '</button></div>';
+      return h + '</li>';
+    }
+    var cands = Array.isArray(m.candidates) ? m.candidates.filter(function (c) { return isObj(c) && c.job_id; }) : [];
+    if (cands.length) {
+      h += '<div class="dpc-tray-cands"><span>Could be:</span>' + cands.map(function (c) {
+        return '<button type="button" data-dpc-tray-assign="' + esc(m.id) + '" data-job="' + esc(c.job_id) + '" data-order="' + esc(c.order_id || '') + '"' + off + '>' +
+          esc((text(c.job_number) || 'Job') + (text(c.reason) ? ', ' + text(c.reason) : '')) + '</button>';
+      }).join('') + '</div>';
+    }
+    var jobs = trayJobs();
+    var pick = t.pick[m.id] || '';
+    h += '<div class="dpc-tray-pick"><label class="dpc-vh" for="dpc-tray-job-' + esc(m.id) + '">Job for this email</label><select id="dpc-tray-job-' + esc(m.id) + '" data-dpc-tray-job="' + esc(m.id) + '"' + off + '><option value="">Pick the job</option>' +
+      jobs.map(function (r) { return '<option value="' + esc(r.id) + '"' + (pick === r.id ? ' selected' : '') + '>' + esc(cardTitle(r)) + '</option>'; }).join('') + '</select>' +
+      '<button type="button" data-dpc-tray-put="' + esc(m.id) + '"' + (busy || !pick ? ' disabled' : '') + '>' + (busy === 'assign' ? 'Saving...' : 'Put on job') + '</button>';
+    if (t.hideAsk === m.id) {
+      h += '</div><div class="dpc-rep-ask" role="group" aria-label="Hide this email"><span class="dpc-grow">Hide this email from the tray? It stays in admin@.</span>' +
+        '<button type="button" class="dpc-primary" data-dpc-tray-hide-go="' + esc(m.id) + '"' + off + '>' + (busy === 'hide' ? 'Hiding...' : 'Hide') + '</button>' +
+        '<button type="button" data-dpc-tray-hide-no' + off + '>Keep</button></div>';
+    } else {
+      h += '<button type="button" class="dpc-textbtn" data-dpc-tray-hide="' + esc(m.id) + '"' + off + '>Hide</button></div>';
+    }
+    return h + '</li>';
+  }
+
+  function trayHtml() {
+    var t = state.rep.tray;
+    if (!t.open) return '<div data-dpc-region="tray" hidden></div>';
+    var h = '<div class="dpc-panel dpc-tray" data-dpc-region="tray" id="dpc-tray" role="region" aria-label="Unmatched supplier emails"><div class="dpc-row"><h3 class="dpc-grow">Unmatched supplier emails</h3>';
+    h += '<label class="dpc-tray-other"><input type="checkbox" data-dpc-tray-other' + (t.other ? ' checked' : '') + '> Also show accounts and other supplier mail</label></div>';
+    h += '<p class="dpc-empty dpc-empty-tight">Supplier emails that could not be matched to a job, and best guesses to check. Pick the job, and it moves to that job\'s Supplier replies.</p>';
+    if (t.msg) h += repMsgHtml(t.msg);
+    if (t.status === 'error') return h + failLine('Could not load the unmatched supplier emails.', 'tray', true) + '</div>';
+    if (!t.data) return h + '<p class="dpc-empty">Reading supplier emails...</p></div>';
+    if (!t.data.emails.length) return h + '<p class="dpc-empty">Nothing to sort. Every supplier email is on a job.</p></div>';
+    h += '<ul class="dpc-rep-list">' + t.data.emails.map(function (m) { return trayItemHtml(t, m); }).join('') + '</ul>';
+    return h + '</div>';
+  }
+
+  var TRAY_FOCUS_KEYS = ['data-dpc-tray-confirm', 'data-dpc-tray-reject', 'data-dpc-tray-assign', 'data-dpc-tray-job', 'data-dpc-tray-put', 'data-dpc-tray-hide', 'data-dpc-tray-hide-go', 'data-dpc-tray-other'];
+  function paintTray() {
+    var btn = root() ? root().querySelector('[data-dpc-tray-toggle]') : null;
+    if (btn) {
+      var had = document.activeElement === btn;
+      btn.outerHTML = trayBtnHtml();
+      if (had) root().querySelector('[data-dpc-tray-toggle]').focus({ preventScroll: true });
+    }
+    var el = region('tray');
+    if (!el) return;
+    var a = document.activeElement;
+    var sel = a && el.contains(a) ? TRAY_FOCUS_KEYS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+      return '[' + k + '="' + String(a.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]';
+    }).join('') : '';
+    painting = true;
+    try { el.outerHTML = trayHtml(); } finally { painting = false; }
+    var now = sel && region('tray') ? region('tray').querySelector(sel) : null;
+    if (now && !now.disabled) now.focus({ preventScroll: true });
+  }
+
   function workspaceHtml() {
     var h = '<section class="dpc-workspace" data-dpc-region="workspace" aria-label="Job">';
     if (state.base.status === 'error' && state.rowStale) {
@@ -4086,7 +4744,7 @@
     } else if (!state.row) {
       h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
     } else {
-      h += headHtml(state.row) + sectionHtml() + matHtml() + mailHtml() + schedHtml();
+      h += headHtml(state.row) + sectionHtml() + matHtml() + repHtml() + mailHtml() + schedHtml();
     }
     return h + '</section>';
   }
@@ -4111,7 +4769,8 @@
   function render() {
     var r = root();
     if (!r) return;
-    var h = '<div class="dpc"><div class="dpc-header"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>';
+    var h = '<div class="dpc"><div class="dpc-header"><div class="dpc-row"><div class="dpc-grow"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>' + trayBtnHtml() + '</div></div>';
+    h += trayHtml();
     h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div></div>';
     r.innerHTML = h;
     wireMat();
@@ -4121,7 +4780,7 @@
   // ───────────────────────── events ─────────────────────────
 
   function rowById(id) {
-    var lists = [state.found.rows, state.base.rows];
+    var lists = [state.found.rows, state.base.rows, state.arch.rows];
     for (var l = 0; l < lists.length; l++) for (var i = 0; i < lists[l].length; i++) if (lists[l][i].id === id) return lists[l][i];
     return null;
   }
@@ -4134,14 +4793,17 @@
 
   function onClick(e) {
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
-      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-jobpage],' +
-      '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
+      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
+      '[data-dpc-mode],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-mat-retry],[data-dpc-mat-addline],[data-dpc-mat-suggest],[data-dpc-mat-remove],[data-dpc-mat-del],[data-dpc-mat-clear],' +
       '[data-dpc-order],[data-dpc-order-pdf],[data-dpc-mail],' +
-      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install]') : null;
+      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install],' +
+      '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
+      '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no]') : null;
     if (!t || t.disabled) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
+    if (onRepClick(t)) return;
     if (onMatClick(t)) return;
     if (onOrderClick(t)) return;
     if (onMailClick(t)) return;
@@ -4153,14 +4815,25 @@
     }
     else if (t.hasAttribute('data-dpc-type')) { state.type = t.getAttribute('data-dpc-type'); paintList(); }
     else if (t.hasAttribute('data-dpc-mode')) {
-      state.mode = t.getAttribute('data-dpc-mode') === 'all' ? 'all' : 'todo';
+      // Active or Archive. The work type and a search are cleared; a view
+      // not read yet (or failed) is read now.
+      state.mode = t.getAttribute('data-dpc-mode') === 'archive' ? 'archive' : 'active';
       writeStore('localStorage', LS_MODE, state.mode);
       state.type = 'all';
       state.search = '';
       clearTimeout(searchTimer);
       var box = root().querySelector('[data-dpc-search]');
       if (box) box.value = '';
-      runSearch();
+      var v = viewData(state.mode);
+      if (v.status === 'idle' || v.status === 'error') loadView(state.mode);
+      paintList();
+    }
+    else if (t.hasAttribute('data-dpc-fold')) {
+      var key = t.getAttribute('data-dpc-fold');
+      if (state.folds[key]) delete state.folds[key]; else state.folds[key] = true;
+      writeStore('localStorage', LS_FOLDS, JSON.stringify(state.folds));
+      paintList(true);
+      refocus('[data-dpc-fold="' + key.replace(/["\\]/g, '\\$&') + '"]');
     }
     else if (t.hasAttribute('data-dpc-side')) {
       state.leftOpen = !state.leftOpen;
@@ -4177,7 +4850,11 @@
     else if (t.hasAttribute('data-dpc-retry')) {
       var what = t.getAttribute('data-dpc-retry');
       if (what === 'list') loadBase();
+      else if (what === 'archive') loadView('archive');
       else if (what === 'search') runSearch();
+      else if (what === 'arrival' && state.row) loadArrival(state.row);
+      else if (what === 'replies' && state.row) loadReplies(state.row);
+      else if (what === 'tray') loadTray();
       else if (what === 'detail' && state.jobId) loadDetail(state.jobId);
       else if (what === 'notes' && state.jobId) loadNotes(state.jobId);
       else if (what === 'story' && state.jobId) loadStory(state.jobId);
@@ -4192,32 +4869,83 @@
   }
 
   // The rail's controls. True when the press was one of them. A press on a
-  // stop only opens the confirm line; pressing the stop already set does
-  // nothing.
+  // stop only opens the confirm line ("Move SWF-x to <Stage>?"); only Move
+  // writes. A stop the job cannot move to is disabled and does nothing.
   function onStageClick(t) {
     var row = state.row;
-    var s = stageOf(row);
+    var b = boardOf(row);
     if (t.hasAttribute('data-dpc-stage')) {
-      if (!s || s.none || state.stage.moving) return true;
-      var to = t.getAttribute('data-dpc-stage');
-      if (stageIndex(to) < 1 || (to === s.key && s.source === 'set')) return true;
-      state.stage.confirm = { jobId: row.id, to: to };
+      if (!b || state.stage.moving) return true;
+      var target = moveTarget(b, t.getAttribute('data-dpc-stage'));
+      if (!target) return true;
+      state.stage.confirm = { jobId: row.id, to: target.key, label: text(target.label) || keyWords(target.key) };
       state.stage.msg = null;
       paintTape();
       refocus('[data-dpc-stage-go]');
     } else if (t.hasAttribute('data-dpc-stage-go')) {
       var c = state.stage.confirm;
-      if (c && row && c.jobId === row.id) moveStage(row.id, c.to);
+      if (c && row && c.jobId === row.id) moveStage(c);
     } else if (t.hasAttribute('data-dpc-stage-cancel')) {
-      var was = state.stage.confirm && state.stage.confirm.to;
+      var was = state.stage.confirm && !state.stage.confirm.offer && state.stage.confirm.to;
       state.stage.confirm = null;
       paintTape();
       if (was) refocus('[data-dpc-stage="' + was + '"]');
     } else if (t.hasAttribute('data-dpc-stage-retry')) {
       var m = state.stage.msg;
-      if (m && row && m.jobId === row.id && m.to) moveStage(row.id, m.to);
+      if (m && row && m.jobId === row.id && m.retry) moveStage(m.retry);
     } else if (t.hasAttribute('data-dpc-next-save')) {
       saveNextStep();
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  // Supplier replies and the tray. True when the press was one of them.
+  function onRepClick(t) {
+    var jobId = state.jobId;
+    var e = repEntry(jobId);
+    var tray = state.rep.tray;
+    var id;
+    if (t.hasAttribute('data-dpc-rep-goto')) {
+      var sec = region('rep');
+      if (sec) { sec.scrollIntoView({ block: 'start', behavior: 'smooth' }); var first = sec.querySelector('[data-dpc-sug-accept]:not([disabled]),[data-dpc-rep-confirm]:not([disabled])'); if (first) first.focus({ preventScroll: true }); }
+    } else if ((id = t.getAttribute('data-dpc-rep-confirm'))) {
+      repPress(jobId, 'confirm', id);
+    } else if ((id = t.getAttribute('data-dpc-rep-reject'))) {
+      repPress(jobId, 'reject', id);
+    } else if ((id = t.getAttribute('data-dpc-sug-accept'))) {
+      repPress(jobId, 'accept', id, e && e.pick[id] ? { order_id: e.pick[id] } : null);
+    } else if ((id = t.getAttribute('data-dpc-sug-dismiss'))) {
+      repPress(jobId, 'dismiss', id);
+    } else if ((id = t.getAttribute('data-dpc-rep-retry') || t.getAttribute('data-dpc-sug-retry'))) {
+      var r = e && e.msg[id] && e.msg[id].retry;
+      if (r) repPress(jobId, r.kind, id, r.extra);
+    } else if (t.hasAttribute('data-dpc-tray-toggle')) {
+      tray.open = !tray.open;
+      if (tray.open && (tray.status === 'idle' || tray.status === 'error')) loadTray(); else paintTray();
+      if (tray.open) { var panel = region('tray'); if (panel) panel.scrollIntoView({ block: 'nearest' }); }
+    } else if ((id = t.getAttribute('data-dpc-tray-confirm'))) {
+      trayPress('confirm', id);
+    } else if ((id = t.getAttribute('data-dpc-tray-reject'))) {
+      trayPress('reject', id);
+    } else if ((id = t.getAttribute('data-dpc-tray-assign'))) {
+      var extra = { job_id: t.getAttribute('data-job') };
+      if (t.getAttribute('data-order')) extra.order_id = t.getAttribute('data-order');
+      trayPress('assign', id, extra);
+    } else if ((id = t.getAttribute('data-dpc-tray-put'))) {
+      if (tray.pick[id]) trayPress('assign', id, { job_id: tray.pick[id] });
+    } else if ((id = t.getAttribute('data-dpc-tray-hide'))) {
+      tray.hideAsk = id;
+      paintTray();
+      refocus('[data-dpc-tray-hide-go="' + id + '"]');
+    } else if ((id = t.getAttribute('data-dpc-tray-hide-go'))) {
+      trayPress('hide', id);
+    } else if (t.hasAttribute('data-dpc-tray-hide-no')) {
+      var was = tray.hideAsk;
+      tray.hideAsk = null;
+      paintTray();
+      if (was) refocus('[data-dpc-tray-hide="' + was + '"]');
     } else {
       return false;
     }
@@ -4262,7 +4990,18 @@
         });
       }
     } else if (t.hasAttribute('data-dpc-send')) {
-      sendReply();
+      // Asks first: "Text this to the client?". Nothing is sent here.
+      if (!state.jobId || !(state.replies[state.jobId] || '').trim()) return true;
+      state.smsAsk[state.jobId] = true;
+      state.replyMsg[state.jobId] = null;
+      paintReply();
+      refocus('[data-dpc-send-go]');
+    } else if (t.hasAttribute('data-dpc-send-go')) {
+      if (state.jobId && state.smsAsk[state.jobId]) sendReply();
+    } else if (t.hasAttribute('data-dpc-send-no')) {
+      if (state.jobId) state.smsAsk[state.jobId] = false;
+      paintReply();
+      refocus('[data-dpc-reply]');
     } else if (t.hasAttribute('data-dpc-jobpage')) {
       // A plain press opens the job as the Jobs tab does, which puts
       // #job/<job number> in the address; a new-tab press keeps the link.
@@ -4389,40 +5128,10 @@
     return true;
   }
 
-  // The install row's presses. True when the press was one of them. Only
-  // Mark confirmed (with a booking), its confirm line's Mark confirmed, Clear
-  // and Retry send anything.
+  // The install row has one press left: Retry when the bookings did not load.
   function onInstallClick(t) {
     if (!t.hasAttribute('data-dpc-install')) return false;
-    var jobId = state.jobId;
-    var ins = state.install;
-    var act = t.getAttribute('data-dpc-install');
-    var d = state.row && state.row.id === jobId ? installOf(state.row) : null;
-    if (!jobId) return true;
-    if (act === 'retry-read') { loadBase(); return true; }
-    if (!d) return true;
-    if (act === 'mark') {
-      if (d.state === 'none') {
-        ins.ask = { jobId: jobId, kind: 'none' };
-        ins.msg = null;
-        paintSched();
-        refocus('[data-dpc-install="cancel"]');
-      } else confirmInstall(jobId, true);
-    } else if (act === 'go') confirmInstall(jobId, true);
-    else if (act === 'clear-ask') {
-      ins.ask = { jobId: jobId, kind: 'clear' };
-      ins.msg = null;
-      paintSched();
-      refocus('[data-dpc-install="keep"]');
-    } else if (act === 'clear-go') confirmInstall(jobId, false);
-    else if (act === 'cancel' || act === 'keep') {
-      ins.ask = null;
-      paintSched();
-      refocus(act === 'keep' ? '[data-dpc-install="clear-ask"]' : '[data-dpc-install="mark"]');
-    } else if (act === 'retry') {
-      var m = ins.msg && ins.msg.jobId === jobId ? ins.msg.retry : null;
-      if (typeof m === 'boolean') confirmInstall(jobId, m);
-    }
+    if (t.getAttribute('data-dpc-install') === 'retry-read') loadBase();
     return true;
   }
 
@@ -4439,7 +5148,6 @@
       writeStore('localStorage', LS_SCHED, d.open ? '1' : '0');
       if (d.edit && d.edit.via === 'deliveries') d.edit = null;
       d.ask = null;
-      state.install.ask = null;
       paintSched();
       refocus('[data-dpc-toggle="sched"]');
       return true;
@@ -4504,7 +5212,32 @@
   // Choice boxes: Add supplier, a line's supplier and its status.
   function onChange(e) {
     var t = e.target;
-    if (!t || !t.hasAttribute || !state.jobId) return;
+    if (!t || !t.hasAttribute) return;
+    // The tray works with no job open.
+    var tray = state.rep.tray;
+    if (t.hasAttribute('data-dpc-tray-job')) {
+      tray.pick[t.getAttribute('data-dpc-tray-job')] = t.value;
+      var put = region('tray') && region('tray').querySelector('[data-dpc-tray-put="' + t.getAttribute('data-dpc-tray-job') + '"]');
+      if (put) put.disabled = !t.value || !!tray.busy[t.getAttribute('data-dpc-tray-job')];
+      return;
+    }
+    if (t.hasAttribute('data-dpc-tray-other')) {
+      tray.other = !!t.checked;
+      tray.data = null;
+      tray.status = 'idle';
+      loadTray();
+      return;
+    }
+    if (!state.jobId) return;
+    if (t.hasAttribute('data-dpc-sug-order')) {
+      var e2 = repEntry(state.jobId);
+      if (!e2) return;
+      var sid = t.getAttribute('data-dpc-sug-order');
+      e2.pick[sid] = t.value;
+      var acc = region('rep') && region('rep').querySelector('[data-dpc-sug-accept="' + sid + '"]');
+      if (acc) acc.disabled = !t.value || !!e2.busy[sid];
+      return;
+    }
     if (t.hasAttribute('data-dpc-mat-addsup')) {
       var id = t.value;
       t.value = '';
@@ -4686,6 +5419,10 @@
     }
     if (!r.firstChild) render();
     loadBase();
+    // Both lists are read up front so the Active and Archive buttons carry
+    // their counts; the tray is read for its count on the header button.
+    loadView('archive');
+    loadTray();
   }
 
   global.OpsDispatch = { show: show };

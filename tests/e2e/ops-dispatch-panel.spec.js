@@ -10,6 +10,7 @@
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
+const { V2_ANSWER, V2_EMPTY_READS } = require('../helpers/dispatch-v2-board');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 const PERTH_YEAR = new Date(Date.now() + 8 * 3600 * 1000).getUTCFullYear();
@@ -116,6 +117,8 @@ async function boot(page, { ops = {}, ghl = {}, viewport = null } = {}) {
       workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
     }),
     dispatch_order_emails: (url) => ({ job_id: url.searchParams.get('job_id'), drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }),
+    // Dispatch v2: no Arrival line, supplier reply or tray email.
+    ...V2_EMPTY_READS,
   }, ops);
   const ghlHandlers = Object.assign({
     get_conversation: () => CHAT(3),
@@ -139,9 +142,15 @@ async function boot(page, { ops = {}, ghl = {}, viewport = null } = {}) {
     if (!handlers || !action) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     const body = request.method() === 'POST' ? JSON.parse(request.postData() || '{}') : null;
     calls.push({ fn, action, method: request.method(), url, body });
-    const out = handlers[action] ? await handlers[action](url, body) : {};
+    const view = url.searchParams.get('view') || 'active';
+    // Dispatch v2: the Archive read is empty here.
+    const archiveRead = fn === 'ops-api' && action === 'pipeline' && view === 'archive' && !url.searchParams.get('search');
+    const out = archiveRead ? { columns: {}, total: 0 } : handlers[action] ? await handlers[action](url, body) : {};
     const wrapped = out && typeof out === 'object' && typeof out.status === 'number' && 'body' in out;
-    return route.fulfill({ status: wrapped ? out.status : 200, contentType: 'application/json', body: JSON.stringify(wrapped ? out.body : out) });
+    let reply = wrapped ? out.body : out;
+    // The v1-shaped list answers become the v2 board answer.
+    if (fn === 'ops-api' && action === 'pipeline' && (!wrapped || out.status < 300)) reply = V2_ANSWER(reply, view);
+    return route.fulfill({ status: wrapped ? out.status : 200, contentType: 'application/json', body: JSON.stringify(reply) });
   });
   await page.goto(OPS_FILE + '#dispatch');
   await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
@@ -503,7 +512,17 @@ test('Dispatch panel chat: Send texts once from +61489267771, then clears and re
   expect(of('send_sms')).toEqual([]);
 
   await panel.locator('[data-dpc-reply]').fill('See you Tuesday.');
+  // v2 slice 4: Send only asks. Cancel sends nothing and keeps the text.
   await send.click();
+  const ask = panel.locator('.dpc-sms-ask');
+  await expect(ask).toContainText('Text this to the client? It sends from the admin line.');
+  await expect(panel.locator('[data-dpc-reply]')).toHaveAttribute('readonly', '');
+  await ask.locator('[data-dpc-send-no]').click();
+  await expect(ask).toHaveCount(0);
+  await expect(panel.locator('[data-dpc-reply]')).toHaveValue('See you Tuesday.');
+  expect(of('send_sms')).toEqual([]);
+  await send.click();
+  await ask.locator('[data-dpc-send-go]').click();
   await expect(send).toHaveText('Sending...');
   await expect(send).toBeDisabled();
   await send.click({ force: true });
@@ -528,12 +547,15 @@ test('Dispatch panel chat: a failed send keeps the text and is never retried on 
   await tab(root, 'messages');
   await expect(panel.locator('.dpc-bubble')).toHaveCount(3);
   await panel.locator('[data-dpc-reply]').fill('Running late.');
+  // Send asks first (v2 slice 4); Send text sends.
   await panel.locator('[data-dpc-send]').click();
+  await panel.locator('[data-dpc-send-go]').click();
   await expect(panel.locator('.dpc-note-msg')).toHaveText('Message not sent. Your text is still here.');
   await expect(panel.locator('[data-dpc-reply]')).toHaveValue('Running late.');
   await page.waitForTimeout(500);
   expect(of('send_sms').length).toBe(1);
   await panel.locator('[data-dpc-send]').click();
+  await panel.locator('[data-dpc-send-go]').click();
   await expect(panel.locator('.dpc-note-msg')).toHaveText('Message not sent. Your text is still here.');
   await expect(panel.locator('[data-dpc-reply]')).toHaveValue('Running late.');
   expect(of('send_sms').length).toBe(2);

@@ -4624,7 +4624,7 @@
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
   {t:'css', u:'modules/ops-sales-booking.css?v=3'},
-  {t:'css', u:'modules/ops-dispatch.css?v=6'}
+  {t:'css', u:'modules/ops-dispatch.css?v=7'}
 ]);
 </script>
 </head>
@@ -6279,7 +6279,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
   {t:'js', u:'modules/ops-modals.js?v=4'},
-  {t:'js', u:'modules/ops-dispatch.js?v=6'}
+  {t:'js', u:'modules/ops-dispatch.js?v=7'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
@@ -18039,7 +18039,11 @@ function renderPOTable(pos) {
     html += '<td>' + fmtDate(po.delivery_date) + '</td>';
     html += '<td>' + poStatusBadge(po.status) + '</td>';
     html += '<td>';
-    if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
+    // Dispatch v2: an order made in the Dispatch tab is sent from there and
+    // never pushed to Xero from this board (the backend refuses it too).
+    if (isDispatchPO(po)) {
+      html += '<span style="font-size:11px; color:var(--sw-text-sec);">Made in Dispatch</span>';
+    } else if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
       html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Push to Xero</button>';
     }
     if (po.job_id) {
@@ -20044,14 +20048,20 @@ function renderMaterialsKanban() {
 
       // FEATURE 7: Lifecycle action buttons + BUG 3: Open Job (fixed to use openJobQuickView)
       html += '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">';
-      // Log Email
-      html += '<button onclick="event.stopPropagation();openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993; Email</button>';
+      // Log Email. Not on an order made in the Dispatch tab: it is emailed
+      // from the job's Dispatch tab, and the backend refuses it here.
+      var fromDispatch = isDispatchPO(po);
+      if (fromDispatch) {
+        html += '<span class="po-dispatch-note" style="font-size:10px;padding:2px 0;color:var(--sw-text-sec);">Made in Dispatch. Send it from the job\'s Dispatch tab.</span>';
+      } else {
+        html += '<button onclick="event.stopPropagation();openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993; Email</button>';
+      }
       // Open Job (BUG 3 — fixed: opens job detail, not patio tool)
       if (po.job_id) {
         html += '<button onclick="event.stopPropagation();openJobQuickView(\'' + po.job_id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">Job</button>';
       }
       // Approve & Send button for draft POs
-      if (stage.key === 'draft') {
+      if (stage.key === 'draft' && !fromDispatch) {
         html += '<button onclick="event.stopPropagation();approveAndSendPO(\'' + po.id + '\',this)" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-green);border-radius:3px;background:var(--sw-green);cursor:pointer;color:#fff;font-weight:600;">Approve &amp; Send</button>';
       }
       // FEATURE 7: Lifecycle buttons
@@ -26970,6 +26980,20 @@ function scanSupplierQuote(poId) {
   input.click();
 }
 
+// Dispatch v2: a purchase order made in the Dispatch tab (source 'dispatch').
+// The old PO board hides its Push to Xero, Email and Approve & Send for it.
+function isDispatchPO(po) { return !!po && po.source === 'dispatch'; }
+
+var DISPATCH_PO_WORDS = 'This order was made in the Dispatch tab. Send it from the job\'s Dispatch tab instead.';
+
+// The backend's own words when it refuses a Dispatch order on an old path
+// (409 {error, code: 'dispatch_po_refused', action, po_id}); null otherwise.
+function dispatchPORefusedText(err) {
+  if (!err || err.code !== 'dispatch_po_refused') return null;
+  var b = err.body || {};
+  return (typeof b.error === 'string' && b.error) || DISPATCH_PO_WORDS;
+}
+
 async function pushPOToXero(poId) {
   if (!confirm('Push this PO to Xero?')) return;
   try {
@@ -26977,6 +27001,8 @@ async function pushPOToXero(poId) {
     showToast('PO pushed to Xero', 'success');
     loadPOs();
   } catch (e) {
+    var refused = dispatchPORefusedText(e);
+    if (refused) { showToast(refused, 'warning'); loadPOs(); return; }
     alert('Failed to push PO: ' + e.message);
   }
 }
@@ -28594,6 +28620,8 @@ async function approveAndSendPO(poId, btnEl) {
     showToast('PO approved and sent to supplier', 'success');
     loadMaterials();
   } catch(e) {
+    var refused = dispatchPORefusedText(e);
+    if (refused) { showToast(refused, 'warning'); loadMaterials(); return; }
     showToast('Error: ' + e.message, 'warning');
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Approve & Send'; }
   }
@@ -29391,6 +29419,7 @@ function openPOEmailCompose(poId) {
 
   var po = _allPOs.find(function(p) { return p.id === poId; });
   if (!po) { showToast('PO not found', 'warning'); return; }
+  if (isDispatchPO(po)) { showToast(DISPATCH_PO_WORDS, 'warning'); return; }
 
   // Find supplier email
   var supplierEmail = '';
@@ -29491,6 +29520,11 @@ async function sendPOEmail() {
     }
   }
 
+  // Dispatch v2: never for an order made in the Dispatch tab. Checked before
+  // the supplier email save below, so nothing is written for it.
+  var composePo = _allPOs.find(function(p) { return p.id === poId; });
+  if (isDispatchPO(composePo)) { showToast(DISPATCH_PO_WORDS, 'warning'); return; }
+
   // Try to save supplier email if it was manually entered
   if (supplierName && to) {
     var existingSup = _suppliers.find(function(s) { return s.name === supplierName; });
@@ -29518,6 +29552,12 @@ async function sendPOEmail() {
         attach_pdf: attachPDF
       })
     });
+    if (resp.status === 409) {
+      // The backend refused a Dispatch order: say so, and log nothing.
+      var refusal = await resp.json().catch(function() { return {}; });
+      var refusedText = dispatchPORefusedText({ code: refusal.code, body: refusal });
+      if (refusedText) { showToast(refusedText, 'warning'); return; }
+    }
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var result = await resp.json();
     if (result.error) throw new Error(result.error);

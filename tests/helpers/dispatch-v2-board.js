@@ -78,6 +78,13 @@ const V2_EMPTY_READS = {
     from: 'admin@secureworkswa.com.au', test_send_done: false, main_supplier_id: null, main_supplier_ticked: false, can_suggest: false,
     draft_list: { lines: [], photos: [] }, suppliers: [],
   }),
+  // Kept from v1 (the working out pad, Deliveries and old purchase orders):
+  // an empty pad, no orders and no deliveries.
+  dispatch_materials: () => ({
+    suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
+    workings: { working_out: '', working_out_updated_at: null, sketch_png: null, sketch_updated_at: null },
+    orders_status: 'ok', orders: [], deliveries: { rows: [], counted: 0, sighted: 0, all_sighted: false },
+  }),
 };
 
 module.exports = { V2_STAGES, PERTH_TODAY, V2_BOARD_ROW, V2_ANSWER, V2_EMPTY_READS };

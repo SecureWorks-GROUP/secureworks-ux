@@ -411,7 +411,10 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     await expect(root.locator('.dpc-jobhead h2')).toContainText('SWP-920002');
     await expect(draftOf(mat)).toBeVisible();
     expect(of('dispatch_v2_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1', 'job-p1']);
-    expect(calls.filter((c) => ['dispatch_materials', 'dispatch_order_emails', 'dispatch_deliveries', 'list_suppliers'].includes(c.action))).toEqual([]);
+    // The v1 materials read is kept for the working out pad, Deliveries and old
+    // purchase orders, once per job open; the other v1 reads are gone.
+    expect(of('dispatch_materials').map((c) => c.url.searchParams.get('job_id'))).toEqual(['job-f1', 'job-p1']);
+    expect(calls.filter((c) => ['dispatch_order_emails', 'dispatch_deliveries', 'list_suppliers'].includes(c.action))).toEqual([]);
     expect(calls.filter((c) => c.method === 'POST' && c.action !== 'operator_heartbeat')).toEqual([]);
     expect(await mat.innerText()).not.toMatch(/[–—]/);
   });

@@ -850,9 +850,11 @@ test('Dispatch: reads only pipeline, job_detail, job_notes and the v2 job reads,
   // open; it is not a Dispatch call, so it is left out here.
   const since = calls.slice(mark).filter((c) => !/^debt_ws_/.test(c.action));
   // v2: dispatch_v2_materials (slices 5 and 6), dispatch_arrival (slice 7) and
-  // dispatch_v2_replies (slice 8) once per job open. The v1 reads are gone.
-  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_arrival', 'dispatch_v2_materials', 'dispatch_v2_replies', 'job_detail', 'job_notes', 'pipeline']);
-  expect(calls.filter((c) => ['list_suppliers', 'dispatch_materials', 'dispatch_order_emails', 'dispatch_deliveries'].includes(c.action))).toEqual([]);
+  // dispatch_v2_replies (slice 8) once per job open, plus the v1
+  // dispatch_materials read kept for the working out pad, Deliveries and old
+  // purchase orders. The other v1 reads are gone.
+  expect([...new Set(since.map((c) => c.action))].sort()).toEqual(['add_note', 'dispatch_arrival', 'dispatch_materials', 'dispatch_v2_materials', 'dispatch_v2_replies', 'job_detail', 'job_notes', 'pipeline']);
+  expect(calls.filter((c) => ['list_suppliers', 'dispatch_order_emails', 'dispatch_deliveries'].includes(c.action))).toEqual([]);
   expect(since.filter((c) => c.method !== 'GET').map((c) => c.action)).toEqual(['add_note']);
   expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1', 'job-p2']);
 });

@@ -136,6 +136,13 @@
   var NEXT_STEP_MAX = 40;
   var LS_ORDER = 'sw_dispatch_order_open';
   var LS_SCHED = 'sw_dispatch_sched_open';
+  // The Working out pad folded open or shut, and the Emails panel open or shut.
+  var LS_WORKOUT = 'sw_dispatch_workout_open';
+  var LS_MAIL = 'sw_dispatch_mail_open';
+  // The pad saves this long after typing stops.
+  var WORKOUT_SAVE_MS = 1200;
+  // The largest sketch the server takes (characters of its PNG data).
+  var MAT_SKETCH_MAX = 400000;
   var TABS = [
     { key: 'sources', label: 'Sources' },
     { key: 'story', label: 'Context story' },
@@ -913,7 +920,15 @@
       unrecorded: {}
     },
     // The Install section, folded or open (kept per browser).
-    sched: { open: readStore('localStorage', LS_SCHED) !== '0' }
+    sched: { open: readStore('localStorage', LS_SCHED) !== '0' },
+    // Kept from v1: the dispatch_materials read per job (working out pad,
+    // purchase orders, Deliveries), and the pad folded open or shut.
+    old: { jobs: {}, workOpen: readStore('localStorage', LS_WORKOUT) === '1', pdf: {} },
+    // The Deliveries table: the row being saved, its message, the date being
+    // edited, the confirm question open, and what was typed in a date box.
+    deliv: { busy: {}, msg: null, edit: null, ask: null, typed: {} },
+    // The Emails panel: open or shut, and the email picked on each job.
+    mail: { open: readStore('localStorage', LS_MAIL) !== '0', sel: {} }
   };
   var tokens = { active: 0, archive: 0, found: 0, fill: 0 };
   var searchTimer = null;
@@ -1079,6 +1094,7 @@
     loadV2(row);
     loadArrival(row);
     loadReplies(row);
+    loadOld(row);
   }
 
   // The one write this module makes.
@@ -2027,7 +2043,8 @@
       h += '<div class="dpc-sec-body"><div data-dpc-region="scope">' + scopeHtml() + '</div>';
       h += '<div data-dpc-region="council">' + councilHtml() + '</div>';
       h += '<div data-dpc-region="notes">' + notesHtml() + '</div>';
-      h += '<div data-dpc-region="composer">' + composerHtml() + '</div></div>';
+      h += '<div data-dpc-region="composer">' + composerHtml() + '</div>';
+      h += workoutHtml() + '</div>';
     }
     return h + '</div>';
   }
@@ -2246,6 +2263,421 @@
   // True while a section is redrawn, so the focus leaving a box that is being
   // replaced is not taken as a person leaving it (which would save it).
   var painting = false;
+
+  // ───────────────────────── kept from v1: the working out pad, Deliveries and old orders ─────────────────────────
+  //
+  // v2 keeps three parts of the v1 job workspace, working as they were built:
+  //   - the Working out and sketch pad, at the foot of Scope and notes;
+  //   - the Deliveries table, where a person records what arrived on a
+  //     purchase order (expected date, confirmed date, sighted on site);
+  //   - the Purchase orders group in Sources, read only.
+  // All three come from the v1 read dispatch_materials, read once per job open
+  // (never on a make-safe), on Retry, and once after a "changed somewhere
+  // else" answer. v2 itself makes no purchase orders; the orders here are ones
+  // a job already has. The writes are the pad's dispatch_materials_save_workings
+  // and the three v1 delivery writes (dispatch_delivery_set_expected,
+  // dispatch_delivery_set_confirmed, dispatch_delivery_mark_sighted), each sent
+  // once on a person's edit or press, never retried on their own. None of them
+  // touches a v2 line, supplier box or order email.
+
+  function oldEntry(jobId) { return (jobId && state.old.jobs[jobId]) || null; }
+
+  function oldNew(jobId) {
+    return {
+      jobId: jobId, status: 'loading', token: 0, rereading: false, notice: '', touched: false,
+      ordersOk: false, orders: [], deliveries: null,
+      w: {
+        loaded: false, text: '', textSaved: '', textStamp: null, textBusy: false, textAgain: false, textFailed: false, timer: null,
+        sketch: null, sketchSaved: null, sketchStamp: null, sketchBusy: false, sketchAgain: false, sketchFailed: false,
+        sketchMsg: '', sketchBroken: false, clearWanted: false
+      }
+    };
+  }
+
+  // An order's delivery block as the server works it out (dispatch_deliveries.ts).
+  function delivOk(d) {
+    return !!d && typeof d === 'object' && typeof d.step === 'number' && typeof d.expected_editable === 'boolean' &&
+      !!d.confirmed && typeof d.confirmed === 'object' && typeof d.confirmed.state === 'string';
+  }
+
+  // The deliveries block of dispatch_materials, or null when it is missing or
+  // any row is not whole: the table then shows its failed line, never a short
+  // or empty table. v1's "not ordered yet" rows are left out: in v2 a supplier
+  // box is ordered by email from Materials, not by a purchase order.
+  function deliveriesFrom(v) {
+    if (!v || typeof v !== 'object' || !Array.isArray(v.rows) || typeof v.counted !== 'number' || typeof v.sighted !== 'number') return null;
+    var ok = v.rows.every(function (r) {
+      if (!r || typeof r !== 'object') return false;
+      if (r.kind === 'not_ordered') return !!r.supplier_id;
+      return r.kind === 'order' && !!r.purchase_order_id && delivOk(r.delivery);
+    });
+    if (!ok) return null;
+    return { rows: v.rows.filter(function (r) { return r.kind === 'order'; }), counted: v.counted, sighted: v.sighted, all_sighted: v.all_sighted === true };
+  }
+
+  // dispatch_materials' answer, the parts v2 still uses. No workings is a
+  // failed read: the pad shows its failed line, never an empty pad.
+  function oldFrom(resp) {
+    if (!isObj(resp) || !isObj(resp.workings)) throw new Error('Unexpected materials answer');
+    var ordersOk = resp.orders_status === 'ok' && Array.isArray(resp.orders);
+    return {
+      workings: resp.workings,
+      ordersOk: ordersOk,
+      orders: ordersOk ? resp.orders.filter(isObj) : [],
+      deliveries: ordersOk ? deliveriesFrom(resp.deliveries) : null
+    };
+  }
+
+  // A fresh read over what the screen holds. Pad text typed and not yet saved
+  // is kept while the server's copy is the one it was typed over.
+  function mergeOld(e, got) {
+    e.orders = got.orders;
+    e.ordersOk = got.ordersOk;
+    e.deliveries = got.deliveries;
+    var w = e.w;
+    var wo = typeof got.workings.working_out === 'string' ? got.workings.working_out : '';
+    var woStamp = got.workings.working_out_updated_at || null;
+    if (!(w.loaded && w.textStamp === woStamp && (w.textBusy || w.text !== w.textSaved))) w.text = wo;
+    w.textSaved = wo;
+    w.textStamp = woStamp;
+    var sk = typeof got.workings.sketch_png === 'string' && got.workings.sketch_png ? got.workings.sketch_png : null;
+    var skStamp = got.workings.sketch_updated_at || null;
+    if (!(w.loaded && w.sketchStamp === skStamp && (w.sketchBusy || w.sketch !== w.sketchSaved))) { w.sketch = sk; w.sketchBroken = false; }
+    w.sketchSaved = sk;
+    w.sketchStamp = skStamp;
+    w.loaded = true;
+  }
+
+  function loadOld(row) {
+    if (!row || !row.id || isMakesafe(row)) return;
+    readOld(row.id, false);
+  }
+
+  // quiet keeps what is drawn until the new answer lands.
+  function readOld(jobId, quiet) {
+    var e = oldEntry(jobId) || (state.old.jobs[jobId] = oldNew(jobId));
+    var token = ++e.token;
+    if (!quiet || e.status !== 'ok') { e.status = 'loading'; if (!quiet) e.notice = ''; }
+    paintOldIf(jobId);
+    return Promise.resolve().then(function () { return global.opsFetch('dispatch_materials', { job_id: jobId }); }).then(function (resp) {
+      if (token !== e.token) return;
+      mergeOld(e, oldFrom(resp));
+      e.status = 'ok';
+      paintOldIf(jobId);
+    }).catch(function () {
+      if (token !== e.token) return;
+      e.status = 'error';
+      paintOldIf(jobId);
+    });
+  }
+
+  // The pad, the Deliveries table and Sources, after the read or a write.
+  function paintOldIf(jobId) {
+    if (state.jobId !== jobId) return;
+    paintWorkout();
+    paintSched();
+    paintSources();
+  }
+
+  // The pad changed somewhere else: say so and show the latest, by one quiet re-read.
+  function oldChanged(jobId) {
+    var e = oldEntry(jobId);
+    if (!e) return;
+    e.notice = 'This changed somewhere else. Showing the latest.';
+    if (state.jobId === jobId) paintWorkout();
+    if (e.rereading) return;
+    e.rereading = true;
+    readOld(jobId, true).then(function () { e.rereading = false; });
+  }
+
+  function oldOk(resp) {
+    if (!resp || typeof resp !== 'object' || resp.success !== true) throw new Error('Unexpected answer');
+    return resp;
+  }
+
+  // ── the working out pad: saved when typing stops, and when the pad is left ──
+
+  function padInput(jobId, value) {
+    var e = oldEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.text = value;
+    clearTimeout(e.w.timer);
+    e.w.timer = setTimeout(function () { saveText(jobId); }, WORKOUT_SAVE_MS);
+  }
+
+  function saveText(jobId) {
+    var e = oldEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    var w = e.w;
+    clearTimeout(w.timer);
+    w.timer = null;
+    if (w.textBusy) { w.textAgain = true; return; }
+    if (w.text === w.textSaved) { if (w.textFailed) { w.textFailed = false; paintPadSave(jobId); } return; }
+    var sent = w.text;
+    w.textBusy = true;
+    w.textFailed = false;
+    e.touched = true;
+    paintPadSave(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, working_out: sent, expected_working_out_updated_at: w.textStamp });
+    }).then(oldOk).then(function (resp) {
+      w.textBusy = false;
+      w.textSaved = sent;
+      w.textStamp = (resp.workings && resp.workings.working_out_updated_at) || null;
+      var again = w.textAgain;
+      w.textAgain = false;
+      if (again && w.text !== w.textSaved) saveText(jobId); else paintPadSave(jobId);
+    }, function (err) {
+      w.textBusy = false;
+      w.textAgain = false;
+      if (err && err.code === 'workings_changed') { oldChanged(jobId); return; }
+      w.textFailed = true;
+      paintPadSave(jobId);
+    });
+  }
+
+  // The sketch: saved after each stroke, as the canvas's own PNG.
+  function sketchDrawn(jobId, dataUrl) {
+    var e = oldEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.sketch = dataUrl;
+    e.w.sketchBroken = false;
+    e.w.sketchMsg = '';
+    e.w.clearWanted = false;
+    saveSketch(jobId);
+    paintSketchMsg(jobId);
+  }
+
+  function clearSketch(jobId) {
+    var e = oldEntry(jobId);
+    if (!e || e.status !== 'ok') return;
+    e.w.sketch = null;
+    e.w.sketchBroken = false;
+    e.w.sketchMsg = '';
+    if (state.jobId === jobId) redrawSketch();
+    saveSketch(jobId);
+    paintSketchMsg(jobId);
+  }
+
+  function saveSketch(jobId) {
+    var e = oldEntry(jobId);
+    if (!e) return;
+    var w = e.w;
+    if (w.sketchBusy) { w.sketchAgain = true; return; }
+    var sent = w.sketch;
+    if (sent === w.sketchSaved) { if (w.sketchFailed) { w.sketchFailed = false; paintPadSave(jobId); } w.clearWanted = false; return; }
+    if (sent && sent.length > MAT_SKETCH_MAX) {
+      w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
+      paintSketchMsg(jobId);
+      return;
+    }
+    w.sketchBusy = true;
+    w.sketchFailed = false;
+    e.touched = true;
+    paintPadSave(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_materials_save_workings', { job_id: jobId, sketch_png: sent, expected_sketch_updated_at: w.sketchStamp });
+    }).then(oldOk).then(function (resp) {
+      w.sketchBusy = false;
+      w.sketchSaved = sent;
+      w.sketchStamp = (resp.workings && resp.workings.sketch_updated_at) || null;
+      w.clearWanted = false;
+      var again = w.sketchAgain;
+      w.sketchAgain = false;
+      if (again && w.sketch !== w.sketchSaved) saveSketch(jobId); else paintPadSave(jobId);
+    }, function (err) {
+      w.sketchBusy = false;
+      w.sketchAgain = false;
+      if (err && err.code === 'workings_changed') { oldChanged(jobId); return; }
+      if (err && err.status === 400 && sent && /too large|at most/i.test(String(err.message))) {
+        w.sketchMsg = 'Sketch not saved: too large. Clear it and draw again.';
+      } else {
+        w.sketchFailed = true;
+        // A failed Clear brings the drawing back; Retry clears it again.
+        if (sent === null) { w.clearWanted = true; w.sketch = w.sketchSaved; if (state.jobId === jobId) redrawSketch(); }
+      }
+      paintPadSave(jobId);
+      paintSketchMsg(jobId);
+    });
+  }
+
+  // The save line's Retry: the pad text and the sketch once more, once each.
+  function retryPad(jobId) {
+    var e = oldEntry(jobId);
+    if (!e) return;
+    if (e.w.textFailed) { e.w.textFailed = false; saveText(jobId); }
+    if (e.w.sketchFailed) { e.w.sketchFailed = false; if (e.w.clearWanted) clearSketch(jobId); else saveSketch(jobId); }
+    paintPadSave(jobId);
+  }
+
+  // ── render: the working out pad (foot of Scope and notes) ──
+
+  function padSaveHtml(e) {
+    if (e.w.textFailed || e.w.sketchFailed) return '<span class="dpc-mat-fail" role="alert">Not saved. <button type="button" class="dpc-retry" data-dpc-mat-retry="saves">Retry</button></span>';
+    if (e.w.textBusy || e.w.sketchBusy) return '<span role="status">Saving...</span>';
+    if (e.touched) return '<span role="status">All changes saved</span>';
+    return '';
+  }
+
+  function sketchMsgHtml(e) {
+    if (e.w.sketchBroken) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">Could not show the saved sketch.</div>';
+    if (e.w.sketchMsg) return '<div class="dpc-line-msg dpc-mat-fail" role="alert">' + esc(e.w.sketchMsg) + '</div>';
+    return '';
+  }
+
+  // Drawn on every job except a make-safe one.
+  function workoutHtml() {
+    var row = state.row;
+    if (!row || isMakesafe(row)) return '<div data-dpc-region="workout"></div>';
+    var e = oldEntry(row.id);
+    var h = '<div data-dpc-region="workout"><details class="dpc-workout" data-dpc-mat-workout' + (state.old.workOpen ? ' open' : '') + '><summary>Working out and sketch</summary>';
+    if (!e || e.status === 'loading' && !e.w.loaded) return h + '<div class="dpc-empty dpc-empty-tight">Loading the working out...</div></details></div>';
+    if (e.status === 'error' && !e.w.loaded) {
+      return h + '<div class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Could not load the working out. <button type="button" class="dpc-retry" data-dpc-mat-retry="read">Retry</button></div></details></div>';
+    }
+    if (e.notice) h += '<div class="dpc-mat-notice" role="status">' + esc(e.notice) + '</div>';
+    h += '<div class="dpc-scratch"><textarea class="dpc-textarea" data-dpc-mat-pad maxlength="20000" placeholder="42 m run / 2.4 m bays = 18 bays..." aria-label="Working out">' + esc(e.w.text) + '</textarea>';
+    h += '<div class="dpc-canvas-wrap"><canvas class="dpc-canvas" data-dpc-mat-canvas width="600" height="220" role="img" aria-label="Sketch pad"></canvas>';
+    h += '<button type="button" class="dpc-canvas-clear" data-dpc-mat-clear>Clear sketch</button></div></div>';
+    h += '<div data-dpc-region="matsketch">' + sketchMsgHtml(e) + '</div>';
+    h += '<div class="dpc-mat-save" data-dpc-region="matsave">' + padSaveHtml(e) + '</div>';
+    return h + '</details></div>';
+  }
+
+  function paintWorkout() {
+    var el = region('workout');
+    if (!el) return;
+    var a = document.activeElement;
+    var hadPad = !!a && el.contains(a) && a.hasAttribute('data-dpc-mat-pad');
+    var start = hadPad ? a.selectionStart : null, end = hadPad ? a.selectionEnd : null;
+    painting = true;
+    try { el.outerHTML = workoutHtml(); } finally { painting = false; }
+    wirePad();
+    var pad = hadPad && region('workout') ? region('workout').querySelector('[data-dpc-mat-pad]') : null;
+    if (pad) { pad.focus({ preventScroll: true }); try { pad.setSelectionRange(start, end); } catch (x) { /* not a text box */ } }
+  }
+
+  function paintPadSave(jobId) {
+    if (state.jobId !== jobId) return;
+    var el = region('matsave');
+    var e = oldEntry(jobId);
+    if (el && e) el.innerHTML = padSaveHtml(e);
+  }
+
+  function paintSketchMsg(jobId) {
+    if (state.jobId !== jobId) return;
+    var el = region('matsketch');
+    var e = oldEntry(jobId);
+    if (el && e) el.innerHTML = sketchMsgHtml(e);
+  }
+
+  // The saved sketch, drawn back onto the pad after every paint of it.
+  function redrawSketch() {
+    var e = oldEntry(state.jobId);
+    var r = region('workout');
+    var c = r && r.querySelector('[data-dpc-mat-canvas]');
+    var ctx = c && c.getContext && c.getContext('2d');
+    if (!e || !ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    var src = e.w.sketch;
+    if (!src) return;
+    var img = new Image();
+    c.dpcLoading = src;
+    img.onload = function () {
+      if (c.dpcLoading === src) c.dpcLoading = null;
+      if (!c.isConnected) return;
+      if (e.w.sketch === src) { ctx.drawImage(img, 0, 0); return; }
+      // A stroke landed before the saved picture had drawn: put the picture
+      // under it and save the two together, so the stroke never wipes it.
+      if (c.dpcDrawnOver !== src) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+      sketchDrawn(e.jobId, c.toDataURL('image/png'));
+    };
+    img.onerror = function () {
+      if (c.dpcLoading === src) c.dpcLoading = null;
+      if (e.w.sketch !== src) return;
+      // Nothing is saved over it until a stroke is drawn.
+      e.w.sketchBroken = true;
+      paintSketchMsg(e.jobId);
+    };
+    img.src = src;
+  }
+
+  // A mouse, a finger or a pen draws; the page does not scroll while drawing.
+  function wirePad() {
+    var r = region('workout');
+    var c = r && r.querySelector('[data-dpc-mat-canvas]');
+    var ctx = c && c.getContext && c.getContext('2d');
+    if (!ctx) return;
+    var jobId = state.jobId;
+    redrawSketch();
+    var drawing = false;
+    var at = function (ev) {
+      var b = c.getBoundingClientRect();
+      return [(ev.clientX - b.left) * c.width / (b.width || 1), (ev.clientY - b.top) * c.height / (b.height || 1)];
+    };
+    c.addEventListener('pointerdown', function (ev) {
+      if (ev.button > 0) return;
+      drawing = true;
+      if (c.dpcLoading) c.dpcDrawnOver = c.dpcLoading;
+      try { c.setPointerCapture(ev.pointerId); } catch (x) { /* already released */ }
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#293C46';
+      var p = at(ev);
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(p[0] + 0.01, p[1]);
+      ctx.stroke();
+      ev.preventDefault();
+    });
+    c.addEventListener('pointermove', function (ev) {
+      if (!drawing) return;
+      var p = at(ev);
+      ctx.lineTo(p[0], p[1]);
+      ctx.stroke();
+      ev.preventDefault();
+    });
+    var end = function () {
+      if (!drawing) return;
+      drawing = false;
+      sketchDrawn(jobId, c.toDataURL('image/png'));
+    };
+    c.addEventListener('pointerup', end);
+    c.addEventListener('pointercancel', end);
+  }
+
+  // The pad's presses. True when the press was one of them.
+  function onPadClick(t) {
+    var jobId = state.jobId;
+    if (t.hasAttribute('data-dpc-mat-clear')) { if (jobId) clearSketch(jobId); return true; }
+    if (t.hasAttribute('data-dpc-mat-retry')) {
+      if (!jobId) return true;
+      if (t.getAttribute('data-dpc-mat-retry') === 'read') { var e = oldEntry(jobId); readOld(jobId, !!e && e.w.loaded); }
+      else retryPad(jobId);
+      return true;
+    }
+    return false;
+  }
+
+  // The pad folded open or shut is kept per browser.
+  function onToggle(e) {
+    var t = e.target;
+    if (!t || !t.hasAttribute || !t.hasAttribute('data-dpc-mat-workout') || state.old.workOpen === t.open) return;
+    state.old.workOpen = t.open;
+    writeStore('localStorage', LS_WORKOUT, t.open ? '1' : '0');
+  }
+
+  // The Sources tab, when it is the one showing.
+  function paintSources() {
+    if (!state.rightOpen || state.tab !== 'sources' || !state.row) return;
+    var el = region('panel');
+    if (el) el.innerHTML = panelHtml();
+  }
 
   // ───────────────────────── render: Install ─────────────────────────
 
@@ -4151,6 +4583,7 @@
   function paintWorkspace() {
     var w = region('workspace');
     if (w) w.outerHTML = workspaceHtml();
+    wirePad();
   }
   function paintHead() { var el = region('head'); if (el) keepNextFocus(function () { el.outerHTML = headHtml(state.row); }); }
   function paintCouncil() { var el = region('council'); if (el) el.innerHTML = councilHtml(); }
@@ -4172,6 +4605,7 @@
     h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div>';
     h += '<div data-dpc-region="v2modal">' + v2ModalHtml() + '</div></div>';
     r.innerHTML = h;
+    wirePad();
     paintList();
   }
 
@@ -4196,9 +4630,10 @@
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
-      '[data-dpc-v2]') : null;
+      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry]') : null;
     if (!t || t.disabled) return;
     if (onV2Click(t)) return;
+    if (onPadClick(t)) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
     if (onRepClick(t)) return;
@@ -4471,6 +4906,7 @@
   function onFocusOut(e) {
     var t = e.target;
     if (painting || !t || !t.hasAttribute || !state.jobId) return;
+    if (t.hasAttribute('data-dpc-mat-pad')) { saveText(state.jobId); return; }
     onV2FocusOut(t);
   }
 
@@ -4478,6 +4914,7 @@
     var t = e.target;
     if (!t || !t.hasAttribute) return;
     if (onV2Input(t)) return;
+    if (t.hasAttribute('data-dpc-mat-pad')) { if (state.jobId) padInput(state.jobId, t.value); return; }
     if (t.hasAttribute('data-dpc-search')) {
       state.search = t.value || '';
       clearTimeout(searchTimer);
@@ -4542,6 +4979,8 @@
       r.addEventListener('change', onChange);
       r.addEventListener('focusout', onFocusOut);
       r.addEventListener('keydown', onKeyDown);
+      // A details element's toggle does not bubble, so it is caught on the way down.
+      r.addEventListener('toggle', onToggle, true);
       r.addEventListener('dragstart', onV2DragStart);
       r.addEventListener('dragover', onV2DragOver);
       r.addEventListener('drop', onV2Drop);

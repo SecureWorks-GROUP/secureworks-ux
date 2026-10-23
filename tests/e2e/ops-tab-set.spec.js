@@ -2842,3 +2842,78 @@ test.describe('Dispatch slice 5: purchase orders and Emails', () => {
     expect(sent).toEqual([['m1', 'Friday works.'], ['m1', 'Friday works.']]);
   });
 });
+
+test.describe('Dispatch: email Context found on the job', () => {
+  const CTX_ROW = (n, over = {}) => Object.assign({
+    event_id: 'ev-' + n, occurred_at: '2026-10-1' + n + 'T02:00:00.000Z', direction: 'inbound', from_address: 'orders@stratco.test',
+    subject: 'Stratco order ' + n, preview: 'Delivery booked for order ' + n + '.', provider_message_id: 'graph:m' + n,
+    counterpart_role: 'supplier', placement: 'certain', by: 'rule', reason: 'Order number on the job', other_jobs: [],
+  }, over);
+  const ctxOn = (page) => page.addInitScript(() => { localStorage.setItem('sw_dispatch_ctxmail', '1'); });
+
+  test('with the switch off it reads nothing and draws no group', async ({ page }) => {
+    const { root, of } = await bootDispatch(page, { context_job_mail: () => ({ mail: [CTX_ROW(1)] }) });
+    await expect(root.locator('.dpc-mailsec .dpc-sec-body')).toContainText('No email on this job yet.');
+    expect(of('context_job_mail')).toHaveLength(0);
+    await expect(root.locator('.dpc-mail-group')).toHaveCount(0);
+  });
+
+  test('sure and maybe-elsewhere rows keep their label and name the other jobs; nothing is written', async ({ page }) => {
+    await ctxOn(page);
+    const rows = [CTX_ROW(1), CTX_ROW(2, { placement: 'candidate', by: 'review', reason: 'Two jobs share this order',
+      other_jobs: [{ job_id: 'job-x', job_number: 'SWP-26102', placement: 'candidate' }] })];
+    const { root, of, calls } = await bootDispatch(page, { context_job_mail: (url) => ({ job_id: url.searchParams.get('job_id'), mail: rows, more: false, candidate_count: 1, limit: 100, roles: ['supplier'] }) });
+    const mail = root.locator('.dpc-mailsec');
+    await expect(mail.locator('.dpc-mail-group')).toHaveText('Found by Context');
+    const items = mail.locator('.dpc-mail-ctx');
+    await expect(items).toHaveCount(2);
+    await expect(items.nth(0).locator('.dpc-status')).toHaveText('Sure on this job');
+    await expect(items.nth(1).locator('.dpc-status')).toHaveText('May belong to another job');
+    await expect(items.nth(1).locator('.dpc-mail-also')).toHaveText('Also on SWP-26102');
+    expect(of('context_job_mail')[0].url.searchParams.get('roles')).toBe('supplier');
+    expect(of('context_job_mail')[0].url.searchParams.get('job_id')).toBe('job-f1');
+    await expect(mail.locator('.dpc-mail-ctx-more')).toHaveCount(0);
+
+    await items.nth(1).click();
+    const view = mail.locator('.dpc-mail-view');
+    await expect(view.locator('.dpc-bubble.them')).toContainText('Delivery booked for order 2.');
+    await expect(view).toContainText('Context could not tell which job this email belongs to, so it is shown on each job it may belong to. It is also on SWP-26102.');
+    await expect(view).toContainText('Why: Two jobs share this order (review)');
+    await expect(view.locator('textarea, [data-dpc-mail="reply"], [data-dpc-mail="send"]')).toHaveCount(0);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(await mail.innerText()).not.toMatch(/—/);
+  });
+
+  test('a failed read is a failed line with Retry, never "No email", and Retry reads it once more', async ({ page }) => {
+    await ctxOn(page);
+    let n = 0;
+    const { root, of } = await bootDispatch(page, { context_job_mail: () => (++n === 1 ? { status: 502, body: { error: 'read_failed' } } : { mail: [CTX_ROW(3)], more: false }) });
+    const mail = root.locator('.dpc-mailsec');
+    await expect(mail.locator('.dpc-mail-listfail [role="alert"]')).toHaveText('Could not load the email Context found. Retry');
+    await expect(mail).not.toContainText('No email on this job yet.');
+    const emailsReads = of('dispatch_order_emails').length;
+    await mail.locator('[data-dpc-mail="retry"][data-dpc-mail-key="context"]').click();
+    await expect(mail.locator('.dpc-mail-ctx')).toHaveCount(1);
+    expect(of('context_job_mail')).toHaveLength(2);
+    expect(of('dispatch_order_emails')).toHaveLength(emailsReads);
+  });
+
+  test('a list the server cut at its page says it is not complete', async ({ page }) => {
+    await ctxOn(page);
+    const rows = Array.from({ length: 100 }, (_, i) => CTX_ROW(i + 1, { event_id: 'ev-cut-' + i }));
+    const { root } = await bootDispatch(page, { context_job_mail: () => ({ mail: rows, more: true, candidate_count: 0, limit: 100, roles: ['supplier'] }) });
+    const mail = root.locator('.dpc-mailsec');
+    await expect(mail.locator('.dpc-mail-ctx')).toHaveCount(100);
+    await expect(mail.locator('.dpc-mail-ctx-more')).toHaveText('Context found more email on this job than is listed here. Only the first 100 are shown, so this list is not complete.');
+    expect(await mail.innerText()).not.toMatch(/—/);
+  });
+
+  test('an answer that does not say whether the list was cut is a failed read, never a complete list', async ({ page }) => {
+    await ctxOn(page);
+    const { root } = await bootDispatch(page, { context_job_mail: () => ({ mail: [CTX_ROW(1)] }) });
+    const mail = root.locator('.dpc-mailsec');
+    await expect(mail.locator('.dpc-mail-listfail [role="alert"]')).toHaveText('Could not load the email Context found. Retry');
+    await expect(mail.locator('.dpc-mail-ctx')).toHaveCount(0);
+    await expect(mail.locator('.dpc-mail-ctx-more')).toHaveCount(0);
+  });
+});

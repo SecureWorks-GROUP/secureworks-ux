@@ -841,6 +841,14 @@ Search `modules/trade-invoice-running-draft.js`. Guards:
 `scripts/test-trade-invoice-running-draft.js`,
 `tests/e2e/trade-invoice-running-draft.spec.js`.
 
+A daily hours nudge uses that same flag (`// <daily-hours-nudge>`,
+`modules/trade-daily-hours-nudge.js`). Calendar and Pay show "Add today's
+hours" when a job today has no start and finish on the draft. One tap opens
+this week's invoice on that day. "Not today" hides it until tomorrow. It reads
+`get_running_invoice_draft` and never calls `generate_trade_invoice`. A failed
+read stays hidden. Guards: `scripts/test-trade-daily-hours-nudge.js`,
+`tests/e2e/trade-daily-hours-nudge.spec.js`.
+
 ## Trade variation request: trade requests, office approves (`trade.html`)
 
 Request Variation (Scope tab, confirmed/in-progress assignment) posts

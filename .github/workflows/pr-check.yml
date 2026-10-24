@@ -79,6 +79,9 @@ jobs:
       - name: Test trade invoice running draft save, weekly lines, and agent path
         run: node scripts/test-trade-invoice-running-draft.js
 
+      - name: Test trade daily hours nudge
+        run: node scripts/test-trade-daily-hours-nudge.js
+
       - name: Test trade scope videos and SOW price redaction
         run: node scripts/test-trade-scope-media.js
 

@@ -832,6 +832,15 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
+A running draft for that same week is off unless `my_hours.running_invoice_draft`
+is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
+one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
+GST, super and the weekly deduction are still worked out only on submit.
+Search `modules/trade-invoice-running-draft.js`. Guards:
+`scripts/test-trade-invoice-running-draft.js`,
+`tests/e2e/trade-invoice-running-draft.spec.js`.
+
 ## Trade variation request: trade requests, office approves (`trade.html`)
 
 Request Variation (Scope tab, confirmed/in-progress assignment) posts

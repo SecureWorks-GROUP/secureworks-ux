@@ -30,6 +30,7 @@
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=2"></script>
   <script src="modules/trade-group-work-order.js?v=2"></script>
+  <script src="modules/trade-invoice-running-draft.js?v=20261024"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -21949,6 +21950,13 @@
   var _invExtraLines = []; // extra line items (travel, materials, etc.)
   var _invNotes = ''; // preserved across re-renders
   var _draftInvoiceId = null; // existing draft being edited
+  var _invDismissedKeys = []; // source keys the person removed from this week's draft
+  var _invCreatedByAgent = false;
+  var _invRunningSavedHash = '';
+  var _invRunningHydrating = false;
+  var _invRunningLoadSeq = 0;
+  var _invRunningSaveTimer = null;
+  var _invRunningSaveWarned = false;
   var _draftSaveUnresolved = false;
   var _invoiceBuilderMode = 'weekly'; // 'weekly' or 'expense'
 
@@ -21983,6 +21991,9 @@
     _invExtraLines = []; // legacy compat
     _invNotes = '';
     _draftInvoiceId = null;
+    _invDismissedKeys = [];
+    _invCreatedByAgent = false;
+    _invRunningSavedHash = '';
     _pmDraftIsPerMetre = false;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
     _invGst = _invoiceGstDefault(_hoursData);
@@ -22000,8 +22011,10 @@
         _pmWoHydrateState = 'pending';
         _pmWoHydrateError = '';
       }
+      if (runningInvoiceDraftOn()) _invRunningHydrating = true;
       renderInvoiceBuilder();
       _hydratePerMetreWorkOrderCards();
+      _loadRunningInvoiceDraft();
       return;
     }
 
@@ -23363,6 +23376,15 @@
     _invLumpLines = [];
     _invRows = [];
     _draftSaveUnresolved = false;
+    _invDismissedKeys = [];
+    _invCreatedByAgent = false;
+    _invRunningSavedHash = '';
+    _invRunningHydrating = false;
+    _invRunningLoadSeq++;
+    if (_invRunningSaveTimer) {
+      clearTimeout(_invRunningSaveTimer);
+      _invRunningSaveTimer = null;
+    }
     try {
       var key = _invDraftStorageKey();
       if (key) sessionStorage.removeItem(key);
@@ -23370,10 +23392,215 @@
     } catch(e) {}
   }
   window._clearInvDraft = _clearInvDraft;
-  window.leaveInvoiceBuilder = function() {
-    _clearInvDraft();
-    loadHoursView();
+
+  // Running weekly draft. Off unless this person's account flag is on, or this
+  // browser is in the trial (?invdraft=1 / localStorage sw_inv_running_draft).
+  // ?invdraft=0 turns the screen off. Save posts save_running_invoice_draft and
+  // never calls generate_trade_invoice. [trade-invoice-running-draft]
+  function _captureInvDraftFlag() {
+    try {
+      var q = new URLSearchParams(location.search).get('invdraft');
+      if (q === '1') localStorage.setItem('sw_inv_running_draft', '1');
+      if (q === '0') localStorage.setItem('sw_inv_running_draft', '0');
+    } catch (e) {}
+  }
+  _captureInvDraftFlag();
+
+  function runningInvoiceDraftOn() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core) return false;
+    var query = null;
+    var stored = null;
+    try { query = new URLSearchParams(location.search).get('invdraft'); } catch (e) {}
+    try { stored = localStorage.getItem('sw_inv_running_draft'); } catch (e2) {}
+    return core.flagOn({
+      server: !!(_hoursData && _hoursData.running_invoice_draft === true),
+      query: query,
+      stored: stored
+    });
+  }
+
+  function _runningInvoiceSnapshot() {
+    var core = window.TradeInvoiceRunningDraft;
+    return core.snapshot({
+      jobCards: _serializeJobCardsDraft(_jobCards),
+      invRows: _invRows,
+      invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
+      dismissedKeys: _invDismissedKeys || [],
+      notes: _invNotes || '',
+      gst_on: !!_invGst,
+      weekStart: _hoursWeekStart || '',
+      weekEnd: _hoursWeekEnd || ''
+    });
+  }
+
+  function _runningInvoiceDirty() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core || !runningInvoiceDraftOn() || !_invoiceBuilderOpen || _invRunningHydrating) return false;
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+    return core.hashSnapshot(_runningInvoiceSnapshot()) !== _invRunningSavedHash;
+  }
+
+  function _paintRunningSaveState(text) {
+    var el = document.getElementById('invSaveState');
+    if (el) el.textContent = text || '';
+  }
+
+  function _runningInvoiceActionsHtml() {
+    if (!runningInvoiceDraftOn()) return '';
+    var html = '';
+    if (_invCreatedByAgent) {
+      html += '<div data-invoice-agent-banner style="margin-top:16px;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">An assistant drafted lines on this invoice. Only you can send it.</div>';
+    }
+    html += '<button type="button" class="hours-submit-btn" id="invSaveBtn" data-invoice-save onclick="saveRunningInvoiceDraft()" style="margin-top:16px;background:var(--sw-mid)">Save</button>';
+    html += '<div id="invSaveState" data-invoice-save-state style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px"></div>';
+    html += '<div data-invoice-save-note style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:4px">Save keeps this draft on your account. It does not send it. Submit sends it to SecureWorks.</div>';
+    html += '<div data-invoice-pay-note style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:2px">GST, super and any weekly deduction are worked out when you submit. Saving does not change them.</div>';
+    return html;
+  }
+
+  function _loadRunningInvoiceDraft() {
+    if (!runningInvoiceDraftOn() || !_invoiceBuilderOpen) {
+      _invRunningHydrating = false;
+      return;
+    }
+    var week = _hoursWeekStart;
+    var seq = ++_invRunningLoadSeq;
+    api('get_running_invoice_draft', { week_start: week }).then(function(res) {
+      if (seq !== _invRunningLoadSeq || !_invoiceBuilderOpen || _hoursWeekStart !== week) return;
+      var core = window.TradeInvoiceRunningDraft;
+      if (!core) { _invRunningHydrating = false; return; }
+      var builder = res && res.draft_builder;
+      if (builder && Array.isArray(builder.jobCards)) {
+        _jobCards = _restoreJobCardsDraft(builder.jobCards);
+        _invRows = Array.isArray(builder.invRows) ? builder.invRows : [];
+        _invLumpLines = Array.isArray(builder.invLumpLines) ? builder.invLumpLines.slice() : [];
+        _invNotes = builder.notes || '';
+        if (typeof builder.gst_on === 'boolean') _invGst = builder.gst_on;
+        _invDismissedKeys = Array.isArray(builder.dismissedKeys) ? builder.dismissedKeys.slice() : [];
+      }
+      if (res && res.draft_id) _draftInvoiceId = res.draft_id;
+      _invCreatedByAgent = !!(res && res.created_by_agent);
+      var merged = core.mergeApproved({
+        cards: _serializeJobCardsDraft(_jobCards),
+        dismissed: _invDismissedKeys,
+        claimed: (res && res.claimed) || [],
+        suggested: (res && res.suggested) || []
+      });
+      _jobCards = _restoreJobCardsDraft(merged.cards);
+      _invDismissedKeys = merged.dismissed;
+      _invRunningHydrating = false;
+      if (merged.added.length) _invRunningSavedHash = '';
+      else _invRunningSavedHash = core.hashSnapshot(_runningInvoiceSnapshot());
+      renderInvoiceBuilder();
+      if (merged.added.length) _scheduleRunningInvoiceAutosave();
+    }).catch(function() {
+      if (seq !== _invRunningLoadSeq) return;
+      _invRunningHydrating = false;
+    });
+  }
+
+  function _runningDraftSaveFailedMessage(err) {
+    var status = err && Number(err.status);
+    var code = String((err && err.code) || '');
+    var msg = String((err && err.message) || '');
+    if (status === 404 || code === 'running_draft_off' || /unknown action|not switched on/i.test(msg)) {
+      return 'Saving is not switched on for this account yet. What you typed is still on this phone only.';
+    }
+    return msg || 'Could not save this invoice.';
+  }
+
+  window.saveRunningInvoiceDraft = function(opts) {
+    opts = opts || {};
+    if (!runningInvoiceDraftOn()) return Promise.resolve(false);
+    if (_invRunningHydrating && opts.quiet) return Promise.resolve(false);
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core) return Promise.resolve(false);
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+    var snap = _runningInvoiceSnapshot();
+    if (opts.quiet && core.hashSnapshot(snap) === _invRunningSavedHash) return Promise.resolve(true);
+    var body = core.saveBody(snap, { draft_id: _draftInvoiceId });
+    var check = core.assertDraftOnly(body);
+    if (!check.ok) {
+      toast('Save does not send an invoice.', true);
+      return Promise.resolve(false);
+    }
+    if (!opts.quiet) _paintRunningSaveState('Saving...');
+    return api('save_running_invoice_draft', null, body).then(function(res) {
+      if (res && res.draft_id) _draftInvoiceId = res.draft_id;
+      if (res && res.created_by_agent) _invCreatedByAgent = true;
+      _invRunningSavedHash = core.hashSnapshot(snap);
+      _invRunningSaveWarned = false;
+      _saveInvDraft();
+      _paintRunningSaveState('Saved. Not sent.');
+      if (!opts.quiet) toast('Saved. This invoice has not been sent.');
+      return true;
+    }).catch(function(err) {
+      var text = _runningDraftSaveFailedMessage(err);
+      if (opts.quiet && _invRunningSaveWarned) return false;
+      _invRunningSaveWarned = true;
+      toast(text, true);
+      _paintRunningSaveState('Not saved.');
+      return false;
+    });
   };
+
+  function _scheduleRunningInvoiceAutosave() {
+    if (!runningInvoiceDraftOn() || !_invoiceBuilderOpen || _invRunningHydrating) return;
+    if (_invRunningSaveTimer) clearTimeout(_invRunningSaveTimer);
+    _invRunningSaveTimer = setTimeout(function() {
+      _invRunningSaveTimer = null;
+      if (!_invoiceBuilderOpen || _invRunningHydrating) return;
+      saveRunningInvoiceDraft({ quiet: true });
+    }, 2500);
+  }
+
+  function _bindRunningInvoiceAutosave() {
+    if (!runningInvoiceDraftOn()) return;
+    var root = document.getElementById('hoursContent');
+    if (!root || root._invDraftBound) return;
+    root._invDraftBound = true;
+    var onEdit = function() { _scheduleRunningInvoiceAutosave(); };
+    root.addEventListener('input', onEdit);
+    root.addEventListener('change', onEdit);
+  }
+
+  window.leaveInvoiceBuilder = function() {
+    if (!runningInvoiceDraftOn() || !_runningInvoiceDirty()) {
+      _clearInvDraft();
+      loadHoursView();
+      return;
+    }
+    var cancelBtn = document.getElementById('confirmCancel');
+    var prev = cancelBtn ? cancelBtn.textContent : 'Cancel';
+    if (cancelBtn) cancelBtn.textContent = 'Leave without saving';
+    showConfirm(
+      'Save this invoice?',
+      'You have changes that are not saved yet. Save keeps them and does not send the invoice.',
+      'Save'
+    ).then(function(ok) {
+      if (cancelBtn) cancelBtn.textContent = prev;
+      if (!ok) {
+        _clearInvDraft();
+        loadHoursView();
+        return;
+      }
+      saveRunningInvoiceDraft().then(function(saved) {
+        if (!saved) return;
+        _clearInvDraft();
+        loadHoursView();
+      });
+    });
+  };
+  window.addEventListener('beforeunload', function(e) {
+    if (!_runningInvoiceDirty()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
 
   function _syncRowsFromDOM() {
     _invRows.forEach(function(row, i) {
@@ -25301,6 +25528,9 @@
     var c = _jobCards[idx];
     if (!c || !c.manually_added) return;
     _syncJobCardsFromDOM();
+    var core = window.TradeInvoiceRunningDraft;
+    var key = core ? core.sourceKey(c) : '';
+    if (key) _invDismissedKeys = core.dismissKey(_invDismissedKeys, key);
     _jobCards.splice(idx, 1);
     renderInvoiceBuilder();
   };
@@ -26661,7 +26891,11 @@
         successHtml += '</div>';
         successHtml += '</div>';
         container.innerHTML = successHtml;
+        var runningDraftId = _draftInvoiceId;
         _jobCards = []; _invRows = []; _clearInvDraft();
+        if (runningDraftId && runningInvoiceDraftOn()) {
+          api('delete_trade_invoice', null, { invoice_id: runningDraftId }).catch(function() {});
+        }
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
@@ -26874,6 +27108,7 @@
       var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
       var woAuthBlocked = _jobCentricHasBlockedWorkOrder();
       var jcHasLumps = _invFinalDeductions().length > 0;
+      html += _runningInvoiceActionsHtml();
       if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
         html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
@@ -26917,6 +27152,8 @@
     // a full re-render (including the error re-paint on failed submit). [FIX-TOTAL-RECOMPUTE]
     _updateInvTotals();
     _saveInvDraft(); // persist draft to sessionStorage
+    _bindRunningInvoiceAutosave();
+    _scheduleRunningInvoiceAutosave();
 
     loadInvoiceJobOptions('');
 

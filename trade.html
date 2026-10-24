@@ -21,11 +21,15 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
+    // Show the set-password panel before the body paints when a reset link lands here.
+    if (/type=recovery/.test(location.hash) || /type=recovery/.test(location.search) || /(?:#|&)error=/.test(location.hash)) {
+      document.documentElement.classList.add('sw-recovery');
+    }
   </script>
   <script src="shared/brand.js"></script>
   <!-- Trade keeps its own login screen. Do NOT load ops auth-gate.js here:
        it hides the trade login UI and confuses crew sign-in after the ops JWT cutover. -->
-  <script src="shared/cloud.js?v=preview-session-20261023"></script>
+  <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=2"></script>
@@ -269,7 +273,43 @@
       color: var(--sw-green);
       font-size: 14px;
       font-weight: 600;
+      line-height: 1.45;
+      text-align: left;
     }
+    .login-text-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 44px;
+      margin-top: 4px;
+      padding: 8px;
+      background: none;
+      border: none;
+      color: var(--sw-orange);
+      font-family: var(--sw-font);
+      font-size: 15px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .login-hint {
+      font-size: 13px;
+      color: var(--sw-text-sec);
+      margin: 0 0 12px;
+      text-align: left;
+      line-height: 1.4;
+    }
+    .login-box .login-lead {
+      font-size: 14px;
+      color: var(--sw-text-sec);
+      display: block;
+      margin-bottom: 12px;
+      text-align: left;
+      line-height: 1.4;
+    }
+    /* Recovery links paint this before the app script runs. JS removes the class once it owns the panels. */
+    html.sw-recovery #loginSignIn { display: none; }
+    html.sw-recovery #loginNewPassword[hidden] { display: block; }
 
     /* ══════════════════════════════════════════════════
        BUTTONS
@@ -3560,12 +3600,39 @@
      ══════════════════════════════════════════════════ -->
 <div id="viewLogin" class="view active">
   <div class="login-box">
-    <h2>Trade Login</h2>
-    <label for="loginEmail" style="font-size:14px;color:var(--sw-text-sec);display:block;margin-bottom:8px">Sign in with your email and password</label>
-    <input type="email" id="loginEmail" placeholder="you@email.com" autocomplete="email">
-    <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" style="margin-bottom:12px">
-    <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Log In</button>
-    <div id="loginError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+    <div id="loginSignIn">
+      <h2>Trade Login</h2>
+      <label for="loginEmail" style="font-size:14px;color:var(--sw-text-sec);display:block;margin-bottom:8px">Sign in with your email and password</label>
+      <input type="email" id="loginEmail" placeholder="you@email.com" autocomplete="email">
+      <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" style="margin-bottom:12px">
+      <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Log In</button>
+      <button type="button" class="login-text-btn" id="btnForgotPassword" onclick="showForgotPassword()">Forgot password?</button>
+      <div id="loginError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+    </div>
+    <div id="loginForgot" hidden>
+      <h2>Forgot password?</h2>
+      <label class="login-lead" id="forgotLead" for="forgotEmail">Enter the email on your account and we will send a link to set a new password.</label>
+      <input type="email" id="forgotEmail" placeholder="you@email.com" autocomplete="email" inputmode="email">
+      <button class="btn btn-primary" id="btnSendReset" onclick="sendPasswordReset()">Send reset link</button>
+      <button type="button" class="login-text-btn" id="btnForgotBack" onclick="showLoginForm()">Back to log in</button>
+      <div id="forgotError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+      <div id="forgotSent" class="login-sent" hidden>If that email has an account, we've sent a reset link.</div>
+    </div>
+    <div id="loginNewPassword" hidden>
+      <h2>Set a new password</h2>
+      <p class="login-lead" id="newPasswordLead">Checking your reset link...</p>
+      <div id="newPasswordForm" hidden>
+        <label class="login-lead" for="newPassword">Choose a password for this trade account.</label>
+        <input type="password" id="newPassword" placeholder="New password" autocomplete="new-password">
+        <input type="password" id="confirmPassword" placeholder="Confirm password" autocomplete="new-password">
+        <p class="login-hint">At least 8 characters.</p>
+        <button class="btn btn-primary" id="btnSetPassword" onclick="submitNewPassword()">Save password</button>
+      </div>
+      <div id="newPasswordError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+      <div id="newPasswordExpired" hidden>
+        <button type="button" class="btn btn-primary" id="btnRequestNewReset" onclick="showForgotPassword()">Request a new link</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -6987,6 +7054,223 @@
     if (el) el.style.display = 'none';
   }
 
+  // <trade-password-reset>
+  // Self-serve reset. The live redirect that must be on the Supabase allow-list
+  // is https://secureworks-group.github.io/secureworks-ux/trade.html. A page
+  // served as trade.html uses its own address so a local check comes back here.
+  var TRADE_PASSWORD_MIN = 8;
+  var TRADE_RESET_REDIRECT = 'https://secureworks-group.github.io/secureworks-ux/trade.html';
+  var _tradeHoldForRecovery = tradeUrlIsRecovery() || tradeUrlAuthError();
+  var _tradeRecoveryProfile = null;
+  var _tradeRecoveryReady = false;
+
+  function tradeUrlIsRecovery() {
+    var hash = window.location.hash || '';
+    var search = window.location.search || '';
+    return /type=recovery/.test(hash) || /type=recovery/.test(search);
+  }
+  function tradeUrlAuthError() {
+    return /(?:#|&)error=/.test(window.location.hash || '') || /(?:#|&)error_code=/.test(window.location.hash || '');
+  }
+  function tradeResetRedirectUrl() {
+    var url = String(window.location.href || '').split('#')[0].split('?')[0];
+    if (/^https?:\/\//.test(url) && /\/trade\.html$/.test(url)) return url;
+    return TRADE_RESET_REDIRECT;
+  }
+  function tradePasswordProblem(pw, confirm) {
+    if (!pw || pw.length < TRADE_PASSWORD_MIN) return 'Use at least 8 characters.';
+    if (pw !== confirm) return "Those passwords don't match.";
+    return '';
+  }
+  function tradePasswordErrorText(err) {
+    var msg = String((err && (err.message || err.msg)) || err || '');
+    if (/at least|weak|short|should be/i.test(msg)) return 'Use at least 8 characters.';
+    if (/session/i.test(msg)) return 'This reset link is no longer valid. Request a new one.';
+    if (/rate|too many/i.test(msg)) return 'Too many attempts. Wait a few minutes and try again.';
+    return 'Could not update the password. Please try again.';
+  }
+  function showLoginMessage(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function showLoginPanel(which) {
+    document.documentElement.classList.remove('sw-recovery');
+    document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
+    var login = document.getElementById('viewLogin');
+    if (login) login.classList.add('active');
+    var nav = document.getElementById('bottomNav');
+    if (nav) nav.style.display = 'none';
+    ['loginSignIn', 'loginForgot', 'loginNewPassword'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = id !== which;
+    });
+  }
+  function showSetPasswordScreen(mode) {
+    showLoginPanel('loginNewPassword');
+    var lead = document.getElementById('newPasswordLead');
+    var form = document.getElementById('newPasswordForm');
+    var expired = document.getElementById('newPasswordExpired');
+    showLoginMessage('newPasswordError', '');
+    if (mode === 'expired') {
+      _tradeRecoveryReady = false;
+      if (lead) lead.textContent = 'This reset link has expired or is not valid.';
+      if (form) form.hidden = true;
+      if (expired) expired.hidden = false;
+      return;
+    }
+    if (mode === 'checking') {
+      _tradeRecoveryReady = false;
+      if (lead) lead.textContent = 'Checking your reset link...';
+      if (form) form.hidden = true;
+      if (expired) expired.hidden = true;
+      return;
+    }
+    _tradeRecoveryReady = true;
+    if (lead) lead.textContent = 'Choose a new password for your trade account.';
+    if (form) form.hidden = false;
+    if (expired) expired.hidden = true;
+    var field = document.getElementById('newPassword');
+    if (field) field.focus();
+  }
+  function beginPasswordRecovery(profile) {
+    _tradeHoldForRecovery = true;
+    if (profile) _tradeRecoveryProfile = profile;
+    showSetPasswordScreen('ready');
+  }
+  function stripAuthFromUrl() {
+    if (!window.history || !history.replaceState) return;
+    var params = new URLSearchParams(window.location.search || '');
+    ['token', 'type', 'code', 'error', 'error_code', 'error_description'].forEach(function(key) {
+      params.delete(key);
+    });
+    var qs = params.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+  }
+  window.showForgotPassword = function() {
+    var from = document.getElementById('loginEmail');
+    var email = document.getElementById('forgotEmail');
+    if (email && from && !email.value) email.value = from.value || '';
+    var lead = document.getElementById('forgotLead');
+    if (lead) lead.hidden = false;
+    showLoginMessage('forgotError', '');
+    var sent = document.getElementById('forgotSent');
+    if (sent) sent.hidden = true;
+    var sendBtn = document.getElementById('btnSendReset');
+    if (sendBtn) { sendBtn.hidden = false; sendBtn.disabled = false; sendBtn.textContent = 'Send reset link'; }
+    if (email) email.hidden = false;
+    showLoginPanel('loginForgot');
+    if (email) email.focus();
+  };
+  window.showLoginForm = function() {
+    _tradeHoldForRecovery = false;
+    if (cloud && cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
+    hideLoginError();
+    showLoginPanel('loginSignIn');
+  };
+  window.sendPasswordReset = function() {
+    var emailEl = document.getElementById('forgotEmail');
+    var email = emailEl ? emailEl.value.trim() : '';
+    var sent = document.getElementById('forgotSent');
+    var btn = document.getElementById('btnSendReset');
+    showLoginMessage('forgotError', '');
+    if (sent) sent.hidden = true;
+    if (!email || email.indexOf('@') < 1) {
+      showLoginMessage('forgotError', 'Enter the email on your account.');
+      return;
+    }
+    if (!cloud || !cloud.supabase) {
+      showLoginMessage('forgotError', 'Still loading. Wait a moment and try again.');
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+    cloud.supabase.auth.resetPasswordForEmail(email, { redirectTo: tradeResetRedirectUrl() }).then(function(result) {
+      var error = result && result.error;
+      var code = String((error && (error.code || error.error_code)) || '').toLowerCase();
+      var msg = String((error && (error.message || error.msg)) || '').toLowerCase();
+      var hidden = !error || code.indexOf('user_not_found') !== -1 || msg.indexOf('user not found') !== -1;
+      if (!hidden) {
+        var friendly = /rate|too many/i.test(msg) ? 'Too many reset emails. Wait a few minutes and try again.' : 'We could not send the reset link. Please try again, or contact the office.';
+        showLoginMessage('forgotError', friendly);
+        if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
+        return;
+      }
+      if (sent) sent.hidden = false;
+      if (emailEl) emailEl.hidden = true;
+      if (btn) btn.hidden = true;
+      var lead = document.getElementById('forgotLead');
+      if (lead) lead.hidden = true;
+    }).catch(function() {
+      showLoginMessage('forgotError', 'We could not send the reset link. Please try again, or contact the office.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
+    });
+  };
+  window.submitNewPassword = function() {
+    var pwEl = document.getElementById('newPassword');
+    var confirmEl = document.getElementById('confirmPassword');
+    var pw = pwEl ? pwEl.value : '';
+    var confirm = confirmEl ? confirmEl.value : '';
+    var btn = document.getElementById('btnSetPassword');
+    var problem = tradePasswordProblem(pw, confirm);
+    if (problem) { showLoginMessage('newPasswordError', problem); return; }
+    if (!_tradeRecoveryReady || !cloud || !cloud.supabase) {
+      showLoginMessage('newPasswordError', 'This reset link is no longer valid. Request a new one.');
+      return;
+    }
+    showLoginMessage('newPasswordError', '');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    cloud.supabase.auth.updateUser({ password: pw }).then(function(result) {
+      if (result && result.error) {
+        showLoginMessage('newPasswordError', tradePasswordErrorText(result.error));
+        if (btn) { btn.disabled = false; btn.textContent = 'Save password'; }
+        return;
+      }
+      _tradeHoldForRecovery = false;
+      if (cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
+      stripAuthFromUrl();
+      var profile = _tradeRecoveryProfile || (cloud.auth && cloud.auth.getUser && cloud.auth.getUser());
+      if (profile) onLogin(profile);
+      else showLoginMessage('newPasswordError', 'Password saved. Sign in with your new password.');
+    }).catch(function(err) {
+      showLoginMessage('newPasswordError', tradePasswordErrorText(err));
+      if (btn) { btn.disabled = false; btn.textContent = 'Save password'; }
+    });
+  };
+  window.changeProfilePassword = function() {
+    var pwEl = document.getElementById('profileNewPassword');
+    var confirmEl = document.getElementById('profileConfirmPassword');
+    var status = document.getElementById('profilePasswordStatus');
+    var btn = document.getElementById('btnProfilePassword');
+    var pw = pwEl ? pwEl.value : '';
+    var confirm = confirmEl ? confirmEl.value : '';
+    function say(text, bad) {
+      if (!status) return;
+      status.textContent = text;
+      status.style.color = bad ? 'var(--sw-red)' : 'var(--sw-green)';
+    }
+    var problem = tradePasswordProblem(pw, confirm);
+    if (problem) { say(problem, true); return; }
+    if (!cloud || !cloud.supabase) { say('Still loading. Wait a moment and try again.', true); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    cloud.supabase.auth.updateUser({ password: pw }).then(function(result) {
+      if (result && result.error) {
+        say(tradePasswordErrorText(result.error), true);
+        if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+        return;
+      }
+      if (pwEl) pwEl.value = '';
+      if (confirmEl) confirmEl.value = '';
+      say('Password updated. Use it next time you sign in.', false);
+      if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+    }).catch(function(err) {
+      say(tradePasswordErrorText(err), true);
+      if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+    });
+  };
+  // </trade-password-reset>
+
   // Enter key on login fields
   document.getElementById('loginEmail').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { document.getElementById('loginPassword').focus(); }
@@ -6994,8 +7278,21 @@
   document.getElementById('loginPassword').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doLogin();
   });
+  document.getElementById('forgotEmail').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') sendPasswordReset();
+  });
+  document.getElementById('confirmPassword').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') submitNewPassword();
+  });
+  document.getElementById('newPassword').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('confirmPassword').focus();
+  });
 
   function onLogin(profile) {
+    if (_tradeHoldForRecovery) {
+      beginPasswordRecovery(profile);
+      return;
+    }
     var prevOwner = _invDraftOwnerId();
     _user = profile;
     if (!_user) { console.error('[trade] onLogin: profile is null!'); return; }
@@ -29712,6 +30009,16 @@
     // General expense
     html += '<button class="btn btn-secondary" style="margin-top:16px;width:100%" onclick="openGeneralExpense()">&#128247; Add General Expense (no job)</button>';
 
+    // Change password (signed-in). Same 8-character rule as the reset link.
+    html += '<div id="profilePasswordCard" style="margin-top:16px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';
+    html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Password</div>';
+    html += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:12px">Set a new password for this account. At least 8 characters.</div>';
+    html += '  <input type="password" id="profileNewPassword" placeholder="New password" autocomplete="new-password" style="width:100%;padding:12px 14px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);margin-bottom:10px" />';
+    html += '  <input type="password" id="profileConfirmPassword" placeholder="Confirm password" autocomplete="new-password" style="width:100%;padding:12px 14px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);margin-bottom:12px" />';
+    html += '  <button type="button" class="btn btn-secondary" id="btnProfilePassword" onclick="changeProfilePassword()">Update password</button>';
+    html += '  <div id="profilePasswordStatus" style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;text-align:center"></div>';
+    html += '</div>';
+
     // Sign out
     html += '<button class="btn btn-danger" style="margin-top:24px" onclick="doLogout()">Sign Out</button>';
 
@@ -34047,20 +34354,34 @@
     cloud.on('auth:login', function(profile) {
       onLogin(profile);
     });
+    cloud.on('auth:recovery', function(profile) {
+      beginPasswordRecovery(profile);
+    });
 
     cloud.on('auth:logout', function() {
+      _tradeHoldForRecovery = false;
+      _tradeRecoveryReady = false;
+      _tradeRecoveryProfile = null;
       resetJobListSession();
       _user = null;
       _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
       _currentJobLoaded = null;
-      document.getElementById('bottomNav').style.display = 'none';
-      document.getElementById('viewLogin').classList.add('active');
+      showLoginPanel('loginSignIn');
     });
 
-    // Check if already logged in (guard against profile not yet loaded)
-    if (cloud.auth.isLoggedIn() && cloud.auth.getUser()) {
+    // A reset link holds the app on "Set a new password" until the new one is saved.
+    if (_tradeHoldForRecovery) {
+      if (tradeUrlAuthError() && !tradeUrlIsRecovery()) showSetPasswordScreen('expired');
+      else showSetPasswordScreen('checking');
+      if (cloud.auth.recoveryPending && cloud.auth.recoveryPending() && cloud.auth.getUser()) {
+        beginPasswordRecovery(cloud.auth.getUser());
+      }
+      setTimeout(function() {
+        if (_tradeHoldForRecovery && !_tradeRecoveryReady) showSetPasswordScreen('expired');
+      }, 8000);
+    } else if (cloud.auth.isLoggedIn() && cloud.auth.getUser()) {
       onLogin(cloud.auth.getUser());
     }
     // Otherwise wait for auth:login event or stay on login screen

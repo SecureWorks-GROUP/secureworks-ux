@@ -232,7 +232,11 @@
     isLoggedIn() { return !!_user; },
 
     // Get current user role
-    getRole() { return _userProfile?.role || null; }
+    getRole() { return _userProfile?.role || null; },
+
+    // True after a reset link established a session and before the new password is saved.
+    recoveryPending() { return _recoveryPending; },
+    clearRecovery() { _recoveryPending = false; }
   };
 
   // Load user profile via edge function (bypasses RLS)
@@ -256,14 +260,27 @@
     }
   }
 
+  // A password-reset link signs the browser in only long enough to choose a
+  // new password. That is a different event from a normal sign-in, so other
+  // apps keep their current login behaviour: they do not listen for auth:recovery.
+  var _recoveryPending = false;
+
   // Listen for auth state changes
   sb.auth.onAuthStateChange(async function(event, session) {
+    if (event === 'PASSWORD_RECOVERY' && session?.user) {
+      _recoveryPending = true;
+      _user = session.user;
+      await _loadUserProfile();
+      emit('auth:recovery', _userProfile);
+      return;
+    }
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
       _user = session.user;
       await _loadUserProfile();
       emit('auth:login', _userProfile);
       _flushQueue();
     } else if (event === 'SIGNED_OUT') {
+      _recoveryPending = false;
       _user = null;
       _userProfile = null;
       _orgId = null;

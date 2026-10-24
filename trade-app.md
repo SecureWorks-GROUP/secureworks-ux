@@ -483,6 +483,10 @@ The user (Marnin) wants this enforced: **no approved PO = no purchase allowed**.
 7. Ops can verify receipt matches PO in job detail
 8. Bookkeeper enters into Xero with proper job/project coding
 
+## Password reset (2026-10-24)
+
+Crew reset their own password from Trade Login ("Forgot password?"). The app calls `resetPasswordForEmail` with `redirectTo` set to this page (`https://secureworks-group.github.io/secureworks-ux/trade.html` when it is not already open as `trade.html`). A recovery link (`type=recovery`, or a Supabase auth error in the URL) stays on "Set a new password" until `updateUser` succeeds, then opens the app. Profile has the same 8-character change for someone already signed in. The neutral confirmation is always "If that email has an account, we've sent a reset link." The hosted allow-list is the Supabase dashboard URL configuration; `secureworks-backend` `supabase/config.toml` is the repo record and is not applied by CI.
+
 ## Job view layout truth (2026-09-09)
 - The Scope / Files / Photos / Log tab bar is wrapped in `.jd-tabs-wrap`, sticky at `top: var(--sw-header-h)`. The app header is also sticky (z-index 100), so a `top: 0` tab bar used to slide underneath it on scroll. `--sw-header-h` is set from the real header height by a ResizeObserver near the iOS keyboard handler.
 - The completion wizard is a flex column: header and footer are normal flex children, only `#wizBody` scrolls. The old `position: fixed` footer floated to mid-screen when the iOS keyboard opened.

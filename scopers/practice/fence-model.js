@@ -4161,8 +4161,8 @@ void main() {
 `)+`
 `+y);let M=b+g+s,x=b+y+a,v=Ry(o,o.VERTEX_SHADER,M),S=Ry(o,o.FRAGMENT_SHADER,x);o.attachShader(m,v),o.attachShader(m,S),t.index0AttributeName!==void 0?o.bindAttribLocation(m,0,t.index0AttributeName):t.hasPositionAttribute===!0&&o.bindAttribLocation(m,0,"position"),o.linkProgram(m);function C(k){if(n.debug.checkShaderErrors){let $=o.getProgramInfoLog(m)||"",F=o.getShaderInfoLog(v)||"",L=o.getShaderInfoLog(S)||"",z=$.trim(),Z=F.trim(),D=L.trim(),W=!0,O=!0;if(o.getProgramParameter(m,o.LINK_STATUS)===!1)if(W=!1,typeof n.debug.onShaderError=="function")n.debug.onShaderError(o,m,v,S);else{let H=Dy(o,v,"vertex"),K=Dy(o,S,"fragment");lt("WebGLProgram: Shader Error "+o.getError()+" - VALIDATE_STATUS "+o.getProgramParameter(m,o.VALIDATE_STATUS)+`
 
-Material Name: `+I.name+`
-Material Type: `+I.type+`
+Material Name: `+k.name+`
+Material Type: `+k.type+`
 
 Program Info Log: `+z+`
 `+H+`

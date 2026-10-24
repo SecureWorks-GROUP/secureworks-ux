@@ -31,6 +31,7 @@
   <script src="shared/group-work-order.js?v=2"></script>
   <script src="modules/trade-group-work-order.js?v=2"></script>
   <script src="modules/trade-invoice-running-draft.js?v=20261024"></script>
+  <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -3505,6 +3506,21 @@
     /* Allocation roster — multi-select (captain: multiple people per job) */
     .alloc-crew.sel{border-color:var(--jt-ms);background:var(--jt-ms-tint)}
     .alloc-crew .tick{float:right;color:var(--jt-ms-ink);font-weight:800;font-family:var(--sw-mono)}
+
+    /* Daily hours nudge. Calm, one card, phone-sized taps. [trade-daily-hours-nudge] */
+    .hours-nudge-host[hidden]{display:none !important}
+    .hours-nudge{background:var(--sw-card);border:1px solid var(--sw-border);border-left:3px solid var(--sw-mid);border-radius:12px;padding:12px;box-shadow:var(--sw-shadow)}
+    .hours-nudge-title{font-size:15px;font-weight:700;color:var(--sw-dark);line-height:1.3}
+    .hours-nudge-body{font-size:13px;line-height:1.4;color:var(--sw-text-sec);margin-top:4px}
+    .hours-nudge-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .hours-nudge-go,.hours-nudge-later{min-height:44px;border-radius:10px;font-family:var(--sw-font);font-size:14px;font-weight:700;cursor:pointer;text-align:center;padding:10px 14px}
+    .hours-nudge-go{flex:1 1 140px;background:var(--sw-dark);color:#fff;border:none}
+    .hours-nudge-later{flex:0 0 auto;background:#fff;color:var(--sw-mid);border:1px solid var(--sw-border)}
+    .hours-nudge-land{margin:0 0 12px}
+    .hours-nudge-land .hours-nudge-later{width:100%}
+    .ncal .hours-nudge-host{flex:0 0 auto;padding:0 12px 8px}
+    .ncal .hours-nudge button{text-align:center}
+    #viewMyJobs .hours-nudge-host{padding:0 0 10px}
   </style>
 </head>
 <body>
@@ -3575,6 +3591,7 @@
     <span id="pullText">Pull to refresh</span>
   </div>
   <div class="container">
+    <div id="hoursNudgeJobs" class="hours-nudge-host" hidden></div>
     <div class="job-search-bar" id="jobSearchBar" style="display:none">
       <!-- Manager lens: Everyone / Mine -->
       <div id="adminJobToggle" style="display:none;margin-bottom:10px">
@@ -3664,6 +3681,7 @@
        permanently hidden (classic hatch removed 2026-07-20).
        ══════════════════════════════════════════════════ -->
   <div id="ncalRoot" class="ncal" style="display:none">
+    <div id="hoursNudgeSchedule" class="hours-nudge-host" hidden></div>
     <div class="ctlrow">
       <div class="seg" id="ncViewseg">
         <button class="segbtn on" data-cv="cal">Calendar</button>
@@ -6986,6 +7004,7 @@
       _hoursData = null;
       _tradeRate = null;
     }
+    _resetDailyHoursNudge();
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
     _userTier = _user.trade_tier || determineTier(_user.email);
@@ -7159,7 +7178,7 @@
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
     if (view === 'board') renderBoardView();
-    if (view === 'schedule') { var _ap = document.getElementById('scheduleAvailPanel'); if (_ap) _ap.style.display = 'none'; renderNewCalendar(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
+    if (view === 'schedule') { var _ap = document.getElementById('scheduleAvailPanel'); if (_ap) _ap.style.display = 'none'; renderNewCalendar(); refreshDailyHoursNudge(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
@@ -8847,6 +8866,7 @@
     if (_needsAllJobsFeed) html += renderGlobalJobSearchResults(data, '', renderedJobIds, 'above');
 
     container.innerHTML = html;
+    refreshDailyHoursNudge();
 
     // Load weather async (non-blocking)
     loadWeather();
@@ -20494,6 +20514,10 @@
   }
 
   function loadHoursView() {
+    if (!_hoursNudgeOpening) {
+      _hoursNudgeNote = false;
+      _hoursNudgeLand = false;
+    }
     _leaveWeeklyWorkOrderInvoice();
     // If invoice builder was open (or saved in sessionStorage), restore it instead of reloading hours
     if (_invoiceBuilderOpen) { renderInvoiceBuilder(); return; }
@@ -23499,6 +23523,7 @@
     }).catch(function() {
       if (seq !== _invRunningLoadSeq) return;
       _invRunningHydrating = false;
+      _focusDailyHoursNudge();
     });
   }
 
@@ -23536,6 +23561,7 @@
       _invRunningSavedHash = core.hashSnapshot(snap);
       _invRunningSaveWarned = false;
       _saveInvDraft();
+      _noteHoursNudgeSaved(snap);
       _paintRunningSaveState('Saved. Not sent.');
       if (!opts.quiet) toast('Saved. This invoice has not been sent.');
       return true;
@@ -23601,6 +23627,244 @@
     e.preventDefault();
     e.returnValue = '';
   });
+
+  // Daily hours nudge. Same flag as the running weekly draft. It reads today's
+  // jobs and the saved draft, then opens that draft on the job that still
+  // needs a start and finish. It does not submit or send. [trade-daily-hours-nudge]
+  var _hoursNudgeProbe = null;
+  var _hoursNudgeProbePending = false;
+  var _hoursNudgeProbeSeq = 0;
+  var _hoursNudgeLines = null;
+  var _hoursNudgeLinesWeek = '';
+  var _hoursNudgeDraftPending = false;
+  var _hoursNudgeDraftSeq = 0;
+  var _hoursNudgeLand = false;
+  var _hoursNudgeNote = false;
+  var _hoursNudgeOpening = false;
+
+  function _resetDailyHoursNudge() {
+    _hoursNudgeProbe = null;
+    _hoursNudgeProbePending = false;
+    _hoursNudgeProbeSeq++;
+    _hoursNudgeLines = null;
+    _hoursNudgeLinesWeek = '';
+    _hoursNudgeDraftPending = false;
+    _hoursNudgeDraftSeq++;
+    _hoursNudgeLand = false;
+    _hoursNudgeNote = false;
+    _hoursNudgeOpening = false;
+    _paintDailyHoursNudge();
+  }
+
+  function _hoursNudgeQuery() {
+    var query = null;
+    var stored = null;
+    try { query = new URLSearchParams(location.search).get('invdraft'); } catch (e) {}
+    try { stored = localStorage.getItem('sw_inv_running_draft'); } catch (e2) {}
+    return { query: query, stored: stored };
+  }
+
+  function _dailyHoursFlagOn() {
+    if (runningInvoiceDraftOn()) return true;
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core || !_hoursNudgeProbe) return false;
+    var flag = _hoursNudgeQuery();
+    return core.flagOn({
+      server: _hoursNudgeProbe.running === true,
+      query: flag.query,
+      stored: flag.stored
+    });
+  }
+
+  function _hoursNudgeDismissedDay() {
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return '';
+    try { return localStorage.getItem(core.dismissKey(_user && _user.id)) || ''; } catch (e) { return ''; }
+  }
+
+  function _dailyHoursWeekSubmitted() {
+    var weekEnd = getWeekEndSunday(0);
+    if (_hoursData && _hoursData.already_submitted && _hoursWeekStart === getWeekStartMonday(0)) return true;
+    if (_hoursNudgeProbe && _hoursNudgeProbe.alreadySubmitted && _hoursNudgeProbe.weekStart === getWeekStartMonday(0)) return true;
+    return !!_invoicedWeek(weekEnd);
+  }
+
+  function _dailyHoursJobsToday() {
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return [];
+    var today = clockPerthDay(new Date());
+    var rows = [];
+    if (_user && _lastJobData) {
+      ownAssignmentRows(_lastJobData, _user.id).forEach(function(row) {
+        if (String(row.scheduled_date || '').slice(0, 10) === today) rows.push(row);
+      });
+    }
+    var fromHours = [];
+    if (_hoursData && Array.isArray(_hoursData.assignments) && _hoursWeekStart === getWeekStartMonday(0)) fromHours = _hoursData.assignments;
+    else if (_hoursNudgeProbe && _hoursNudgeProbe.weekStart === getWeekStartMonday(0)) fromHours = _hoursNudgeProbe.assignments || [];
+    fromHours.forEach(function(row) {
+      if (String((row && row.scheduled_date) || '').slice(0, 10) === today) rows.push(row);
+    });
+    return core.jobsFromAssignments(rows, today);
+  }
+
+  function _dailyHoursState() {
+    var today = clockPerthDay(new Date());
+    var weekStart = getWeekStartMonday(0);
+    var lines = _hoursNudgeLinesWeek === weekStart ? _hoursNudgeLines : null;
+    return {
+      flagOn: _dailyHoursFlagOn(),
+      dismissedDay: _hoursNudgeDismissedDay(),
+      today: today,
+      weekSubmitted: _dailyHoursWeekSubmitted(),
+      jobsToday: _dailyHoursJobsToday(),
+      lines: lines
+    };
+  }
+
+  function _paintDailyHoursNudge() {
+    var core = window.TradeDailyHoursNudge;
+    var state = core ? _dailyHoursState() : null;
+    var html = core && core.shouldShow(state) ? core.bannerHTML(state) : '';
+    ['hoursNudgeSchedule', 'hoursNudgeJobs'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (el.getAttribute('data-nudge-html') !== html) {
+        el.innerHTML = html;
+        el.setAttribute('data-nudge-html', html);
+      }
+      el.hidden = !html;
+    });
+  }
+
+  function _startHoursNudgeProbe(weekStart, weekEnd) {
+    if (_hoursNudgeProbePending) return;
+    _hoursNudgeProbePending = true;
+    var seq = ++_hoursNudgeProbeSeq;
+    api('my_hours', { week_ending: weekEnd }).then(function(data) {
+      if (seq !== _hoursNudgeProbeSeq) return;
+      _hoursNudgeProbePending = false;
+      _hoursNudgeProbe = {
+        running: !!(data && data.running_invoice_draft === true),
+        alreadySubmitted: !!(data && data.already_submitted),
+        assignments: (data && data.assignments) || [],
+        weekStart: weekStart
+      };
+      refreshDailyHoursNudge();
+    }).catch(function() {
+      if (seq !== _hoursNudgeProbeSeq) return;
+      _hoursNudgeProbePending = false;
+    });
+  }
+
+  function _startHoursNudgeDraft(weekStart) {
+    if (_hoursNudgeDraftPending) return;
+    if (_hoursNudgeLines != null && _hoursNudgeLinesWeek === weekStart) return;
+    _hoursNudgeDraftPending = true;
+    var seq = ++_hoursNudgeDraftSeq;
+    api('get_running_invoice_draft', { week_start: weekStart }).then(function(res) {
+      if (seq !== _hoursNudgeDraftSeq) return;
+      _hoursNudgeDraftPending = false;
+      var builder = res && res.draft_builder;
+      _hoursNudgeLines = builder && Array.isArray(builder.jobCards) ? builder.jobCards : [];
+      _hoursNudgeLinesWeek = weekStart;
+      _paintDailyHoursNudge();
+    }).catch(function(err) {
+      if (seq !== _hoursNudgeDraftSeq) return;
+      _hoursNudgeDraftPending = false;
+      if (err && Number(err.status) === 404) {
+        _hoursNudgeLines = [];
+        _hoursNudgeLinesWeek = weekStart;
+        _paintDailyHoursNudge();
+      }
+    });
+  }
+
+  function refreshDailyHoursNudge() {
+    if (!_user || !window.TradeDailyHoursNudge) return;
+    var flag = _hoursNudgeQuery();
+    if (flag.query === '0' || flag.stored === '0') { _paintDailyHoursNudge(); return; }
+    var today = clockPerthDay(new Date());
+    if (_hoursNudgeDismissedDay() === today) { _paintDailyHoursNudge(); return; }
+    var weekStart = getWeekStartMonday(0);
+    var weekEnd = getWeekEndSunday(0);
+    var haveProbe = _hoursNudgeProbe && _hoursNudgeProbe.weekStart === weekStart;
+    if (!haveProbe) _startHoursNudgeProbe(weekStart, weekEnd);
+    if (!_dailyHoursFlagOn()) { _paintDailyHoursNudge(); return; }
+    if (_dailyHoursWeekSubmitted()) { _paintDailyHoursNudge(); return; }
+    if (!_dailyHoursJobsToday().length) { _paintDailyHoursNudge(); return; }
+    _startHoursNudgeDraft(weekStart);
+    _paintDailyHoursNudge();
+  }
+  window.refreshDailyHoursNudge = refreshDailyHoursNudge;
+
+  function _noteHoursNudgeSaved(snap) {
+    if (!snap) return;
+    var week = snap.weekStart || getWeekStartMonday(0);
+    if (week !== getWeekStartMonday(0)) return;
+    _hoursNudgeDraftSeq++;
+    _hoursNudgeDraftPending = false;
+    _hoursNudgeLines = snap.jobCards || [];
+    _hoursNudgeLinesWeek = week;
+    _paintDailyHoursNudge();
+  }
+
+  function _dailyHoursNudgeFocusJob() {
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return null;
+    var state = _dailyHoursState();
+    var gaps = core.missing(state.jobsToday, _jobCards || [], state.today);
+    return gaps[0] || state.jobsToday[0] || null;
+  }
+
+  function _dailyHoursNudgeCardIndex() {
+    if (!_hoursNudgeNote) return -1;
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return -1;
+    var state = _dailyHoursState();
+    var gaps = core.missing(state.jobsToday, _jobCards || [], state.today);
+    var job = gaps[0];
+    if (!job) return -1;
+    for (var i = 0; i < _jobCards.length; i++) {
+      var card = _jobCards[i];
+      if (!card || card.wo_mode || card.commission_mode) continue;
+      if (job.assignment_id && card.assignment_id && String(card.assignment_id) === String(job.assignment_id)) return card._idx;
+      if (job.job_id && card.job_id && String(card.job_id) === String(job.job_id)) return card._idx;
+    }
+    return -1;
+  }
+
+  function _focusDailyHoursNudge() {
+    if (!_hoursNudgeLand || _invRunningHydrating) return;
+    var target = document.querySelector('[data-hours-nudge-target]');
+    _hoursNudgeLand = false;
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: 'center' });
+  }
+
+  window.openDailyHoursNudge = function() {
+    if (!_dailyHoursFlagOn()) return;
+    _hoursNudgeOpening = true;
+    _hoursNudgeNote = true;
+    _hoursNudgeLand = true;
+    _invoiceBuilderOpen = false;
+    _hoursWeekEnd = getWeekEndSunday(0);
+    _hoursWeekStart = getWeekStartMonday(0);
+    showView('hours');
+    loadAndOpenInvoice();
+    _hoursNudgeOpening = false;
+  };
+
+  window.dismissDailyHoursNudge = function() {
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return;
+    try { localStorage.setItem(core.dismissKey(_user && _user.id), clockPerthDay(new Date())); } catch (e) {}
+    _paintDailyHoursNudge();
+  };
+
+  window.scrollDailyHoursDraft = function() {
+    var el = document.getElementById('invSaveBtn') || document.getElementById('invMoneySummary');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  };
 
   function _syncRowsFromDOM() {
     _invRows.forEach(function(row, i) {
@@ -24982,6 +25246,7 @@
     Object.keys(byDay).forEach(function(k) { daySet[k] = true; });
     var days = Object.keys(daySet).sort();
     _jcDayKeys = days;
+    var hoursNudgeIdx = _dailyHoursNudgeCardIndex();
 
     days.forEach(function(dk, di) {
       var d = dk ? new Date(dk + 'T00:00:00') : null;
@@ -25010,7 +25275,7 @@
       dayCards.forEach(function(c) {
         var rowRate = Number(c.rate || rate || 0);
         var lineAmt = (c.included && c.hours != null && rowRate > 0) ? Math.round(c.hours * rowRate * 100) / 100 : 0;
-        html += '<div class="jc-card" data-card="' + c._idx + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--sw-card);' + (c.included ? '' : 'opacity:0.5') + '">';
+        html += '<div class="jc-card" data-card="' + c._idx + '"' + (c._idx === hoursNudgeIdx ? ' data-hours-nudge-target="1"' : '') + ' style="border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--sw-card);' + (c.included ? '' : 'opacity:0.5') + '">';
         html += '<div style="display:flex;align-items:flex-start;gap:10px">';
         html += '<input type="checkbox" ' + (c.included ? 'checked' : '') + ' onchange="toggleJobCard(' + c._idx + ',this.checked)" style="margin-top:3px;width:18px;height:18px">';
         html += '<div style="flex:1;min-width:0">';
@@ -26971,6 +27236,9 @@
     html += '<h2 style="font-size:18px;font-weight:700;color:var(--sw-dark);margin:0">' + (isExpense ? 'Expense Invoice' : 'Invoice') + '</h2>';
     html += '<button class="btn btn-secondary btn-small" onclick="leaveInvoiceBuilder()">Back</button>';
     html += '</div>';
+    if (_hoursNudgeNote && !isExpense && window.TradeDailyHoursNudge) {
+      html += window.TradeDailyHoursNudge.landHTML(_dailyHoursNudgeFocusJob());
+    }
 
     if (_draftInvoiceId) {
       html += '<div style="font-size:11px;color:var(--sw-mid);padding:0 0 8px;display:flex;align-items:center;gap:4px"><span class="inv-status draft">Draft</span> Editing saved draft</div>';
@@ -27154,6 +27422,7 @@
     _saveInvDraft(); // persist draft to sessionStorage
     _bindRunningInvoiceAutosave();
     _scheduleRunningInvoiceAutosave();
+    _focusDailyHoursNudge();
 
     loadInvoiceJobOptions('');
 

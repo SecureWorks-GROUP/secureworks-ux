@@ -359,6 +359,16 @@ An agent calls `agent_save_running_invoice_draft` (ops-api, not this repo). That
 
 Guards: `scripts/test-trade-invoice-running-draft.js`, `tests/e2e/trade-invoice-running-draft.spec.js`. Migration: `supabase/migrations/20261024120000_trade_invoice_running_draft.sql`, applied on the backend project by Marnin, not from this app. The ops-api handler and the `index.ts` wiring are in `docs/trade-invoice-running-draft/` for that backend repo. This app does not deploy ops-api.
 
+### Pay tab: a daily hours nudge (Hugo, 2026-10-24)
+
+The same flag shows a small card on Calendar and Jobs: "Add today's hours". It is there when the person has their own job scheduled today (from `my_jobs`, plus this week's `my_hours` assignments) and the running draft does not already have that job's date, start and finish. Not today stores the Perth day on `sw_hours_nudge_day:<user id>` and the card stays away until tomorrow. A day with no job, a week already sent, or a draft that has not been read yet stays quiet.
+
+Add hours opens this week's Weekly Invoice on that job's card. Check draft scrolls to Save. Save is the existing `save_running_invoice_draft`. The nudge never calls `generate_trade_invoice` or `submit_trade_invoice`.
+
+No new ops-api action. "Logged today" is a complete time line on the draft, because that is what Friday's invoice uses. `log_my_job_hours` on the job view still only writes `hours_worked` on the assignment and does not put the times on the draft (see "Hours for this job" above). To make those job-view times count, and to open the card on them, ops-api would need to return `work_date`, `start_time` and `finish_time` on each `my_hours` assignment. That is not required for this nudge.
+
+Guards: `scripts/test-trade-daily-hours-nudge.js`, `tests/e2e/trade-daily-hours-nudge.spec.js`.
+
 ### Pay tab — Work Order mode labour lines (reconciliation and direct billing)
 - A WO-mode job card on the Pay tab invoice builder carries `wo_allocated` plus structured deduct lines (`wo_labour_lines` and `wo_lump_lines`). Hourly crew lines stay `{trade_name, hours, rate, amount}`. Work-order amounts Henry pays other trades are `{trade_name, line_kind: 'wo_pass_through', amount}` (prefilled from `negative_charges` when the job-centric builder hydrates `my_work_orders`). Freeform job deducts are `{description, amount, line_kind: 'lump_sum'}`. Hours-mode cards on the same builder expose the same `{description, amount}` lines next to the date and time fields — any job-centric trade can add them; they submit as negative `extra_items` (`source: 'invoice_final_deduction'`) plus `final_deductions`, not as `wo_lump_lines` on a work-order extra. The holder's payable line is always **net = WO allocated − Σ deducts**; hourly prose stays `WO $559.5 − labour [Tendo 11.5h×$25=$287.5]=net $272`, pass-throughs add `− WO trades [Israel $40]`, and lump sums add `− other [Materials $10]`.
 - The structured lines are the money contract, not decoration: ops-api `generate_trade_invoice` persists them on the holder's `trade_invoice_lines` row for office reconciliation. The labour is deducted from the holder's invoice and shown to the office; each named crew member bills SecureWorks Group directly. No automatic payout invoice is created for the named crew.

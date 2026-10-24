@@ -202,6 +202,34 @@ const test = base.extend({
       }
     ];
     const runningDraftClaimed = ['wo:e2e-claimed-last-week'];
+    // Daily hours nudge. Today's job is on my_jobs and on this week's hours,
+    // with no start or finish on the draft until the trade saves one.
+    const hoursNudgeDraft = { id: null, draft_builder: null };
+    const hoursNudgeHours = {
+      week_start: weekStart,
+      week_ending: addIsoDays(weekStart, 6),
+      running_invoice_draft: true,
+      already_submitted: false,
+      rate: 50,
+      rate_resolved: true,
+      total_hours: 0,
+      assignments: [
+        {
+          id: 'e2e-assignment-1',
+          job_id: 'e2e-job-1',
+          scheduled_date: perthDate(),
+          hours_worked: null,
+          status: 'confirmed',
+          jobs: {
+            id: 'e2e-job-1',
+            job_number: 'E2E-JOB-001',
+            client_name: 'Fixture Homeowner',
+            site_suburb: 'Joondalup',
+            type: 'patio'
+          }
+        }
+      ]
+    };
     // Weekly deduction (Captain, 2026-10-13): a trade who hires a ute from us
     // has an amount taken off what he is paid. Shapes follow
     // secureworks-backend docs/trade-recurring-deductions-2026-10-13.md:
@@ -919,7 +947,8 @@ const test = base.extend({
       'crew-lead-refused': ['set_job_lead'],
       'henry-job-centric-submit': ['generate_trade_invoice'],
       'henry-wo-hydrate-fail': ['generate_trade_invoice'],
-      'trade-invoice-running-draft': ['save_running_invoice_draft']
+      'trade-invoice-running-draft': ['save_running_invoice_draft'],
+      'trade-daily-hours-nudge': ['save_running_invoice_draft']
     };
 
     const feed = await installFeedStubs(page, {
@@ -1179,6 +1208,8 @@ const test = base.extend({
         my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
         my_hours: feedScenario === 'trade-invoice-running-draft'
           ? { ...labourExplainerHours, running_invoice_draft: true }
+          : feedScenario === 'trade-daily-hours-nudge'
+          ? hoursNudgeHours
           : deductionDraftScenario
           ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
           : withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
@@ -1914,6 +1945,18 @@ const test = base.extend({
           return response;
         },
         get_running_invoice_draft: () => {
+          if (feedScenario === 'trade-daily-hours-nudge') {
+            return {
+              ok: true,
+              draft_id: hoursNudgeDraft.id,
+              status: 'draft',
+              created_by_agent: false,
+              xero: false,
+              draft_builder: hoursNudgeDraft.draft_builder,
+              suggested: [],
+              claimed: []
+            };
+          }
           if (feedScenario !== 'trade-invoice-running-draft') {
             return { status: 404, body: { error: 'No E2E fixture registered for get_running_invoice_draft' } };
           }
@@ -1931,6 +1974,21 @@ const test = base.extend({
           };
         },
         save_running_invoice_draft: ({ request }) => {
+          if (feedScenario === 'trade-daily-hours-nudge') {
+            const body = request.postDataJSON();
+            if (body.submit || body.send || body.authorise || body.authorize || body.pay || body.xero || (body.status && body.status !== 'draft')) {
+              return { status: 403, body: { error: 'Save does not send an invoice', code: 'agent_draft_only' } };
+            }
+            hoursNudgeDraft.id = hoursNudgeDraft.id || 'draft-hours-nudge';
+            hoursNudgeDraft.draft_builder = body.draft_builder || null;
+            return {
+              ok: true,
+              draft_id: hoursNudgeDraft.id,
+              status: 'draft',
+              created_by_agent: false,
+              xero: false
+            };
+          }
           if (feedScenario !== 'trade-invoice-running-draft') {
             return { status: 409, body: { error: 'Save is not enabled for this fixture' } };
           }

@@ -260,7 +260,7 @@
       // when the list's materials read worked; a failed one is never 0 of 0.
       if (resp.dispatch_materials !== 'ok') { delete r.materials_lines_total; delete r.materials_lines_ready; }
       // Slice 6: the rail's sightings counts, the same way.
-      if (resp.dispatch_deliveries !== 'ok') { delete r.deliveries_orders_total; delete r.deliveries_orders_sighted; }
+      if (resp.dispatch_deliveries !== 'ok') { delete r.deliveries_orders_total; delete r.deliveries_orders_sighted; delete r.deliveries_orders_on_site; delete r.deliveries_lines_part_delivered; }
       // Slice 7: a failed bookings read is never "Not booked".
       if (resp.dispatch_installs !== 'ok') { delete r.dispatch_install; delete r.dispatch_install_open; }
     });
@@ -633,6 +633,7 @@
     to_order: { label: 'To order', tone: 'warn' },
     in_stock: { label: 'In stock', tone: 'ok' },
     on_po: { label: 'On PO', tone: 'info' },
+    part_delivered: { label: 'Part delivered', tone: 'warn' },
     delivered: { label: 'Delivered', tone: 'ok' }
   };
   var MAT_QTY_MAX = 999999999.999;
@@ -736,7 +737,12 @@
       if (r.kind === 'not_ordered') return !!r.supplier_id;
       return r.kind === 'order' && !!r.purchase_order_id && delivOk(r.delivery);
     });
-    return ok ? { rows: v.rows.slice(), counted: v.counted, sighted: v.sighted, all_sighted: v.all_sighted === true } : null;
+    if (!ok) return null;
+    var out = { rows: v.rows.slice(), counted: v.counted, sighted: v.sighted, all_sighted: v.all_sighted === true };
+    // S5 (partial deliveries): present only from a server that records receipts.
+    if (typeof v.on_site === 'number') { out.on_site = v.on_site; out.all_on_site = v.all_on_site === true; }
+    if (typeof v.lines_part_delivered === 'number') out.lines_part_delivered = v.lines_part_delivered;
+    return out;
   }
 
   // A date box's value worth saving: a whole YYYY-MM-DD in a four-figure year,
@@ -782,9 +788,25 @@
   // The rail panel's sightings line (build note section 4.4), from the list
   // row's two counts; '' when the job has no counted order or the counts did
   // not come.
+  // S5: with the server's on-site count, an order received in full line by line
+  // counts as on site, and any line part delivered is named:
+  // "1 of 2 orders on site; 1 line part delivered."
   function deliveriesRailLine(row, s) {
     var total = row && row.deliveries_orders_total, seen = row && row.deliveries_orders_sighted;
     if (typeof total !== 'number' || typeof seen !== 'number' || !(total > 0)) return '';
+    var on = row.deliveries_orders_on_site, part = row.deliveries_lines_part_delivered;
+    var orders = ' order' + (total === 1 ? '' : 's');
+    if (typeof on === 'number' && typeof part === 'number' && part > 0) {
+      return on + ' of ' + total + orders + ' on site; ' + part + ' line' + (part === 1 ? '' : 's') + ' part delivered.';
+    }
+    // Orders on site by what arrived rather than by a sighting: say on site,
+    // never sighted. Without receipts on and seen agree and the line is slice 6's.
+    if (typeof on === 'number' && on !== seen) {
+      if (on < total) return on + ' of ' + total + orders + ' on site.';
+      return s && (s.index === 5 || s.index === 6)
+        ? 'Every order on this job is on site.'
+        : 'Every order on this job is on site. Press Materials on site to move the job.';
+    }
     if (seen < total) return seen + ' of ' + total + ' orders sighted on site.';
     return s && (s.index === 5 || s.index === 6)
       ? 'Every order on this job is sighted on site.'
@@ -878,7 +900,12 @@
       typed: {},
       edit: null,
       ask: null,
-      msg: null
+      msg: null,
+      // S5: the one open "Record what arrived" form
+      // ({ jobId, poId, day, qty: { lineId: text }, ids: { lineId: uuid }, busy, fail }),
+      // and the Undo press in flight per receipt.
+      recv: null,
+      undo: {}
     },
     // Slice 7, the install row: the job whose press is in flight, the open
     // confirm line ({ jobId, kind: 'none' | 'clear' }) and the line under the table.
@@ -1301,6 +1328,9 @@
       id: String(l.id), supplier_id: String(l.supplier_id), description: text(l.description), quantity: matQtyText(l.quantity), unit: text(l.unit),
       status: l.status, display_status: text(l.display_status) || l.status, purchase_order_id: l.purchase_order_id || null, source: l.source,
       position: Number(l.position) || 0, updated_at: l.updated_at, saved: lineSaved(l),
+      // S5: what has arrived on the line's current order (absent from an older server).
+      received_quantity: typeof l.received_quantity === 'number' ? l.received_quantity : null,
+      receipts: Array.isArray(l.receipts) ? l.receipts.filter(function (x) { return x && x.id; }) : null,
       busy: false, again: false, failed: false, delFailed: false, msg: '', retry: false, want: null, gone: false
     };
   }
@@ -2377,6 +2407,9 @@
       if ('in_xero' in o) r.in_xero = o.in_xero === true;
     }
     e.lines.forEach(function (l) {
+      // A line that carries receipts (S5) is worked out by the server alone: a
+      // sighting may not cover a line added after it. Its status comes from the re-read.
+      if (Array.isArray(l.receipts)) return;
       if (l.purchase_order_id === poId && (l.display_status === 'on_po' || l.display_status === 'delivered')) l.display_status = o.delivery.sighted ? 'delivered' : 'on_po';
     });
     return true;
@@ -2390,9 +2423,15 @@
     e.deliveries.counted = c.counted;
     e.deliveries.sighted = c.sighted;
     e.deliveries.all_sighted = c.all_sighted === true;
+    var s5 = typeof c.on_site === 'number' && typeof c.lines_part_delivered === 'number';
+    if (s5) { e.deliveries.on_site = c.on_site; e.deliveries.all_on_site = c.all_on_site === true; e.deliveries.lines_part_delivered = c.lines_part_delivered; }
     [state.base.rows, state.found.rows, state.row ? [state.row] : []].forEach(function (rows) {
       rows.forEach(function (r) {
-        if (r && r.id === jobId && typeof r.deliveries_orders_total === 'number') { r.deliveries_orders_total = c.counted; r.deliveries_orders_sighted = c.sighted; }
+        if (r && r.id === jobId && typeof r.deliveries_orders_total === 'number') {
+          r.deliveries_orders_total = c.counted;
+          r.deliveries_orders_sighted = c.sighted;
+          if (s5) { r.deliveries_orders_on_site = c.on_site; r.deliveries_lines_part_delivered = c.lines_part_delivered; }
+        }
       });
     });
   }
@@ -2429,7 +2468,8 @@
     }).then(writeOk).then(function (resp) {
       delete d.busy[poId];
       // Saved, but an answer without the order cannot redraw the row: one quiet re-read shows it.
-      if (!applyDelivOrder(e, poId, resp.order)) readMat(jobId, true);
+      var s5Lines = action === 'dispatch_delivery_mark_sighted' && e.lines.some(function (l) { return l.purchase_order_id === poId && Array.isArray(l.receipts); });
+      if (!applyDelivOrder(e, poId, resp.order) || s5Lines) readMat(jobId, true);
       applyDelivCounts(jobId, resp.deliveries);
       applyCounts(jobId, resp.counts);
       if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); }
@@ -2451,6 +2491,169 @@
       paintSchedIf(jobId);
       paintMailIf(jobId);
       return landed;
+    });
+  }
+
+  // ── S5: partial deliveries, what arrived per line ──
+  // "Record what arrived" opens a form under the order's row: a quantity box per
+  // line on the order (the remaining quantity to start) and the day it arrived
+  // (today to start). Save sends one dispatch_delivery_record_receipt per line
+  // with a quantity, each with its own client_receipt_id kept for the open form,
+  // so Retry never records a line twice. Undo voids one receipt. Neither changes
+  // a line, an order or the job; each answer redraws the line, and one quiet
+  // re-read redraws the order's row and the rail.
+
+  function perthToday() {
+    var p = new Date(Date.now() + PERTH_OFFSET_MS);
+    var m = p.getUTCMonth() + 1, d = p.getUTCDate();
+    return p.getUTCFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+  }
+
+  // Lines on the order that the server reports receipts for (an S5 server).
+  function recvLines(e, poId) {
+    return e ? e.lines.filter(function (l) { return l.purchase_order_id === poId && Array.isArray(l.receipts); }) : [];
+  }
+
+  function lineQty(l) {
+    var q = Number(text(l.quantity));
+    return text(l.quantity) !== '' && isFinite(q) && q > 0 ? q : null;
+  }
+
+  function roundQty(n) { return Math.round(n * 1000) / 1000; }
+
+  // What is still to come on a line, as the box's starting text.
+  function remainingText(l) {
+    var q = lineQty(l);
+    var got = typeof l.received_quantity === 'number' ? l.received_quantity : 0;
+    if (q === null) return got > 0 ? '' : '1';
+    var left = roundQty(q - got);
+    return left > 0 ? String(left) : '';
+  }
+
+  function openRecv(jobId, poId) {
+    var e = matEntry(jobId);
+    var lines = recvLines(e, poId);
+    if (!lines.length) return;
+    var f = { jobId: jobId, poId: poId, day: perthToday(), qty: {}, ids: {}, busy: false, fail: null };
+    lines.forEach(function (l) { f.qty[l.id] = remainingText(l); });
+    state.deliv.recv = f;
+    state.deliv.edit = null;
+    state.deliv.ask = null;
+    state.deliv.msg = null;
+  }
+
+  // The form's problem, or '' when it can be saved.
+  function recvProblem(f, e) {
+    if (!wholeDay(f.day)) return 'Enter the day it arrived.';
+    if (f.day > perthToday()) return 'The day it arrived cannot be after today.';
+    var any = false;
+    var bad = '';
+    recvLines(e, f.poId).forEach(function (l) {
+      var v = text(f.qty[l.id]);
+      if (!v || bad) return;
+      var q = matQty(v);
+      if (!q.ok || q.value === null) { bad = 'Each quantity must be a number.'; return; }
+      if (q.value === 0) return;
+      if (lineQty(l) === null && q.value !== 1) { bad = 'A line with no quantity arrives whole: enter 1.'; return; }
+      any = true;
+    });
+    if (bad) return bad;
+    return any ? '' : 'Enter what arrived on at least one line.';
+  }
+
+  // One line's answer onto the line on screen.
+  function applyRecvLine(e, ln) {
+    if (!e || !ln || typeof ln !== 'object' || !ln.id) return;
+    e.lines.forEach(function (l) {
+      if (l.id !== String(ln.id)) return;
+      if (text(ln.display_status)) l.display_status = text(ln.display_status);
+      if (typeof ln.received_quantity === 'number') l.received_quantity = ln.received_quantity;
+      if (Array.isArray(ln.receipts)) l.receipts = ln.receipts.filter(function (x) { return x && x.id; });
+    });
+  }
+
+  var RECV_REFUSED = ['line_not_on_order', 'order_cancelled', 'not_material', 'not_dispatch_work', 'line_changed', 'line_not_found', 'line_already_received', 'receipt_not_found'];
+
+  function recvAnswer(jobId, resp) {
+    var e = matEntry(jobId);
+    applyRecvLine(e, resp.line);
+    applyDelivCounts(jobId, resp.deliveries);
+    applyCounts(jobId, resp.counts);
+  }
+
+  function saveRecv() {
+    var f = state.deliv.recv;
+    var jobId = f && f.jobId;
+    var e = f && matEntry(jobId);
+    if (!f || f.busy || !e || recvProblem(f, e)) return;
+    var todo = recvLines(e, f.poId).filter(function (l) {
+      var q = matQty(text(f.qty[l.id]));
+      return q.ok && q.value !== null && q.value > 0;
+    });
+    f.busy = true;
+    f.fail = null;
+    paintSchedIf(jobId);
+    var notes = [];
+    var refused = false;
+    var chain = Promise.resolve();
+    todo.forEach(function (l) {
+      chain = chain.then(function () {
+        if (refused) return;
+        var id = f.ids[l.id] || (f.ids[l.id] = newId());
+        return Promise.resolve().then(function () {
+          return global.opsPost('dispatch_delivery_record_receipt', {
+            job_id: jobId, line_id: l.id, quantity: matQty(text(f.qty[l.id])).value, received_on: f.day, client_receipt_id: id
+          });
+        }).then(writeOk).then(function (resp) {
+          recvAnswer(jobId, resp);
+          if (resp.warning && resp.warning.code === 'over_quantity') {
+            notes.push((text(l.description) || 'A line') + ': ' + resp.warning.received + ' received against ' + resp.warning.ordered + ' ordered.');
+          }
+          // Saved: this line leaves the form, so Retry sends only what did not land.
+          f.qty[l.id] = '';
+          delete f.ids[l.id];
+        }, function (err) {
+          if (RECV_REFUSED.indexOf(err && err.code) >= 0) refused = true;
+          else if (!f.fail) f.fail = 'Not all of it was saved.';
+        });
+      });
+    });
+    chain.then(function () {
+      f.busy = false;
+      if (refused) {
+        state.deliv.recv = null;
+        delivChanged(jobId, 'This order changed somewhere else. Showing the latest.');
+        return;
+      }
+      if (!f.fail && state.deliv.recv === f) state.deliv.recv = null;
+      if (notes.length) state.deliv.msg = { jobId: jobId, text: 'Saved. More than ordered: ' + notes.join(' ') };
+      readMat(jobId, true);
+      if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); }
+      paintSchedIf(jobId);
+      paintCard(jobId);
+    });
+  }
+
+  function undoReceipt(jobId, receiptId) {
+    var d = state.deliv;
+    if (!receiptId || d.undo[receiptId]) return;
+    d.undo[receiptId] = true;
+    d.msg = null;
+    paintSchedIf(jobId);
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_delivery_void_receipt', { job_id: jobId, receipt_id: receiptId });
+    }).then(writeOk).then(function (resp) {
+      delete d.undo[receiptId];
+      recvAnswer(jobId, resp);
+      readMat(jobId, true);
+      if (state.jobId === jobId) { paintMat(); paintHead(); paintSources(); }
+      paintSchedIf(jobId);
+      paintCard(jobId);
+    }, function (err) {
+      delete d.undo[receiptId];
+      if (RECV_REFUSED.indexOf(err && err.code) >= 0) delivChanged(jobId, 'This changed somewhere else. Showing the latest.');
+      else d.msg = { jobId: jobId, text: 'Not undone.', retry: { kind: 'undo', receiptId: receiptId } };
+      paintSchedIf(jobId);
     });
   }
 
@@ -3186,7 +3389,9 @@
       var tone = (MAT_STATUS[l.display_status] || { tone: 'muted' }).tone;
       h += '<div class="dpc-line dpc-line-ro"><span>' + esc(l.description) + '</span><span class="dpc-mono">' + esc(l.quantity) + '</span>';
       h += '<span class="dpc-mono">' + esc(l.unit) + '</span><span>' + esc(supplierName(e, l.supplier_id)) + '</span>';
-      h += '<span><span class="dpc-status dpc-tone-' + tone + '">' + esc(matStatusLabel(l.display_status)) + '</span></span>' + takeOffHtml(e, l) + '</div>';
+      var label = matStatusLabel(l.display_status);
+      if (l.display_status === 'part_delivered' && typeof l.received_quantity === 'number' && lineQty(l) !== null) label += ', ' + recvQtyText(l.received_quantity) + ' of ' + recvQtyText(lineQty(l));
+      h += '<span><span class="dpc-status dpc-tone-' + tone + '">' + esc(label) + '</span></span>' + takeOffHtml(e, l) + '</div>';
       var off = e.orderMsg['line:' + l.id];
       if (off) {
         h += '<div class="dpc-line-msg' + (off.retry ? ' dpc-mat-fail' : '') + '" role="' + (off.retry ? 'alert' : 'status') + '">' + esc(off.text) +
@@ -3934,6 +4139,67 @@
     return h + '</div>';
   }
 
+  // S5: what arrived on each line of the order, with Undo, then the
+  // "Record what arrived" press or its open form. Nothing shows for an order
+  // whose lines the server reports no receipts for (an older server).
+  function recvQtyText(n) { return typeof n === 'number' && isFinite(n) ? String(roundQty(n)) : '?'; }
+
+  function recvListHtml(jobId, l) {
+    var got = Array.isArray(l.receipts) ? l.receipts : [];
+    if (!got.length) return '';
+    var q = lineQty(l);
+    var name = text(l.description) || 'Line not described';
+    var total = typeof l.received_quantity === 'number' ? l.received_quantity : 0;
+    var head = q === null ? (total > 0 ? 'received' : 'nothing received yet') : recvQtyText(total) + ' of ' + recvQtyText(q) + (text(l.unit) ? ' ' + text(l.unit) : '') + ' received';
+    var h = '<li class="dpc-recv-line"><span class="dpc-recv-name">' + esc(name) + ': ' + esc(head) + '</span><ul class="dpc-recv-parts">';
+    got.forEach(function (x) {
+      var when = dayOf(x.received_on) || 'Day not recorded';
+      var by = text(x.recorded_by) || 'someone not recorded';
+      if (x.voided) {
+        h += '<li class="dpc-recv-void">' + esc(when + ': ' + recvQtyText(x.quantity) + ', undone by ' + (text(x.voided_by) || 'someone not recorded')) + '</li>';
+        return;
+      }
+      var busy = !!state.deliv.undo[x.id];
+      h += '<li>' + esc(when + ': ' + recvQtyText(x.quantity) + ', recorded by ' + by) + (text(x.note) ? ' <small>' + esc(text(x.note)) + '</small>' : '') +
+        ' <button type="button" class="dpc-textbtn" data-dpc-recv-undo="' + esc(x.id) + '" aria-label="' + esc('Undo ' + recvQtyText(x.quantity) + ' received on ' + when + ' for ' + name) + '"' +
+        (busy ? ' disabled' : '') + '>' + (busy ? 'Undoing...' : 'Undo') + '</button></li>';
+    });
+    return h + '</ul></li>';
+  }
+
+  function recvFormHtml(e, r, f) {
+    var po = text(r.po_number) || 'this order';
+    var off = f.busy ? ' disabled' : '';
+    var problem = recvProblem(f, e);
+    var h = '<div class="dpc-deliv-edit dpc-recv-form" role="group" aria-label="' + esc('Record what arrived on ' + po) + '"><p class="dpc-empty dpc-empty-tight">What arrived on ' + esc(po) + ':</p>';
+    recvLines(e, f.poId).forEach(function (l) {
+      var q = lineQty(l);
+      var name = text(l.description) || 'Line not described';
+      var hint = q === null ? 'no quantity on the line: 1 marks it arrived' : 'of ' + recvQtyText(q) + (text(l.unit) ? ' ' + text(l.unit) : '') + ' ordered';
+      h += '<label class="dpc-recv-row"><span>' + esc(name) + '</span><input type="text" inputmode="decimal" class="dpc-recv-qty" data-dpc-recv-qty="' + esc(l.id) + '" value="' + esc(f.qty[l.id] || '') + '" aria-label="' +
+        esc('Quantity arrived for ' + name) + '"' + off + '><small>' + esc(hint) + '</small></label>';
+    });
+    h += '<div class="dpc-actions"><span class="dpc-recv-daylabel">Arrived on</span>' + dateBoxHtml(f.day, 'data-dpc-recv-day', 'Day it arrived on ' + po, f.busy, true);
+    h += '<button type="button" class="dpc-primary" data-dpc-recv="save"' + (f.busy || problem ? ' disabled' : '') + '>' + (f.busy ? 'Saving...' : 'Save') + '</button>';
+    h += '<button type="button" data-dpc-recv="cancel"' + off + '>Cancel</button></div>';
+    if (problem && !f.busy) h += '<p class="dpc-empty dpc-empty-tight dpc-recv-hint" role="status">' + esc(problem) + '</p>';
+    if (f.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(f.fail) + ' <button type="button" class="dpc-retry" data-dpc-recv="save"' + off + '>Retry</button></p>';
+    return h + '</div>';
+  }
+
+  function recvHtml(jobId, r) {
+    var e = matEntry(jobId);
+    var lines = recvLines(e, r.purchase_order_id);
+    if (!lines.length || text(r.status) === 'cancelled') return '';
+    var h = '<div class="dpc-deliv-sub dpc-recv">';
+    var list = lines.map(function (l) { return recvListHtml(jobId, l); }).join('');
+    if (list) h += '<ul class="dpc-recv-list">' + list + '</ul>';
+    var f = state.deliv.recv;
+    if (f && f.jobId === jobId && f.poId === r.purchase_order_id) h += recvFormHtml(e, r, f);
+    else h += '<button type="button" class="dpc-deliv-btn" data-dpc-recv-open="' + esc(r.purchase_order_id) + '">Record what arrived</button>';
+    return h + '</div>';
+  }
+
   function delivRowHtml(jobId, r) {
     var d = state.deliv;
     if (r.kind === 'not_ordered') {
@@ -3958,6 +4224,7 @@
         '<button type="button" class="dpc-primary" data-dpc-deliv-unsight="go" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Clear</button>' +
         '<button type="button" data-dpc-deliv-unsight="keep" data-dpc-deliv-po="' + esc(poId) + '"' + (busy ? ' disabled' : '') + '>Keep</button></div></div></div>';
     }
+    h += recvHtml(jobId, r);
     return h + '</div>';
   }
 
@@ -4062,7 +4329,8 @@
   }
 
   var SCHED_FOCUS_KEYS = ['data-dpc-deliv-expected', 'data-dpc-deliv-edit-date', 'data-dpc-deliv-sight', 'data-dpc-deliv-unsight', 'data-dpc-deliv-po',
-    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-toggle'];
+    'data-dpc-deliv-confirm', 'data-dpc-deliv-edit', 'data-dpc-deliv-retry', 'data-dpc-deliv-cal', 'data-dpc-install', 'data-dpc-toggle',
+    'data-dpc-recv-open', 'data-dpc-recv', 'data-dpc-recv-qty', 'data-dpc-recv-day', 'data-dpc-recv-undo'];
   function paintSched() {
     var el = region('sched');
     if (!el) return;
@@ -4138,7 +4406,8 @@
       '[data-dpc-mode],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-mat-retry],[data-dpc-mat-addline],[data-dpc-mat-suggest],[data-dpc-mat-remove],[data-dpc-mat-del],[data-dpc-mat-clear],' +
       '[data-dpc-order],[data-dpc-order-pdf],[data-dpc-mail],' +
-      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install]') : null;
+      '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-thread],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-deliv-cal],[data-dpc-install],' +
+      '[data-dpc-recv-open],[data-dpc-recv],[data-dpc-recv-undo]') : null;
     if (!t || t.disabled) return;
     if (onPanelClick(t, e)) return;
     if (onStageClick(t)) return;
@@ -4449,6 +4718,29 @@
       if (typeof global.showView === 'function') global.showView('calendar');
       return true;
     }
+    if (t.hasAttribute('data-dpc-recv-open')) {
+      if (!jobId) return true;
+      var openPo = t.getAttribute('data-dpc-recv-open');
+      openRecv(jobId, openPo);
+      paintBoth();
+      refocus('[data-dpc-recv-qty]');
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-recv')) {
+      var rf = d.recv;
+      if (!rf) return true;
+      if (t.getAttribute('data-dpc-recv') === 'save') saveRecv();
+      else if (!rf.busy) {
+        d.recv = null;
+        paintBoth();
+        refocus('[data-dpc-recv-open="' + rf.poId + '"]');
+      }
+      return true;
+    }
+    if (t.hasAttribute('data-dpc-recv-undo')) {
+      if (jobId) undoReceipt(jobId, t.getAttribute('data-dpc-recv-undo'));
+      return true;
+    }
     var poId = t.getAttribute('data-dpc-deliv-po') || t.getAttribute('data-dpc-deliv-sight') || t.getAttribute('data-dpc-deliv-confirm') || '';
     if (t.hasAttribute('data-dpc-deliv-sight')) {
       if (jobId) markSighted(jobId, poId, true);
@@ -4494,6 +4786,7 @@
         var m = d.msg && d.msg.jobId === jobId ? d.msg.retry : null;
         if (m && m.kind === 'expected') setExpected(jobId, m.poId, m.value);
         else if (m && m.kind === 'sight') markSighted(jobId, m.poId, m.value);
+        else if (m && m.kind === 'undo') undoReceipt(jobId, m.receiptId);
       }
     } else {
       return false;
@@ -4613,6 +4906,31 @@
       return;
     }
     if (t.hasAttribute('data-dpc-mat-pad') && state.jobId) { padInput(state.jobId, t.value); return; }
+    if ((t.hasAttribute('data-dpc-recv-qty') || t.hasAttribute('data-dpc-recv-day')) && state.deliv.recv) {
+      var rv = state.deliv.recv;
+      if (t.hasAttribute('data-dpc-recv-qty')) rv.qty[t.getAttribute('data-dpc-recv-qty')] = t.value;
+      else {
+        rv.day = t.value;
+        if (t.parentNode && t.parentNode.classList) t.parentNode.classList.toggle('dpc-deliv-blank', !t.value);
+      }
+      // Only the Save button and the hint follow the typing: no repaint under the cursor.
+      var form = t.closest('.dpc-recv-form');
+      var re = matEntry(rv.jobId);
+      var problem = re ? recvProblem(rv, re) : 'x';
+      var sb = form && form.querySelector('[data-dpc-recv="save"]');
+      if (sb) sb.disabled = !!rv.busy || !!problem;
+      var hint = form && form.querySelector('.dpc-recv-hint');
+      if (hint) { hint.textContent = problem; hint.hidden = !problem; }
+      else if (problem && form && !rv.busy) {
+        var p = document.createElement('p');
+        p.className = 'dpc-empty dpc-empty-tight dpc-recv-hint';
+        p.setAttribute('role', 'status');
+        p.textContent = problem;
+        var acts = form.querySelector('.dpc-actions');
+        if (acts && acts.nextSibling) form.insertBefore(p, acts.nextSibling); else form.appendChild(p);
+      }
+      return;
+    }
     if (t.hasAttribute('data-dpc-deliv-edit-date') || t.hasAttribute('data-dpc-deliv-expected')) {
       var wrap = t.parentNode;
       if (wrap && wrap.classList) wrap.classList.toggle('dpc-deliv-blank', !t.value);

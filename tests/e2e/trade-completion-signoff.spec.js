@@ -68,14 +68,18 @@ async function openWizardAtSignoff(page) {
 test.describe('Completion wizard client sign-off', () => {
   test.use({ persona: 'installer' });
 
-  test('Next stays shut until the client has rated, given their name and signed', async ({ appPage: page }) => {
+  test('Next stays shut until the client has rated, said if they are happy, given their name and signed', async ({ appPage: page }) => {
     await stub(page, []);
     await openWizardAtSignoff(page);
     const next = page.locator('#wizSignoffNext');
     await expect(next).toBeDisabled();
-    await expect(page.locator('#wizSignoffHint')).toHaveText("Add the client's rating, name and signature to continue");
+    await expect(page.locator('#wizSignoffHint')).toHaveText("Add the client's rating, name, signature and answer on whether they are happy to continue");
 
     await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(4).click();
+    await expect(next).toBeDisabled();
+    await expect(page.locator('#wizSignoffHint')).toHaveText("Add the client's name, signature and answer on whether they are happy to continue");
+
+    await page.locator('#wizHappyYes').click();
     await expect(next).toBeDisabled();
     await expect(page.locator('#wizSignoffHint')).toHaveText("Add the client's name and signature to continue");
 
@@ -98,6 +102,7 @@ test.describe('Completion wizard client sign-off', () => {
   test('a star tap after typing and signing keeps the name and the signature', async ({ appPage: page }) => {
     await stub(page, []);
     await openWizardAtSignoff(page);
+    await page.locator('#wizHappyYes').click();
     await page.locator('#wizSigNameInput').fill('Jane Client');
     await drawSignature(page);
     await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(3).click();
@@ -116,6 +121,7 @@ test.describe('Completion wizard client sign-off', () => {
     await page.locator('#wizSigNameInput').fill('  Jane Client ');
     await drawSignature(page);
     await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(4).click();
+    await page.locator('#wizHappyYes').click();
     await page.locator('#wizSignoffNext').click();
     for (const cb of await page.locator('#wizBody input[type="checkbox"]').all()) await cb.check();
     await page.locator('#wizFooter .wiz-btn-primary').click();
@@ -124,7 +130,9 @@ test.describe('Completion wizard client sign-off', () => {
 
     const complete = log.filter((e) => e[0] === 'complete_my_job').map((e) => e[1]);
     expect(complete).toHaveLength(1);
-    expect(complete[0]).toMatchObject({ jobId: 'e2e-patio-1', signatureName: 'Jane Client', satisfaction_rating: 5 });
+    // DSP-11: the happy answer and the stored signature's id go with completion.
+    const sigUpload = log.findIndex((e) => e[0] === 'confirm_upload' && e[1].phase === 'signature');
+    expect(complete[0]).toMatchObject({ jobId: 'e2e-patio-1', signatureName: 'Jane Client', satisfaction_rating: 5, client_happy: true, signature_media_id: 'm-' + (sigUpload + 1) });
     const sigs = log.filter((e) => e[0] === 'confirm_upload' && e[1].phase === 'signature').map((e) => e[1].label);
     expect(sigs).toEqual(['Client signature — Jane Client']);
   });

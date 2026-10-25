@@ -4,6 +4,11 @@
 
 # Claude Code Instructions — ops-dashboard / SecureSuite
 
+## Project folder (six parts, R51)
+Project documents for this repo live on Marnin's Mac, outside the repo: `~/Projects/dispatch/`, `~/Projects/context-system/`, `~/Projects/job-profit/`.
+Before project work read that folder's `PROJECT.md` and `5-context.md`; log each run in its `6-progress.md`.
+Rules: `~/CLAUDE.md` > Project work. v1, 18 Oct 2026; Rayleigh owns it and may refine it.
+
 ## Bug Tracking
 
 When Shaun says **"new bug"**, **"log a bug"**, **"add a bug"**, **"found a bug"**, or any similar phrase:

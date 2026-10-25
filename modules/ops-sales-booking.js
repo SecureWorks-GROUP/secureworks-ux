@@ -986,6 +986,44 @@
     return 'busy';
   }
 
+  // ---- the live calendar read (live-availability-v1) ---------------------------
+  // Backend docs/sales-booking-live-availability.md: booking_flow.calendar_read
+  // says whether the person's GHL calendars were read and names why not;
+  // booking_flow.free_times carries each bookable day's state and the arrival
+  // windows the server worked out. The screen paints them and computes none.
+  function liveFreeTimes() {
+    var flow = state.data && state.data.booking_flow;
+    var ft = flow && flow.free_times;
+    return ft && Array.isArray(ft.days) ? ft : null;
+  }
+
+  function liveDay(date) {
+    var ft = liveFreeTimes();
+    return ft ? ft.days.filter(function (d) { return d && d.date === date; })[0] || null : null;
+  }
+
+  function liveBusy(source) {
+    var ft = liveFreeTimes(), out = [];
+    (ft ? ft.days : []).forEach(function (d) {
+      (Array.isArray(d.busy) ? d.busy : []).forEach(function (b) { if (b && b.source === source && b.start_iso && b.end_iso) out.push(b); });
+    });
+    return out;
+  }
+
+  // The day's state in words, for the chosen lead when their own times came
+  // with the read, else for the person.
+  var DAY_STATE_WORDS = { open: 'Open', full: 'Full', past: 'Past', no_time_left: 'No time left', travel_unknown: 'Travel unknown', already_booked: 'Booked that day' };
+  function dayStateWords(date) {
+    var person = liveDay(date);
+    if (!person) return null;
+    var c = selectedCase();
+    var lead = c && c.free_times && Array.isArray(c.free_times.days) ? c.free_times.days.filter(function (d) { return d && d.date === date; })[0] : null;
+    var st = String((lead || person).state || '');
+    var words = DAY_STATE_WORDS[st] || ('State not known (' + st + ')');
+    var count = person.booked != null && person.max_per_day ? person.booked + ' of ' + person.max_per_day : '';
+    return { state: st, words: words, count: (st === 'open' || st === 'full') && count ? count : '' };
+  }
+
   function diary() {
     var data = state.data;
     if (!data) return [];
@@ -1018,6 +1056,11 @@
     };
     (data.events || []).forEach(function (ev) { push(ev, 'events'); });
     (data.diary || []).forEach(function (ev) { push(ev, 'diary'); });
+    // GHL blocked-off time comes only with the live read's free times.
+    liveBusy('ghl_blocked').forEach(function (b) {
+      push({ id: 'ghl-blocked-' + b.start_iso, start_iso: b.start_iso, end_iso: b.end_iso, title: b.label ? 'Blocked off in GHL: ' + b.label : 'Blocked off in GHL',
+        kind: 'busy', layer: 'busy', blocks_capacity: true, source: 'ghl_blocked' }, 'ghl_blocked');
+    });
     commitmentSlots().forEach(function (slot) {
       out.push({ id: slot.id, contact_id: slot.contact_id, start_iso: slot.start_iso, end_iso: slot.end_iso,
         reservation_state: slot.state, display_name: 'Taken · ' + (slot.state === 'agreed' ? 'customer agreed' : 'previously offered'),
@@ -2342,6 +2385,51 @@
       (notes ? '<span class="count">' + notes + '</span>' : '') + icon('chevron') + '</button></div>';
   }
 
+  // The live read names why a person's GHL calendar could not be read
+  // (backend docs/sales-booking-live-availability.md "Named reasons"). Each
+  // one reads as a plain sentence; an unrecognised one is quoted, never hidden.
+  function calendarReasonWords(read, name) {
+    var raw = String((read && read.reason) || '').trim();
+    var cut = raw.indexOf(':');
+    var code = cut > 0 ? raw.slice(0, cut).trim() : raw;
+    var detail = cut > 0 ? raw.slice(cut + 1).trim().replace(/_/g, ' ') : '';
+    var said = detail ? ' (GHL said: ' + detail + ')' : '';
+    var who = name + '\'s';
+    var words = {
+      ghl_calendar_directory_unreadable: 'GHL did not return its list of calendars' + said + '.',
+      ghl_user_not_confirmed: who + ' GHL login could not be matched to exactly one GHL user, so their calendar was not read.',
+      ghl_calendar_assignments_unreadable: 'GHL did not say which calendars ' + name + ' is on.',
+      person_has_no_ghl_calendar: name + ' is not on any GHL calendar yet. Add them to one in GHL, then press Refresh.',
+      ghl_events_unreadable: 'GHL did not return ' + who + ' bookings for this week' + said + '.',
+      ghl_blocked_slots_unreadable: 'GHL did not return ' + who + ' blocked-off time for this week' + said + '.',
+      ghl_event_times_malformed: 'GHL returned a booking for ' + name + ' whose times could not be read.',
+      person_not_configured: name + ' is not set up for live free times on this screen yet.',
+      person_wide_calendars_and_prior_offer_ledger_not_connected: 'The live GHL calendar read is not switched on yet.'
+    };
+    if (words[code]) return words[code];
+    if (read && read.state === 'not_configured') return who + ' calendar is not set up' + (raw ? ' (' + raw + ')' : '') + '.';
+    return 'Could not read ' + who + ' calendar' + (raw ? ' (' + raw + ')' : '') + '.';
+  }
+
+  // What the live read could not count, each as one plain sentence.
+  function liveReadNotes() {
+    var flow = (state.data && state.data.booking_flow) || {};
+    var read = flow.calendar_read || {};
+    if (read.state !== 'read' || read.source !== 'server_live_read') return [];
+    var name = resource().name, notes = [];
+    (Array.isArray(read.caveats) ? read.caveats : []).forEach(function (cv) {
+      var text = String(cv || ''), n = text.match(/^outlook_malformed_dropped:\s*(\d+)/);
+      if (n) notes.push(name + '\'s Outlook had ' + plural(Number(n[1]), 'entry', 'entries') + ' with times that could not be read, so free times are not shown. Booking still checks Outlook.');
+      else if (/^outlook_unread\b/.test(text)) notes.push(name + '\'s Outlook could not be read, so only GHL time is counted here. Booking still checks Outlook.');
+      else if (text) notes.push('The calendar read noted: ' + text + '.');
+    });
+    var offers = flow.commitments_read || {};
+    if (offers.state === 'could_not_read' && offers.reason !== 'calendar_not_read') {
+      notes.push('Earlier offers could not be read' + (offers.reason ? ' (' + String(offers.reason).replace(/^system_offers_unreadable:\s*/, '') + ')' : '') + ', so free times are not shown.');
+    }
+    return notes;
+  }
+
   function readProblem() {
     if (state.error) {
       return state.stale && state.data
@@ -2350,9 +2438,7 @@
     }
     if (state.data && calendarUnread(state.data)) {
       var read = calendarReadState(state.data);
-      return read.state === 'not_configured'
-        ? resource().name + '\'s calendar is not set up, so free times are unknown and nothing can be booked.'
-        : 'Could not read ' + resource().name + '\'s calendar' + (read.reason ? ' (' + read.reason + ')' : '') + ', so free times are unknown and nothing can be booked.';
+      return calendarReasonWords(read, resource().name) + ' Free times are unknown, so nothing can be booked.';
     }
     return '';
   }
@@ -2791,26 +2877,69 @@
 
   // The chosen lead's free times on one day, as green bands to tap. Only the
   // server's windows are drawn; a day it sent none for shows none.
+  function freeBandRows(band) {
+    var a = slotOf(band[0].from_iso, false), z = slotOf(band[band.length - 1].end_iso, true);
+    return a == null || z == null || z <= a ? null : 'grid-row:' + (a + 1) + ' / ' + (z + 1) + ';grid-column:1 / -1';
+  }
+
+  function freeBandWords(band) {
+    var first = band[0], last = band[band.length - 1];
+    return band.length === 1 ? 'Free, arrive ' + timeRange(first.from_iso, first.to_iso) : 'Free, arrive from ' + clockLabel(hourFromIso(first.from_iso)) + ' to ' + clockLabel(hourFromIso(last.from_iso));
+  }
+
   function renderFreeBands(date) {
     var c = selectedCase();
-    if (!canTapFreeTime(c)) return '';
+    if (c && bookedElsewhere(c)) return '';
+    if (!(c && c.free_times && Array.isArray(c.free_times.days))) {
+      // Nobody chosen (or no times of their own): the person's free times, to read.
+      var tip = 'For a place not yet known, with travel allowed both ways. ' + (c ? 'No free times came for this lead\'s place, so these cannot be picked.' : 'Choose a lead to pick a time for them.');
+      return bandsOf(personFreeWindows(date)).map(function (band) {
+        var at = freeBandRows(band);
+        return at ? '<div class="ev-free is-static" style="' + at + '" title="' + esc(tip) + '">' +
+          '<span class="ev-freewords">' + esc(freeBandWords(band)) + '</span></div>' : '';
+      }).join('');
+    }
+    var tap = canTapFreeTime(c);
     var pick = state.ownerVisits[draftKey(c)];
     var picked = freePickWindow(pick);
-    var rows = function (fromIso, toIso) {
-      var a = slotOf(fromIso, false), z = slotOf(toIso, true);
-      return a == null || z == null || z <= a ? null : 'grid-row:' + (a + 1) + ' / ' + (z + 1) + ';grid-column:1 / -1';
-    };
     return freeBands(c, date).map(function (band, bi) {
-      var at = rows(band[0].from_iso, band[band.length - 1].end_iso);
+      var at = freeBandRows(band);
       if (!at) return '';
-      var first = band[0], last = band[band.length - 1];
-      var words = band.length === 1 ? 'Free, arrive ' + timeRange(first.from_iso, first.to_iso) : 'Free, arrive from ' + clockLabel(hourFromIso(first.from_iso)) + ' to ' + clockLabel(hourFromIso(last.from_iso));
+      var words = freeBandWords(band);
       var on = picked && band.some(function (w) { return w.from_iso === picked.from_iso; });
       var mark = on ? '<span class="ev-freepick">Picked: arrive ' + esc(timeRange(picked.from_iso, picked.to_iso)) + '</span>' : '';
+      if (!tap) return '<div class="ev-free is-static' + (on ? ' is-on' : '') + '" style="' + at + '">' + '<span class="ev-freewords">' + esc(words) + '</span>' + mark + '</div>';
       return '<button type="button" class="ev-free' + (on ? ' is-on' : '') + '" data-free-band="' + bi + '" data-case-id="' + esc(c.id) + '" data-date="' + esc(date) + '" style="' + at + '"' +
         ' aria-label="' + esc(words + ' on ' + longDate(date) + '. Tap to pick this time for ' + (c.display_name || 'this lead') + '.') + '">' +
         '<span class="ev-freewords">' + esc(words) + '</span>' + mark + '</button>';
     }).join('');
+  }
+
+  // What the live read counted as busy this week, and what it could not count.
+  function renderLiveReadLine() {
+    var flow = (state.data && state.data.booking_flow) || {};
+    var read = flow.calendar_read || {};
+    if (read.state !== 'read' || read.source !== 'server_live_read') return '';
+    var name = resource().name;
+    var ol = read.outlook || {};
+    var parts = [plural(Number(read.ghl_events) || 0, 'booking') + ' in GHL'];
+    if (ol.state === 'read') parts.push(plural(Number(ol.events) || 0, 'entry', 'entries') + ' in ' + name + '\'s Outlook');
+    if (Number(read.ghl_blocked_slots) > 0) parts.push(plural(Number(read.ghl_blocked_slots), 'block') + ' of time off in GHL');
+    var ft = liveFreeTimes();
+    var rule = ft && ft.rule || {};
+    var line = '<p class="fine liveline">Read live from GHL: ' + esc(parts.join(', ')) + ', all counted as busy.' +
+      (ft ? ' Free times allow ' + esc(String(rule.on_site_minutes || 30)) + ' minutes on site plus travel between visits.' : '') + '</p>';
+    var notes = liveReadNotes();
+    if (!ft && !notes.length) notes.push('Free times did not come with this read, so none are shown.');
+    var unverified = Number(ol.unverified_correspondence) || 0;
+    var out = line + notes.map(function (n) { return '<p class="ft-warn">' + esc(n) + '</p>'; }).join('');
+    if (unverified > 0) {
+      var rb = ownerFlow() && ownerFlow().owner_rulebook;
+      var cal = (rb && rb.calendar && rb.calendar.calendar_name) || (name + '\'s booking calendar');
+      out += '<details class="ft-note"><summary>' + esc(plural(unverified, 'Outlook entry is', 'Outlook entries are')) + ' not confirmed in GHL. They still count as busy here.</summary>' +
+        '<p>Booking checks Outlook too. So that GHL itself also holds that time, connect Outlook to GHL once, signed in as ' + esc(name) + ': in GHL open Settings, Calendars, Connections; connect Microsoft 365 with ' + esc(name.toLowerCase()) + '@secureworkswa.com.au; set it as the conflict calendar for ' + esc(cal) + '; then check a known Outlook busy time cannot be booked in GHL.</p></details>';
+    }
+    return out;
   }
 
   // The week sits in the middle, Monday to Friday. On a phone it is one day at
@@ -2827,18 +2956,23 @@
     }).join('') + '</div>';
     var head = '<div class="weekhead"><h2>Week of ' + esc(shortDate(state.weekStart).replace(/^\w+ /, '')) + '</h2>' +
       '<p class="fine">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p>' + picker +
-      '<h3 class="dayname">' + esc(longDate(addDays(state.weekStart, d))) + '</h3></div>';
+      '<h3 class="dayname">' + esc(longDate(addDays(state.weekStart, d))) + (function () {
+        var st = dayStateWords(addDays(state.weekStart, d));
+        return st ? '<em class="wkstate is-' + esc(st.state) + '">' + esc(st.words) + (st.count ? ', ' + esc(st.count) + ' booked' : '') + '</em>' : '';
+      })() + '</h3></div>';
     if (calendarUnread(state.data)) {
       var read = calendarReadState(state.data);
-      return '<section class="bk-week" aria-label="The week">' + head + '<div class="dayunread"><h3>' + (read.state === 'not_configured' ? 'Calendar not set up' : 'Could not read calendar') + '</h3><p>' + esc(read.reason || '') + '</p><p>Free times are unknown. A calendar that could not be read is never shown as free.</p></div></section>';
+      return '<section class="bk-week" aria-label="The week">' + head + '<div class="dayunread"><h3>' + (read.state === 'not_configured' ? 'Calendar not set up' : 'Could not read calendar') + '</h3><p>' + esc(calendarReasonWords(read, res.name)) + '</p><p>Free times are unknown. A calendar that could not be read is never shown as free.</p></div></section>';
     }
     var slots = (DAY_END - DAY_START) * SLOTS_PER_HOUR;
     var headers = DAYS.map(function (name, i) {
       var iso = addDays(state.weekStart, i);
       var off = lane.indexOf(i) < 0;
       var isToday = iso === today;
+      var st = dayStateWords(iso);
       return '<div class="wkday' + (off ? ' is-off' : '') + (isToday ? ' is-today' : '') + '" style="grid-column:' + (i + 2) + '">' +
-        '<span>' + name.slice(0, 3) + (isToday ? ' · today' : '') + '</span><b>' + Number(iso.slice(8, 10)) + '</b></div>';
+        '<span>' + name.slice(0, 3) + (isToday ? ' · today' : '') + '</span><b>' + Number(iso.slice(8, 10)) + '</b>' +
+        (st ? '<em class="wkstate is-' + esc(st.state) + '">' + esc(st.words) + (st.count ? ' · ' + esc(st.count) : '') + '</em>' : '') + '</div>';
     }).join('');
     var hours = '';
     for (var h = DAY_START; h < DAY_END; h++) {
@@ -2858,7 +2992,7 @@
       var w = (!cards.length && lane.indexOf(i) < 0 ? 0.6 : 1) + 0.6 * (lanes - 1);
       return 'minmax(0,' + Math.min(2.8, w).toFixed(1) + 'fr)';
     });
-    return '<section class="bk-week" aria-label="The week">' + head + empty +
+    return '<section class="bk-week" aria-label="The week">' + head + renderLiveReadLine() + empty +
       '<div class="weekgrid" style="grid-template-columns:42px ' + widths.join(' ') + ';grid-template-rows:auto repeat(' + slots + ',minmax(15px,auto))">' + headers + hours + days + '</div>' +
       '<p class="daykey"><span class="src src-ghl">GHL</span><span class="src src-outlook">Outlook</span> shows where each entry lives. Dashed means proposed, not booked. Leave is not read, so empty is not the same as free.</p></section>';
   }
@@ -3090,7 +3224,16 @@
   function leadFreeWindows(c, date) {
     var ft = c && c.free_times;
     if (!ft || !Array.isArray(ft.days)) return [];
-    var day = ft.days.filter(function (d) { return d && d.date === date; })[0];
+    return usableWindows(ft.days.filter(function (d) { return d && d.date === date; })[0], date);
+  }
+
+  // The person's own free times, for a place not yet known (travel allowed
+  // both ways), shown when no lead's own times are on screen.
+  function personFreeWindows(date) {
+    return usableWindows(liveDay(date), date);
+  }
+
+  function usableWindows(day, date) {
     if (!day || !Array.isArray(day.arrival_windows)) return [];
     return day.arrival_windows.filter(function (w) {
       return w && String(w.from_iso || '').slice(0, 10) === date && !isNaN(Date.parse(w.from_iso)) && !isNaN(Date.parse(w.to_iso)) && !isNaN(Date.parse(w.end_iso));
@@ -3099,8 +3242,12 @@
 
   // Windows five minutes apart are one run of free time, painted as one band.
   function freeBands(c, date) {
+    return bandsOf(leadFreeWindows(c, date));
+  }
+
+  function bandsOf(windows) {
     var bands = [], last = null;
-    leadFreeWindows(c, date).forEach(function (w) {
+    windows.forEach(function (w) {
       var t = Date.parse(w.from_iso);
       if (last != null && t - last <= 5 * 60000) bands[bands.length - 1].push(w);
       else bands.push([w]);
@@ -4473,6 +4620,9 @@
     bookTargets: bookTargets,
     renderVisitOutcomes: renderVisitOutcomes,
     renderWeek: renderWeek,
+    calendarReasonWords: calendarReasonWords,
+    dayStateWords: dayStateWords,
+    liveReadNotes: liveReadNotes,
     freeBands: freeBands,
     freeWindowAt: freeWindowAt,
     pickFreeWindow: pickFreeWindow,

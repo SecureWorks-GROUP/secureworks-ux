@@ -395,6 +395,8 @@
 .dpc-mail-tags { display: flex !important; gap: 6px; align-items: center; margin-top: 4px; }
 .dpc-mail-head .dpc-mail-tags { margin-top: 0; }
 .dpc-mail-listfail { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.dpc-mail-group { padding: 8px 14px 6px; border-bottom: 1px solid var(--line); font: 600 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--mute); }
+.dpc-mail-also { font-size: 11px; margin-top: 3px; }
 .dpc-mail-view { background: #fff; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .dpc-mail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
 .dpc-mail-head strong { overflow-wrap: anywhere; }

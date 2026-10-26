@@ -46,7 +46,7 @@ test.describe('Trade app: My money + GST from profile', () => {
     await expect(fy).toContainText('Super $416.40');
     await expect(view.locator('[data-mm-months] tbody tr')).toHaveCount(2);
     await expect(view.locator('[data-mm-invoice="i-paid"]')).toContainText('Paid 10 Aug 2026');
-    await expect(view.locator('[data-mm-invoice="i-owed"]')).toContainText('Approved, awaiting payment');
+    await expect(view.locator('[data-mm-invoice="i-owed"]')).toContainText('Approved in Xero');
     await expect(fy).toContainText('$208.20 from you');
     await expect(fy).toContainText('company covers $208.20');
     await expect(fy).toContainText('You get $3,261.80');

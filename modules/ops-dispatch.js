@@ -549,7 +549,7 @@
     });
   }
 
-  var INVOICE_STATUS = { PAID: 'Paid', AUTHORISED: 'Sent, not paid yet', DRAFT: 'Draft, not issued', SUBMITTED: 'Awaiting approval' };
+  var INVOICE_STATUS = { PAID: 'Paid (Xero)', AUTHORISED: 'Owed · Approved in Xero', DRAFT: 'Draft in Xero', SUBMITTED: 'Awaiting approval in Xero' };
 
   // This job's client invoices only. job_detail falls back to invoices matched
   // on the client's name when none is linked to the job; those are not this

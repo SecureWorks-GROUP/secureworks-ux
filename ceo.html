@@ -1136,8 +1136,9 @@ window.addEventListener('scroll', () => {
 // HELPERS
 // ════════════════════════════════════════════════════════════
 
+// A figure we do not have reads Unknown, never a dash or $0 (R-22, doc 3 section 5).
 function fmtK(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   const sign = n < 0 ? '-' : '';
   const abs = Math.abs(n);
   if (abs >= 1000000) return sign + '$' + (abs / 1000000).toFixed(1) + 'M';
@@ -1146,12 +1147,12 @@ function fmtK(n) {
 }
 
 function fmtDollar(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   return '$' + Math.round(n).toLocaleString();
 }
 
 function fmtPct(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   return Math.round(n) + '%';
 }
 

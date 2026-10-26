@@ -1360,7 +1360,7 @@
     if (isBooked(c)) return ['ok', 'Booked'];
     if (quoteOutstanding(c)) return ['warn', 'Quote to send'];
     if (isWaiting(c)) return ['q', 'Waiting'];
-    if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Overdue'];
+    if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Follow-up late'];
     if (c && (c.proposal || c.status === 'repair')) return ['bad', 'Act today'];
     var days = daysWaiting(c);
     if (days == null) return ['q', 'Wait unknown'];

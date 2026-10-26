@@ -65,7 +65,7 @@ test('every invoice shows its real amount and Xero state in Invoice history, Rec
   // Recent activity: the newest three, same wording as history.
   const recent = page.locator('#hoursRecentActivity');
   await expect(recent.locator('[data-inv-history="a-gst-split"]')).toContainText('$1,040.00');
-  await expect(recent.locator('[data-inv-history="a-gst-split"]')).toContainText('Approved, awaiting payment');
+  await expect(recent.locator('[data-inv-history="a-gst-split"]')).toContainText('Approved in Xero');
   await expect(recent.locator('[data-inv-history="b-legacy-pending"]')).toContainText('$800.00');
   await expect(recent.locator('[data-inv-history="b-legacy-pending"]')).toContainText('Waiting on office');
   await expect(recent.locator('[data-inv-history="c-part-paid"]')).toContainText('Part paid');

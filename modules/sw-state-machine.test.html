@@ -91,7 +91,7 @@
     });
 
     // ── partially_accepted (was missing pre-Cap-1A) ──────────────
-    check('partially_accepted in STATUS_LABELS', function () { return SM.STATUS_LABELS.partially_accepted === 'Partially Accepted'; });
+    check('partially_accepted in STATUS_LABELS', function () { return SM.STATUS_LABELS.partially_accepted === 'Partially accepted'; });
     check('partially_accepted in FENCING_STAGES', function () { return SM.FENCING_STAGES.indexOf('partially_accepted') !== -1; });
     check('partially_accepted NOT in PATIO_STAGES', function () { return SM.PATIO_STAGES.indexOf('partially_accepted') === -1; });
 

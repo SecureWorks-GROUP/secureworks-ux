@@ -934,7 +934,7 @@ test.describe('A stuck Xero draft on a customer variation (preview)', () => {
     await expect(page.locator('[data-job-wo-cv-message]')).toHaveText('Recorded: INV-0123 is this variation\'s Xero draft. Nothing was sent to Xero or the customer.');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.locator('[data-job-wo-cv-xero-stuck]')).toHaveCount(0);
-    await expect(page.locator('[data-job-wo-cv-invoice]')).toContainText('In Xero as a draft INV-0123.');
+    await expect(page.locator('[data-job-wo-cv-invoice]')).toContainText('Draft in Xero INV-0123.');
     expect(await posts(page)).toEqual([{
       action: 'reconcile_customer_variation_xero_draft',
       body: { variation_id: 'cv-1', expected_updated_at: STUCK_AT, outcome: 'draft_exists', xero_invoice_id: XERO_ID, invoice_number: 'INV-0123' },

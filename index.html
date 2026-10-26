@@ -3489,8 +3489,9 @@ var _arStackedChart = null;
 var _leadSourceChart = null;
 // Charts are re-rendered on each tab visit to keep data fresh
 
+// An amount we do not have reads Unknown, never $0 (R-22, doc 3 section 5).
 function fmt$(n) {
-  if (n == null || isNaN(n) || !isFinite(n)) return '$0';
+  if (n == null || n === '' || isNaN(n) || !isFinite(n)) return 'Unknown';
   return '$' + Math.round(Number(n)).toLocaleString();
 }
 

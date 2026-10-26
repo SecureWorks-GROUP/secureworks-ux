@@ -781,7 +781,7 @@ var JobWorkOrderCore = (function () {
         h += '<div class="jwo-fig" data-job-wo-agreed-total><div class="jwo-fig-k">Agreed total</div><div class="jwo-fig-v">' +
           esc(moneyWords(f.agreed_total_ex) || 'Not set') + '</div></div>';
       }
-      h += figureCell('Billed to date', moneyWords(f.billed_to_date_ex) || '$0.00');
+      h += figureCell('Billed to date', moneyWords(f.billed_to_date_ex) || 'Unknown');
       h += figureCell('Remaining', f.remaining_ex == null ? '' : moneyWords(f.remaining_ex), f.over_agreed ? 'jwo-fig-over' : '');
     } else {
       var agreed = num(wo && wo.agreed_labour_ex);
@@ -942,7 +942,7 @@ var JobWorkOrderCore = (function () {
       '<td class="r">' + esc(moneyWords(line.unit_price)) + '</td><td class="r">' + esc(line.account_code || '') + '</td></tr></tbody></table>';
     if (ref) h += '<div class="jwo-line-note">Reference ' + esc(ref) + '</div>';
     if (inv && inv.status === 'xero_draft_created') {
-      h += '<div class="jwo-line-note">In Xero as a draft' + (inv.invoice_number ? ' ' + esc(inv.invoice_number) : '') + '.</div>';
+      h += '<div class="jwo-line-note">Draft in Xero' + (inv.invoice_number ? ' ' + esc(inv.invoice_number) : '') + '.</div>';
     }
     h += '<div class="jwo-line-note" data-job-wo-cv-invoice-note>Preview only: nothing is sent to Xero from here. Hours, the trade allocation and rates stay off the customer\'s line.</div>';
     return h + '</div>';
@@ -1254,7 +1254,7 @@ var JobWorkOrderCore = (function () {
   //   line.job_work_order_id                    same link, the column that
   //                                             exists today
   // Already read when the new field is absent:
-  //   acknowledgment_status  pending|submitted|held -> Held,
+  //   acknowledgment_status  pending|submitted|held -> Held for review,
   //                          acknowledged|approved -> Approved,
   //                          queried -> Queried, rejected -> Rejected
   //   agreed_labour_ex, figures.agreed_ex, figures.agreed_total_ex,
@@ -1275,7 +1275,7 @@ var JobWorkOrderCore = (function () {
   // (the read is this job) and the card says the id is not on the read yet.
   // A line whose id is a different work order is left out.
   // </job-wo-overview-fields>
-  var REVIEW_LABELS = { held: 'Held', approved: 'Approved', queried: 'Queried', rejected: 'Rejected' };
+  var REVIEW_LABELS = { held: 'Held for review', approved: 'Approved', queried: 'Queried', rejected: 'Rejected' };
   var ACK_TO_REVIEW = {
     held: 'held', pending: 'held', submitted: 'held',
     acknowledged: 'approved', approved: 'approved',

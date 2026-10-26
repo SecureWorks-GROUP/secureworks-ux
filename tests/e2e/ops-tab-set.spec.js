@@ -1389,11 +1389,11 @@ test.describe('Dispatch: To do and the stage rail (slice 3)', () => {
     await expect(tape.locator('.dpc-tape-label')).toHaveText(NAMES);
     await expect(tape).not.toContainText(/Installed/);
     const cases = [
-      ['SWF-920015', 'Not started', 0, 'From the job status: Partially Accepted. Not set in Dispatch yet.'],
-      ['SWF-920001', 'Accepted', 1, 'From the job status: Awaiting Deposit. Not set in Dispatch yet.'],
-      ['SWF-920002', 'Deposit paid', 2, 'From the job status: Order Materials. Not set in Dispatch yet.'],
-      ['SWF-920003', 'Materials ordered', 3, 'From the job status: Awaiting Supplier. Not set in Dispatch yet.'],
-      ['SWP-920005', 'Supplier confirmed', 4, 'From the job status: Schedule Install. Not set in Dispatch yet.'],
+      ['SWF-920015', 'Not started', 0, 'From the job status: Partially accepted. Not set in Dispatch yet.'],
+      ['SWF-920001', 'Accepted', 1, 'From the job status: Awaiting deposit. Not set in Dispatch yet.'],
+      ['SWF-920002', 'Deposit paid', 2, 'From the job status: Order materials. Not set in Dispatch yet.'],
+      ['SWF-920003', 'Materials ordered', 3, 'From the job status: Awaiting supplier. Not set in Dispatch yet.'],
+      ['SWP-920005', 'Supplier confirmed', 4, 'From the job status: Schedule install. Not set in Dispatch yet.'],
       ['SWP-920006', 'Materials on site', 5, `Set by Office Person, ${SET_DAY}`],
       ['SWF-920012', 'Trade scheduled', 6, 'From the job status: Scheduled. Not set in Dispatch yet.'],
       ['SWR-920007', 'Accepted', 1, 'From the Repairs board: Approved. Not set in Dispatch yet.'],

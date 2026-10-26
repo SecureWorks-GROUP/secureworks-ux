@@ -72,7 +72,7 @@ check('My money period line reads 120 / 60 / 60 / 940', period.indexOf('Super $1
 
 check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-10' }).label === 'Paid 10 Aug 2026');
 check('status: PAID bill without our flag is still paid', M.statusOf({ xero_bill_status: 'PAID' }).cls === 'paid');
-check('status: authorised bill is approved awaiting payment', M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED' }).label === 'Approved, awaiting payment');
+check('status: authorised bill is approved in Xero', M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED' }).label === 'Approved in Xero');
 check('status: voided', M.statusOf({ xero_bill_status: 'VOIDED' }).label === 'Voided');
 check('status: draft / review / waiting on office', M.statusOf({ status: 'draft' }).label === 'Draft' && M.statusOf({ status: 'pending_ops_review' }).label === 'Under review' && M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'DRAFT' }).label === 'Waiting on office');
 check('status: part paid', M.statusOf({ status: 'pushed_to_xero', amount_paid: 100, outstanding: 50 }).label === 'Part paid');
@@ -115,7 +115,7 @@ check('no em dash, no old brand', view.indexOf('—') === -1 && view.indexOf('Se
 // Every status combination found in production, and what the trade must see.
 const liveStatuses = [
   [{ status: 'paid', xero_bill_status: 'PAID', paid: true, paid_at: '2026-09-04T02:00:00Z' }, 'Paid 4 Sep 2026', 'paid'],
-  [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 0 }, 'Approved, awaiting payment', 'owed'],
+  [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 0 }, 'Approved in Xero', 'owed'],
   [{ status: 'pushed_to_xero', xero_bill_status: 'DRAFT', amount_paid: 0 }, 'Waiting on office', 'sent'],
   [{ status: 'pending_acknowledgment', xero_bill_status: null }, 'Waiting on office', 'sent'],
   [{ status: 'approved', xero_bill_status: null }, 'Waiting on office', 'sent'],
@@ -148,7 +148,7 @@ check('part paid row renders owed, paid detail, and part paid pill', partRow.ind
 // the month table), and the incomplete-split note names what it leaves out.
 const allView = M.viewHTML({ fy_label: 'FY 2026/27', month: {}, fytd: {}, all_time: { invoices: 30, gross_earned: 2400, super_amount: 288, payable: 30000, paid_total: 27000, outstanding: 1200, figures_incomplete: 27 }, months: [], invoices: [] });
 check('view shows an all-time card', /data-mm-period="all"/.test(allView) && allView.indexOf('All time') !== -1 && allView.indexOf('$27,000.00') !== -1);
-check('incomplete note says earned/super leave old invoices out, paid/owed count them', allView.indexOf('27 older invoices without a super split. Earned and super leave them out; paid and still owed count them.') !== -1);
+check('incomplete note says earned/super leave old invoices out, paid/owed count them', allView.indexOf('27 older invoices without a super split. Earned and super leave them out; paid and owed count them.') !== -1);
 check('view without all_time has no all-time card', !/data-mm-period="all"/.test(M.viewHTML({ invoices: [] })));
 
 function extractFunction(name) {
@@ -258,7 +258,7 @@ const gstTotals = { month: '2026-10', label: 'Oct 2026', invoices: 1, gross_earn
 const plainView = M.viewHTML({ fy_label: 'FY 2026/27', fy_start: '2026-07-01', month: gstTotals, fytd: gstTotals, all_time: gstTotals, months: [], invoices: [{ id: 'inv-gst', week_end: '2026-10-18', bucket: '2026-10', counts: true, status: 'pushed_to_xero', payable: 1034, trade_payable: 1034 }] });
 check('a trade with no deduction keeps every period card exactly as it was',
   plainView.indexOf('data-mm-period-deduction') === -1
-  && cardOf(plainView, 'month') === '<div class="mm-card" data-mm-period="month"><div class="mm-card-t">Oct 2026<span class="mm-card-n">1 invoice</span></div><div class="mm-stats"><div class="mm-stat earned"><div class="mm-stat-v">$1,000.00</div><div class="mm-stat-l">Earned</div></div><div class="mm-stat paid"><div class="mm-stat-v">$0.00</div><div class="mm-stat-l">Paid to you</div></div><div class="mm-stat owed"><div class="mm-stat-v">$1,034.00</div><div class="mm-stat-l">Still owed</div></div></div><div class="mm-sub">Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00 &middot; GST $94.00 &middot; You get $940.00</div></div>');
+  && cardOf(plainView, 'month') === '<div class="mm-card" data-mm-period="month"><div class="mm-card-t">Oct 2026<span class="mm-card-n">1 invoice</span></div><div class="mm-stats"><div class="mm-stat earned"><div class="mm-stat-v">$1,000.00</div><div class="mm-stat-l">Earned</div></div><div class="mm-stat paid"><div class="mm-stat-v">$0.00</div><div class="mm-stat-l">Paid to you</div></div><div class="mm-stat owed"><div class="mm-stat-v">$1,034.00</div><div class="mm-stat-l">Owed</div></div></div><div class="mm-sub">Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00 &middot; GST $94.00 &middot; You get $940.00</div></div>');
 
 // Persisted invoice money and the Invoice history row.
 const uteMoney = context._invoicePersistedMoney(uteInvoice);

@@ -271,7 +271,7 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   // Supplier bill, voided and deleted invoices are not listed.
   const invoices = panel.locator('[data-dpc-invoice]');
   await expect(invoices.locator('strong')).toHaveText(['INV-1004', 'INV-1003', 'INV-1002', 'Deposit invoice INV-1001']);
-  await expect(invoices.locator('small')).toHaveText(['Awaiting approval', 'Draft, not issued', 'Sent, not paid yet', 'Paid']);
+  await expect(invoices.locator('small')).toHaveText(['Awaiting approval in Xero', 'Draft in Xero', 'Owed · Approved in Xero', 'Paid (Xero)']);
   await expect(panel).not.toContainText(/INV-VOID|INV-DEL|BILL-1/);
 
   // Pressing an invoice reads that one PDF from Xero, once.
@@ -280,7 +280,7 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   await expect.poll(() => of('get_invoice_pdf').length).toBe(1);
   expect(of('get_invoice_pdf')[0].url.searchParams.get('xero_invoice_id')).toBe('xero-dep');
   await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
-  await expect(invoices.last().locator('small')).toHaveText('Paid');
+  await expect(invoices.last().locator('small')).toHaveText('Paid (Xero)');
 });
 
 test('Dispatch panel Sources: a second press while the invoice PDF loads makes no second read', async ({ page }) => {
@@ -295,20 +295,20 @@ test('Dispatch panel Sources: a second press while the invoice PDF loads makes n
     },
   });
   const invoice = panel.locator('[data-dpc-invoice]').last();
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
   await invoice.click();
   await expect(invoice.locator('small')).toHaveText('Loading...');
   await invoice.click();
   await expect.poll(() => of('get_invoice_pdf').length).toBe(1);
   release();
   await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
   await page.waitForTimeout(300);
   expect(of('get_invoice_pdf').length).toBe(1);
   // Once it has loaded, a fresh press reads it again.
   await invoice.click();
   await expect.poll(() => of('get_invoice_pdf').length).toBe(2);
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
 });
 
 test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', async ({ page }) => {

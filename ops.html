@@ -18347,8 +18347,10 @@ function _jpDate(d) {
   if (!dateOnly) opts.timeZone = 'Australia/Perth';
   return dt.toLocaleDateString('en-AU', opts);
 }
+// Every paid flag on the job profit read is Xero's PAID (v_job_profit; a trade
+// invoice's 'paid' is set by xero-sync when its bill is PAID).
 function _jpPaid(paid, paidOn) {
-  if (paid === true) return '<span class="jp-tag ok">Paid' + (paidOn ? ' ' + _jpDate(paidOn) : '') + '</span>';
+  if (paid === true) return '<span class="jp-tag ok">Paid (Xero)' + (paidOn ? ' ' + _jpDate(paidOn) : '') + '</span>';
   if (paid === false) return '<span class="jp-tag mute">Not paid</span>';
   return '<span class="jp-unk">Unknown</span>';
 }
@@ -22895,7 +22897,7 @@ function renderOverviewView(data) {
     { label: 'Crew assigned', done: (data.assignments || []).length > 0, extra: (data.assignments || []).length + ' assignments' },
     { label: 'Build complete', done: !!j.completed_at, date: j.completed_at },
     { label: 'Invoiced', done: salesInvs.length > 0 },
-    { label: 'Paid', done: paidInvs.length > 0 },
+    { label: 'Paid (Xero)', done: paidInvs.length > 0 },
   ];
   checkSteps.forEach(function(s) {
     var icon = s.done ? '<span style="color:var(--sw-green);">&#9989;</span>' : '<span style="color:var(--sw-border);">&#9744;</span>';

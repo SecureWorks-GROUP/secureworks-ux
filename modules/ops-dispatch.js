@@ -400,6 +400,13 @@
   function scopeFacts(scope_json, jobType) {
     var scope = parseScope(scope_json);
     if (!scope || typeof scope !== 'object') return [];
+    // A Scope Engine record reads through the one scope reader (modules/job-scope-record.js).
+    var rec = global.JobScopeRecord ? global.JobScopeRecord.read({ type: jobType, scope_json: scope }) : null;
+    if (rec && rec.kind === 'engine-patio') {
+      var out = [];
+      if (rec.revision && rec.revision.n != null) out.push(['Revision', global.JobScopeRecord.revisionWords(rec)]);
+      return out.concat(rec.inputs.map(function (f) { return [f.label, f.value]; }));
+    }
     var facts = [];
     if (jobType === 'fencing' || hasFenceShape(scope)) {
       var fenceJob = scope.job || {};

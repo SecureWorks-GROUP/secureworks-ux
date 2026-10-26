@@ -3189,7 +3189,8 @@ function renderCockpitStats(stats, forecast, targets, agedAR) {
   }
 
   // Overdue AR — use aged breakdown for severity
-  var ar = stats.outstanding_receivables || 0;
+  // A missing figure reads Unknown and never "All clear" (INT-35).
+  var ar = stats.outstanding_receivables == null ? null : Number(stats.outstanding_receivables);
   var ar90 = (agedAR['90+'] && agedAR['90+'].total) || 0;
   var ar60 = (agedAR['61-90'] && agedAR['61-90'].total) || 0;
   var arOverdue = ar90 + ar60; // 60+ days is the danger zone
@@ -3200,6 +3201,8 @@ function renderCockpitStats(stats, forecast, targets, agedAR) {
     arSub.innerHTML = '<span class="trend-down">' + fmt$(ar90) + ' at 90+ days</span>';
   } else if (ar60 > 0) {
     arSub.innerHTML = '<span style="color:var(--sw-yellow)">' + fmt$(ar60) + ' at 61-90 days</span>';
+  } else if (ar == null || !isFinite(ar)) {
+    arSub.textContent = 'Not read';
   } else if (ar > 0) {
     arSub.textContent = 'All within 60 days';
   } else {
@@ -3207,7 +3210,7 @@ function renderCockpitStats(stats, forecast, targets, agedAR) {
   }
   // RAG: based on overdue amount (90+ is crisis, 60+ is warning)
   var arCard = document.getElementById('cpArCard');
-  arCard.className = 'cockpit-stat ' + (ar90 > 10000 ? 'rag-red' : arOverdue > 20000 ? 'rag-red' : arOverdue > 5000 ? 'rag-amber' : ar <= 0 ? 'rag-green' : 'rag-green');
+  arCard.className = 'cockpit-stat ' + (ar90 > 10000 ? 'rag-red' : arOverdue > 20000 ? 'rag-red' : arOverdue > 5000 ? 'rag-amber' : (ar == null || !isFinite(ar)) ? '' : 'rag-green');
 }
 
 // ── Cockpit: Revenue by Service Type (horizontal bars) ──

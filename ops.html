@@ -6816,10 +6816,19 @@ function fmtArtifactSize(bytes) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
 }
 
-function scopeToolUrlFor(jobType) {
-  return jobType === 'fencing'
-    ? 'https://marninms98-dotcom.github.io/fence-designer/'
-    : 'https://marninms98-dotcom.github.io/patio/';
+// A patio job opens the Scope Engine page when its scope is one the Scope Engine made, or it has no
+// scope yet. A job scoped in the old patio page keeps opening the old page: the Scope Engine never
+// writes over a scope it did not make. Without the scope in hand (scopeJson undefined) it stays on
+// the old page, as before.
+function scopeToolUrlFor(jobType, scopeJson) {
+  if (jobType === 'fencing') return 'https://marninms98-dotcom.github.io/fence-designer/';
+  if (jobType === 'patio' && scopeJson !== undefined) {
+    var empty = !scopeJson || (typeof scopeJson === 'object' && Object.keys(scopeJson).length === 0);
+    if (empty || (typeof scopeJson === 'object' && scopeJson.tool === 'patio-scoper')) {
+      return 'https://marninms98-dotcom.github.io/patio/scope-engine/';
+    }
+  }
+  return 'https://marninms98-dotcom.github.io/patio/';
 }
 
 async function toggleFrozenRevisions(jobId, jobType, anchor) {
@@ -17156,9 +17165,7 @@ function renderKanbanCard(j, status) {
       + '</a>';
   }
   if (j.type && j.type !== 'miscellaneous') {
-    var scopeUrl = j.type === 'fencing'
-      ? 'https://marninms98-dotcom.github.io/fence-designer/?jobId=' + j.id
-      : 'https://marninms98-dotcom.github.io/patio/?jobId=' + j.id;
+    var scopeUrl = scopeToolUrlFor(j.type, j.scope_json) + '?jobId=' + j.id;
     iconRow += '<a class="kanban-icon-btn" href="' + scopeUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open scope tool">'
       + '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
       + '</a>';
@@ -20122,7 +20129,7 @@ function renderJobPeek(data) {
     html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">View in GHL &#8599;</a>';
   }
   if (j.type !== 'miscellaneous') {
-    var scopeToolUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeToolUrl = scopeToolUrlFor(j.type, j.scope_json);
     html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">Open Scope &#8599;</a>';
   }
   html += '<button class="btn btn-primary btn-sm" style="font-size:11px; padding:3px 8px;" onclick="closeSlidePanel(); openJobDetail(\'' + j.id + '\')">Open Record</button>';
@@ -20635,7 +20642,7 @@ function renderScopeSummary(scope_json, jobType, jobId) {
   }
 
   // Scope tool link
-  var scopeToolUrl = jobType === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+  var scopeToolUrl = scopeToolUrlFor(jobType);
   var linkId = jobId || scope.jobId || '';
   if (linkId) {
     html += '<div style="margin-top:6px;"><a href="' + scopeToolUrl + '?jobId=' + linkId + '" target="_blank" style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;">&#128279; Open in Scope Tool &#8599;</a></div>';
@@ -22678,7 +22685,7 @@ function renderOverviewView(data) {
   html += '</div>';
   html += '<div style="margin-top:8px;font-size:11px;display:flex;gap:12px;">';
   if (j.type !== 'miscellaneous') {
-    var scopeUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeUrl = scopeToolUrlFor(j.type, j.scope_json);
     html += '<a href="' + scopeUrl + '?jobId=' + j.id + '" target="_blank" style="color:var(--sw-mid);">Open Scope &#8599;</a>';
   }
   if (j.ghl_opportunity_id) html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" style="color:var(--sw-mid);">View in GHL &#8599;</a>';
@@ -23309,7 +23316,7 @@ function renderMoneyView(data) {
   var quoteDocs = (data.documents || []).filter(function(d) { return d.type === 'quote' || d.type === 'permit_quote'; });
   if (quoteDocs.length > 0) {
     // Scope tool URL for this job type
-    var scopeToolUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeToolUrl = scopeToolUrlFor(j.type, j.scope_json);
     quoteDocs.forEach(function(doc) {
       var pdfUrl = doc.storage_url || doc.pdf_url || '';
       var quoteNum = doc.quote_number || ('v' + (doc.version || 1));

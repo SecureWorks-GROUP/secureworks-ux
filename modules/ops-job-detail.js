@@ -343,7 +343,7 @@ function renderJobPeek(data) {
     html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">View in GHL &#8599;</a>';
   }
   if (j.type !== 'miscellaneous') {
-    var scopeToolUrl = j.type === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/';
+    var scopeToolUrl = typeof window.scopeToolUrlFor === 'function' ? window.scopeToolUrlFor(j.type, j.scope_json) : (j.type === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/');
     html += '<a href="#" onclick="openScopeSnapshot(_peekData);return false;" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">Snapshot &#128248;</a>';
     html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '&mode=readonly" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">View Scope &#8599;</a>';
     html += '<a href="#" onclick="confirmEditScope(\'' + scopeToolUrl + '?jobId=' + j.id + '\');return false;" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none; color:var(--sw-orange);">Edit Scope &#9998;</a>';
@@ -894,7 +894,7 @@ function renderScopeSummary(scope_json, jobType, jobId) {
   }
 
   // Scope tool link (readonly by default)
-  var scopeToolUrl = jobType === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/';
+  var scopeToolUrl = typeof window.scopeToolUrlFor === 'function' ? window.scopeToolUrlFor(jobType) : (jobType === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/');
   var linkId = jobId || scope.jobId || '';
   if (linkId) {
     html += '<div style="margin-top:6px;"><a href="' + scopeToolUrl + '?jobId=' + linkId + '" target="_blank" style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;">&#128279; View in Scope Tool &#8599;</a></div>';
@@ -1198,7 +1198,7 @@ function renderOverviewView(data) {
   html += '</div>';
   html += '<div style="margin-top:8px;font-size:11px;display:flex;gap:12px;">';
   if (j.type !== 'miscellaneous') {
-    var scopeUrl = j.type === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/';
+    var scopeUrl = typeof window.scopeToolUrlFor === 'function' ? window.scopeToolUrlFor(j.type, j.scope_json) : (j.type === 'fencing' ? 'https://secureworks-group.github.io/fence-designer/' : 'https://secureworks-group.github.io/patio/');
     html += '<a href="#" onclick="openScopeSnapshot(_currentJobData);return false;" style="color:var(--sw-dark);font-weight:600;">Snapshot &#128248;</a>';
     html += '<a href="' + scopeUrl + '?jobId=' + j.id + '&mode=readonly" target="_blank" style="color:var(--sw-mid);">View Scope &#8599;</a>';
     html += '<a href="#" onclick="confirmEditScope(\'' + scopeUrl + '?jobId=' + j.id + '\');return false;" style="color:var(--sw-orange);">Edit Scope &#9998;</a>';

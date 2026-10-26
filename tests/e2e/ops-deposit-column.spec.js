@@ -51,7 +51,7 @@ test('patio offers Awaiting Deposit as a next status, like fencing', async ({ pa
     patioAwaiting: getNextStatuses('awaiting_deposit', 'patio'),
     fencingAccepted: getNextStatuses('accepted', 'fencing'),
   }));
-  expect(next.patioAccepted).toContain('awaiting_deposit');
-  expect(next.patioAwaiting.length).toBeGreaterThan(0);
+  expect(next.patioAccepted).toEqual(['awaiting_deposit', 'approvals', 'processing']);
+  expect(next.patioAwaiting).toEqual(['approvals', 'processing']);
   expect(next.fencingAccepted).toEqual(['awaiting_deposit']);
 });

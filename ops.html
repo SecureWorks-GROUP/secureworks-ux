@@ -25894,13 +25894,12 @@ function getNextStatuses(current, jobType) {
     return ft[current] || [];
   }
   if (jobType === 'patio') {
-    // Patio waits on its deposit like fencing (Captain 2026-10-26), then follows
-    // the stage gate engine's patio ladder (modules/ops-stage-gate-engine.js).
+    // Patio can wait on its deposit like fencing (Captain 2026-10-26), then
+    // carries on through approvals / processing as before.
     var pt = {
       'quoted': ['accepted', 'cancelled'],
       'accepted': ['awaiting_deposit', 'approvals', 'processing'],
-      'awaiting_deposit': ['approvals', 'order_materials', 'processing'],
-      'deposit': ['awaiting_deposit', 'approvals', 'processing'],
+      'awaiting_deposit': ['approvals', 'processing'],
       'approvals': ['processing'],
       'processing': ['in_progress'],
       'scheduled': ['in_progress', 'cancelled'],

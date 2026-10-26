@@ -27918,7 +27918,7 @@
         } else if (result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Draft bill in Xero</div>';
         } else {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not add it to Xero. The office will add it.</div>';
         }
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';

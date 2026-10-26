@@ -18072,7 +18072,7 @@ function renderPOTable(pos) {
     html += '<td>' + poStatusBadge(po.status) + '</td>';
     html += '<td>';
     if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
-      html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Push to Xero</button>';
+      html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Add to Xero for approval</button>';
     }
     if (po.job_id) {
       html += ' <button class="btn btn-secondary btn-sm" onclick="openJobPeek(\'' + po.job_id + '\')" style="font-size:10px; padding:2px 6px;">Job</button>';
@@ -19081,7 +19081,7 @@ function renderTradeBillTable(invoices) {
     }
     if ((inv.status === 'approved' || inv.status === 'acknowledged') && !inv.xero_bill_id) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
-      html += '<button onclick="retryPushToXero(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry push to Xero</button>';
+      html += '<button onclick="retryPushToXero(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry: add to Xero as a draft</button>';
       html += '</div>';
     }
     html += '</td>';

@@ -4296,7 +4296,10 @@
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_suggest_draft', { job_id: jobId }); }).then(v2Ok).then(function (resp) {
       delete e.busy.suggest;
       var n = Number(resp.added) || 0;
-      e.msg.draft = { text: n ? v2Count(n, 'line', 'lines') + ' filled in from the scope. Check each one before ordering.' : 'The scope had nothing to fill in. Type the lines in.' };
+      // The scope reader's notes (a long panel, a height with no post rule, a
+      // gate with no size) are shown under the message, never guessed into a line.
+      var notes = Array.isArray(resp.notes) ? resp.notes.filter(function (t) { return typeof t === 'string' && t; }) : [];
+      e.msg.draft = { text: n ? v2Count(n, 'line', 'lines') + ' filled in from the scope. Check each one before ordering.' : 'The scope had nothing to fill in. Type the lines in.', notes: notes };
       readV2(jobId, true);
     }, function (err) {
       delete e.busy.suggest;
@@ -4800,8 +4803,11 @@
   // A line under a box or the draft list: what a press said.
   function v2MsgHtml(m, retryAttrs, cls) {
     if (!m) return '';
+    var notes = Array.isArray(m.notes) && m.notes.length
+      ? '<ul class="dpc-msg-notes">' + m.notes.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>'
+      : '';
     return '<div class="' + (cls || 'dpc-card-msg') + (m.bad ? ' dpc-mat-fail' : '') + '" role="' + (m.bad ? 'alert' : 'status') + '">' + esc(m.text) +
-      (m.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + '</div>';
+      (m.retry && retryAttrs ? ' <button type="button" class="dpc-retry" ' + retryAttrs + '>Retry</button>' : '') + notes + '</div>';
   }
 
   function v2MoveOptions(e, current) {

@@ -208,7 +208,7 @@ function fakeV2(seed = {}) {
       const added = (SCOPE[b.job_id] || []).map(([d, q], i) => ({ id: LID(800 + i), supplier_id: null, description: d, quantity: q, unit: null, detail: null, profile: null, colour: null,
         status: 'not_reviewed', source: 'scope', sent_on_email_id: null, updated_at: stamp() }));
       j.lines.push(...added);
-      return { success: true, added: added.length, lines: added.map(lineOut) };
+      return { success: true, added: added.length, lines: added.map(lineOut), notes: ['1 panel is marked long width in the scope. Check the panel line with the supplier.'] };
     },
     dispatch_v2_add_supplier: (url, b) => {
       const f = forced('dispatch_v2_add_supplier');
@@ -454,6 +454,7 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     const { mat, writes } = await boot(page, fake);
     await draftOf(mat).locator('[data-dpc-v2="suggest"]').click();
     await expect(draftOf(mat)).toContainText('2 lines filled in from the scope. Check each one before ordering.');
+    await expect(draftOf(mat).locator('.dpc-msg-notes li')).toHaveText(['1 panel is marked long width in the scope. Check the panel line with the supplier.']);
     await expect(draftOf(mat).locator('[data-dpc-v2-cell="description"]')).toHaveCount(2);
     await expect(draftOf(mat).locator('[data-dpc-v2="suggest"]')).toHaveCount(0);
     expect(writes().map((c) => [c.action, c.body.job_id])).toEqual([['dispatch_v2_suggest_draft', 'job-f1']]);

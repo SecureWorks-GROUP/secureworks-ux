@@ -123,6 +123,7 @@ test('a refused clear keeps the flag and says why in words', async ({ page }) =>
 
 for (const [name, answer] of [
   ['the connection drops before the answer', (route) => route.abort('failed')],
+  ['the gateway times out with no ops-api answer', (route) => route.fulfill({ status: 504, contentType: 'application/json', body: JSON.stringify({ message: 'Gateway timeout' }) })],
   ['the answer is not one we know', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, action: 'something_else' }) })],
 ]) {
   test(`unknown outcome when ${name}: never says nothing was changed`, async ({ page }) => {

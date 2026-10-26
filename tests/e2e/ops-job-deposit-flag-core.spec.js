@@ -22,6 +22,8 @@ function extractCore() {
 
 const C = extractCore();
 const voided = { reason: 'deposit_voided', invoice_number: 'INV-1234', invoice_status: 'VOIDED', flagged_at: '2026-10-27T02:00:00Z' };
+// The error opsPost throws for a non-ok reply: status, code and the whole answer as body.
+const refused = (status, code) => ({ status, code, body: { ok: false, code, error: 'refused' } });
 const unpaid = { reason: 'deposit_unpaid', invoice_number: 'INV-1235', invoice_status: 'AUTHORISED', flagged_at: null };
 
 test.describe('Deposit flag core (extracted from modules/ops-job-deposit-flag.js)', () => {
@@ -68,15 +70,21 @@ test.describe('Deposit flag core (extracted from modules/ops-job-deposit-flag.js
   });
 
   test('refusals are in words, never codes', () => {
-    expect(C.refusalWords({ status: 403, code: 'operator_access_required' })).toBe('Only signed-in office staff can clear a deposit flag. Nothing was changed.');
-    expect(C.refusalWords({ status: 503, body: { code: 'state_unwritable' } })).toBe('The deposit flag could not be cleared. Nothing was changed.');
+    expect(C.refusalWords(refused(403, 'operator_access_required'))).toBe('Only signed-in office staff can clear a deposit flag. Nothing was changed.');
+    expect(C.refusalWords(refused(503, 'state_unwritable'))).toBe('The deposit flag could not be cleared. Nothing was changed.');
+    expect(C.refusalWords(refused(405, 'method_not_allowed'))).toBe('The deposit flag could not be cleared. Nothing was changed.');
   });
 
-  test('a failure with no HTTP answer is unknown, never "Nothing was changed"', () => {
+  test('anything but an ops-api refusal is unknown, never "Nothing was changed"', () => {
     const unknown = 'Could not tell whether the deposit flag was cleared. Refresh the job to check.';
     expect(C.refusalWords(new TypeError('Failed to fetch'))).toBe(unknown);
     expect(C.refusalWords(new Error('unexpected answer'))).toBe(unknown);
-    expect(C.refusalWords({ code: 'operator_access_required' })).toBe(unknown);
+    for (const status of [502, 504, 546]) {
+      expect(C.refusalWords({ status, code: null, body: {} })).toBe(unknown);
+      expect(C.refusalWords({ status, code: null, body: { message: 'Gateway timeout' } })).toBe(unknown);
+    }
+    expect(C.refusalWords({ status: 500, code: 'x', body: { error: { code: 'x' } } })).toBe(unknown);
+    expect(C.refusalWords({ status: 403, code: 'operator_access_required', body: { ok: false } })).toBe(unknown);
     expect(C.refusalWords(null)).toBe(unknown);
   });
 
@@ -91,8 +99,8 @@ test.describe('Deposit flag core (extracted from modules/ops-job-deposit-flag.js
       C.detailHtml('f1', null, true),
       C.label(voided),
       C.invoiceWords({ reason: 'deposit_voided', invoice_status: 'VOIDED' }),
-      C.refusalWords({ status: 403, code: 'operator_access_required' }),
-      C.refusalWords({ status: 503, code: 'state_unwritable' }),
+      C.refusalWords(refused(403, 'operator_access_required')),
+      C.refusalWords(refused(503, 'state_unwritable')),
       C.refusalWords(new TypeError('Failed to fetch')),
     ];
     for (const s of shown) {

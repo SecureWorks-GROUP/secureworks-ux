@@ -15,8 +15,9 @@
 //
 // One write: ops-api `clear_job_deposit_flag` { job_id } from the job page, after a
 // confirm. It answers { ok, action: 'cleared' | 'no_open_flag' }; both mean the job
-// has no open flag now. A failure with no HTTP status is said as unknown. The board is not re-read: the answer is written into every
-// row the flag was drawn from.
+// has no open flag now. Only an { ok: false, code } refusal says nothing was
+// changed. The board is not re-read: the answer is written into every row the
+// flag was drawn from.
 // ════════════════════════════════════════════════════════════
 
 // <job-deposit-flag-core>
@@ -96,11 +97,13 @@ var DepositFlagCore = (function () {
     return !!res && res.ok === true && (res.action === 'cleared' || res.action === 'no_open_flag');
   }
 
-  // A failed clear_job_deposit_flag, in words. Only an HTTP refusal is known to
-  // have changed nothing; a lost connection or an answer we cannot read is unknown.
+  // A failed clear_job_deposit_flag, in words. Only ops-api's own refusal
+  // ({ ok: false, code }) is known to have changed nothing; a lost connection, a
+  // gateway error or an answer we cannot read is unknown.
   function refusalWords(err) {
-    if (!err || !err.status) return 'Could not tell whether the deposit flag was cleared. Refresh the job to check.';
-    var code = str(err && (err.code || (err.body && err.body.code))).trim();
+    var body = err && err.body;
+    var code = body && body.ok === false ? str(body.code).trim() : '';
+    if (!code) return 'Could not tell whether the deposit flag was cleared. Refresh the job to check.';
     if (code === 'operator_access_required') return 'Only signed-in office staff can clear a deposit flag. Nothing was changed.';
     return 'The deposit flag could not be cleared. Nothing was changed.';
   }

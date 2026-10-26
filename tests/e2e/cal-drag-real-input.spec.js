@@ -67,10 +67,17 @@ function fixtureEvents() {
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents() };
   const writes = [];
+  // Crew texts the page sends through ghl-proxy send_sms. Stubbed: nothing
+  // leaves the browser.
+  const texts = [];
   await installOpsSessionStub(page);
   await page.route('**/*', async (route) => {
     const url = route.request().url();
     if (url.startsWith('file://')) return route.continue();
+    if (/\/functions\/v1\/ghl-proxy\?action=send_sms/.test(url)) {
+      texts.push(route.request().postDataJSON());
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+    }
     const m = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
     if (!m) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
     const action = m[1];
@@ -78,10 +85,21 @@ async function bootCalendar(page, opts = {}) {
     if (action === 'calendar') return json({ events: state.events });
     if (action === 'pipeline') return json({ columns: { accepted: opts.unschedJobs || [] } });
     if (action === 'get_crew_availability') return json(opts.availability || []);
-    if (action === 'list_users') return json({ users: USERS });
+    if (action === 'list_users') return json({ users: opts.users || USERS });
+    if (action === 'job_detail') {
+      const jobId = new URL(url).searchParams.get('jobId');
+      return json({
+        job: { id: jobId },
+        assignments: state.events.filter((e) => e.job_id === jobId).map((e) => ({
+          id: e.assignment_id, job_id: e.job_id, user_id: e.user_id, role: 'installer',
+          status: e.assignment_status, scheduled_date: e.scheduled_date, scheduled_end: e.scheduled_end,
+        })),
+      });
+    }
     if (action === 'update_assignment') {
       const body = route.request().postDataJSON();
       writes.push({ action, body });
+      if (opts.writeDelayMs) await new Promise((r) => setTimeout(r, opts.writeDelayMs));
       const ev = state.events.find((e) => e.assignment_id === body.assignmentId);
       if (ev) {
         if (body.scheduled_date) ev.scheduled_date = body.scheduled_date;
@@ -92,7 +110,13 @@ async function bootCalendar(page, opts = {}) {
       return json({ ok: true });
     }
     if (action === 'create_assignment' || action === 'delete_assignment' || action === 'send_client_update') {
-      writes.push({ action, body: route.request().postDataJSON() });
+      const body = route.request().postDataJSON();
+      writes.push({ action, body });
+      if (action === 'create_assignment' && opts.keepCreates) {
+        const like = state.events.find((e) => e.job_id === body.jobId) || {};
+        state.events.push({ ...like, assignment_id: 'new-' + writes.length, user_id: body.userId, crew_name: body.crewName,
+          assigned_to: body.crewName, scheduled_date: body.scheduledDate, scheduled_end: body.scheduledEnd || body.scheduledDate, duration_days: 1 });
+      }
       return json({ ok: true, sent: true });
     }
     return json({});
@@ -119,7 +143,7 @@ async function bootCalendar(page, opts = {}) {
       .poll(() => page.evaluate(() => Object.keys(_calAvailability).length), { message: 'availability enrich never landed' })
       .toBeGreaterThan(0);
   }
-  return { writes };
+  return { writes, texts, state };
 }
 
 // A REAL drag: trusted pointer press at the source, incremental moves, release
@@ -429,5 +453,165 @@ test.describe('dragv2 default-on gating', () => {
     expect(await flag()).toBe(false); // persistent kill switch
     await page.goto(OPS_URL);
     expect(await flag()).toBe(true); // ?dragv2=1 beats localStorage '0'
+  });
+});
+
+// The live failure (Captain, Milan Mall SWP-26595): a multi-crew job stored as
+// one booking per person per day, across a weekend. Grabbing it anywhere and
+// dropping it on a new start day moves the WHOLE job by working days, every
+// person together, with the job's own rows never counted as clashes.
+test.describe('Whole job, one booking per person per day (Milan Mall shape)', () => {
+  // Pin the page's today to this spec's first Monday so every day below is
+  // inside the 2-week window whatever weekday the suite runs on.
+  test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(new Date(D.MON + 'T09:00:00'));
+  });
+  const FRI2 = isoStr(plusDays(monA, 11));
+  const CREW4 = [
+    { id: 'u-hugo', name: 'Hugo', email: 'hugo@secureworkswa.com.au', role: 'lead_installer', phone: '+61400000001' },
+    { id: 'u-liam', name: 'Liam', email: 'liam@secureworkswa.com.au', role: 'installer', phone: '+61400000002' },
+    { id: 'u-priya', name: 'Priya', email: 'priya@secureworkswa.com.au', role: 'installer' },
+    { id: 'u-nina', name: 'Nina', email: 'nina@secureworkswa.com.au', role: 'installer', phone: '+61400000004' },
+  ];
+  function perDayRows(days, crew = CREW4) {
+    const out = [];
+    days.forEach((day, di) => crew.forEach((u) => out.push({
+      start_time: null, end_time: null, assignment_type: 'install', assignment_status: 'scheduled',
+      confirmation_status: 'tentative', job_type: 'patio', job_status: 'accepted', legacy: false,
+      assignment_id: 'mm-' + u.name.toLowerCase() + '-' + di, job_id: 'j-mm', user_id: u.id, crew_name: u.name,
+      assigned_to: u.name, job_number: 'SWP-26595', client_name: 'Milan Mall', site_address: '4 Example Way, Malaga WA 6090',
+      site_suburb: 'Malaga', scheduled_date: day, scheduled_end: day, duration_days: 1,
+    })));
+    return out;
+  }
+  const datesOf = (state, userId) => state.events.filter((e) => e.job_id === 'j-mm' && e.user_id === userId)
+    .map((e) => e.scheduled_date).sort();
+  async function toSchedule(page) {
+    await page.locator('#btnViewSchedule').click();
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first()).toBeVisible();
+  }
+
+  test('drag the Friday piece onto Monday: every person moves one working day, painted at once', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, {
+      events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4, writeDelayMs: 1500,
+    });
+    await toSchedule(page);
+    // the Friday piece, before the weekend break
+    const friPiece = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await realDrag(page, friPiece, page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+
+    // On screen at once, while the server is still answering, and the grid
+    // never blanks to the loading state.
+    await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm' && e.user_id === 'u-hugo')
+      .map((e) => e.scheduled_date).sort()), { timeout: 1000 }).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
+    await expect(page.locator('#calendarBody .cal-loading')).toHaveCount(0);
+
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length, { timeout: 15000 }).toBe(16);
+    await expect(page.locator('body')).not.toContainText('Not moved');
+    for (const u of CREW4) await expect.poll(() => datesOf(state, u.id), { message: u.name }).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
+    // every write keeps the booking one day long
+    expect(writes.filter((w) => w.action === 'update_assignment').every((w) => w.body.scheduled_date === w.body.scheduled_end)).toBe(true);
+    // a person's day is never written onto a date another of their rows still holds
+    const order = writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId);
+    // (Tue leaves for Wed before Mon takes Tue, and Mon leaves before Fri takes it)
+    expect(order.indexOf('mm-hugo-2')).toBeLessThan(order.indexOf('mm-hugo-1'));
+    expect(order.indexOf('mm-hugo-1')).toBeLessThan(order.indexOf('mm-hugo-0'));
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+  });
+
+  test('the reschedule step also offers the crew text: one each, from the office number, naming who has no phone', async ({ page }) => {
+    const { writes, texts } = await bootCalendar(page, { events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4 });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+    const modal = page.locator('#calConfirmModal');
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    await expect(modal).toContainText('Send reschedule update?');
+    // the client text is unchanged; the crew text sits beside it, ticked
+    await expect(page.locator('#calReschedClient')).toBeChecked();
+    await expect(page.locator('#calReschedCrew')).toBeChecked();
+    await expect(modal).toContainText('Hugo, Liam, Nina');
+    await expect(page.locator('#calReschedNoPhone')).toHaveText('No phone on file, not texted: Priya');
+    await page.locator('#confirmModalProceed').click();
+
+    await expect.poll(() => texts.length).toBe(3);
+    expect(texts.map((t) => t.phone).sort()).toEqual(['+61400000001', '+61400000002', '+61400000004']);
+    for (const t of texts) {
+      expect(t).toMatchObject({ fromNumber: '+61489267771', recipientRole: 'crew', aboutJobId: 'j-mm' });
+      expect(t.jobId).toBeUndefined();
+      expect(t.message).toContain('SWP-26595');
+      expect(t.message).toContain('Milan Mall');
+      expect(t.message).toContain('4 Example Way');
+      expect(t.message).toContain('trade.html#job/j-mm');
+    }
+    const hugo = texts.find((t) => t.phone === '+61400000001').message;
+    const label = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/,/g, '');
+    expect(hugo).toContain('Your days: ' + [D.MON2, D.TUE2, D.WED2, FRI2].map(label).join(', '));
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(1);
+    await expect(page.getByText(/Crew texted: Hugo, Liam, Nina/)).toBeVisible();
+    await expect(page.getByText(/No phone on file, not texted: Priya/).last()).toBeVisible();
+  });
+
+  test('untick the crew text and only the client text goes', async ({ page }) => {
+    const { writes, texts } = await bootCalendar(page, { events: perDayRows([D.MON, D.TUE]), users: CREW4 });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    await page.locator('#calReschedCrew').uncheck();
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => writes.filter((w) => w.action === 'send_client_update').length).toBe(1);
+    await page.waitForTimeout(300);
+    expect(texts).toHaveLength(0);
+  });
+
+  test('stretch the end over a weekend: every person gains Monday, new bookings sent quietly', async ({ page }) => {
+    // Hugo and Liam booked per day Thu + Fri; Priya on one spanning row.
+    const rows = perDayRows([D.THU, D.FRI], CREW4.slice(0, 2));
+    rows.push({ ...rows[0], assignment_id: 'mm-priya-span', user_id: 'u-priya', crew_name: 'Priya', assigned_to: 'Priya',
+      scheduled_date: D.THU, scheduled_end: D.FRI, duration_days: 2 });
+    const { writes } = await bootCalendar(page, { events: rows, users: CREW4 });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+
+    await expect.poll(() => writes.filter((w) => w.action !== 'send_client_update').length).toBe(3);
+    const creates = writes.filter((w) => w.action === 'create_assignment').map((w) => w.body);
+    expect(creates.map((c) => c.userId).sort()).toEqual(['u-hugo', 'u-liam']);
+    for (const c of creates) {
+      // the interior Sat and Sun are breaks; only Monday is added
+      expect(c).toMatchObject({ jobId: 'j-mm', scheduledDate: D.MON2, scheduledEnd: D.MON2, suppress_notifications: true });
+    }
+    const priya = writes.find((w) => w.action === 'update_assignment').body;
+    expect(priya).toMatchObject({ assignmentId: 'mm-priya-span', scheduled_date: D.THU, scheduled_end: D.MON2, duration_days: 3 });
+    expect(writes.some((w) => w.action === 'delete_assignment')).toBe(false);
+    await expect(page.getByText('Duration updated')).toBeVisible();
+  });
+
+  test('stretch the start back a day on a multi-crew job: the end holds, every person gains the day', async ({ page }) => {
+    const { writes } = await bootCalendar(page, { events: perDayRows([D.WED, D.THU], CREW4.slice(0, 3)), users: CREW4, keepCreates: true });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.left'), page.locator('.cal-schedule-cell[data-date="' + D.TUE + '"]'));
+
+    await expect.poll(() => writes.filter((w) => w.action === 'create_assignment').length).toBe(3);
+    const creates = writes.filter((w) => w.action === 'create_assignment').map((w) => w.body);
+    expect(new Set(creates.map((c) => c.scheduledDate))).toEqual(new Set([D.TUE]));
+    expect(creates.every((c) => c.suppress_notifications === true)).toBe(true);
+    expect(writes.some((w) => w.action === 'update_assignment' || w.action === 'delete_assignment')).toBe(false);
+  });
+
+  test('pull the end in: the dropped day is removed for every person', async ({ page }) => {
+    const { writes } = await bootCalendar(page, { events: perDayRows([D.MON, D.TUE, D.WED], CREW4.slice(0, 2)), users: CREW4 });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.TUE + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(2);
+    expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort())
+      .toEqual(['mm-hugo-2', 'mm-liam-2']);
+    expect(writes.some((w) => w.action === 'create_assignment' || w.action === 'update_assignment')).toBe(false);
   });
 });

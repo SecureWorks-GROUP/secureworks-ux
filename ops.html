@@ -22639,6 +22639,29 @@ function renderMakesafeOpsDetail(data) {
   return html;
 }
 
+// <job-dispatch-stage> The job page's Dispatch card: accepted work only (ops-api
+// DISPATCH_LIST_STATUSES is every pipeline status except draft and quoted), read
+// through modules/ops-dispatch.js so it shows exactly what Dispatch would.
+function jobOnDispatchList(j) {
+  return !!(j && j.type !== 'makesafe' && j.job_number && ['draft', 'quoted', 'cancelled', 'lost'].indexOf(j.status) < 0 && window.OpsDispatch && OpsDispatch.stageForJob);
+}
+function paintJobDispatchStage(j) {
+  if (!jobOnDispatchList(j) || !document.getElementById('jdDispatchStage')) return;
+  OpsDispatch.stageForJob(j).then(function(result) {
+    var el = document.getElementById('jdDispatchStage');
+    if (!el || _currentJobId !== j.id) return;
+    el.innerHTML = OpsDispatch.stageCardHtml(result);
+    var link = el.querySelector('[data-open-dispatch]');
+    if (link) link.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      OpsDispatch.openJob(j.id);
+      if (typeof closeJobDetail === 'function') closeJobDetail(true);
+      showView('dispatch');
+    });
+  });
+}
+// </job-dispatch-stage>
+
 function renderOverviewView(data) {
   var j = data.job;
   if (j.type === 'makesafe') {
@@ -22716,6 +22739,8 @@ function renderOverviewView(data) {
 
   // The Scope Engine's sealed scope and its documents (modules/job-scope-record.js).
   if (scopeRec && scopeRec.kind === 'engine-patio') html += JobScopeRecord.scopeCardHtml(scopeRec, j.id);
+  // Where the job is on Dispatch's stage rail, filled in after the page paints (paintJobDispatchStage).
+  if (jobOnDispatchList(j)) html += '<div id="jdDispatchStage"></div>';
 
   // Fencing scoping tool notes (Site/Final/Removal/Supplier) — the Overview tab is
   // the drawer's default tab and does not go through renderScopeSummary, so this
@@ -22914,6 +22939,7 @@ function renderOverviewView(data) {
   if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
   if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
   if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
+  paintJobDispatchStage(j);
 
   // Load job actions async
   loadJobActions(j.id);

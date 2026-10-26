@@ -10,14 +10,15 @@ const { JOB_ID, buildEnginePatioDetail, buildScopeRevisions, pricingJson } = req
 const ENGINE = 'https://marninms98-dotcom.github.io/patio/scope-engine/';
 test.use({ viewport: { width: 1360, height: 1000 } });
 
-async function boot(page, { pricing = null } = {}) {
+async function boot(page, { pricing = null, status = null, pipeline = null } = {}) {
   await page.route('**/functions/v1/**', (route) => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"not stubbed"}' }));
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
   const detail = buildEnginePatioDetail();
   if (pricing) detail.job.pricing_json = pricing;
+  if (status) detail.job.status = status;
   const revs = buildScopeRevisions().map((r) => Object.assign({ revision_number: 1 }, r));
-  await page.evaluate(({ detail, revs }) => {
+  await page.evaluate(({ detail, revs, pipeline }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
     const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -30,7 +31,16 @@ async function boot(page, { pricing = null } = {}) {
     };
     window.opsPost = (action) => action === 'list_scope_revisions_for_job' ? Promise.resolve({ ok: true, revisions: clone(revs) }) : unknown();
     window.opsAuthHeaders = async (extra) => Object.assign({ Authorization: 'Bearer e2e' }, extra || {});
-  }, { detail, revs });
+    window.__pipelineReads = [];
+    if (pipeline !== null) {
+      const fetch0 = window.opsFetch;
+      window.opsFetch = (action, params) => {
+        if (action !== 'pipeline') return fetch0(action, params);
+        window.__pipelineReads.push(params);
+        return pipeline === 'fail' ? Promise.reject(new Error('down')) : Promise.resolve(clone(pipeline));
+      };
+    }
+  }, { detail, revs, pipeline });
   await page.evaluate((id) => openJobDetail(id), JOB_ID);
   await expect(page.locator('#jobDetailView')).toHaveClass(/active/);
 }
@@ -97,4 +107,44 @@ test('Files: the Scope Engine documents for Rev 3 above the photos', async ({ pa
   const f = page.locator('#jdFiles');
   await expect(f).toContainText('Scope Engine documents (Rev 3)');
   await expect(f.locator('a', { hasText: 'Material order' })).toHaveAttribute('href', ENGINE + '?jobId=' + JOB_ID);
+});
+
+// <job-dispatch-stage>: the Overview's Dispatch card, read through modules/ops-dispatch.js.
+const dispatchRow = (over = {}) => Object.assign({
+  id: JOB_ID, job_number: 'SWP-990301', type: 'patio', status: 'order_materials', client_name: 'Casey Morgan',
+  updated_at: '2026-10-25T06:44:00Z', value_inc_gst: true, description: 'Gable patio', work_type: 'patio',
+  dispatch_todo: true, dispatch_stage: 'materials_ordered', dispatch_stage_index: 3, dispatch_stage_source: 'set',
+  dispatch_stage_from: null, dispatch_stage_set_at: '2026-10-25T06:44:00Z', dispatch_stage_set_by: 'Office Person',
+  dispatch_next_step: 'Chase Stratco for the delivery date',
+}, over);
+const listAnswer = (rows) => ({ columns: { order_materials: rows }, total: rows.length, dispatch_stages: 'ok', todo_total: rows.filter((r) => r.dispatch_todo).length });
+
+test('Overview: an accepted job shows its Dispatch stage, next step and a way into Dispatch', async ({ page }) => {
+  await boot(page, { status: 'order_materials', pipeline: listAnswer([dispatchRow(), dispatchRow({ id: 'other-job', job_number: 'SWP-9903010', dispatch_todo: false })]) });
+  await tab(page, 'overview');
+  const card = page.locator('#jdOverview [data-dispatch-card]');
+  await expect(card).toContainText('Stage: Materials ordered');
+  await expect(card).toContainText('in To do');
+  await expect(card).toContainText('Next step: Chase Stratco for the delivery date');
+  await expect(card.locator('[aria-current="step"]')).toHaveAttribute('data-dispatch-stop', 'materials_ordered');
+  expect(await page.evaluate(() => window.__pipelineReads)).toEqual([{ dispatch: 1, search: 'SWP-990301' }]);
+  await card.locator('a', { hasText: 'Open in Dispatch' }).click();
+  await expect(page.locator('#jobDetailView')).not.toHaveClass(/active/);
+  expect(await page.evaluate(() => sessionStorage.getItem('sw_dispatch_job'))).toBe(JOB_ID);
+});
+
+test('Overview: a failed Dispatch read says so, never "not started"', async ({ page }) => {
+  await boot(page, { status: 'scheduled', pipeline: 'fail' });
+  await tab(page, 'overview');
+  const card = page.locator('#jdOverview [data-dispatch-card]');
+  await expect(card).toContainText('Could not read the Dispatch stage.');
+  await expect(card).not.toContainText('Not started');
+});
+
+test('Overview: a quoted job has no Dispatch card and no Dispatch read', async ({ page }) => {
+  await boot(page, { pipeline: listAnswer([dispatchRow()]) });
+  await tab(page, 'overview');
+  await expect(page.locator('#jdOverview')).toContainText('Rev 3');
+  await expect(page.locator('#jdOverview [data-dispatch-card]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__pipelineReads)).toEqual([]);
 });

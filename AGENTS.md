@@ -57,6 +57,10 @@ a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
 Materials by supplier reads `dispatch_materials` once per job open and
 `list_suppliers` once a session.
+The classic job page Overview shows that job's Dispatch stage (`// <job-dispatch-stage>`,
+`OpsDispatch.stageForJob` / `stageCardHtml` / `openJob`): accepted work only, one
+`pipeline&dispatch=1&search=<job number>` read per job open (cached a minute,
+through the same `rowsFromPipeline` / `stageOf` checks), and a failed read says so.
 Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
 `send_sms` from `+61489267771`, the rail's `set_dispatch_stage` (after a
 confirm line) and `set_dispatch_next_step`, and the six `dispatch_materials_*`

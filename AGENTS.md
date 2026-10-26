@@ -125,7 +125,10 @@ Duration precedence: the rendered `scheduled_date..scheduled_end` span wins over
 `duration_days` (legacy rows all carry the unused default 1 — a drag must never
 collapse a visible multi-day bar). The reschedule SMS (`send_client_update`,
 trigger `install_rescheduled`) fires ONLY from an explicit Yes in the confirm
-modal, and only when the START day changed. The Schedule modal's real-crew
+modal, and only when the START day changed. The same modal offers the crew
+text (ticked; `// <crew-reschedule-text>`): one ghl-proxy `send_sms` per person
+whose own days changed, from `+61489267771`, `recipientRole: 'crew'` +
+`aboutJobId` (never `jobId`), naming anyone with no phone as not texted. The Schedule modal's real-crew
 requirement is deliberately UNFLAGGED: `create_assignment` takes camelCase keys
 and a required `userId` — name-only rows are invisible to the Trade App's
 my-jobs filter and the backend rejects them.
@@ -135,22 +138,26 @@ per-assignment blocks) and Schedule (`renderScheduleView`, job-grouped bars;
 the active view persists in `localStorage.sw_cal_view_mode`, so one click on
 the toggle silently sticks forever — this is how "drag is broken" shipped once
 already: only Crew view had drag wiring). Schedule-view drops carry only a DAY
-(no crew rows — a drop there never reassigns): a single-assignment move pins
-the event's own `user_id` (`opts.pinnedUserId` on `moveAssignment`), never a
-display-name lookup that could land on a deactivated or duplicate-named user —
-Crew-view callers deliberately keep name resolution because it powers
-cross-row reassignment; a multi-assignment move builds all plans first, then
-shows ONE combined "Crew Unavailable" confirm across every affected crew
-(Captain ruling — never one modal per crew). With dragv2 ON a single-assignment
-move (either view, shared `moveAssignment`) runs the SAME span-depth check —
+(no crew rows — a drop there never reassigns) and move the WHOLE JOB
+(`moveSchedSegment` → `CalOpsCore.planJobMove`): the drop day is the job's new
+first day, whichever piece was grabbed, and every live (not ghost, cancelled or
+completed) row of the job moves by the same working days, keeping its own
+`user_id`. The bar's edge handles sit on the job's first and last day for any
+crew count and stretch it for everyone (`stretchSchedJob` →
+`CalOpsCore.planJobStretch`): per-day crews gain `create_assignment` rows with
+`suppress_notifications: true` or lose deleted rows (an invoiced row's refusal
+is shown in words), spanning rows move their own end. Crew-view callers keep
+name resolution because it powers cross-row reassignment. Every move shows ONE
+combined "Crew Unavailable" confirm across every affected crew
+(Captain ruling — never one modal per crew). With dragv2 ON a Crew-view
+single-assignment move runs the SAME span-depth check —
 every painted day of the moved span (`CalOpsCore.movedSpanV2`, the only
 derivation of a moved span, shared by warning and write) through the shared
 `collectSpanClashes`/`confirmClashesOrProceed` helpers, one combined confirm,
 identical wording (ruling cp1-askuser-2); flag off keeps the drop-day-only
 check. With dragv2 ON the Schedule view lays active dates via
 `CalOpsCore.paintedSpanDates`, so weekend-crossing jobs render as broken
-segments like the Crew view and dragging EITHER segment reschedules the whole
-job; flag OFF keeps the every-calendar-day loop byte-identical. Bars float
+segments like the Crew view; flag OFF keeps the every-calendar-day loop byte-identical. Bars float
 on a `pointer-events:none` overlay above the day
 cells, so bars themselves must accept `dragover`/`drop` and fall through to
 the cell under the pointer.
@@ -158,14 +165,20 @@ Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
 ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
-Schedule bars may be backed by several same-person day rows; every V2
+A V2 save paints at once and writes behind it (`calSaveJobPlan`: batches from
+`CalOpsCore.planWriteBatches` sent concurrently, the last write leaving each
+date in a later batch so ghost reconcile stays right; a failure puts the
+calendar back and names the row), then re-reads only the feed without blanking
+the grid (`refreshCalendarQuietly`). Schedule bars may be backed by several same-person day rows; every V2
 move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
 writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
 safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
 window PLUS the dragged job's full assignment set from the existing
-`job_detail` read — because the window alone is blind past its edge and when
-the feed is truncated. A job-level Schedule-bar drag is all-or-nothing: if any
-crew chain would collide with a genuine separate visit, nothing is written,
+`job_detail` read (`calJobRows`, started at drag start and cached a minute;
+no lighter ops-api read exists) — because the window alone is blind past its edge and when
+the feed is truncated. The job's own rows move together, so they never block it. A job-level Schedule-bar drag is all-or-nothing: if any
+crew chain would collide with a row that stays put (a cancelled or completed
+one), nothing is written,
 every row stays where it is, and one warning toast names the blocking existing
 visits counted as real holders (`staged.blockers`), never cascaded candidates.
 A single-row move/resize onto a held date is skipped with both visits kept,
@@ -249,8 +262,9 @@ read off `_calPick` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
-stays its own division (ruling 2026-09-16). Leave and reminders show under Everything and
-Business; holidays and company days under Everything and Holidays. Deliveries are read-only and come from
+stays its own division (ruling 2026-09-16). Reminders show under Everything and
+Business; leave and unavailable marks under Everything and Leave (its own box,
+in the business grey; `// <calendar-leave>`); holidays and company days under Everything and Holidays. Deliveries are read-only and come from
 `calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
 order, see `// <calendar-delivery-row>`) passed through the Show and Type
 focus; both views use it, and Materials with none in view says "No deliveries

@@ -924,7 +924,11 @@
     #viewCalendar.cal-v3.cal-v3-hol .cal-swimlane-day-header.holiday-col .day-name { background: var(--v3hol); color: #fff; }
     #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.holiday-col { background: #FEF4F4; }
     #viewCalendar.cal-v3.cal-v3-hol .cal-holiday-badge { color: #fff; background: var(--v3hol); }
-    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: #374151; background: #E5E7EB; }
+    /* <calendar-leave> leave and unavailable marks in the business lines' grey */
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: var(--v3k); background: color-mix(in srgb, var(--v3biz) 12%, #fff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v3biz) 72%, #000); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.avail-leave,
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.avail-unavailable { background: color-mix(in srgb, var(--v3biz) 12%, #fff) !important; background-image: none !important; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell .leave-badge { color: var(--v3k); background: color-mix(in srgb, var(--v3biz) 24%, #fff); }
     #viewCalendar.cal-v3.cal-v3-hol .cal-job-block.meeting-block { border-color: #6B7280; background: rgba(107,114,128,0.10); }
     #viewCalendar.cal-v3.cal-v3-hol .cal-reminder-pill { color: #374151; background: rgba(107,114,128,0.10); border-color: rgba(107,114,128,0.30); }
     .cal-focus-tick { user-select: none; }
@@ -946,6 +950,7 @@
     @media (max-width: 1380px) { #viewCalendar.cal-v3.cal-v3-hol .cal-focus-key { display: none; } #viewCalendar.cal-v3.cal-v3-hol .cal-v3-new { margin-left: auto; } }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="materials"] { --tk: #74747C; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="business"] { --tk: #6B7280; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="leave"] { --tk: #6B7280; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="holidays"] { --tk: #E11D2E; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="patio"] { --tk: #2563EB; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="fencing"] { --tk: #CA8A04; }
@@ -6415,7 +6420,7 @@ window.__SW_CAL_V3_ENABLED = (function () {
 })();
 // ── Calendar Holidays tick box and colours (live for everyone) ──
 // The v3 Show row has a Holidays tick box that alone covers holidays and company
-// days (Business keeps meetings, leave and reminders), and v3 colours are:
+// days (Business keeps meetings and reminders; Leave has its own box), and v3 colours are:
 // patios blue, fencing yellow, repairs green, make safes purple, holidays and
 // company days bright red, business grey. The old ?calholidays switch and its
 // localStorage.sw_cal_holidays_preview key are gone and ignored.
@@ -7350,7 +7355,8 @@ async function loadCrewList() {
       // words stands in for it; when the backend adds full_name it wins here.
       var rawFull = String(u.name || '').trim();
       var fullName = u.full_name || (rawFull.split(/\s+/).length > 1 ? rawFull : '');
-      return { id: u.id, name: displayName, fullName: fullName, email: u.email, role: u.role || '', division: div };
+      // phone: the number a crew reschedule text goes to (<crew-reschedule-text>)
+      return { id: u.id, name: displayName, fullName: fullName, email: u.email, phone: u.phone || '', role: u.role || '', division: div };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
   } catch (e) {
     console.warn('Failed to load crew list:', e);
@@ -8371,9 +8377,13 @@ var _calEventFilters = (function() {
 // <calendar-holidays> Show has a fourth tick box,
 // Holidays (holidays and company days), which Everything covers too. A saved
 // pick from before it existed has no holidays key, so it loads ticked.
-var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business', 'holidays'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
+// <calendar-leave> Leave has its own tick box between Business and Holidays
+// (crew availability marked leave or unavailable); Business keeps meetings and
+// reminders. A saved pick from before it existed has no leave key, so it loads
+// ticked, as Holidays did.
+var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business', 'leave', 'holidays'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
 var _calPick = (function() {
-  var d = { show: { labour: true, materials: true, business: true, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
+  var d = { show: { labour: true, materials: true, business: true, leave: true, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
   try {
     var v = JSON.parse(localStorage.getItem('sw_cal_pick') || '{}');
     ['show', 'type'].forEach(function(k) {
@@ -8410,8 +8420,9 @@ function calShowMaterialsOnly() {
 function applyCalFocus() {
   if (!window.__SW_CAL_V3_ENABLED) return;
   var biz = calShowPicked('business');
-  // Holidays and company days follow their own Holidays tick box (<calendar-holidays>).
-  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: calShowPicked('holidays'), leave: biz, reminders: biz };
+  // Holidays and company days follow their own Holidays tick box (<calendar-holidays>),
+  // leave and unavailable marks their own Leave tick box (<calendar-leave>).
+  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: calShowPicked('holidays'), leave: calShowPicked('leave'), reminders: biz };
 }
 applyCalFocus();
 // Whether the Show filters let a calendar row through, for both views. v3 off:
@@ -8848,6 +8859,8 @@ async function loadCalendar() {
   // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
   var bodyEl = document.getElementById('calendarBody');
   if (bodyEl) bodyEl.innerHTML = '<div class="cal-loading"><div class="spinner"></div><div>Loading calendar…</div></div>';
+  _calLoadSeq++; // a quiet refresh started before this load drops its answer
+  _calJobRowsCache = {}; // a write that reloads the calendar may have changed any job's bookings
 
   try {
     // ── Grid-critical fetch ── the grid only needs the calendar events; draw it as soon as they arrive.
@@ -8903,8 +8916,9 @@ async function loadCalendar() {
           if (!name) return;
           _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
           // Schedule view has no crew rows, so leave is keyed by date there and
-          // painted as a named badge on the day cell.
-          if (a.status === 'leave') {
+          // painted as a named badge on the day cell. With v3 an unavailable
+          // mark is shown there too: both sit under the Leave tick box.
+          if (a.status === 'leave' || (window.__SW_CAL_V3_ENABLED && a.status === 'unavailable')) {
             (_calLeaveByDate[a.date] = _calLeaveByDate[a.date] || []).push(name);
           }
         });
@@ -9164,16 +9178,16 @@ var CalOpsCore = (function () {
   // mirror off (job,user,date) before it writes a real crew row there, so a
   // key held ONLY by a ghost is free here and a ghost is never a holder,
   // blocker or count. A real row on that same key still blocks as usual.
+  function isGhost(ev) {
+    var role = String((ev && ev.role) || '').toLowerCase();
+    var aType = String((ev && ev.assignment_type) || '').toLowerCase();
+    return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
+  }
+  function key(jobId, userId, date) {
+    if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
+    return String(jobId) + '|' + String(userId) + '|' + String(date);
+  }
   function stageCollisionSafeMoves(events, moves) {
-    function isGhost(ev) {
-      var role = String((ev && ev.role) || '').toLowerCase();
-      var aType = String((ev && ev.assignment_type) || '').toLowerCase();
-      return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
-    }
-    function key(jobId, userId, date) {
-      if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
-      return String(jobId) + '|' + String(userId) + '|' + String(date);
-    }
     var occupancy = {};
     (events || []).forEach(function(ev) {
       if (!ev || isGhost(ev)) return;
@@ -9259,7 +9273,11 @@ var CalOpsCore = (function () {
         status: a.status || null,
         role: a.role || null,
         assignment_type: a.assignment_type || null,
-        is_ghost: a.is_ghost === true
+        is_ghost: a.is_ghost === true,
+        duration_days: a.duration_days == null ? null : a.duration_days,
+        start_time: a.start_time || null,
+        end_time: a.end_time || null,
+        confirmation_status: a.confirmation_status || null
       };
     }).filter(Boolean);
   }
@@ -9274,6 +9292,274 @@ var CalOpsCore = (function () {
     });
     return merged;
   }
+  // ── Whole-job drag (Schedule view): move and stretch every booking of a job ──
+  // A job is often stored as one booking per person per day, so a bar is
+  // backed by many rows and its pieces (split at weekends and skipped days)
+  // are one job. A drag from any piece, or of either end, acts on the job's
+  // live bookings: never a ghost watcher (backend-owned), a cancelled row, a
+  // completed visit (history), or a meeting / reminder (its own line).
+  function rowStatus(ev) {
+    return String((ev && (ev.status || ev.assignment_status)) || '').toLowerCase();
+  }
+  function isLiveJobRow(ev) {
+    if (!ev || !ev.scheduled_date || isGhost(ev)) return false;
+    var t = String(ev.assignment_type || 'install').toLowerCase();
+    if (t === 'meeting' || t === 'reminder') return false;
+    var st = rowStatus(ev);
+    return st !== 'cancelled' && st !== 'complete' && st !== 'completed';
+  }
+  // The job's rows to plan with: the loaded window's copy (it carries the
+  // job's client, site and crew names) under the job-scoped read's dates and
+  // status, which are fresher and also cover rows outside the window.
+  function jobRowsForPlan(windowEvents, jobRows, jobId) {
+    var byId = {}, out = [];
+    (windowEvents || []).forEach(function(ev) {
+      if (ev && ev.job_id === jobId && ev.assignment_id) byId[ev.assignment_id] = ev;
+    });
+    (jobRows || []).forEach(function(row) {
+      if (!row || !row.assignment_id) return;
+      var merged = Object.assign({}, byId[row.assignment_id] || {});
+      Object.keys(row).forEach(function(k) {
+        if (row[k] != null || k === 'scheduled_end') merged[k] = row[k];
+      });
+      if (row.status) merged.assignment_status = row.status;
+      delete byId[row.assignment_id];
+      out.push(merged);
+    });
+    Object.keys(byId).forEach(function(id) { out.push(byId[id]); });
+    return out;
+  }
+  function jobSpan(rows) {
+    var span = null;
+    (rows || []).forEach(function(ev) {
+      var s = ev.scheduled_date, e = spanEnd(ev);
+      if (!span) { span = { start: s, end: e }; return; }
+      if (s < span.start) span.start = s;
+      if (e > span.end) span.end = e;
+    });
+    return span;
+  }
+  // Drop day = the job's new FIRST day. Every booking keeps its working-day
+  // offset from the job's first day and its own working-day length, so gaps
+  // between days and the weekend rule hold (Fri, Mon, Tue, Thu dropped one
+  // working day later is Mon, Tue, Wed, Fri). `crewNameOf` names the crew on
+  // the update, as the single-booking move does.
+  function planJobMove(rows, newStart, crewNameOf) {
+    var live = (rows || []).filter(isLiveJobRow);
+    var span = jobSpan(live);
+    var plan = { kind: 'move', from: span, to: null, updates: [], creates: [], deletes: [] };
+    if (!span || !newStart || newStart === span.start) return plan;
+    live.forEach(function(ev) {
+      var rowStart = layWorkingDays(newStart, workingSpanDays(span.start, ev.scheduled_date));
+      var built = buildMovePayloadV2(ev, crewNameOf ? crewNameOf(ev) : (ev.crew_name || null), ev.user_id || null, rowStart);
+      plan.updates.push({ ev: ev, update: built.update });
+    });
+    plan.to = jobSpan(applyPlanToEvents(live, plan).filter(isLiveJobRow));
+    return plan;
+  }
+  // Drag either END of the job: the other end holds and every crew member on
+  // the job gains or loses the same working days (a weekend day only as the
+  // chosen end), and nothing else: a person's own gaps stay gaps. A crew
+  // member whose own booking reaches the dragged end, booked as one row, has
+  // that row's start or end moved; anyone else gets a new row for each added
+  // day, or loses the rows past the new end. Rows the stretch adds are
+  // silent (suppress_notifications); the reschedule text covers them.
+  // `unbookable` lists crew with no user on record, who cannot be given a row.
+  function planJobStretch(rows, edge, target, crewNameOf) {
+    var live = (rows || []).filter(isLiveJobRow);
+    var span = jobSpan(live);
+    var plan = { kind: 'stretch', edge: edge, from: span, to: null, updates: [], creates: [], deletes: [], unbookable: [] };
+    if (!span || !target) return plan;
+    var newStart = span.start, newEnd = span.end;
+    if (edge === 'start') newStart = target > span.end ? span.end : target;
+    else newEnd = target < span.start ? span.start : target;
+    if (newStart === span.start && newEnd === span.end) return plan;
+    var added = [];
+    if (edge === 'start' && newStart < span.start) {
+      added = paintedSpanDates(newStart, span.start).filter(function(d) { return d !== span.start; });
+    } else if (edge !== 'start' && newEnd > span.end) {
+      added = paintedSpanDates(span.end, newEnd).filter(function(d) { return d !== span.end; });
+    }
+    var groups = {}, order = [];
+    live.forEach(function(ev) {
+      var g = ev.user_id ? 'u:' + ev.user_id : 'n:' + String(ev.crew_name || ev.assigned_to || '');
+      if (!groups[g]) { groups[g] = []; order.push(g); }
+      groups[g].push(ev);
+    });
+    order.forEach(function(g) {
+      var evs = groups[g];
+      if (added.length) {
+        var anchor = evs.reduce(function(best, ev) {
+          if (!best) return ev;
+          return edge === 'start' ? (ev.scheduled_date < best.scheduled_date ? ev : best) : (spanEnd(ev) > spanEnd(best) ? ev : best);
+        }, null);
+        var atEdge = edge === 'start' ? anchor.scheduled_date === span.start : spanEnd(anchor) === span.end;
+        if (atEdge && (evs.length === 1 || spanEnd(anchor) > anchor.scheduled_date)) {
+          plan.updates.push({ ev: anchor, update: buildResizePayload(anchor, edge === 'start' ? 'start' : 'end', edge === 'start' ? newStart : newEnd) });
+          return;
+        }
+        if (!anchor.user_id) { plan.unbookable.push(anchor); return; }
+        var confirmation = anchor.confirmation_status === 'placeholder' ? 'placeholder' : 'tentative';
+        added.forEach(function(d) {
+          plan.creates.push({ template: anchor, date: d, create: {
+            jobId: anchor.job_id, userId: anchor.user_id,
+            crewName: crewNameOf ? crewNameOf(anchor) : (anchor.crew_name || null),
+            scheduledDate: d, scheduledEnd: d, durationDays: 1,
+            startTime: anchor.start_time || null, endTime: anchor.end_time || null,
+            assignmentType: anchor.assignment_type || 'install',
+            role: anchor.role || 'lead_installer', jobType: anchor.job_type || null,
+            confirmationStatus: confirmation,
+            suppress_notifications: true
+          } });
+        });
+        return;
+      }
+      evs.forEach(function(ev) {
+        var s = ev.scheduled_date, e = spanEnd(ev);
+        if (edge === 'start') {
+          if (e < newStart) plan.deletes.push({ ev: ev });
+          else if (s < newStart) plan.updates.push({ ev: ev, update: buildResizePayload(ev, 'start', newStart) });
+        } else {
+          if (s > newEnd) plan.deletes.push({ ev: ev });
+          else if (e > newEnd) plan.updates.push({ ev: ev, update: buildResizePayload(ev, 'end', newEnd) });
+        }
+      });
+    });
+    plan.to = jobSpan(applyPlanToEvents(live, plan).filter(isLiveJobRow));
+    return plan;
+  }
+  // The rows as they will be once a plan is saved: updates moved, deletes
+  // gone, creates added under a stand-in id until the real row is read back.
+  // A stand-in's id is no booking's, so it is never planned or written.
+  var STAND_IN_PREFIX = 'pending-';
+  function isStandIn(ev) {
+    return String((ev && ev.assignment_id) || '').indexOf(STAND_IN_PREFIX) === 0;
+  }
+  function applyPlanToEvents(events, plan) {
+    var upd = {}, del = {};
+    (plan.updates || []).forEach(function(u) { upd[u.ev.assignment_id] = u.update; });
+    (plan.deletes || []).forEach(function(d) { del[d.ev.assignment_id] = true; });
+    var out = [];
+    (events || []).forEach(function(ev) {
+      if (!ev || del[ev.assignment_id]) return;
+      var u = upd[ev.assignment_id];
+      if (!u) { out.push(ev); return; }
+      var next = Object.assign({}, ev);
+      if (u.scheduled_date) next.scheduled_date = u.scheduled_date;
+      if (u.scheduled_end) next.scheduled_end = u.scheduled_end;
+      if (u.duration_days != null) next.duration_days = u.duration_days;
+      out.push(next);
+    });
+    (plan.creates || []).forEach(function(c, i) {
+      out.push(Object.assign({}, c.template, {
+        assignment_id: STAND_IN_PREFIX + i + '-' + c.date,
+        scheduled_date: c.date, scheduled_end: c.date, duration_days: 1,
+        assignment_status: 'scheduled', status: 'scheduled', confirmation_status: c.create.confirmationStatus
+      }));
+    });
+    return out;
+  }
+  // The unique-key moves a plan makes, for stageCollisionSafeMoves: every
+  // update that changes a row's start day, and every new row (no source key).
+  function planKeyMoves(plan) {
+    var moves = [];
+    (plan.updates || []).forEach(function(u) {
+      if (u.update.scheduled_date && u.update.scheduled_date !== u.ev.scheduled_date) {
+        moves.push({ assignmentId: u.ev.assignment_id, jobId: u.ev.job_id, userId: u.ev.user_id || null,
+                     fromDate: u.ev.scheduled_date, toDate: u.update.scheduled_date, entry: u });
+      }
+    });
+    (plan.creates || []).forEach(function(c, i) {
+      moves.push({ assignmentId: STAND_IN_PREFIX + i + '-' + c.date, jobId: c.create.jobId, userId: c.create.userId,
+                   fromDate: null, toDate: c.date, entry: c });
+    });
+    return moves;
+  }
+  // The writes of a plan as batches: every write in a batch is sent at once,
+  // a batch waits for the one before. A move whose target key is the source
+  // key of another move waits for that move (a one-day shift frees Wed before
+  // Tue and Tue before Mon); everything else goes together. Within a step,
+  // the LAST write leaving each day goes in its own later batch, so the
+  // server's watcher (ghost) mirror sees the day emptied once, by that write,
+  // and moves or drops the mirror instead of every write seeing the others
+  // still there and leaving the mirror behind.
+  function planWriteBatches(staged, plan) {
+    var ordered = (staged && staged.ordered) || [];
+    var keyOf = function(m, which) {
+      return which === 'source'
+        ? key(m.jobId, m.sourceUserId || m.userId, m.fromDate)
+        : key(m.jobId, m.targetUserId || m.userId, m.toDate);
+    };
+    var wave = [], waves = [];
+    ordered.forEach(function(m, i) {
+      var w = 0, target = keyOf(m, 'target');
+      for (var j = 0; j < i; j++) {
+        if (target && keyOf(ordered[j], 'source') === target) w = Math.max(w, wave[j] + 1);
+      }
+      wave.push(w);
+      (waves[w] = waves[w] || []).push({ kind: m.fromDate ? 'update' : 'create', entry: m.entry, fromDate: m.fromDate || null });
+    });
+    var keyed = {};
+    ordered.forEach(function(m) { if (m.entry && m.entry.ev) keyed[m.entry.ev.assignment_id] = true; });
+    var rest = [];
+    (plan.updates || []).forEach(function(u) { if (!keyed[u.ev.assignment_id]) rest.push({ kind: 'update', entry: u, fromDate: null }); });
+    (plan.deletes || []).forEach(function(d) { rest.push({ kind: 'delete', entry: d, fromDate: d.ev.scheduled_date }); });
+    if (rest.length) { if (waves.length) waves[0] = (waves[0] || []).concat(rest); else waves.push(rest); }
+    var batches = [];
+    waves.forEach(function(list) {
+      if (!list || !list.length) return;
+      var last = {};
+      list.forEach(function(w, i) { if (w.fromDate) last[w.fromDate] = i; });
+      var first = [], then = [];
+      list.forEach(function(w, i) { (w.fromDate && last[w.fromDate] === i ? then : first).push(w); });
+      if (first.length) batches.push(first);
+      if (then.length) batches.push(then);
+    });
+    return batches;
+  }
+  // Each crew member's worked days on a job, and who's changed between two
+  // sets of rows. `nameOf` names a crew member.
+  function crewDays(rows, nameOf) {
+    var out = {};
+    (rows || []).filter(isLiveJobRow).forEach(function(ev) {
+      var k = ev.user_id ? 'u:' + ev.user_id : 'n:' + String(ev.crew_name || ev.assigned_to || '');
+      if (!out[k]) out[k] = { userId: ev.user_id || null, name: nameOf ? nameOf(ev) : (ev.crew_name || ''), days: [] };
+      paintedSpanDates(ev.scheduled_date, spanEnd(ev)).forEach(function(d) {
+        if (out[k].days.indexOf(d) === -1) out[k].days.push(d);
+      });
+    });
+    Object.keys(out).forEach(function(k) { out[k].days.sort(); });
+    return out;
+  }
+  function crewDayChanges(beforeRows, afterRows, nameOf) {
+    var before = crewDays(beforeRows, nameOf), after = crewDays(afterRows, nameOf), out = [];
+    Object.keys(before).concat(Object.keys(after)).forEach(function(k) {
+      if (out.some(function(c) { return c.key === k; })) return;
+      var b = before[k] ? before[k].days : [], a = after[k] ? after[k].days : [];
+      if (b.join(',') === a.join(',')) return;
+      var who = after[k] || before[k];
+      out.push({ key: k, userId: who.userId, name: who.name, before: b, after: a });
+    });
+    return out.sort(function(x, y) { return String(x.name).localeCompare(String(y.name)); });
+  }
+  var DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function dayLabel(dateStr) {
+    var d = new Date(dateStr + 'T00:00:00');
+    return DAY_SHORT[d.getDay()] + ' ' + d.getDate() + ' ' + MONTH_SHORT[d.getMonth()];
+  }
+  // The text a crew member gets when their own days on a job change: the
+  // job, client, site, every day they are now booked, and the Trade App link,
+  // in the allocation text's shape.
+  function crewRescheduleText(job, days, jobId) {
+    var site = String((job && (job.site_address || job.site_suburb)) || '').trim();
+    return [
+      ('Job rescheduled: ' + ((job && job.job_number) || '') + ' - ' + ((job && job.client_name) || 'Client')).replace(/\s+/g, ' ').trim(),
+      site ? 'Site: ' + site : '',
+      (days && days.length) ? 'Your days: ' + days.map(dayLabel).join(', ') : 'Your days: none, you are no longer booked on this job',
+      'Open in Trade: https://secureworks-group.github.io/secureworks-ux/trade.html#job/' + jobId
+    ].filter(Boolean).join('\n');
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
@@ -9285,7 +9571,13 @@ var CalOpsCore = (function () {
     buildResizePayload: buildResizePayload,
     stageCollisionSafeMoves: stageCollisionSafeMoves,
     assignmentRowsToEvents: assignmentRowsToEvents,
-    mergeOccupancyEvents: mergeOccupancyEvents
+    mergeOccupancyEvents: mergeOccupancyEvents,
+    isLiveJobRow: isLiveJobRow, jobRowsForPlan: jobRowsForPlan, jobSpan: jobSpan,
+    planJobMove: planJobMove, planJobStretch: planJobStretch,
+    isStandIn: isStandIn, applyPlanToEvents: applyPlanToEvents, planKeyMoves: planKeyMoves,
+    planWriteBatches: planWriteBatches,
+    crewDays: crewDays, crewDayChanges: crewDayChanges,
+    dayLabel: dayLabel, crewRescheduleText: crewRescheduleText
   };
 })();
 // </calendar-ops-core>
@@ -9997,6 +10289,9 @@ function renderScheduleView(container, range) {
       }
     }
     segments.push({ start: segStart, end: segEnd });
+    // the job's own first and last day, for the stretch handles: from all of
+    // its bookings once they are read, never only the window's edge
+    var fullSpan = window.__SW_CAL_DRAGV2_ENABLED ? calJobSpanInHand(jid) : null;
     segments.forEach(function(seg, idx) {
       var copy = {};
       for (var k in j) copy[k] = j[k];
@@ -10004,6 +10299,8 @@ function renderScheduleView(container, range) {
       copy.end = seg.end;
       copy.id = segments.length > 1 ? jid + '_seg' + idx : jid;
       copy._jobId = jid;
+      copy.jobFirst = fullSpan ? fullSpan.start : j.start;
+      copy.jobLast = fullSpan ? fullSpan.end : j.end;
       jobs.push(copy);
     });
   });
@@ -10181,7 +10478,7 @@ function renderScheduleView(container, range) {
       // Crew on leave. Schedule view has no crew rows, so name them on the day.
       var leaveNames = (_calEventFilters.leave && _calLeaveByDate[ds]) || [];
       if (leaveNames.length) {
-        var leaveLabel = leaveNames.join(', ') + ' on leave';
+        var leaveLabel = leaveNames.join(', ') + (v3 ? ' away (leave or unavailable)' : ' on leave');
         html += '<span class="cal-schedule-leave-badge" title="' + escapeHtml(leaveLabel) + '">'
              + escapeHtml(leaveNames.join(', ')) + ' away</span>';
       }
@@ -10293,22 +10590,13 @@ function renderScheduleView(container, range) {
         }
         html += '>';
 
-        // CP1 (dragv2): edge-resize handles — only when the bar maps to exactly
-        // ONE assignment (a multi-crew bar has no single edge to resize) and
-        // only on TRUE endpoints (not week-clipped continuations).
+        // CP1 (dragv2): stretch handles on the job's own first and last day,
+        // whatever the crew count and however the job is stored; never on a
+        // piece clipped at a week edge. A drop moves that end of the job for
+        // every crew member (stretchSchedJob).
         if (window.__SW_CAL_DRAGV2_ENABLED && confClass !== 'confirmed') {
-          var barEvs = _calEvents.filter(function(e) {
-            if (e.job_id !== realJobId) return false;
-            var t = e.assignment_type || 'install';
-            if (t === 'meeting' || t === 'reminder') return false;
-            var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
-            return !(en < job.start || s > job.end);
-          });
-          if (barEvs.length === 1) {
-            var rsEv = barEvs[0];
-            if (barStart === rsEv.scheduled_date) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'start\')"></span>';
-            if (barEnd === (rsEv.scheduled_end || rsEv.scheduled_date)) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'end\')"></span>';
-          }
+          if (barStart === job.jobFirst) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleJobResizeDragStart(event,\'' + realJobId + '\',\'start\')"></span>';
+          if (barEnd === job.jobLast) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleJobResizeDragStart(event,\'' + realJobId + '\',\'end\')"></span>';
         }
 
         // Readiness dot (not on a v3 line: two states only; the tooltip and popup still say)
@@ -10380,6 +10668,8 @@ var CAL_V3_ICONS = {
   makesafe: '<path d="M8 1.8 15.2 14H.800z"/><path d="M8 6.4v3.5" stroke="var(--v3c,#0D9488)" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.9" r=".95" fill="var(--v3c,#0D9488)"/>',
   // clock (business)
   biz: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 4.9V8l2.1 1.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  // suitcase (crew leave, <calendar-leave>)
+  leave: '<path d="M5.5 3.5V2.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v.9H14c.6 0 1 .4 1 1V13c0 .6-.4 1-1 1H2c-.6 0-1-.4-1-1V4.5c0-.6.4-1 1-1zm1.4 0h2.2v-.6H6.9z"/>',
   // flag (holiday or company day, <calendar-holidays>)
   holiday: '<path d="M2.6 1.4h1.7v13.2H2.600z"/><path d="M4.3 2.2h9.6l-2.4 3.4 2.4 3.4H4.300z"/>',
   truck: '<path d="M1 3.8h8.2v7.4H1z"/><path d="M9.8 6h2.7l2.5 2.6v2.6H9.800z"/><circle cx="4.2" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/><circle cx="12" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/>'
@@ -10508,6 +10798,7 @@ function syncCalV3Chrome() {
     + tick('show', 'all', 'Everything') + tick('show', 'labour', 'Labour')
     + tick('show', 'materials', '<span style="color:var(--v3g2);display:inline-flex;">' + calV3Icon('truck', 11) + '</span>Materials')
     + tick('show', 'business', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('biz', 11) + '</span>Business')
+    + tick('show', 'leave', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('leave', 11) + '</span>Leave')
     + tick('show', 'holidays', '<span style="color:var(--v3hol);display:inline-flex;">' + calV3Icon('holiday', 11) + '</span>Holidays')
     + '<span class="cal-focus-sep"></span><span class="cal-focus-lbl">Type</span>'
     + tick('type', 'all', 'All') + tick('type', 'patio', sq('patio', ['patio']) + 'Patios')
@@ -10669,6 +10960,7 @@ var _calDragData = null;
 
 function handleBlockDragStart(event, assignmentId) {
   _calDragData = { type: 'assignment', assignmentId: assignmentId };
+  calPrefetchForAssignment(assignmentId);
   event.dataTransfer.effectAllowed = 'move';
   // Firefox refuses to start a drag with an empty dataTransfer; Chrome doesn't
   // care. The payload itself still travels via _calDragData.
@@ -10689,6 +10981,7 @@ function handleUnschedDragStart(event, jobId) {
 function handleResizeDragStart(event, assignmentId, edge) {
   event.stopPropagation();
   _calDragData = { type: 'resize', assignmentId: assignmentId, edge: edge };
+  calPrefetchForAssignment(assignmentId);
   event.dataTransfer.effectAllowed = 'move';
   try { event.dataTransfer.setData('text/plain', assignmentId); } catch (e) {}
 }
@@ -10698,10 +10991,27 @@ function handleResizeDragStart(event, assignmentId, edge) {
 function handleSchedBarDragStart(event, jobId, segStart, segEnd) {
   event.stopPropagation();
   _calDragData = { type: 'sched-job', jobId: jobId, segStart: segStart, segEnd: segEnd };
+  if (window.__SW_CAL_DRAGV2_ENABLED) calJobRows(jobId); // in hand by the drop
   event.dataTransfer.effectAllowed = 'move';
   try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
   event.target.classList.add('dragging');
   setTimeout(function() { event.target.classList.remove('dragging'); }, 0);
+}
+
+// CP1 (dragv2): a Schedule-view stretch handle drags one END of the whole job.
+function handleJobResizeDragStart(event, jobId, edge) {
+  event.stopPropagation();
+  _calDragData = { type: 'job-resize', jobId: jobId, edge: edge };
+  event.dataTransfer.effectAllowed = 'move';
+  try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
+  calJobRows(jobId);
+}
+
+// Starts the job-scoped read for a dragged Crew-view block (dragv2 only).
+function calPrefetchForAssignment(assignmentId) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
+  if (ev && ev.job_id) calJobRows(ev.job_id);
 }
 
 // CP1 (dragv2): Schedule-view drop resolver. Bars float on an overlay above
@@ -10727,6 +11037,8 @@ function handleSchedDrop(event) {
   } else if (dd.type === 'resize') {
     // Same rule as the Crew view: only the DAY matters, a resize never reassigns.
     resizeAssignment(dd.assignmentId, dd.edge, date);
+  } else if (dd.type === 'job-resize') {
+    stretchSchedJob(dd.jobId, dd.edge, date);
   } else if (dd.type === 'sched-job') {
     moveSchedSegment(dd.jobId, dd.segStart, dd.segEnd, date);
   }
@@ -10755,16 +11067,120 @@ function confirmIfCrewUnavailable(crew, dateStr, proceed) {
 // existing job_detail action and merged over the window. A failed read falls
 // back to the window snapshot rather than blocking the drag.
 async function calStagingOccupancy(jobId) {
-  var jobRows = [];
-  if (jobId) {
-    try {
-      var detail = await opsFetch('job_detail', { jobId: jobId });
-      jobRows = CalOpsCore.assignmentRowsToEvents(detail && detail.assignments, jobId);
-    } catch (e) {
-      console.warn('calendar staging: job_detail read failed, staging against the loaded window only:', e && e.message);
+  var jobRows = jobId ? await calJobRows(jobId) : [];
+  return CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows || []);
+}
+
+// The job-scoped read behind every drag (its rows outside the window, and the
+// cancelled / completed rows the feed hides). It starts when the drag starts,
+// so it is usually in hand by the drop, and is kept for a minute; every save
+// on the job, and every loadCalendar(), drops it. ops-api has no lighter read of one job's bookings than
+// job_detail today. A failed read answers null: a Crew-view booking stages
+// against the loaded window alone, as before, and a whole-job change refuses.
+var _calJobRowsCache = {};
+var CAL_JOB_ROWS_TTL_MS = 60000;
+function calJobRows(jobId) {
+  if (!jobId) return Promise.resolve(null);
+  var hit = _calJobRowsCache[jobId];
+  if (hit && Date.now() - hit.at < CAL_JOB_ROWS_TTL_MS) return hit.promise;
+  var entry = { at: Date.now(), promise: null };
+  entry.promise = opsFetch('job_detail', { jobId: jobId }).then(function(detail) {
+    entry.rows = CalOpsCore.assignmentRowsToEvents(detail && detail.assignments, jobId);
+    return entry.rows;
+  }).catch(function(e) {
+    console.warn('calendar staging: job_detail read failed, staging against the loaded window only:', e && e.message);
+    if (_calJobRowsCache[jobId] === entry) delete _calJobRowsCache[jobId];
+    return null;
+  });
+  _calJobRowsCache[jobId] = entry;
+  return entry.promise;
+}
+function calForgetJobRows(jobId) { delete _calJobRowsCache[jobId]; }
+// The job's own first and last day from its full set of bookings, once that
+// read is in hand; null before then (the loaded window may clip the job).
+function calJobSpanInHand(jobId) {
+  var hit = _calJobRowsCache[jobId];
+  if (!hit || !hit.rows || Date.now() - hit.at >= CAL_JOB_ROWS_TTL_MS) return null;
+  return CalOpsCore.jobSpan(CalOpsCore.jobRowsForPlan(_calEvents, hit.rows, jobId).filter(CalOpsCore.isLiveJobRow));
+}
+
+// After a save the grid refreshes in place: only the calendar feed is read
+// again (deliveries, crew availability and the unscheduled list do not change
+// with a booking's days), nothing is blanked, and an answer is dropped when a
+// newer load started or another save is still on its way.
+var _calLoadSeq = 0;
+var _calSavesInFlight = 0;
+function refreshCalendarQuietly() {
+  if (_calSavesInFlight > 0) return;
+  var seq = ++_calLoadSeq;
+  var range = getCalRange();
+  opsFetch('calendar', { from: range.from, to: range.to }).then(function(data) {
+    if (seq !== _calLoadSeq || _calSavesInFlight > 0) return;
+    var r = getCalRange();
+    if (r.from !== range.from || r.to !== range.to) return;
+    _calEvents = (data.events || []).filter(function(ev) {
+      if (ev.legacy === true) return false;
+      if (ev.job_id && ev.job_status === 'complete' && !ev.job_number) return false;
+      return true;
+    });
+    _calDeliveries = data.deliveries || [];
+    _calReadiness = data.readiness || {};
+    _calOrgEvents = data.orgEvents || [];
+    _calTruncated = data.truncated === true;
+    renderCalendar();
+  }).catch(function(e) {
+    console.error('calendar quiet refresh failed:', e);
+    // Without the read the added bookings' real ids are unknown, so their
+    // stand-ins come off the grid rather than stay there to be acted on.
+    if (seq !== _calLoadSeq || !_calEvents.some(CalOpsCore.isStandIn)) return;
+    _calEvents = _calEvents.filter(function(ev) { return !CalOpsCore.isStandIn(ev); });
+    renderCalendar();
+    showToast('Saved, but the calendar could not refresh. Reload it to see every booking.', 'warning');
+  });
+}
+
+// Saves a planned change to a job's bookings behind a calendar that already
+// shows it. Batches go one after another, the writes inside a batch together
+// (CalOpsCore.planWriteBatches). The first refusal stops the rest; the grid is
+// put back as it was and the refusal is said in words, then re-read so it
+// shows what the server holds. Answers true when every write landed.
+var _calSavingJobs = {};
+async function calSaveJobPlan(jobId, batches, snapshot) {
+  _calSavingJobs[jobId] = true;
+  _calSavesInFlight++;
+  var failure = null;
+  try {
+    for (var bi = 0; bi < batches.length && !failure; bi++) {
+      var results = await Promise.allSettled(batches[bi].map(function(w) {
+        if (w.kind === 'create') return opsPost('create_assignment', w.entry.create);
+        if (w.kind === 'delete') return opsPost('delete_assignment', { assignmentId: w.entry.ev.assignment_id });
+        return opsPost('update_assignment', w.entry.update);
+      }));
+      results.forEach(function(r, ri) {
+        if (r.status === 'rejected' && !failure) failure = { write: batches[bi][ri], error: r.reason };
+      });
     }
+  } finally {
+    _calSavesInFlight--;
+    delete _calSavingJobs[jobId];
+    calForgetJobRows(jobId);
   }
-  return CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
+  if (failure) {
+    if (snapshot && _calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
+    showToast(calDescribeSaveFailure(failure), 'warning');
+  }
+  refreshCalendarQuietly();
+  return !failure;
+}
+
+function calDescribeSaveFailure(failure) {
+  var msg = (failure.error && failure.error.message) || String(failure.error || 'the save failed');
+  var w = failure.write;
+  var ev = w.kind === 'create' ? w.entry.template : w.entry.ev;
+  var day = w.kind === 'create' ? w.entry.date : (ev && ev.scheduled_date);
+  var who = ev ? crewDisplayName(ev) + ' on ' + fmtDate(day) : 'a booking';
+  var what = w.kind === 'delete' ? 'Not removed' : w.kind === 'create' ? 'Not added' : 'Not moved';
+  return what + ': ' + who + ' - ' + msg + '. The calendar now shows what was saved.';
 }
 
 // One warning for a Schedule-bar drag that could not move as a whole. A
@@ -10802,85 +11218,133 @@ function describeBlockedSegmentMove(staged, crewCount) {
     ' kept: ' + names.join(', ');
 }
 
-// CP1 (dragv2): Schedule-view bar move. The drop day is the segment's new
-// START. A single-assignment segment routes through moveAssignment with its
-// OWN crew — identical guards to the Crew view (confirmed lock, availability
-// warning, reschedule-SMS offer). A multi-crew segment moves every assignment
-// under the bar, each keeping its working-day offset and duration, with one
-// SMS offer for the job.
+// CP1 (dragv2): Schedule-view job move. The drop day is the JOB's new first
+// day, whichever piece of the bar was grabbed: every live booking of the job
+// (in view or not) moves by the same working days and keeps its own length,
+// so a job stored one booking per person per day moves whole and its own
+// rows never count as clashes. Crew never changes from this view (each row
+// keeps its own user_id). The bar moves on screen at once and the save runs
+// behind it. A job-level drag is still all-or-nothing: a cancelled or
+// completed row of the job holding a target date moves nobody.
 async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
   if (!window.__SW_CAL_DRAGV2_ENABLED) return;
-  var evs = _calEvents.filter(function(e) {
-    if (e.job_id !== jobId) return false;
-    var t = e.assignment_type || 'install';
-    if (t === 'meeting' || t === 'reminder') return false;
-    var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
-    return !(en < segStart || s > segEnd);
+  if (!calJobDraggable(jobId)) return;
+  calApplyJobPlan(jobId, 'move', newDate);
+}
+
+// CP1 (dragv2): Schedule-view stretch. A handle sits on the job's first and
+// last day whatever the crew count; dropping it on a day moves that end of
+// the job for every crew member (CalOpsCore.planJobStretch), the other end
+// holding.
+async function stretchSchedJob(jobId, edge, targetDate) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  if (!calJobDraggable(jobId)) return;
+  calApplyJobPlan(jobId, 'stretch', targetDate, edge);
+}
+
+// A Schedule-view drag on a job goes ahead only when the job is in view, not
+// locked, not still saving, and holds no booking the page has not read back.
+function calJobDraggable(jobId) {
+  var shown = calJobBarRows(jobId);
+  if (!shown.length) return false;
+  if (shown.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
+    showToast('Confirmed — use Reschedule in the job popup', 'warning');
+    return false;
+  }
+  if (_calSavingJobs[jobId]) { showToast('Still saving the last change to this job', 'warning'); return false; }
+  if (shown.some(CalOpsCore.isStandIn)) { calRefuseStandIn(); return false; }
+  return true;
+}
+
+// A booking just added is painted under a stand-in id until the calendar is
+// read again; nothing is done to it until then.
+function calRefuseStandIn() {
+  showToast('Still saving that booking - try again in a moment', 'warning');
+  refreshCalendarQuietly();
+}
+
+// The rows behind a job's Schedule-view line: its crew work in the loaded
+// window (meetings and reminders on the job are their own lines).
+function calJobBarRows(jobId) {
+  return _calEvents.filter(function(e) { return e.job_id === jobId && CalOpsCore.isLiveJobRow(e); });
+}
+
+// Every leave / unavailable day a plan books a crew member onto.
+function calPlanClashes(plan) {
+  var clashes = [];
+  (plan.updates || []).forEach(function(u) {
+    var s = u.update.scheduled_date || u.ev.scheduled_date;
+    var e = u.update.scheduled_end || CalOpsCore.spanEnd(u.ev);
+    clashes = clashes.concat(collectSpanClashes(crewDisplayName(u.ev), s, e));
   });
-  if (!evs.length) return;
-  if (evs.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
+  (plan.creates || []).forEach(function(c) {
+    clashes = clashes.concat(collectSpanClashes(crewDisplayName(c.template), c.date, c.date));
+  });
+  return clashes;
+}
+
+// Plans the change over the job's full set of bookings (the job-scoped read,
+// started when the drag started), refuses it when the end the person dragged
+// is not the job's own end but only the edge of the calendar view, warns on
+// crew leave over every day it books, refuses it whole if a row it cannot
+// move holds a target date, paints it, then saves it behind the painted grid
+// and offers the reschedule texts once every write has landed.
+async function calApplyJobPlan(jobId, kind, target, edge) {
+  _calSavingJobs[jobId] = true;
+  var jobRows = await calJobRows(jobId);
+  delete _calSavingJobs[jobId];
+  // Without the job's full set of bookings, the ones outside the loaded window
+  // would be left behind, so the change waits for a read that works.
+  if (!jobRows) {
+    showToast('Not changed - could not read this job\'s bookings. Try again.', 'warning');
+    return;
+  }
+  var live = CalOpsCore.jobRowsForPlan(_calEvents, jobRows, jobId).filter(CalOpsCore.isLiveJobRow);
+  if (!live.length) return;
+  if (live.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
   }
-  if (evs.length === 1) {
-    // Pin the event's own user_id so this path can NEVER resolve a different
-    // person by display name and turn the move into a reassign.
-    moveAssignment(evs[0].assignment_id, crewDisplayName(evs[0]), newDate, { pinnedUserId: evs[0].user_id || null });
+  var full = CalOpsCore.jobSpan(live), shown = CalOpsCore.jobSpan(calJobBarRows(jobId));
+  var dragged = kind === 'stretch' && edge === 'end' ? 'end' : 'start';
+  if (!shown || full[dragged] !== shown[dragged]) {
+    renderCalendar();
+    showToast('Not changed - this job runs past the calendar view; widen the view to change it', 'warning');
     return;
   }
-  evs.sort(function(a, b) { return a.scheduled_date.localeCompare(b.scheduled_date); });
-  var oldStart = evs[0].scheduled_date;
-  if (newDate === oldStart) return;
-  // Build every per-assignment plan up front so the availability check and the
-  // writes see the same spans.
-  var plans = [];
-  for (var i = 0; i < evs.length; i++) {
-    var ev = evs[i];
-    // Keep each assignment's working-day offset within the dragged bar.
-    var offset = CalOpsCore.workingSpanDays(oldStart, ev.scheduled_date);
-    var evStart = CalOpsCore.layWorkingDays(newDate, offset);
-    var plan = CalOpsCore.buildMovePayloadV2(ev, crewDisplayName(ev), ev.user_id || null, evStart);
-    if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
-    plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
+  var plan = kind === 'move'
+    ? CalOpsCore.planJobMove(live, target, crewDisplayName)
+    : CalOpsCore.planJobStretch(live, edge, target, crewDisplayName);
+  if (!plan.updates.length && !plan.creates.length && !plan.deletes.length) return;
+  if (plan.unbookable && plan.unbookable.length) {
+    showToast('Not changed - ' + plan.unbookable.map(crewDisplayName).join(', ') + ' has no crew member on record to book the added days to', 'warning');
+    return;
   }
-  var occupancy = await calStagingOccupancy(jobId);
-  var stagedMoves = CalOpsCore.stageCollisionSafeMoves(occupancy, plans.map(function(p) {
-    return {
-      assignmentId: p.ev.assignment_id,
-      jobId: p.ev.job_id,
-      userId: p.ev.user_id || null,
-      fromDate: p.ev.scheduled_date,
-      toDate: p.plan.update.scheduled_date,
-      entry: p
-    };
-  }));
-  // A job-level drag is all-or-nothing: one crew chain blocked by a genuine
-  // separate visit means nothing is written and every row stays put, so the
-  // job is never torn across crews on different days.
-  if (stagedMoves.skipped.length) {
+  confirmClashesOrProceed(calPlanClashes(plan), function() { calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows); });
+}
+
+async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows) {
+  var occupancy = CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
+  var staged = CalOpsCore.stageCollisionSafeMoves(occupancy, CalOpsCore.planKeyMoves(plan));
+  if (staged.skipped.length) {
     var crewIds = {};
-    evs.forEach(function(e) { crewIds[e.user_id || crewDisplayName(e)] = true; });
-    showToast(describeBlockedSegmentMove(stagedMoves, Object.keys(crewIds).length), 'warning');
+    live.forEach(function(e) { crewIds[e.user_id || crewDisplayName(e)] = true; });
+    showToast(describeBlockedSegmentMove(staged, Object.keys(crewIds).length), 'warning');
     return;
   }
-  async function applyMoves() {
-    try {
-      for (var pi = 0; pi < stagedMoves.ordered.length; pi++) {
-        await opsPost('update_assignment', stagedMoves.ordered[pi].entry.plan.update);
-      }
-      showToast('Rescheduled', 'success');
-      maybeOfferRescheduleSms(evs[0], newDate);
-      loadCalendar();
-    } catch (e) { showToast('Error: ' + e.message, 'warning'); loadCalendar(); }
-  }
-  // ONE combined availability check across all affected crew over their moved
-  // working-day spans — a single confirm, never one modal per crew member.
-  var clashes = [];
-  stagedMoves.ordered.forEach(function(move) {
-    var p = move.entry;
-    clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
+  var snapshot = _calEvents.slice();
+  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
+  renderCalendar();
+  var saved = await calSaveJobPlan(jobId, CalOpsCore.planWriteBatches(staged, plan), snapshot);
+  if (!saved) return;
+  showToast(kind === 'move' ? 'Rescheduled' : 'Duration updated', 'success');
+  var after = CalOpsCore.applyPlanToEvents(live, plan);
+  // The job's client and site come from a row the calendar feed carried.
+  var jobEv = snapshot.find(function(e) { return e.job_id === jobId && e.client_name !== undefined; }) || live[0];
+  maybeOfferRescheduleSms(jobEv, plan.to && plan.to.start, {
+    startChanged: !!(plan.from && plan.to && plan.from.start !== plan.to.start),
+    crewChanges: CalOpsCore.crewDayChanges(live, after, crewDisplayName)
   });
-  confirmClashesOrProceed(clashes, applyMoves);
 }
 
 function handleCalDrop(event, cell) {
@@ -10910,6 +11374,7 @@ function handleCalDrop(event, cell) {
 async function resizeAssignment(assignmentId, edge, targetDate) {
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
   if (ev.confirmation_status === 'confirmed') {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
@@ -10935,43 +11400,127 @@ async function doResizeAssignment(ev, edge, targetDate) {
     showToast(describeSkippedSingleMove(stagedResize), 'warning');
     return;
   }
-  try {
-    await opsPost('update_assignment', payload);
-    showToast('Duration updated', 'success');
-    // Only a changed START day is a reschedule the client would care about —
-    // an end-day extension doesn't move their arrival date.
-    if (payload.scheduled_date !== ev.scheduled_date) {
-      maybeOfferRescheduleSms(ev, payload.scheduled_date);
-    }
-    loadCalendar();
-  } catch (e) { showToast('Error: ' + e.message, 'warning'); }
+  await calSaveSingleUpdate(ev, payload, 'Duration updated');
+}
+
+// A Crew-view move or resize of one booking: painted at once, saved behind
+// the grid (calSaveJobPlan), then the reschedule step. Only a changed START
+// day offers the client a text — an end-day extension doesn't move their
+// arrival date; the crew member is offered one whenever their days changed.
+async function calSaveSingleUpdate(ev, update, doneText) {
+  var plan = { updates: [{ ev: ev, update: update }], creates: [], deletes: [] };
+  var jobRows = CalOpsCore.jobRowsForPlan(_calEvents, (ev.job_id && await calJobRows(ev.job_id)) || [], ev.job_id)
+    .filter(CalOpsCore.isLiveJobRow);
+  if (!jobRows.some(function(r) { return r.assignment_id === ev.assignment_id; })) jobRows.push(ev);
+  var snapshot = _calEvents.slice();
+  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
+  renderCalendar();
+  var saved = await calSaveJobPlan(ev.job_id, [[{ kind: 'update', entry: plan.updates[0], fromDate: ev.scheduled_date }]], snapshot);
+  if (!saved) return;
+  showToast(doneText, 'success');
+  maybeOfferRescheduleSms(ev, update.scheduled_date, {
+    startChanged: update.scheduled_date !== ev.scheduled_date,
+    crewChanges: CalOpsCore.crewDayChanges(jobRows, CalOpsCore.applyPlanToEvents(jobRows, plan), crewDisplayName)
+  });
 }
 
 // CP1 (dragv2): after a drag/resize that changed the job's start day, ask
 // before texting the client. The install_rescheduled SMS fires ONLY from an
 // explicit Yes here — never automatically. Dedup server-side is per (job, new
 // date), so a double-tap is swallowed but a later re-reschedule still sends.
-function maybeOfferRescheduleSms(ev, newDate) {
+// The same step also offers the crew a text (ticked to start) when their own
+// days on the job changed: `opts.crewChanges` from CalOpsCore.crewDayChanges.
+// The client text is offered only when `opts.startChanged` (callers that pass
+// no opts mean the start day moved, as before). Nothing changed, no step.
+function maybeOfferRescheduleSms(ev, newDate, opts) {
   if (!window.__SW_CAL_DRAGV2_ENABLED) return;
   if (!ev || !ev.job_id) return; // internal events have no client
+  opts = opts || { startChanged: true, crewChanges: [] };
+  var offerClient = !!opts.startChanged && !!newDate;
+  var crewChanges = opts.crewChanges || [];
+  if (!offerClient && !crewChanges.length) return;
   var clientName = (ev.client_name || '').trim() || 'the client';
+  var phoned = crewChanges.filter(function(c) { return !!calCrewPhone(c.userId); });
+  var noPhone = crewChanges.filter(function(c) { return !calCrewPhone(c.userId); });
+  var tickRow = function(id, inner) {
+    return '<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0;cursor:pointer;"><input type="checkbox" id="' + id + '" checked style="margin-top:2px;"><span>' + inner + '</span></label>';
+  };
+  var body = '';
+  if (offerClient) {
+    body += tickRow('calReschedClient', 'Text <strong>' + escapeHtml(clientName) + '</strong> a reschedule update' +
+      '<br><span style="font-size:11px;color:var(--sw-text-sec);">SMS: install rescheduled to ' + fmtDate(newDate) + '</span>');
+  }
+  if (phoned.length) {
+    body += tickRow('calReschedCrew', 'Text the crew their new days: <strong>' + phoned.map(function(c) { return escapeHtml(c.name); }).join(', ') + '</strong>' +
+      '<br><span style="font-size:11px;color:var(--sw-text-sec);">One text each, with the Trade App link</span>');
+  }
+  if (noPhone.length) {
+    body += '<div id="calReschedNoPhone" style="font-size:11px;color:var(--sw-text-sec);margin-top:4px;">No phone on file, not texted: ' +
+      noPhone.map(function(c) { return escapeHtml(c.name); }).join(', ') + '</div>';
+  }
+  var sendable = offerClient || phoned.length;
   showConfirmModal(
     'Send reschedule update?',
-    'Do you want to send <strong>' + escapeHtml(clientName) + '</strong> a reschedule update?' +
-      '<br><span style="font-size:11px;color:var(--sw-text-sec);">SMS: install rescheduled to ' + fmtDate(newDate) + '</span>',
-    'Send SMS',
+    body,
+    sendable ? 'Send SMS' : 'OK',
     function() {
-      opsPost('send_client_update', {
-        job_id: ev.job_id,
-        comms_trigger: 'install_rescheduled',
-        template_vars: { new_date: newDate }
-      }).then(function(r) {
-        if (r && r.sent) showToast('Reschedule SMS sent', 'success');
-        else showToast('SMS not sent' + (r && r.reason ? ': ' + r.reason : ''), 'warning');
-      }).catch(function(e) { showToast('SMS failed: ' + e.message, 'warning'); });
+      var clientBox = document.getElementById('calReschedClient');
+      var crewBox = document.getElementById('calReschedCrew');
+      if (offerClient && clientBox && clientBox.checked) {
+        opsPost('send_client_update', {
+          job_id: ev.job_id,
+          comms_trigger: 'install_rescheduled',
+          template_vars: { new_date: newDate }
+        }).then(function(r) {
+          if (r && r.sent) showToast('Reschedule SMS sent', 'success');
+          else showToast('SMS not sent' + (r && r.reason ? ': ' + r.reason : ''), 'warning');
+        }).catch(function(e) { showToast('SMS failed: ' + e.message, 'warning'); });
+      }
+      if (phoned.length && crewBox && crewBox.checked) sendCrewRescheduleTexts(ev, crewChanges);
     }
   );
 }
+
+// <crew-reschedule-text> One text per crew member whose own days changed,
+// through ghl-proxy send_sms from +61489267771 as a text to crew about the job
+// (recipientRole crew, aboutJobId; never jobId, which would file it as a
+// message to the customer). Phones come from list_users. The result names who
+// was texted, who has no phone on file and whose text failed.
+var CREW_RESCHEDULE_SMS_FROM = '+61489267771';
+function calCrewPhone(userId) {
+  var u = userId && _crewList.find(function(c) { return c.id === userId; });
+  return (u && String(u.phone || '').trim()) || '';
+}
+function sendCrewRescheduleTexts(ev, crewChanges) {
+  var job = ev;
+  var sent = [], failed = [], noPhone = [];
+  var sends = (crewChanges || []).map(function(c) {
+    var phone = calCrewPhone(c.userId);
+    if (!phone) { noPhone.push(c.name); return Promise.resolve(); }
+    var message = CalOpsCore.crewRescheduleText(job, c.after, ev.job_id);
+    return Promise.resolve(opsAuthHeaders({ 'Content-Type': 'application/json' })).then(function(headers) {
+      return fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=send_sms', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ phone: phone, message: message, fromNumber: CREW_RESCHEDULE_SMS_FROM, recipientRole: 'crew', aboutJobId: ev.job_id })
+      });
+    }).then(function(resp) {
+      return resp.json().catch(function() { return null; }).then(function(data) {
+        if (!resp.ok || !data || data.success !== true) throw new Error((data && data.error) || 'Send failed');
+        sent.push(c.name);
+      });
+    }).catch(function(e) { failed.push(c.name + ' (' + ((e && e.message) || 'send failed') + ')'); });
+  });
+  return Promise.all(sends).then(function() {
+    var parts = [];
+    if (sent.length) parts.push('Crew texted: ' + sent.join(', '));
+    if (noPhone.length) parts.push('No phone on file, not texted: ' + noPhone.join(', '));
+    if (failed.length) parts.push('Text failed: ' + failed.join(', '));
+    if (parts.length) showToast(parts.join('. '), failed.length || noPhone.length ? 'warning' : 'success');
+    return { sent: sent, noPhone: noPhone, failed: failed };
+  });
+}
+// </crew-reschedule-text>
 
 function handleCellClick(date, crew, userId) {
   // Resolve userId — use passed value, or look up from crew list by name
@@ -11077,15 +11626,17 @@ async function submitScheduleFromModal(jobId) {
   }
 }
 
-// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so the
-// Schedule view can never re-resolve crew by display NAME — a name lookup can
-// land on a different person (deactivated user, duplicate display names) and
-// silently turn a move into a reassign. Crew-view callers omit opts and keep
-// the name-resolution that powers cross-row reassignment.
+// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so a
+// caller can never re-resolve crew by display NAME — a name lookup can land on
+// a different person (deactivated user, duplicate display names) and silently
+// turn a move into a reassign. No caller passes it today: the Schedule view
+// moves whole jobs through calApplyJobPlan. Crew-view callers omit opts and
+// keep the name-resolution that powers cross-row reassignment.
 async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // Find the assignment in events
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
 
   // Confirmed jobs cannot be dragged — must use Reschedule
   if (ev.confirmation_status === 'confirmed') {
@@ -11142,7 +11693,7 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   }
   var newUserId;
   if (opts && 'pinnedUserId' in opts) {
-    // CP1 (dragv2): Schedule-view moves pin the event's own user_id — never a
+    // CP1 (dragv2): a pinned move keeps the event's own user_id — never a
     // name lookup, so this path can never produce a reassign plan.
     newUserId = opts.pinnedUserId;
   } else {
@@ -11174,6 +11725,10 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
       return;
     }
   }
+  if (window.__SW_CAL_DRAGV2_ENABLED && plan.mode === 'move') {
+    await calSaveSingleUpdate(ev, plan.update, 'Assignment moved');
+    return;
+  }
   try {
     if (plan.mode === 'reassign') {
       // Crew change = an allocation act (G2): delete the old row and create the
@@ -11189,7 +11744,8 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
     // CP1 (dragv2): the drop moved the start day — offer the client
     // reschedule SMS (explicit Yes only; no-ops when the flag is off).
     if (newDate !== ev.scheduled_date) maybeOfferRescheduleSms(ev, newDate);
-    loadCalendar();
+    if (window.__SW_CAL_DRAGV2_ENABLED) { calForgetJobRows(ev.job_id); refreshCalendarQuietly(); }
+    else loadCalendar();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');
   }
@@ -11200,6 +11756,7 @@ function openCalJobPopup(event, assignmentId) {
   event.stopPropagation();
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
   _calPopupAssignment = ev;
 
   var popup = document.getElementById('calJobPopup');
@@ -11542,7 +12099,7 @@ async function doConfirmAssignment(assignmentId, notify) {
     var siblingIds = [];
     if (ev) {
       _calEvents.forEach(function(e) {
-        if (e.job_id === ev.job_id && e.assignment_id !== assignmentId) {
+        if (e.job_id === ev.job_id && e.assignment_id !== assignmentId && !CalOpsCore.isStandIn(e)) {
           var cs = e.confirmation_status || 'tentative';
           if (cs !== 'confirmed') siblingIds.push(e.assignment_id);
         }
@@ -11664,7 +12221,7 @@ function handleCalEventDelete(assignmentId) {
 function openBulkConfirm() {
   var unlockedCount = _calEvents.filter(function(ev) {
     var cs = ev.confirmation_status || 'tentative';
-    return cs === 'tentative' || cs === 'placeholder';
+    return (cs === 'tentative' || cs === 'placeholder') && !CalOpsCore.isStandIn(ev);
   }).length;
   if (unlockedCount === 0) { showToast('No unconfirmed assignments', 'warning'); return; }
   document.getElementById('calBulkText').textContent = 'Confirm ' + unlockedCount + ' assignment' + (unlockedCount > 1 ? 's' : '') + '?';
@@ -11678,7 +12235,7 @@ function closeBulkBar() {
 async function executeBulkConfirm() {
   var unlocked = _calEvents.filter(function(ev) {
     var cs = ev.confirmation_status || 'tentative';
-    return cs === 'tentative' || cs === 'placeholder';
+    return (cs === 'tentative' || cs === 'placeholder') && !CalOpsCore.isStandIn(ev);
   });
   closeBulkBar();
 
@@ -26638,7 +27195,7 @@ async function submitAssignment() {
       // Sync dates to sibling assignments (other crew on same job)
       if (editEv && editEv.job_id) {
         var siblings = _calEvents.filter(function(e) {
-          return e.job_id === editEv.job_id && e.assignment_id !== _editAssignmentId;
+          return e.job_id === editEv.job_id && e.assignment_id !== _editAssignmentId && !CalOpsCore.isStandIn(e);
         });
         for (var s = 0; s < siblings.length; s++) {
           try {

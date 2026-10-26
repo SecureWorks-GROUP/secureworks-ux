@@ -296,3 +296,138 @@ test.describe('CP1 staging occupancy — job-scoped assignment rows over the loa
     expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['a1']);
   });
 });
+
+// Whole-job move and stretch (Captain, Milan Mall SWP-26595): a multi-crew job
+// stored one booking per person per day, across a weekend.
+test.describe('Whole-job move and stretch planners', () => {
+  const crew = ['u-h', 'u-i', 'u-n', 'u-r'];
+  const days = [FRI, MON2, TUE2, '2026-07-30'];
+  function milanRows() {
+    const rows = [];
+    let n = 0;
+    days.forEach((d) => crew.forEach((u) => rows.push({
+      assignment_id: 'a' + (n++), job_id: 'j', user_id: u, crew_name: u, scheduled_date: d, scheduled_end: d,
+      assignment_type: 'install', assignment_status: 'scheduled',
+    })));
+    return rows;
+  }
+  const userKey = (jobId, userId, date) => [jobId, userId, date].join('|');
+
+  test('a move lays every row by the same working days from the new first day', () => {
+    const rows = milanRows();
+    const plan = C.planJobMove(rows, MON2);
+    expect(plan.kind).toBe('move');
+    expect(plan.updates).toHaveLength(16);
+    const moved = {};
+    plan.updates.forEach((u) => { moved[u.ev.scheduled_date] = u.update.scheduled_date; });
+    // Fri -> Mon, Mon -> Tue, Tue -> Wed, Thu -> Fri: one working day later each
+    expect(moved).toEqual({ [FRI]: MON2, [MON2]: TUE2, [TUE2]: '2026-07-29', '2026-07-30': '2026-07-31' });
+    expect(plan.updates.every((u) => u.update.scheduled_end === u.update.scheduled_date)).toBe(true);
+  });
+
+  test('the job\'s own rows never block it, and the write batches free each date before it is taken', () => {
+    const rows = milanRows();
+    const plan = C.planJobMove(rows, MON2);
+    const staged = C.stageCollisionSafeMoves(rows, C.planKeyMoves(plan));
+    expect(staged.skipped).toHaveLength(0);
+    expect(staged.blockers || []).toHaveLength(0);
+    const batches = C.planWriteBatches(staged, plan);
+    expect(batches.flat()).toHaveLength(16);
+    const at = (pred) => batches.findIndex((b) => b.some(pred));
+    batches.forEach((batch, bi) => batch.forEach((w) => {
+      const ev = w.entry.ev;
+      const target = userKey(ev.job_id, ev.user_id, w.entry.update.scheduled_date);
+      // nothing at or after this batch still sits on the date this write takes
+      const holder = at((o) => userKey(o.entry.ev.job_id, o.entry.ev.user_id, o.entry.ev.scheduled_date) === target);
+      if (holder !== -1) expect(holder, 'write into ' + target).toBeLessThan(bi);
+    }));
+    // ghost-mirror safety: the last write leaving a date never runs beside another leaving it
+    days.forEach((d) => {
+      const leaving = batches.map((b) => b.filter((w) => w.entry.ev.scheduled_date === d).length);
+      const lastBatch = leaving.map((c, i) => (c ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+      expect(leaving[lastBatch], 'last leaver of ' + d).toBe(1);
+    });
+  });
+
+  test('a stretch adds the working days between the old edge and the target for every person, quietly', () => {
+    const rows = milanRows();
+    // end Thu 30 -> Mon 3 Aug: Fri 31 and Mon 3 (Sat/Sun interior breaks)
+    const end = C.planJobStretch(rows, 'end', '2026-08-03');
+    expect(end.creates).toHaveLength(8);
+    expect([...new Set(end.creates.map((c) => c.date))].sort()).toEqual(['2026-07-31', '2026-08-03']);
+    expect(end.creates.every((c) => c.create.suppress_notifications === true && c.create.userId && c.create.jobId === 'j')).toBe(true);
+    expect(end.deletes).toHaveLength(0);
+    // start Fri -> Thu before it
+    const start = C.planJobStretch(rows, 'start', THU);
+    expect(start.creates.map((c) => c.date)).toEqual([THU, THU, THU, THU]);
+    // pull the end in to Tue: every Thu row goes, nothing else
+    const shrink = C.planJobStretch(rows, 'end', TUE2);
+    expect(shrink.deletes.map((d) => d.ev.scheduled_date)).toEqual(['2026-07-30', '2026-07-30', '2026-07-30', '2026-07-30']);
+    expect(shrink.creates).toHaveLength(0);
+  });
+
+  test('a spanning row stretches by moving its end; a row with no person cannot be added to', () => {
+    const rows = [
+      { assignment_id: 's', job_id: 'j', user_id: 'u-p', scheduled_date: MON, scheduled_end: TUE, duration_days: 2, assignment_type: 'install', assignment_status: 'scheduled' },
+      { assignment_id: 'x', job_id: 'j', user_id: 'u-q', scheduled_date: MON, scheduled_end: MON, assignment_type: 'install', assignment_status: 'scheduled' },
+      { assignment_id: 'y', job_id: 'j', user_id: 'u-q', scheduled_date: TUE, scheduled_end: TUE, assignment_type: 'install', assignment_status: 'scheduled' },
+    ];
+    const plan = C.planJobStretch(rows, 'end', WED);
+    expect(plan.updates.map((u) => [u.ev.assignment_id, u.update.scheduled_end, u.update.duration_days])).toEqual([['s', WED, 3]]);
+    expect(plan.creates.map((c) => [c.create.userId, c.date])).toEqual([['u-q', WED]]);
+  });
+
+  // Every person gains exactly the added days and nothing else: a person
+  // whose own first or last day is not the job's keeps their own gap.
+  test('a stretch never books a person onto days inside the job they were not on', () => {
+    const row = (id, user, s, e) => ({ assignment_id: id, job_id: 'j', user_id: user, scheduled_date: s, scheduled_end: e,
+      assignment_type: 'install', assignment_status: 'scheduled' });
+    const dayOf = (plan) => C.crewDays(C.applyPlanToEvents(plan.rows, plan.plan));
+    // per-day job: Mon (A, B), Tue (A); end to Wed
+    let rows = [row('a1', 'u-a', MON, MON), row('a2', 'u-a', TUE, TUE), row('b1', 'u-b', MON, MON)];
+    let plan = C.planJobStretch(rows, 'end', WED);
+    expect(plan.updates).toHaveLength(0);
+    expect(plan.creates.map((c) => [c.create.userId, c.date, c.create.suppress_notifications])).toEqual([['u-a', WED, true], ['u-b', WED, true]]);
+    let days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, WED]);
+    expect(days['u:u-b'].days).toEqual([MON, WED]);
+    // the same at the start edge: Tue (A), Wed (A, B); start to Mon
+    rows = [row('a1', 'u-a', TUE, TUE), row('a2', 'u-a', WED, WED), row('b1', 'u-b', WED, WED)];
+    plan = C.planJobStretch(rows, 'start', MON);
+    expect(plan.updates).toHaveLength(0);
+    days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, WED]);
+    expect(days['u:u-b'].days).toEqual([MON, WED]);
+    // spanning rows: A Mon-Tue, B Mon-Thu; end to Fri. Only B's row reaches the end.
+    rows = [row('a', 'u-a', MON, TUE), row('b', 'u-b', MON, THU)];
+    plan = C.planJobStretch(rows, 'end', FRI);
+    expect(plan.updates.map((u) => [u.ev.assignment_id, u.update.scheduled_end])).toEqual([['b', FRI]]);
+    expect(plan.creates.map((c) => [c.create.userId, c.date])).toEqual([['u-a', FRI]]);
+    days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, FRI]);
+    expect(days['u:u-b'].days).toEqual([MON, TUE, WED, THU, FRI]);
+    // a person off the edge with no user on record cannot be given the new day
+    rows = [row('a', 'u-a', MON, TUE), { ...row('n', null, MON, MON), crew_name: 'Nobody' }];
+    plan = C.planJobStretch(rows, 'end', WED);
+    expect(plan.unbookable.map((e) => e.assignment_id)).toEqual(['n']);
+  });
+
+  test('a stand-in row for a booking just asked for is told apart from a real one', () => {
+    const rows = [MON, TUE].map((d, i) => ({ assignment_id: 'a' + i, job_id: 'j', user_id: 'u-a', scheduled_date: d, scheduled_end: d,
+      assignment_type: 'install', assignment_status: 'scheduled' }));
+    const after = C.applyPlanToEvents(rows, C.planJobStretch(rows, 'end', WED));
+    expect(after.map(C.isStandIn)).toEqual([false, false, true]);
+  });
+
+  test('crew changes name only people whose own days moved, and the text names job, client, site and days', () => {
+    const rows = milanRows();
+    expect(C.crewDayChanges(rows, rows)).toEqual([]);
+    const after = C.applyPlanToEvents(rows, C.planJobMove(rows, MON2));
+    const changes = C.crewDayChanges(rows, after);
+    expect(changes.map((c) => c.userId)).toEqual(['u-h', 'u-i', 'u-n', 'u-r']);
+    expect(changes[0].after).toEqual([MON2, TUE2, '2026-07-29', '2026-07-31']);
+    const text = C.crewRescheduleText({ job_number: 'SWP-26595', client_name: 'Milan Mall', site_address: '4 Example Way, Malaga' }, changes[0].after, 'job-1');
+    expect(text).toBe('Job rescheduled: SWP-26595 - Milan Mall\nSite: 4 Example Way, Malaga\nYour days: Mon 27 Jul, Tue 28 Jul, Wed 29 Jul, Fri 31 Jul\nOpen in Trade: https://secureworks-group.github.io/secureworks-ux/trade.html#job/job-1');
+    expect(C.crewRescheduleText({ job_number: 'SWP-1', client_name: 'A' }, [], 'job-1')).toContain('Your days: none, you are no longer booked on this job');
+  });
+});

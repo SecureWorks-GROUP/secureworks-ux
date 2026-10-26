@@ -82,7 +82,21 @@ async function bootCalendar(page, opts = {}) {
     if (!m) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
     const action = m[1];
     const json = (obj) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(obj) });
-    if (action === 'calendar') return json({ events: state.events });
+    if (action === 'calendar') {
+      // { windowOnly }: the feed sends only rows inside the asked window, as
+      // the live one does. { refreshFails } / { refreshDelayMs }: every read
+      // after the first fails, or is slow.
+      state.calendarReads = (state.calendarReads || 0) + 1;
+      if (state.calendarReads > 1 && opts.refreshFails) {
+        return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"down"}' });
+      }
+      if (state.calendarReads > 1 && opts.refreshDelayMs) await new Promise((r) => setTimeout(r, opts.refreshDelayMs));
+      const q = new URL(url).searchParams;
+      const from = q.get('from'), to = q.get('to');
+      return json({ events: opts.windowOnly
+        ? state.events.filter((e) => e.scheduled_date <= to && (e.scheduled_end || e.scheduled_date) >= from)
+        : state.events });
+    }
     if (action === 'pipeline') return json({ columns: { accepted: opts.unschedJobs || [] } });
     if (action === 'get_crew_availability') return json(opts.availability || []);
     if (action === 'list_users') return json({ users: opts.users || USERS });
@@ -601,6 +615,80 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(new Set(creates.map((c) => c.scheduledDate))).toEqual(new Set([D.TUE]));
     expect(creates.every((c) => c.suppress_notifications === true)).toBe(true);
     expect(writes.some((w) => w.action === 'update_assignment' || w.action === 'delete_assignment')).toBe(false);
+  });
+
+  // The loaded window is today forward for two weeks (to D.MON + 13). A job
+  // whose bookings reach past it must never be planned from the edge that is
+  // only the window's.
+  const MON3 = isoStr(plusDays(monA, 14));
+  const FRI0 = isoStr(plusDays(monA, -3));
+
+  test('a job running past the view: its end handle refuses rather than removing the days out of sight', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows([D.THU2, MON3], CREW4.slice(0, 2)), users: CREW4, windowOnly: true,
+    });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + FRI2 + '"]'));
+    await expect(page.getByText('Not changed - this job runs past the calendar view; widen the view to change it')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(writes).toHaveLength(0);
+    // with the job's bookings read, the handle is no longer offered on the
+    // window's edge
+    await page.evaluate(() => renderCalendar());
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.right')).toHaveCount(0);
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.left')).toHaveCount(1);
+  });
+
+  test('a job that started before the view: a move refuses rather than taking the hidden first day as the drop', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows([FRI0, D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4, windowOnly: true,
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.getByText('Not changed - this job runs past the calendar view; widen the view to change it')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(writes).toHaveLength(0);
+  });
+
+  test('a booking just added is never acted on under its stand-in id before the calendar is read again', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, keepCreates: true, refreshDelayMs: 4000,
+    });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'create_assignment').length).toBe(1);
+    await expect(page.getByText('Duration updated')).toBeVisible();
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    await page.evaluate(() => closeConfirmModal());
+    // the added Wednesday is painted under a stand-in until the slow read lands
+    await page.locator('#btnViewCrew').click();
+    const added = page.locator('.cal-swim-cell[data-date="' + D.WED + '"][data-crew="Hugo"] .cal-job-block');
+    await expect(added).toHaveCount(1);
+    await realDrag(page, added, page.locator('.cal-swim-cell[data-date="' + D.FRI + '"][data-crew="Hugo"]'));
+    await expect(page.getByText('Still saving that booking - try again in a moment')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
+    // once the read lands the real row replaces it
+    await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm')
+      .map((e) => e.assignment_id).sort()), { timeout: 10000 }).toEqual(['mm-hugo-0', 'mm-hugo-1', 'new-1']);
+  });
+
+  test('a failed read after a save takes the stand-ins off the grid and says so', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, keepCreates: true, refreshFails: true,
+    });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'create_assignment').length).toBe(1);
+    await expect(page.getByText('Saved, but the calendar could not refresh. Reload it to see every booking.')).toBeVisible();
+    expect(await page.evaluate(() => window._calEvents.some((e) => String(e.assignment_id).startsWith('pending-')))).toBe(false);
   });
 
   test('pull the end in: the dropped day is removed for every person', async ({ page }) => {

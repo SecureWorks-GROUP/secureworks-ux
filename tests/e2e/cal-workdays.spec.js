@@ -377,6 +377,48 @@ test.describe('Whole-job move and stretch planners', () => {
     expect(plan.creates.map((c) => [c.create.userId, c.date])).toEqual([['u-q', WED]]);
   });
 
+  // Every person gains exactly the added days and nothing else: a person
+  // whose own first or last day is not the job's keeps their own gap.
+  test('a stretch never books a person onto days inside the job they were not on', () => {
+    const row = (id, user, s, e) => ({ assignment_id: id, job_id: 'j', user_id: user, scheduled_date: s, scheduled_end: e,
+      assignment_type: 'install', assignment_status: 'scheduled' });
+    const dayOf = (plan) => C.crewDays(C.applyPlanToEvents(plan.rows, plan.plan));
+    // per-day job: Mon (A, B), Tue (A); end to Wed
+    let rows = [row('a1', 'u-a', MON, MON), row('a2', 'u-a', TUE, TUE), row('b1', 'u-b', MON, MON)];
+    let plan = C.planJobStretch(rows, 'end', WED);
+    expect(plan.updates).toHaveLength(0);
+    expect(plan.creates.map((c) => [c.create.userId, c.date, c.create.suppress_notifications])).toEqual([['u-a', WED, true], ['u-b', WED, true]]);
+    let days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, WED]);
+    expect(days['u:u-b'].days).toEqual([MON, WED]);
+    // the same at the start edge: Tue (A), Wed (A, B); start to Mon
+    rows = [row('a1', 'u-a', TUE, TUE), row('a2', 'u-a', WED, WED), row('b1', 'u-b', WED, WED)];
+    plan = C.planJobStretch(rows, 'start', MON);
+    expect(plan.updates).toHaveLength(0);
+    days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, WED]);
+    expect(days['u:u-b'].days).toEqual([MON, WED]);
+    // spanning rows: A Mon-Tue, B Mon-Thu; end to Fri. Only B's row reaches the end.
+    rows = [row('a', 'u-a', MON, TUE), row('b', 'u-b', MON, THU)];
+    plan = C.planJobStretch(rows, 'end', FRI);
+    expect(plan.updates.map((u) => [u.ev.assignment_id, u.update.scheduled_end])).toEqual([['b', FRI]]);
+    expect(plan.creates.map((c) => [c.create.userId, c.date])).toEqual([['u-a', FRI]]);
+    days = dayOf({ rows, plan });
+    expect(days['u:u-a'].days).toEqual([MON, TUE, FRI]);
+    expect(days['u:u-b'].days).toEqual([MON, TUE, WED, THU, FRI]);
+    // a person off the edge with no user on record cannot be given the new day
+    rows = [row('a', 'u-a', MON, TUE), { ...row('n', null, MON, MON), crew_name: 'Nobody' }];
+    plan = C.planJobStretch(rows, 'end', WED);
+    expect(plan.unbookable.map((e) => e.assignment_id)).toEqual(['n']);
+  });
+
+  test('a stand-in row for a booking just asked for is told apart from a real one', () => {
+    const rows = [MON, TUE].map((d, i) => ({ assignment_id: 'a' + i, job_id: 'j', user_id: 'u-a', scheduled_date: d, scheduled_end: d,
+      assignment_type: 'install', assignment_status: 'scheduled' }));
+    const after = C.applyPlanToEvents(rows, C.planJobStretch(rows, 'end', WED));
+    expect(after.map(C.isStandIn)).toEqual([false, false, true]);
+  });
+
   test('crew changes name only people whose own days moved, and the text names job, client, site and days', () => {
     const rows = milanRows();
     expect(C.crewDayChanges(rows, rows)).toEqual([]);

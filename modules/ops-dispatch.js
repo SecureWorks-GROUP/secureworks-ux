@@ -400,6 +400,13 @@
   function scopeFacts(scope_json, jobType) {
     var scope = parseScope(scope_json);
     if (!scope || typeof scope !== 'object') return [];
+    // A Scope Engine record reads through the one scope reader (modules/job-scope-record.js).
+    var rec = global.JobScopeRecord ? global.JobScopeRecord.read({ type: jobType, scope_json: scope }) : null;
+    if (rec && rec.kind === 'engine-patio') {
+      var out = [];
+      if (rec.revision && rec.revision.n != null) out.push(['Revision', global.JobScopeRecord.revisionWords(rec)]);
+      return out.concat(rec.inputs.map(function (f) { return [f.label, f.value]; }));
+    }
     var facts = [];
     if (jobType === 'fencing' || hasFenceShape(scope)) {
       var fenceJob = scope.job || {};
@@ -4688,5 +4695,68 @@
     loadBase();
   }
 
-  global.OpsDispatch = { show: show };
+  // ── The job page (ops.html Overview): one job's Dispatch stage ──
+  // A job page open reads its stage once (cached a minute per job): the Dispatch
+  // list searched by the job number, through the same rowsFromPipeline and
+  // stageOf checks as the list, so the page can never draw a stage Dispatch
+  // would not. A failed read says so and is not cached; it never reads as
+  // "not started".
+  var stageReads = {};
+  function stageForJob(job) {
+    var num = job ? text(job.job_number) : '';
+    if (!job || !job.id || !num) return Promise.resolve({ status: 'unknown' });
+    var hit = stageReads[job.id];
+    if (hit && Date.now() - hit.at < 60000) return hit.p;
+    var p = Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, search: num }); }).then(function (resp) {
+      var got = rowsFromPipeline(resp);
+      var row = null;
+      got.rows.forEach(function (r) { if (r.id === job.id) row = r; });
+      if (!row) return { status: got.degraded ? 'error' : 'not_listed' };
+      if (got.stages !== 'ok') return { status: 'error' };
+      var s = stageOf(row);
+      return s && !s.none ? { status: 'ok', stage: s, row: row } : { status: s ? 'not_listed' : 'error' };
+    }).catch(function () { return { status: 'error' }; });
+    stageReads[job.id] = { at: Date.now(), p: p };
+    p.then(function (r) { if (r.status === 'error' && stageReads[job.id] && stageReads[job.id].p === p) delete stageReads[job.id]; });
+    return p;
+  }
+
+  // The card the job page shows for that answer: the six stops, where the job
+  // is, its next step and whether it is in To do. '' when there is nothing to say.
+  function stageCardHtml(result) {
+    if (!result || result.status === 'unknown') return '';
+    var body;
+    if (result.status === 'error') body = '<div style="font-size:12px;color:var(--sw-red);">Could not read the Dispatch stage.</div>';
+    else if (result.status === 'not_listed') body = '<div style="font-size:12px;color:var(--sw-text-sec);">Not on the Dispatch list.</div>';
+    else {
+      var s = result.stage, row = result.row || {};
+      var stops = STAGES.map(function (st, i) {
+        var n = i + 1, done = n < s.index || (n === s.index && n === 6 && !(row.dispatch_todo === true && INSTALL_OPEN[row.dispatch_install_open])), at = n === s.index;
+        var bg = done ? 'var(--sw-green)' : at ? 'var(--sw-orange)' : 'var(--sw-light)';
+        return '<div data-dispatch-stop="' + esc(st.key) + '"' + (at ? ' aria-current="step"' : '') + ' style="flex:1;min-width:0;">' +
+          '<div style="height:4px;background:' + bg + ';margin-bottom:4px;"></div>' +
+          '<div style="font-size:10px;line-height:1.25;color:' + (at ? 'var(--sw-dark)' : 'var(--sw-text-sec)') + ';font-weight:' + (at ? 700 : 500) + ';">' + esc(st.label) + '</div></div>';
+      }).join('');
+      var next = text(row.dispatch_next_step);
+      body = '<div style="font-size:13px;color:var(--sw-text);margin-bottom:8px;">' + stageLineHtml(s, row).replace(/<[^>]+>/g, '') + (row.dispatch_todo === true ? ' &middot; in To do' : '') + '</div>' +
+        '<div style="display:flex;gap:4px;">' + stops + '</div>' +
+        (next ? '<div style="font-size:12px;color:var(--sw-text);margin-top:8px;">Next step: ' + esc(next) + '</div>' : '');
+    }
+    var open = result.status === 'ok' ? '<a href="#dispatch" data-open-dispatch="1" style="font-size:11px;color:var(--sw-mid);">Open in Dispatch &#8599;</a>' : '';
+    return '<div data-dispatch-card="1" style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.5px;">Dispatch</div>' + open + '</div>' +
+      body + '</div>';
+  }
+
+  // Open a job in Dispatch: the page then shows the Dispatch tab and this job.
+  function openJob(jobId) {
+    if (!jobId) return;
+    writeStore('sessionStorage', SS_JOB, jobId);
+    var rows = state.base.status === 'ok' ? state.base.rows : [];
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === jobId) { selectJob(rows[i]); return; }
+    state.jobId = null;
+    state.row = null;
+  }
+
+  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob };
 })(window);

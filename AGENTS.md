@@ -57,6 +57,10 @@ a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
 `get_conversation` and `get_job_conversation` only when their tab is first shown.
 Materials by supplier reads `dispatch_materials` once per job open and
 `list_suppliers` once a session.
+The classic job page Overview shows that job's Dispatch stage (`// <job-dispatch-stage>`,
+`OpsDispatch.stageForJob` / `stageCardHtml` / `openJob`): accepted work only, one
+`pipeline&dispatch=1&search=<job number>` read per job open (cached a minute,
+through the same `rowsFromPipeline` / `stageOf` checks), and a failed read says so.
 Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
 `send_sms` from `+61489267771`, the rail's `set_dispatch_stage` (after a
 confirm line) and `set_dispatch_next_step`, and the six `dispatch_materials_*`
@@ -751,6 +755,15 @@ The middle Job Story card reads the live card's `now`, timeline, money and loops
 the Quoted band uses only a recorded current-quote value. Backend `notes` is an
 object with `items[]`, and its invoice rows need the matching `job_detail` row
 for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
+
+## Scope reader (`modules/job-scope-record.js`)
+
+Every job view reads `scope_json` / `pricing_json` through `JobScopeRecord.read(job)`:
+the Scope Engine patio record (`tool: 'patio-scoper'`), the fence designer / Scope
+Engine fence shape and the older patio page. Teach a new tool there, never in a caller.
+Money is a number or null; null is "Not known yet", never `$0`. `scopeToolUrlFor(type, job)`
+sends a Scope Engine record to the Scope Engine. Contract: `docs/job-scope-record.md`.
+Guards: `modules/job-scope-record.test.cjs`, `tests/e2e/ops-job-page-scope-engine.spec.js`.
 
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 

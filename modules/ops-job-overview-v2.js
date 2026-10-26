@@ -658,6 +658,12 @@ var JobOverviewV2Core = (function () {
       if (rem && rem.removalRequired && lower(rem.existingFenceType) === 'asbestos') parts.push('asbestos removal');
       return parts.filter(Boolean).join(DOT);
     }
+    // A Scope Engine record: its revision and what was scoped (modules/job-scope-record.js).
+    var R = typeof JobScopeRecord !== 'undefined' ? JobScopeRecord : null;
+    var rec = R ? R.read({ type: job.type, scope_json: sj }) : null;
+    if (rec && rec.kind === 'engine-patio') {
+      return [rec.revision && rec.revision.n != null ? 'Rev ' + rec.revision.n + ' ' + shortDate(rec.revision.sealedAt, now) : '', R.summaryLine(rec)].filter(Boolean).join(DOT);
+    }
     var sc = obj(sj.config) || sj;
     var p = [];
     if (sc.length && sc.projection) p.push(sc.length + 'm x ' + sc.projection + 'm');
@@ -1316,7 +1322,7 @@ var JobOverviewV2 = (function () {
   function xeroUrl(id) { return 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + encodeURIComponent(id); }
   function scopeUrl(j) {
     var f = fn('scopeToolUrlFor');
-    var base = f ? f(j.type) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/');
+    var base = f ? f(j.type, j) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/');
     return base + '?jobId=' + encodeURIComponent(j.id);
   }
   function quoteUrl(doc) {

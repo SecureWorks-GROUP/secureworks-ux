@@ -10,13 +10,14 @@ const { JOB_ID, buildEnginePatioDetail, buildScopeRevisions, pricingJson } = req
 const ENGINE = 'https://marninms98-dotcom.github.io/patio/scope-engine/';
 test.use({ viewport: { width: 1360, height: 1000 } });
 
-async function boot(page, { pricing = null, status = null, pipeline = null } = {}) {
+async function boot(page, { pricing = null, status = null, pipeline = null, bare = false } = {}) {
   await page.route('**/functions/v1/**', (route) => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"not stubbed"}' }));
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
   const detail = buildEnginePatioDetail();
   if (pricing) detail.job.pricing_json = pricing;
   if (status) detail.job.status = status;
+  if (bare) { detail.media = []; detail.documents = []; detail.work_orders = []; delete detail.readiness; }
   const revs = buildScopeRevisions().map((r) => Object.assign({ revision_number: 1 }, r));
   await page.evaluate(({ detail, revs, pipeline }) => {
     const main = document.getElementById('mainApp');
@@ -89,6 +90,9 @@ test('Money: an unpriced engine scope says not known, never $0 costs', async ({ 
   const costs = page.locator('#jdMoney [data-scope-costs]');
   await expect(costs).toContainText('Still to price: Materials (3 rows with no cost)');
   await expect(costs).not.toContainText('$0.00');
+  const quote = page.locator('#jdMoney .jd-money-card-head', { hasText: 'Quote Value' });
+  await expect(quote).toContainText('Not priced yet');
+  await expect(quote).not.toContainText('$0.00');
 });
 
 test('Build: sealed scope and material lines; the old patio tool is not embedded', async ({ page }) => {
@@ -107,6 +111,14 @@ test('Files: the Scope Engine documents for Rev 3 above the photos', async ({ pa
   const f = page.locator('#jdFiles');
   await expect(f).toContainText('Scope Engine documents (Rev 3)');
   await expect(f.locator('a', { hasText: 'Material order' })).toHaveAttribute('href', ENGINE + '?jobId=' + JOB_ID);
+});
+
+test('Files: an engine job with no photos, documents or work orders still lists its documents', async ({ page }) => {
+  await boot(page, { bare: true });
+  await tab(page, 'files');
+  const f = page.locator('#jdFiles');
+  await expect(f).toContainText('Scope Engine documents (Rev 3)');
+  await expect(f).not.toContainText('No files yet');
 });
 
 // <job-dispatch-stage>: the Overview's Dispatch card, read through modules/ops-dispatch.js.

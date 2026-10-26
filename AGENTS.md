@@ -109,6 +109,12 @@ there. Guards: `tests/e2e/ops-tab-set.spec.js`,
 `tests/e2e/ops-dispatch-panel.spec.js`, `tests/e2e/ops-dispatch-v2.spec.js`,
 `tests/e2e/ops-dispatch-v2-materials.spec.js`,
 `tests/e2e/ops-dispatch-v2-restored.spec.js`.
+The v1 / v2 switch (`<dispatch-version>` in ops.html, Shaun 26 Oct 2026): v2 is the
+default; "Switch back to v1" on the Dispatch tab, or `?dispatch_version=v1`, loads
+the kept v1 screen (`modules/ops-dispatch-v1.js` and `.css`, frozen copies of main
+at d0b6419) instead, remembered per browser in localStorage `sw_dispatch_version`.
+Only one of the two files is ever loaded. Never build on the v1 copy; new work
+goes in `modules/ops-dispatch.js`. Guard: `tests/e2e/ops-dispatch-switch.spec.js`.
 
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /

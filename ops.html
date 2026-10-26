@@ -23345,7 +23345,9 @@ function renderMoneyView(data) {
   // Revenue column
   html += '<div class="jd-money-col">';
   html += '<div class="jd-money-heading">Revenue</div>';
-  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + fmt$(quoteVal) + '</strong></div>';
+  // An engine job with no price is not a $0 quote: say so, as the Overview does.
+  var quoteNotKnown = !quoteVal && scopeRec && scopeRec.kind === 'engine-patio' && scopeRec.money.saleIncGst == null;
+  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + (quoteNotKnown ? 'Not priced yet' : fmt$(quoteVal)) + '</strong></div>';
   // Quote breakdown — show what was actually quoted. A Scope Engine record: one line and its
   // revision here; the whole sealed scope is under Frozen Revisions below.
   if (scopeRec && scopeRec.kind === 'engine-patio') {
@@ -24714,7 +24716,8 @@ function renderFilesView(data) {
     html += '</tbody></table></div></div>';
   }
 
-  if (!readiness && jobPhotos.length === 0 && receiptPhotos.length === 0 && (data.documents || []).length === 0 && workOrders.length === 0) {
+  var hasEngineDocs = !!(filesRec && filesRec.kind === 'engine-patio' && filesRec.documents.length);
+  if (!readiness && !hasEngineDocs && jobPhotos.length === 0 && receiptPhotos.length === 0 && (data.documents || []).length === 0 && workOrders.length === 0) {
     html = '<div class="empty-state"><div class="empty-state-icon">&#128247;</div><div class="empty-state-text">No files yet</div></div>';
   }
 

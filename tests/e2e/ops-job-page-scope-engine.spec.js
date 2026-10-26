@@ -38,7 +38,9 @@ async function boot(page, { pricing = null, status = null, pipeline = null, bare
       window.opsFetch = (action, params) => {
         if (action !== 'pipeline') return fetch0(action, params);
         window.__pipelineReads.push(params);
-        return pipeline === 'fail' ? Promise.reject(new Error('down')) : Promise.resolve(clone(pipeline));
+        if (pipeline === 'fail') return Promise.reject(new Error('down'));
+        // byView: a different board answer for Active and Archive.
+        return Promise.resolve(clone(pipeline.byView ? pipeline.byView[params.view] : pipeline));
       };
     }
   }, { detail, revs, pipeline });
@@ -125,24 +127,50 @@ test('Files: an engine job with no photos, documents or work orders still lists 
 const dispatchRow = (over = {}) => Object.assign({
   id: JOB_ID, job_number: 'SWP-990301', type: 'patio', status: 'order_materials', client_name: 'Casey Morgan',
   updated_at: '2026-10-25T06:44:00Z', value_inc_gst: true, description: 'Gable patio', work_type: 'patio',
-  dispatch_todo: true, dispatch_stage: 'materials_ordered', dispatch_stage_index: 3, dispatch_stage_source: 'set',
-  dispatch_stage_from: null, dispatch_stage_set_at: '2026-10-25T06:44:00Z', dispatch_stage_set_by: 'Office Person',
   dispatch_next_step: 'Chase Stratco for the delivery date',
+  board: { track: 'pipeline', stage_key: 'order_materials', stage_label: 'Order Materials', stage_phase: 'window', title: 'SWP-990301 · Casey Morgan' },
 }, over);
-const listAnswer = (rows) => ({ columns: { order_materials: rows }, total: rows.length, dispatch_stages: 'ok', todo_total: rows.filter((r) => r.dispatch_todo).length });
+const STAGES = { pipeline: [
+  { key: 'order_materials', label: 'Order Materials' }, { key: 'awaiting_supplier', label: 'Awaiting Supplier' },
+  { key: 'order_confirmed', label: 'Order Confirmed' }, { key: 'schedule_install', label: 'Schedule Install' }, { key: 'scheduled', label: 'Scheduled' },
+] };
+// The Dispatch v2 board answer (pipeline with dispatch=1&board=v2).
+const listAnswer = (rows, key = 'order_materials') => ({
+  columns: { [key]: rows }, total: rows.length,
+  board: { version: 'v2', total: rows.length, stages: STAGES, groups: [{ key, track: 'pipeline', label: key, job_ids: rows.map((r) => r.id) }] },
+});
 
 test('Overview: an accepted job shows its Dispatch stage, next step and a way into Dispatch', async ({ page }) => {
   await boot(page, { status: 'order_materials', pipeline: listAnswer([dispatchRow(), dispatchRow({ id: 'other-job', job_number: 'SWP-9903010', dispatch_todo: false })]) });
   await tab(page, 'overview');
   const card = page.locator('#jdOverview [data-dispatch-card]');
-  await expect(card).toContainText('Stage: Materials ordered');
-  await expect(card).toContainText('in To do');
+  await expect(card).toContainText('Pipeline stage: Order Materials');
   await expect(card).toContainText('Next step: Chase Stratco for the delivery date');
-  await expect(card.locator('[aria-current="step"]')).toHaveAttribute('data-dispatch-stop', 'materials_ordered');
-  expect(await page.evaluate(() => window.__pipelineReads)).toEqual([{ dispatch: 1, search: 'SWP-990301' }]);
+  await expect(card.locator('[aria-current="step"]')).toHaveAttribute('data-dispatch-stop', 'order_materials');
+  expect(await page.evaluate(() => window.__pipelineReads)).toEqual([{ dispatch: 1, board: 'v2', view: 'active', search: 'SWP-990301' }]);
   await card.locator('a', { hasText: 'Open in Dispatch' }).click();
   await expect(page.locator('#jobDetailView')).not.toHaveClass(/active/);
   expect(await page.evaluate(() => sessionStorage.getItem('sw_dispatch_job'))).toBe(JOB_ID);
+});
+
+test('Overview: a job past Scheduled is found in the Dispatch archive, with every stop done', async ({ page }) => {
+  const archived = dispatchRow({ status: 'complete', board: { track: 'pipeline', stage_key: 'scheduled', stage_label: 'Scheduled', stage_phase: 'after', title: 'SWP-990301 · Casey Morgan' } });
+  await boot(page, { status: 'complete', pipeline: { byView: { active: listAnswer([]), archive: listAnswer([archived], 'archive') } } });
+  await tab(page, 'overview');
+  const card = page.locator('#jdOverview [data-dispatch-card]');
+  await expect(card).toContainText('Pipeline stage: Scheduled · in the Dispatch archive');
+  await expect(card.locator('[aria-current="step"]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__pipelineReads)).toEqual([
+    { dispatch: 1, board: 'v2', view: 'active', search: 'SWP-990301' },
+    { dispatch: 1, board: 'v2', view: 'archive', search: 'SWP-990301' },
+  ]);
+});
+
+test('Overview: an old-style list answer is a failed read, never a stage', async ({ page }) => {
+  const v1 = { columns: { order_materials: [dispatchRow({ board: undefined })] }, total: 1, dispatch_stages: 'ok', todo_total: 0 };
+  await boot(page, { status: 'order_materials', pipeline: v1 });
+  await tab(page, 'overview');
+  await expect(page.locator('#jdOverview [data-dispatch-card]')).toContainText('Could not read the Dispatch stage.');
 });
 
 test('Overview: a failed Dispatch read says so, never "not started"', async ({ page }) => {

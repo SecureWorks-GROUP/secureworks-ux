@@ -8860,6 +8860,7 @@ async function loadCalendar() {
   var bodyEl = document.getElementById('calendarBody');
   if (bodyEl) bodyEl.innerHTML = '<div class="cal-loading"><div class="spinner"></div><div>Loading calendar…</div></div>';
   _calLoadSeq++; // a quiet refresh started before this load drops its answer
+  _calJobRowsCache = {}; // a write that reloads the calendar may have changed any job's bookings
 
   try {
     // ── Grid-critical fetch ── the grid only needs the calendar events; draw it as soon as they arrive.

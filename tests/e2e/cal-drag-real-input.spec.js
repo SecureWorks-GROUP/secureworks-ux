@@ -675,6 +675,25 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
   });
 
+  test('a calendar reload drops the job reads a drag kept, so the next drag plans over today\'s bookings', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, { events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4 });
+    await toSchedule(page);
+    // a drop back on the job's own first day changes nothing, but reads the job
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.MON + '"]'));
+    await expect.poll(() => page.evaluate(() => !!calJobSpanInHand('j-mm'))).toBe(true);
+    // another edit removes Liam's Tuesday, and the page reloads the calendar as every such write does
+    state.events = state.events.filter((e) => e.assignment_id !== 'mm-liam-1');
+    await page.evaluate(() => loadCalendar());
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first()).toBeVisible();
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(3);
+    await page.waitForTimeout(300);
+    const ids = writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId).sort();
+    expect(ids).toEqual(['mm-hugo-0', 'mm-hugo-1', 'mm-liam-0']);
+  });
+
   test('a booking just added is never acted on under its stand-in id before the calendar is read again', async ({ page }) => {
     const { writes } = await bootCalendar(page, {
       events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, keepCreates: true, refreshDelayMs: 4000,

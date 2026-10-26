@@ -6513,14 +6513,15 @@ function firstMoney() {
   }
   return null;
 }
-// A job's quote value inc GST from pricing_json (patio at the root, fencing
-// under totals), or null when the quote has no total. jobs.value is tried first
-// only when above 0, because an unpriced job stores 0 there by default.
+// A job's quote value inc GST from pricing_json (fencing under totals, patio at
+// the root), or null when the quote has no total. totals is read first when it
+// has a figure, because a fencing quote can also carry a root 0. jobs.value is
+// tried first only when above 0, because an unpriced job stores 0 there by default.
 function quoteValueOf(pj, jobValue) {
   if (Number(jobValue) > 0) return Number(jobValue);
   if (!pj) return null;
   var t = pj.totals || {};
-  return firstMoney(pj.totalIncGST, pj.total, t.total_inc_gst, t.totalIncGst);
+  return firstMoney(t.total_inc_gst, t.totalIncGst, pj.totalIncGST, pj.total);
 }
 // The cost estimate on a quote, or null.
 function costEstimateOf(pj) {
@@ -27249,9 +27250,9 @@ function addDepositPreset(pct) {
   if (!_invJobCache) return;
   var pricing = _invJobCache.pricing_json;
   if (typeof pricing === 'string') pricing = JSON.parse(pricing);
-  // Kept (INT-37): a missing total stops here with a message, so no deposit is worked out from $0.
-  var totalIncGst = pricing ? (pricing.totalIncGST || pricing.total || 0) : 0;
-  if (totalIncGst <= 0) { alert('No pricing data on this job.'); return; }
+  // A missing or $0 total stops here with a message, so no deposit is worked out from $0 (INT-37).
+  var totalIncGst = quoteValueOf(pricing);
+  if (!(totalIncGst > 0)) { alert('No pricing data on this job.'); return; }
   var depositIncGst = Math.round(totalIncGst * (pct / 100) * 100) / 100;
   var depositExGst = Math.round((depositIncGst / 1.1) * 100) / 100;
   var desc = pct + '% Deposit — ' + (_invJobCache.job_number || '') + ' (' + fmt$(totalIncGst) + ' inc GST)';

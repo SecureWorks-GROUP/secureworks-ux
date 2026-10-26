@@ -49,6 +49,10 @@ test('a quote with no total reads Unknown on the Money view; a true $0 quote rea
 
   const fencing = await moneyText(page, jobData({ totals: { total_inc_gst: 5500 } }));
   expect(fencing).toContain('Quote Value$5,500.00');
+
+  // A fencing quote that also carries a root 0 reads its totals figure (V-22).
+  const fencingRootZero = await moneyText(page, jobData({ total: 0, totals: { total_inc_gst: 5500 } }));
+  expect(fencingRootZero).toContain('Quote Value$5,500.00');
 });
 
 test('a PO with no total makes the PO sum "at least", and margin is not worked out', async ({ page }) => {

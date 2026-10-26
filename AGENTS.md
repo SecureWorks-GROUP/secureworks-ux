@@ -65,7 +65,13 @@ sections below Scope and notes is drawn on a make-safe). It reads
 old order's PDF is opened, `job_detail` (once per job
 open; the panel reuses it, never a second call) and `job_notes`; the panel
 reads `job_story`, ghl-proxy `get_conversation` and `get_job_conversation` only
-when their tab is first shown. Its writes are `add_note` (always
+when their tab is first shown.
+The classic job page Overview shows that job's Dispatch stage (`// <job-dispatch-stage>`,
+`OpsDispatch.stageForJob` / `stageCardHtml` / `openJob`): accepted work only, one
+`pipeline&dispatch=1&board=v2&view=active&search=<job number>` read per job open
+(then `view=archive` only when Active does not list it; cached a minute, through
+the same `rowsFromBoard` checks), drawing the real pipeline (or Repairs) stage
+as the header rail does, and a failed read says so. Its writes are `add_note` (always
 `visibility: 'internal_only'`), a pressed `send_sms` from `+61489267771` (after
 "Text this to the client?"), the rail's `update_job_status` (compare-and-set
 on `expected_statuses`, `source 'dispatch'`) or `update_repair_stage` (each
@@ -771,6 +777,15 @@ the Quoted band uses only a recorded current-quote value. Backend `notes` is an
 object with `items[]`, and its invoice rows need the matching `job_detail` row
 for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 
+## Scope reader (`modules/job-scope-record.js`)
+
+Every job view reads `scope_json` / `pricing_json` through `JobScopeRecord.read(job)`:
+the Scope Engine patio record (`tool: 'patio-scoper'`), the fence designer / Scope
+Engine fence shape and the older patio page. Teach a new tool there, never in a caller.
+Money is a number or null; null is "Not known yet", never `$0`. `scopeToolUrlFor(type, job)`
+sends a Scope Engine record to the Scope Engine. Contract: `docs/job-scope-record.md`.
+Guards: `modules/job-scope-record.test.cjs`, `tests/e2e/ops-job-page-scope-engine.spec.js`.
+
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 
 The fence-designer scoping tool writes every internal note into
@@ -850,6 +865,23 @@ stays disabled until `#confirmAck` is ticked, so specs must
 `_moveToWeekAfter` moves the Pay hub and picker on to the next week. Do not add a
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
+
+A running draft for that same week is off unless `my_hours.running_invoice_draft`
+is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
+one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
+GST, super and the weekly deduction are still worked out only on submit.
+Search `modules/trade-invoice-running-draft.js`. Guards:
+`scripts/test-trade-invoice-running-draft.js`,
+`tests/e2e/trade-invoice-running-draft.spec.js`.
+
+A daily hours nudge uses that same flag (`// <daily-hours-nudge>`,
+`modules/trade-daily-hours-nudge.js`). Calendar and Pay show "Add today's
+hours" when a job today has no start and finish on the draft. One tap opens
+this week's invoice on that day. "Not today" hides it until tomorrow. It reads
+`get_running_invoice_draft` and never calls `generate_trade_invoice`. A failed
+read stays hidden. Guards: `scripts/test-trade-daily-hours-nudge.js`,
+`tests/e2e/trade-daily-hours-nudge.spec.js`.
 
 ## Trade variation request: trade requests, office approves (`trade.html`)
 

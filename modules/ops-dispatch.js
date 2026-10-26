@@ -395,8 +395,11 @@
   // ── v2 slice 3: the header rail's rules ──
 
   // A track's stages from the latest board answer, else the fixed lists.
-  function trackStages(b) {
-    var seen = state.stagesSeen && state.stagesSeen[b.track];
+  // stages: a board answer's own stages (the job page's read), else the
+  // latest the list saw.
+  function trackStages(b, stages) {
+    var all = stages || state.stagesSeen;
+    var seen = all && all[b.track];
     var list = Array.isArray(seen) && seen.length ? seen : (BOARD_STAGES[b.track] || []);
     return list.filter(function (s) { return s && text(s.key); }).map(function (s) { return { key: text(s.key), label: text(s.label) || keyWords(s.key) }; });
   }
@@ -537,6 +540,13 @@
   function scopeFacts(scope_json, jobType) {
     var scope = parseScope(scope_json);
     if (!scope || typeof scope !== 'object') return [];
+    // A Scope Engine record reads through the one scope reader (modules/job-scope-record.js).
+    var rec = global.JobScopeRecord ? global.JobScopeRecord.read({ type: jobType, scope_json: scope }) : null;
+    if (rec && rec.kind === 'engine-patio') {
+      var out = [];
+      if (rec.revision && rec.revision.n != null) out.push(['Revision', global.JobScopeRecord.revisionWords(rec)]);
+      return out.concat(rec.inputs.map(function (f) { return [f.label, f.value]; }));
+    }
     var facts = [];
     if (jobType === 'fencing' || hasFenceShape(scope)) {
       var fenceJob = scope.job || {};
@@ -5846,5 +5856,81 @@
     loadTray();
   }
 
-  global.OpsDispatch = { show: show };
+  // ── The job page (ops.html Overview): one job's Dispatch stage ──
+  // A job page open reads its stage once (cached a minute per job): the v2
+  // board searched by the job number, Active first and Archive only when the
+  // job is not there, through the same rowsFromBoard checks as the list, so
+  // the page can never draw a stage Dispatch would not. The stage is the job's
+  // real pipeline (or Repairs) stage, the same as the Dispatch header rail. A
+  // failed read says so and is not cached; it never reads as "not listed".
+  var stageReads = {};
+  function boardSearch(view, num, jobId) {
+    return Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, board: 'v2', view: view, search: num }); }).then(function (resp) {
+      var got = rowsFromBoard(resp);
+      var row = null;
+      got.rows.forEach(function (r) { if (r.id === jobId) row = r; });
+      return { row: row, stages: got.stages };
+    });
+  }
+
+  function stageForJob(job) {
+    var num = job ? text(job.job_number) : '';
+    if (!job || !job.id || !num) return Promise.resolve({ status: 'unknown' });
+    var hit = stageReads[job.id];
+    if (hit && Date.now() - hit.at < 60000) return hit.p;
+    var p = boardSearch('active', num, job.id).then(function (got) {
+      return got.row ? got : boardSearch('archive', num, job.id);
+    }).then(function (got) {
+      return got.row ? { status: 'ok', row: got.row, stages: got.stages } : { status: 'not_listed' };
+    }).catch(function () { return { status: 'error' }; });
+    stageReads[job.id] = { at: Date.now(), p: p };
+    p.then(function (r) { if (r.status === 'error' && stageReads[job.id] && stageReads[job.id].p === p) delete stageReads[job.id]; });
+    return p;
+  }
+
+  // The card the job page shows for that answer: the track's stops, where the
+  // job is and its next step. '' when there is nothing to say.
+  function stageCardHtml(result) {
+    if (!result || result.status === 'unknown') return '';
+    var body;
+    if (result.status === 'error') body = '<div style="font-size:12px;color:var(--sw-red);">Could not read the Dispatch stage.</div>';
+    else if (result.status === 'not_listed') body = '<div style="font-size:12px;color:var(--sw-text-sec);">Not on the Dispatch list.</div>';
+    else {
+      var row = result.row || {}, b = row.board || {};
+      var stops = trackStages(b, result.stages);
+      var now = 0;
+      stops.forEach(function (st, i) { if (st.key === b.stage_key) now = i + 1; });
+      // Archived (moved past Scheduled): every stop is done.
+      var after = b.stage_phase === 'after';
+      var bars = stops.map(function (st, i) {
+        var n = i + 1, at = !after && n === now, done = after || n < now;
+        var bg = done ? 'var(--sw-green)' : at ? 'var(--sw-orange)' : 'var(--sw-light)';
+        return '<div data-dispatch-stop="' + esc(st.key) + '"' + (at ? ' aria-current="step"' : '') + ' style="flex:1;min-width:0;">' +
+          '<div style="height:4px;background:' + bg + ';margin-bottom:4px;"></div>' +
+          '<div style="font-size:10px;line-height:1.25;color:' + (at ? 'var(--sw-dark)' : 'var(--sw-text-sec)') + ';font-weight:' + (at ? 700 : 500) + ';">' + esc(st.label) + '</div></div>';
+      }).join('');
+      var line = (b.track === 'repairs' ? 'Repairs stage: ' : 'Pipeline stage: ') + (text(b.stage_label) || keyWords(b.stage_key)) + (after ? ' · in the Dispatch archive' : '');
+      var next = text(row.dispatch_next_step);
+      body = '<div style="font-size:13px;color:var(--sw-text);margin-bottom:8px;">' + esc(line) + '</div>' +
+        '<div style="display:flex;gap:4px;">' + bars + '</div>' +
+        (next ? '<div style="font-size:12px;color:var(--sw-text);margin-top:8px;">Next step: ' + esc(next) + '</div>' : '');
+    }
+    var open = result.status === 'ok' ? '<a href="#dispatch" data-open-dispatch="1" style="font-size:11px;color:var(--sw-mid);">Open in Dispatch &#8599;</a>' : '';
+    return '<div data-dispatch-card="1" style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.5px;">Dispatch</div>' + open + '</div>' +
+      body + '</div>';
+  }
+
+  // Open a job in Dispatch: the page then shows the Dispatch tab and this job.
+  // A job the lists have not loaded yet is picked up when Active loads.
+  function openJob(jobId) {
+    if (!jobId) return;
+    writeStore('sessionStorage', SS_JOB, jobId);
+    var row = rowById(jobId);
+    if (row) { selectJob(row); return; }
+    state.jobId = null;
+    state.row = null;
+  }
+
+  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob };
 })(window);

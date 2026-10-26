@@ -347,6 +347,26 @@ A trade who hires a ute from us has a weekly amount taken off what he is paid. o
 - **Ops, Financials > Trade Bills.** What the office sees (amount payable, label and amount, the not-taken reason at every status) is owned by `ops-dashboard.md` → "A trade's weekly deduction".
 - **Guards.** `scripts/test-trade-my-money.js` (the readers, My money row and period cards, history row, and what the Weekly Invoice says before submit from `my_hours` and from a draft save) and `tests/e2e/trade-invoice-recurring-deduction.spec.js`. `tests/e2e/trade-weekly-work-order-invoice.spec.js` holds the Work Order Invoice to its three total rows as they were before this change.
 
+### Pay tab: a saved weekly draft (Hugo, 2026-10-24)
+
+The job-centric Weekly Invoice can keep a draft on the person's account. It is off until `my_hours` returns `running_invoice_draft: true`, which ops-api reads from `users.trade_details.runningInvoiceDraft`. `?invdraft=1` (stored as `localStorage.sw_inv_running_draft`) shows the Save button on that browser; `?invdraft=0` hides it. The server still refuses the save until that person's flag is on.
+
+Save (`#invSaveBtn`, `saveRunningInvoiceDraft`) posts `save_running_invoice_draft` with the screen snapshot (`draft_builder`: job cards, extras, amounts, notes, GST choice, week). It does not call `generate_trade_invoice`, does not create or authorise a Xero bill, and does not notify anyone. Submit stays `#invSubmitBtn` / `submitJobCentricInvoice`. Leaving with unsaved changes asks to save; autosave posts the same action. Reopening the week calls `get_running_invoice_draft` and shows that snapshot. The phone's `sessionStorage` draft remains a backup for the same visit.
+
+Approved work for the week is added once (`mergeApproved`): a work order, an assignment, or a job on a day. A line already on the draft, dismissed from it, or already on a sent invoice in any week is not added again. GST, super and the weekly deduction are unchanged and are still worked out only when the person submits. The draft header is marked so those figures are not treated as the payable amount.
+
+An agent calls `agent_save_running_invoice_draft` (ops-api, not this repo). That path only stores a draft, marks it `created_by_agent`, and the screen says an assistant drafted lines and only the person can send it. There is no agent submit. This repo does not host the MCP tools; the action is the contract for that tool.
+
+Guards: `scripts/test-trade-invoice-running-draft.js`, `tests/e2e/trade-invoice-running-draft.spec.js`. Migration: `supabase/migrations/20261024120000_trade_invoice_running_draft.sql`, applied on the backend project by Marnin, not from this app. The ops-api handler and the `index.ts` wiring are in `docs/trade-invoice-running-draft/` for that backend repo. This app does not deploy ops-api.
+
+### Pay tab: a daily nudge to log today's hours (Hugo, 2026-10-24)
+
+Same switch as the saved draft. Off for everyone else. On Calendar (and on the Pay hub) a card says "Add today's hours" when a job scheduled today does not yet have a start and finish on the draft. One tap opens this week's invoice on that day. "Check your draft" scrolls to Save. "Not today" hides the card until tomorrow (Perth), stored on this phone as `sw_hours_nudge_off`. It goes away once every job today has those times, or the week is already submitted.
+
+What counts as logged is the draft line: `work_date` today plus start and finish. Clock on and off, and the job-view hours row (`log_my_job_hours`), still do not put time on the invoice. Accepting a job is unchanged. The draft's suggested work already includes scheduled, confirmed, in-progress and complete assignments for the week.
+
+No new ops-api action. The card reads `my_hours.running_invoice_draft` and `get_running_invoice_draft`. If that read fails, the card stays hidden. It never calls `generate_trade_invoice`. Guards: `scripts/test-trade-daily-hours-nudge.js`, `tests/e2e/trade-daily-hours-nudge.spec.js`.
+
 ### Pay tab — Work Order mode labour lines (reconciliation and direct billing)
 - A WO-mode job card on the Pay tab invoice builder carries `wo_allocated` plus structured deduct lines (`wo_labour_lines` and `wo_lump_lines`). Hourly crew lines stay `{trade_name, hours, rate, amount}`. Work-order amounts Henry pays other trades are `{trade_name, line_kind: 'wo_pass_through', amount}` (prefilled from `negative_charges` when the job-centric builder hydrates `my_work_orders`). Freeform job deducts are `{description, amount, line_kind: 'lump_sum'}`. Hours-mode cards on the same builder expose the same `{description, amount}` lines next to the date and time fields — any job-centric trade can add them; they submit as negative `extra_items` (`source: 'invoice_final_deduction'`) plus `final_deductions`, not as `wo_lump_lines` on a work-order extra. The holder's payable line is always **net = WO allocated − Σ deducts**; hourly prose stays `WO $559.5 − labour [Tendo 11.5h×$25=$287.5]=net $272`, pass-throughs add `− WO trades [Israel $40]`, and lump sums add `− other [Materials $10]`.
 - The structured lines are the money contract, not decoration: ops-api `generate_trade_invoice` persists them on the holder's `trade_invoice_lines` row for office reconciliation. The labour is deducted from the holder's invoice and shown to the office; each named crew member bills SecureWorks Group directly. No automatic payout invoice is created for the named crew.
@@ -462,6 +482,10 @@ The user (Marnin) wants this enforced: **no approved PO = no purchase allowed**.
 6. Trade buys materials per PO, photographs receipt → linked to PO
 7. Ops can verify receipt matches PO in job detail
 8. Bookkeeper enters into Xero with proper job/project coding
+
+## Password reset (2026-10-24)
+
+Crew reset their own password from Trade Login ("Forgot password?"). The app calls `resetPasswordForEmail` with `redirectTo` set to this page (`https://secureworks-group.github.io/secureworks-ux/trade.html` when it is not already open as `trade.html`). A recovery link (`type=recovery`, or a Supabase auth error in the URL) stays on "Set a new password" until `updateUser` succeeds, then opens the app. Profile has the same 8-character change for someone already signed in. The neutral confirmation is always "If that email has an account, we've sent a reset link." The hosted allow-list is the Supabase dashboard URL configuration; `secureworks-backend` `supabase/config.toml` is the repo record and is not applied by CI.
 
 ## Job view layout truth (2026-09-09)
 - The Scope / Files / Photos / Log tab bar is wrapped in `.jd-tabs-wrap`, sticky at `top: var(--sw-header-h)`. The app header is also sticky (z-index 100), so a `top: 0` tab bar used to slide underneath it on scroll. `--sw-header-h` is set from the real header height by a ResizeObserver near the iOS keyboard handler.

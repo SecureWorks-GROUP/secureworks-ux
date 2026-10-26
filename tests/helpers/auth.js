@@ -32,8 +32,39 @@ async function installSupabaseAuthStub(page, {
         const auth = {
           onAuthStateChange(listener) {
             listeners.push(listener);
-            setTimeout(() => listener('INITIAL_SESSION', session), 0);
+            setTimeout(() => {
+              listener('INITIAL_SESSION', session);
+              const hash = window.location.hash || '';
+              if (hash.indexOf('type=recovery') !== -1 && !session) {
+                const recovery = Object.values(USERS).map((record) => record.user).find((user) => user.id === 'e2e-installer')
+                  || Object.values(USERS)[0].user;
+                session = {
+                  access_token: 'e2e-recovery-token',
+                  refresh_token: 'e2e-refresh-token',
+                  expires_in: 3600,
+                  token_type: 'bearer',
+                  user: recovery
+                };
+                listener('PASSWORD_RECOVERY', session);
+              }
+            }, 0);
             return { data: { subscription: { unsubscribe() {} } } };
+          },
+          async resetPasswordForEmail(email, options) {
+            window.__swResetCalls = window.__swResetCalls || [];
+            window.__swResetCalls.push({
+              email,
+              redirectTo: options && options.redirectTo
+            });
+            return { data: {}, error: null };
+          },
+          async updateUser(attrs) {
+            if (!session || !session.user) {
+              return { data: { user: null }, error: { message: 'Auth session missing!' } };
+            }
+            window.__swPasswordUpdates = window.__swPasswordUpdates || [];
+            window.__swPasswordUpdates.push(attrs && attrs.password ? String(attrs.password).length : 0);
+            return { data: { user: session.user }, error: null };
           },
           async signInWithPassword({ email, password }) {
             const record = USERS[String(email || '').toLowerCase()];

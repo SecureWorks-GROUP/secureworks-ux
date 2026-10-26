@@ -6504,6 +6504,52 @@ function moneyOrNull(v) {
   return isFinite(n) ? n : null;
 }
 
+// The first money figure that is on the record, or null (INT-37). A true 0
+// counts; a missing, blank or non-number field does not.
+function firstMoney() {
+  for (var i = 0; i < arguments.length; i++) {
+    var n = moneyOrNull(arguments[i]);
+    if (n != null) return n;
+  }
+  return null;
+}
+// A job's quote value inc GST from pricing_json (patio at the root, fencing
+// under totals), or null when the quote has no total. jobs.value is tried first
+// only when above 0, because an unpriced job stores 0 there by default.
+function quoteValueOf(pj, jobValue) {
+  if (Number(jobValue) > 0) return Number(jobValue);
+  if (!pj) return null;
+  var t = pj.totals || {};
+  return firstMoney(pj.totalIncGST, pj.total, t.total_inc_gst, t.totalIncGst);
+}
+// The cost estimate on a quote, or null.
+function costEstimateOf(pj) {
+  return pj ? firstMoney(pj.costEstimate, pj.totalCost, pj.cost) : null;
+}
+// A sum of money fields that never hides a missing one: { sum, missing } where
+// sum adds the rows that have a figure and missing counts the rows that do not.
+function moneySum(rows, field) {
+  var out = { sum: 0, missing: 0 };
+  (rows || []).forEach(function(r) {
+    var n = moneyOrNull(r && r[field]);
+    if (n == null) out.missing++; else out.sum += n;
+  });
+  return out;
+}
+// A line's total: its own total when it has one, else quantity x unit price,
+// else null (INT-37). A true 0 stays 0.
+function lineTotalOf(total, qty, unit) {
+  var t = moneyOrNull(total);
+  if (t != null) return t;
+  var u = moneyOrNull(unit);
+  return u == null ? null : qty * u;
+}
+// A moneySum in words: the sum, or "At least $X (N POs with no total)".
+function moneySumText(ms, noun) {
+  if (!ms.missing) return fmt$(ms.sum);
+  return 'At least ' + fmt$(ms.sum) + ' (' + ms.missing + ' ' + (noun || 'PO') + (ms.missing === 1 ? '' : 's') + ' with no total)';
+}
+
 function fmtTime(t) {
   if (!t) return '';
   return t.slice(0, 5);
@@ -8088,10 +8134,10 @@ function renderActionableItems(pipelineData, summaryData) {
   var completeJobs = cols.complete || [];
   completeJobs.forEach(function(j) {
     var daysSince = j.completed_at ? Math.floor((now - new Date(j.completed_at).getTime()) / 86400000) : 0;
-    var quoteVal = j.value || j.pricing_json?.totalIncGST || 0;
+    var quoteVal = quoteValueOf(j.pricing_json, j.value);
     urgent.push({
       title: (j.job_number || '') + (j.job_number && j.client_name ? ' — ' : '') + (j.client_name || 'Unknown'),
-      detail: fmt$(quoteVal) + ' &middot; ' + daysSince + 'd since completion',
+      detail: fmt$(quoteVal, 'no quote total') + ' &middot; ' + daysSince + 'd since completion',
       type: 'not_invoiced',
       jobId: j.id,
       btnLabel: 'Create Invoice',
@@ -8177,10 +8223,10 @@ function renderActionableItems(pipelineData, summaryData) {
   quotedJobs.forEach(function(j) {
     var daysSince = j.created_at ? Math.floor((now - new Date(j.created_at).getTime()) / 86400000) : 0;
     if (daysSince >= 14) {
-      var quoteVal = j.value || j.pricing_json?.totalIncGST || 0;
+      var quoteVal = quoteValueOf(j.pricing_json, j.value);
       action.push({
         title: (j.job_number || '') + (j.job_number && j.client_name ? ' — ' : '') + (j.client_name || 'Unknown'),
-        detail: fmt$(quoteVal) + ' &middot; Sent ' + daysSince + ' days ago',
+        detail: fmt$(quoteVal, 'no quote total') + ' &middot; Sent ' + daysSince + ' days ago',
         type: 'stale_quote',
         jobId: j.id,
         btnLabel: 'Follow Up',
@@ -9757,7 +9803,7 @@ function guessDivision(ev) {
 // ── Summary Bar (management metrics) ──
 function renderCalSummary(range) {
   var dates = getCalDays(range);
-  var lockedReady = 0, lockedExposed = 0, tentativeCount = 0, revenue = 0;
+  var lockedReady = 0, lockedExposed = 0, tentativeCount = 0, revenue = 0, revenueMissing = 0;
   var countedJobs = {};
   var conflictCount = 0;
 
@@ -9796,16 +9842,16 @@ function renderCalSummary(range) {
         else if (isLocked && !isReady) lockedExposed++;
         else tentativeCount++;
 
-        // Revenue from pricing_json
-        var val = 0;
+        // Revenue from pricing_json; a job with no quote total is counted, not added as $0 (INT-37)
+        var val = null;
         if (ev.pricing_json) {
           try {
             var pj = typeof ev.pricing_json === 'string' ? JSON.parse(ev.pricing_json) : ev.pricing_json;
-            val = parseFloat(pj.totalIncGST || pj.total || 0) || 0;
+            val = quoteValueOf(pj);
           } catch(e) {}
         }
-        if (!val) val = ev.quote_value || 0;
-        revenue += val;
+        if (!val && moneyOrNull(ev.quote_value) != null) val = moneyOrNull(ev.quote_value);
+        if (val == null) revenueMissing++; else revenue += val;
       }
     }
   });
@@ -9818,8 +9864,8 @@ function renderCalSummary(range) {
   html += '<span class="stat" style="color:#EF4444"><span class="stat-val">' + lockedExposed + '</span> Confirmed — Not Ready</span>';
   html += '<span class="stat" style="color:#F59E0B"><span class="stat-val">' + tentativeCount + '</span> Planned</span>';
   html += '<span class="stat"><span class="stat-val">' + unschedCount + '</span> Unscheduled</span>';
-  if (revenue > 0) {
-    html += '<span class="stat" style="margin-left:auto;"><span class="stat-val">$' + Math.round(revenue).toLocaleString() + '</span> revenue</span>';
+  if (revenue > 0 || revenueMissing) {
+    html += '<span class="stat" style="margin-left:auto;"><span class="stat-val">' + (revenueMissing ? 'At least ' : '') + '$' + Math.round(revenue).toLocaleString() + '</span> revenue' + (revenueMissing ? ' (' + revenueMissing + ' job' + (revenueMissing === 1 ? '' : 's') + ' with no quote total)' : '') + '</span>';
   }
   if (conflictCount > 0) {
     html += '<span class="conflict-warn" onclick="highlightConflicts()">&#9888; ' + conflictCount + ' conflict' + (conflictCount > 1 ? 's' : '') + '</span>';
@@ -10652,6 +10698,7 @@ function renderCalUnschedSidebar() {
     html += '<div class="cal-unsched-group">';
     html += '<div class="cal-unsched-group-title">' + (groupLabels[type] || type) + '</div>';
     jobs.forEach(function(j) {
+      // Kept (INT-37): the value shows only when above $0.
       var val = j.value || 0;
       var daysAccepted = j.accepted_at ? Math.floor((Date.now() - new Date(j.accepted_at).getTime()) / 86400000) : 0;
       var isStale = daysAccepted > 7;
@@ -11284,6 +11331,7 @@ function openCalJobPopup(event, assignmentId) {
     h += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + _calPopupTypeText + '</span></div>';
     h += '<div class="jd-qv-row"><span class="jd-qv-label">Status</span><span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span></div>';
 
+    // Kept (INT-37): the Quote row shows only when there is a total above $0, so a missing one is never shown as $0.
     var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
     if (quoteVal) h += '<div class="jd-qv-row"><span class="jd-qv-label">Quote</span><strong style="color:var(--sw-green)">' + fmt$(quoteVal) + '</strong></div>';
 
@@ -17833,12 +17881,12 @@ function invoiceActions(inv) {
 
   if (status === 'DRAFT') {
     return '<button class="btn btn-sm btn-green" onclick="approveInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\')">Approve</button> ' +
-           '<button class="btn btn-sm btn-red" onclick="deleteInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + (inv.total || 0) + ')">Delete</button>';
+           '<button class="btn btn-sm btn-red" onclick="deleteInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + JSON.stringify(moneyOrNull(inv.total)) + ')">Delete</button>';
   }
   if (status === 'AUTHORISED' || status === 'SUBMITTED') {
     if (hasPaid) return '<span style="color:var(--sw-text-sec);font-size:12px;">Has payment</span>';
     return '<button class="btn btn-sm btn-blue" onclick="sendInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\')">Send</button> ' +
-           '<button class="btn btn-sm btn-red" onclick="voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + (inv.total || 0) + ')">Void</button>';
+           '<button class="btn btn-sm btn-red" onclick="voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + JSON.stringify(moneyOrNull(inv.total)) + ')">Void</button>';
   }
   if (status === 'PAID') return '<span style="color:var(--sw-text-sec);font-size:12px;">Paid (Xero)</span>';
   if (status === 'VOIDED' || status === 'DELETED') return '<span style="color:var(--sw-text-sec);font-size:12px;">&mdash;</span>';
@@ -17919,8 +17967,8 @@ function showGlobalInvoicePreview(inv) {
     lineItems.forEach(function(li) {
       var desc = li.Description || li.description || '';
       var qty = li.Quantity || li.quantity || 1;
-      var unitPrice = li.UnitAmount || li.unit_price || 0;
-      var lineTotal = li.LineAmount || li.total || (qty * unitPrice);
+      var unitPrice = firstMoney(li.UnitAmount, li.unit_price);
+      var lineTotal = lineTotalOf(firstMoney(li.LineAmount, li.total), qty, unitPrice);
       html += '<tr style="border-bottom:1px solid var(--sw-border);"><td style="padding:6px 4px;">' + escapeHtml(desc) + '</td><td style="padding:6px 4px;text-align:right;">' + qty + '</td><td style="padding:6px 4px;text-align:right;font-family:var(--sw-font-num);">' + fmt$(unitPrice) + '</td><td style="padding:6px 4px;text-align:right;font-family:var(--sw-font-num);font-weight:600;">' + fmt$(lineTotal) + '</td></tr>';
     });
     html += '</tbody></table>';
@@ -17952,11 +18000,11 @@ function showGlobalInvoicePreview(inv) {
   if (!isPaid && inv.status !== 'VOIDED' && inv.status !== 'DELETED') {
     html += '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--sw-border);">';
     if (isDraft) {
-      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');approveInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',\'' + (inv.reference||'').replace(/'/g,"\\'") + '\',' + (inv.total||0) + ')" style="background:var(--sw-green);color:#fff;font-size:11px;">Approve</button>';
-      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');deleteInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',' + (inv.total||0) + ')" style="background:var(--sw-red);color:#fff;font-size:11px;">Delete</button>';
+      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');approveInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',\'' + (inv.reference||'').replace(/'/g,"\\'") + '\',' + JSON.stringify(moneyOrNull(inv.total)) + ')" style="background:var(--sw-green);color:#fff;font-size:11px;">Approve</button>';
+      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');deleteInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',' + JSON.stringify(moneyOrNull(inv.total)) + ')" style="background:var(--sw-red);color:#fff;font-size:11px;">Delete</button>';
     } else {
       html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');sendInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\')" style="background:#2196F3;color:#fff;font-size:11px;">Send</button>';
-      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',' + (inv.total||0) + ')" style="background:var(--sw-red);color:#fff;font-size:11px;">Void</button>';
+      html += '<button class="btn btn-sm" onclick="closeModal(\'invoicePreviewModal\');voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number||'') + '\',' + JSON.stringify(moneyOrNull(inv.total)) + ')" style="background:var(--sw-red);color:#fff;font-size:11px;">Void</button>';
     }
     html += '</div>';
   }
@@ -18009,7 +18057,7 @@ function _openInvAction(title, bodyHtml, btnClass, btnLabel, onConfirm) {
 
 async function deleteInvoice(xeroId, invNumber, total) {
   _openInvAction('Delete Draft Invoice',
-    'This will permanently delete <b>' + invNumber + '</b> ($' + (total||0).toLocaleString('en-AU', {minimumFractionDigits:2}) + ') from Xero.<br><br>This cannot be undone.',
+    'This will permanently delete <b>' + invNumber + '</b> (' + (moneyOrNull(total) != null ? fmt$(total) : 'amount unknown') + ') from Xero.<br><br>This cannot be undone.',
     'btn-danger', 'Delete',
     async function() {
       var result = await opsPost('void_invoice', { xero_invoice_id: xeroId });
@@ -18021,7 +18069,7 @@ async function deleteInvoice(xeroId, invNumber, total) {
 
 async function voidInvoice(xeroId, invNumber, total) {
   _openInvAction('Void Invoice',
-    'This will void <b>' + invNumber + '</b> ($' + (total||0).toLocaleString('en-AU', {minimumFractionDigits:2}) + ') in Xero.<br><br>The invoice will be marked as VOIDED and removed from your receivables. This cannot be undone.',
+    'This will void <b>' + invNumber + '</b> (' + (moneyOrNull(total) != null ? fmt$(total) : 'amount unknown') + ') in Xero.<br><br>The invoice will be marked as VOIDED and removed from your receivables. This cannot be undone.',
     'btn-danger', 'Void Invoice',
     async function() {
       var result = await opsPost('void_invoice', { xero_invoice_id: xeroId, void: true });
@@ -18232,8 +18280,8 @@ function renderQuoteTable(quotes) {
   var html = '';
   filtered.forEach(function(q) {
     var qs = getQuoteStatus(q);
-    var total = 0;
-    try { total = q.pricing_json ? (q.pricing_json.totals ? (q.pricing_json.totals.total_inc_gst || q.pricing_json.totals.totalIncGst || 0) : (q.pricing_json.totalIncGST || q.pricing_json.total || 0)) : 0; } catch(e) {}
+    var total = null;
+    try { total = quoteValueOf(q.pricing_json); } catch(e) {}
     html += '<tr style="cursor:pointer;" onclick="openJobPeek(\'' + q.id + '\')">';
     html += '<td><strong>' + (q.job_number || '-') + '</strong></td>';
     html += '<td>' + (q.client_name || '-') + '</td>';
@@ -18241,7 +18289,7 @@ function renderQuoteTable(quotes) {
     html += '<td>' + (TYPE_LABELS[q.type] || q.type || '-') + '</td>';
     html += '<td><span class="status-badge ' + (STATUS_CLASSES[qs] || 'draft') + '">' + (STATUS_LABELS[qs] || qs) + '</span></td>';
     html += '<td>' + (q.quoted_at ? fmtDate(q.quoted_at.slice(0, 10)) : '-') + '</td>';
-    html += '<td style="font-family:var(--sw-font-num);">' + (total ? fmt$(total) : '-') + '</td>';
+    html += '<td style="font-family:var(--sw-font-num);">' + fmt$(total) + '</td>';
     html += '</tr>';
   });
   tbody.innerHTML = html;
@@ -18931,14 +18979,10 @@ function renderSentQuotesPanel() {
   html += '</tr></thead><tbody>';
 
   filtered.forEach(function(q) {
-    var total = 0;
+    var total = null;
     try {
       // Fencing quotes nest totals under pricing_json.totals; patio quotes store at root (totalIncGST / total)
-      total = q.pricing_json
-        ? (q.pricing_json.totals
-            ? (q.pricing_json.totals.total_inc_gst || q.pricing_json.totals.totalIncGst || 0)
-            : (q.pricing_json.totalIncGST || q.pricing_json.total || 0))
-        : (q.value || 0);
+      total = q.pricing_json ? quoteValueOf(q.pricing_json) : moneyOrNull(q.value);
     } catch(e) {}
     var sentDate = q.quoted_at ? fmtDate(q.quoted_at.slice(0, 10)) : (q.created_at ? fmtDate(q.created_at.slice(0, 10)) : '-');
     html += '<tr onclick="openJobPeek(\'' + q.id + '\')">';
@@ -18946,7 +18990,7 @@ function renderSentQuotesPanel() {
     html += '<td>' + (q.client_name || '-') + '</td>';
     html += '<td><span class="type-badge ' + (q.type || '') + '">' + (TYPE_LABELS[q.type] || q.type || '-') + '</span></td>';
     html += '<td style="white-space:nowrap;">' + sentDate + '</td>';
-    html += '<td style="font-family:var(--sw-font-num);">' + (total ? fmt$(total) : '-') + '</td>';
+    html += '<td style="font-family:var(--sw-font-num);">' + fmt$(total) + '</td>';
     html += '<td style="color:var(--sw-text-sec);">' + (q.site_suburb || '-') + '</td>';
     html += '</tr>';
   });
@@ -19752,7 +19796,7 @@ async function loadPendingPrices() {
       html += '<div class="today-card-main">';
       html += '<div class="today-card-title">' + (p.supplier_name || '') + ' — ' + (p.item_description || '').substring(0, 60) + '</div>';
       html += '<div class="today-card-detail">' + (p.material_category || 'uncategorized') + (p.material_code ? ' · ' + p.material_code : '') + ' · ' + (p.unit || '') + '</div>';
-      html += '<div class="today-card-meta">$' + Number(p.unit_price || 0).toFixed(2) + ' per ' + (p.unit || 'unit') + '</div>';
+      html += '<div class="today-card-meta">' + fmt$(moneyOrNull(p.unit_price)) + ' per ' + (p.unit || 'unit') + '</div>';
       html += '</div>';
       html += '<button class="today-card-btn green" onclick="confirmPriceItem(\'' + p.id + '\')">Confirm</button>';
       html += '<button class="today-card-btn outline" onclick="dismissPriceItem(\'' + p.id + '\')">Dismiss</button>';
@@ -20213,30 +20257,33 @@ function renderJobPeek(data) {
   html += '</div>';
 
   // ── Financials mini-section ──
-  var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
-  var poCostsTotal = (data.purchase_orders || []).reduce(function(s, po) { return s + (po.total || 0); }, 0);
+  var quoteVal = quoteValueOf(j.pricing_json);
+  var poSum = moneySum(data.purchase_orders, 'total');
+  var poCostsTotal = poSum.sum;
   // Only count ACCREC (sales) invoices, exclude voided/deleted
   var salesInvoices = (data.invoices || []).filter(function(inv) {
     return inv.invoice_type === 'ACCREC' && ['VOIDED','DELETED'].indexOf(inv.status) < 0;
   });
   var invoicedTotal = salesInvoices.reduce(function(s, inv) { return s + (parseFloat(inv.total) || 0); }, 0);
   var invoicePaid = salesInvoices.reduce(function(s, inv) { return s + (parseFloat(inv.amount_paid) || 0); }, 0);
-  var invoiceRemaining = Math.max(0, quoteVal - invoicedTotal);
-  if (quoteVal > 0 || poCostsTotal > 0 || invoicedTotal > 0) {
-    var margin = quoteVal > 0 ? ((quoteVal - poCostsTotal) / quoteVal * 100) : 0;
-    var marginColor = margin >= 25 ? 'var(--sw-green)' : margin >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
+  var invoiceRemaining = quoteVal == null ? null : Math.max(0, quoteVal - invoicedTotal);
+  if (quoteVal > 0 || poCostsTotal > 0 || poSum.missing > 0 || invoicedTotal > 0) {
+    // Margin only when the quote and every PO total are known (INT-37)
+    var marginKnown = quoteVal > 0 && !poSum.missing;
+    var margin = marginKnown ? ((quoteVal - poCostsTotal) / quoteVal * 100) : null;
+    var marginColor = !marginKnown ? 'var(--sw-text-sec)' : margin >= 25 ? 'var(--sw-green)' : margin >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
     html += '<div style="margin-bottom:16px; padding:10px; background:var(--sw-light); border-radius:8px; font-size:12px;">';
-    html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Quote value</span><strong>' + fmt$(quoteVal) + '</strong></div>';
+    html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Quote value</span><strong>' + fmt$(quoteVal, 'no quote total') + '</strong></div>';
     // Cost estimate from pricing_json vs actual PO spend
-    var costEstimate = j.pricing_json?.costEstimate || j.pricing_json?.totalCost || j.pricing_json?.cost || 0;
+    var costEstimate = costEstimateOf(j.pricing_json);
     if (costEstimate > 0) {
       html += '<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>Est. costs</span><strong style="color:var(--sw-text-sec);">' + fmt$(costEstimate) + '</strong></div>';
       var costDiff = poCostsTotal - costEstimate;
-      var costDiffLabel = costDiff > 0 ? 'Over by ' + fmt$(costDiff) : costDiff < 0 ? 'Under by ' + fmt$(Math.abs(costDiff)) : 'On target';
+      var costDiffLabel = poSum.missing ? (costDiff > 0 ? 'Over by at least ' + fmt$(costDiff) : 'not known yet') : costDiff > 0 ? 'Over by ' + fmt$(costDiff) : costDiff < 0 ? 'Under by ' + fmt$(Math.abs(costDiff)) : 'On target';
       var costDiffColor = costDiff > 0 ? 'var(--sw-red)' : 'var(--sw-green)';
-      html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>PO costs (actual)</span><strong style="color:var(--sw-red);">' + fmt$(poCostsTotal) + ' <span style="font-size:10px; color:' + costDiffColor + '">(' + costDiffLabel + ')</span></strong></div>';
+      html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>PO costs (actual)</span><strong style="color:var(--sw-red);">' + moneySumText(poSum) + ' <span style="font-size:10px; color:' + costDiffColor + '">(' + costDiffLabel + ')</span></strong></div>';
     } else {
-      html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>PO costs</span><strong style="color:var(--sw-red);">' + fmt$(poCostsTotal) + '</strong></div>';
+      html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>PO costs</span><strong style="color:var(--sw-red);">' + moneySumText(poSum) + '</strong></div>';
     }
     // Invoice running total with progress bar
     html += '<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>Invoiced</span><strong>' + fmt$(invoicedTotal) + '</strong></div>';
@@ -20246,12 +20293,12 @@ function renderJobPeek(data) {
       html += '<div style="height:100%; width:' + invPct + '%; background:var(--sw-green); border-radius:2px;"></div></div>';
     }
     html += '<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>Collected</span><strong style="color:var(--sw-green);">' + fmt$(invoicePaid) + '</strong></div>';
-    html += '<div style="display:flex; justify-content:space-between; margin-bottom:6px;"><span>Still to invoice</span><strong style="color:' + (invoiceRemaining > 0 ? 'var(--sw-orange)' : 'var(--sw-green)') + ';">' + fmt$(invoiceRemaining) + '</strong></div>';
+    html += '<div style="display:flex; justify-content:space-between; margin-bottom:6px;"><span>Still to invoice</span><strong style="color:' + (invoiceRemaining == null ? 'var(--sw-text-sec)' : invoiceRemaining > 0 ? 'var(--sw-orange)' : 'var(--sw-green)') + ';">' + fmt$(invoiceRemaining, 'no quote total') + '</strong></div>';
     if (quoteVal > 0) {
       var barPct = Math.min(100, poCostsTotal / quoteVal * 100);
       html += '<div style="height:6px; background:#e0e0e0; border-radius:3px; overflow:hidden;">';
       html += '<div style="height:100%; width:' + barPct + '%; background:' + marginColor + '; border-radius:3px;"></div></div>';
-      html += '<div style="text-align:right; margin-top:2px; font-weight:600; color:' + marginColor + ';">Margin: ' + margin.toFixed(0) + '%</div>';
+      html += '<div style="text-align:right; margin-top:2px; font-weight:600; color:' + marginColor + ';">Margin: ' + (marginKnown ? margin.toFixed(0) + '%' : 'Unknown (' + poSum.missing + ' PO' + (poSum.missing === 1 ? '' : 's') + ' with no total)') + '</div>';
     }
     html += '</div>';
   }
@@ -21109,15 +21156,15 @@ async function renderJarvisView(data) {
 
     // Payment short form (reuse sw_get_payment_truth logic client-side)
     var pricing = job.pricing_json || {};
-    var expectedTotal = Number(pricing.totalIncGST || 0);
+    var expectedTotal = quoteValueOf(pricing);
     var amountInvoiced = invoices.reduce(function(s, i) { return s + Number(i.total || 0); }, 0);
     var amountPaid = invoices.reduce(function(s, i) { return s + Number(i.amount_paid || 0); }, 0);
-    var outstanding = expectedTotal > 0 ? Math.max(0, expectedTotal - amountPaid) : 0;
+    var outstanding = expectedTotal > 0 ? Math.max(0, expectedTotal - amountPaid) : null;
     var paymentLine;
     if (!invoices.length) paymentLine = 'No invoice yet';
     else if (amountPaid === 0) paymentLine = '$' + Math.round(amountInvoiced).toLocaleString() + ' invoiced, owed';
     else if (expectedTotal && amountPaid >= expectedTotal - 1) paymentLine = 'Paid (Xero)';
-    else paymentLine = '$' + Math.round(amountPaid).toLocaleString() + ' paid (Xero) · $' + Math.round(outstanding).toLocaleString() + ' owed';
+    else paymentLine = '$' + Math.round(amountPaid).toLocaleString() + ' paid (Xero) · ' + (outstanding == null ? 'owed unknown (no quote total)' : '$' + Math.round(outstanding).toLocaleString() + ' owed');
 
     // Risk derivation — prefer intel, fallback to readiness
     var risk;
@@ -21665,10 +21712,12 @@ function evaluateJobAlerts(data) {
   }
 
   // 5. AMBER: PO costs > quote
-  var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
-  var poCosts = (data.purchase_orders || []).reduce(function(s, po) { return s + (po.total || 0); }, 0);
+  // A PO with no total can only add to the sum, so the known sum already over is "at least" (INT-37)
+  var quoteVal = quoteValueOf(j.pricing_json);
+  var poSum = moneySum(data.purchase_orders, 'total');
+  var poCosts = poSum.sum;
   if (quoteVal > 0 && poCosts > quoteVal) {
-    alerts.push({ level: 'amber', icon: '&#9888;', message: 'Over budget by ' + fmt$(poCosts - quoteVal), target: 'money' });
+    alerts.push({ level: 'amber', icon: '&#9888;', message: 'Over budget by ' + (poSum.missing ? 'at least ' : '') + fmt$(poCosts - quoteVal), target: 'money' });
   }
 
   // 6. AMBER: quoted for >14 days
@@ -22744,14 +22793,16 @@ function renderOverviewView(data) {
     scopeDesc = j.pricing_json.job_description.substring(0, 80);
   }
   html += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:8px;">' + escapeHtml(scopeDesc) + '</div>';
-  var quoteVal = j.pricing_json ? (j.pricing_json.totalIncGST || j.pricing_json.total || 0) : 0;
-  var poCosts = (data.purchase_orders || []).reduce(function(s, po) { return s + (po.total || 0); }, 0);
+  var quoteVal = quoteValueOf(j.pricing_json);
+  var poSum = moneySum(data.purchase_orders, 'total');
+  var poCosts = poSum.sum;
   var margin = quoteVal > 0 ? quoteVal - poCosts : 0;
   var marginPct = quoteVal > 0 ? (margin / quoteVal * 100).toFixed(0) : 0;
   var marginColor = marginPct >= 35 ? 'var(--sw-green)' : marginPct >= 25 ? 'var(--sw-yellow)' : 'var(--sw-red)';
   html += '<div style="display:flex;gap:16px;align-items:baseline;">';
-  html += '<span style="font-size:20px;font-weight:700;color:var(--sw-dark);font-family:var(--sw-font-num);">' + fmt$(quoteVal) + '</span>';
-  if (quoteVal > 0 && poCosts > 0) html += '<span style="font-size:13px;font-weight:600;color:' + marginColor + ';">' + marginPct + '% margin (' + fmt$(margin) + ')</span>';
+  html += '<span style="font-size:20px;font-weight:700;color:var(--sw-dark);font-family:var(--sw-font-num);">' + fmt$(quoteVal, 'no quote total') + '</span>';
+  // Margin only when every PO total is known (INT-37)
+  if (quoteVal > 0 && poCosts > 0 && !poSum.missing) html += '<span style="font-size:13px;font-weight:600;color:' + marginColor + ';">' + marginPct + '% margin (' + fmt$(margin) + ')</span>';
   html += '</div>';
   html += '<div style="margin-top:8px;font-size:11px;display:flex;gap:12px;">';
   if (j.type !== 'miscellaneous') {
@@ -23345,9 +23396,10 @@ function toggleQuoteDetailExpand(docId) {
 
 function renderMoneyView(data) {
   var j = data.job;
-  var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
-  var costEstimate = j.pricing_json?.costEstimate || j.pricing_json?.totalCost || j.pricing_json?.cost || 0;
-  var poCosts = (data.purchase_orders || []).reduce(function(s, po) { return s + (po.total || 0); }, 0);
+  var quoteVal = quoteValueOf(j.pricing_json);
+  var costEstimate = costEstimateOf(j.pricing_json);
+  var poSum = moneySum(data.purchase_orders, 'total');
+  var poCosts = poSum.sum;
   var salesInvoices = (data.invoices || []).filter(function(inv) {
     return inv.invoice_type === 'ACCREC' && ['VOIDED','DELETED'].indexOf(inv.status) < 0;
   });
@@ -23355,14 +23407,14 @@ function renderMoneyView(data) {
   var invoicePaid = salesInvoices.reduce(function(s, inv) { return s + (parseFloat(inv.amount_paid) || 0); }, 0);
   var margin = quoteVal > 0 ? quoteVal - poCosts : 0;
   var marginPct = quoteVal > 0 ? (margin / quoteVal * 100).toFixed(0) : 0;
-  var marginColor = marginPct >= 25 ? 'var(--sw-green)' : marginPct >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
+  var marginColor = poSum.missing ? 'var(--sw-text-sec)' : marginPct >= 25 ? 'var(--sw-green)' : marginPct >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
 
   var html = '<div class="jd-money-grid">';
 
   // Revenue column
   html += '<div class="jd-money-col">';
   html += '<div class="jd-money-heading">Revenue</div>';
-  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + fmt$(quoteVal) + '</strong></div>';
+  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + fmt$(quoteVal, 'no quote total') + '</strong></div>';
   // Quote breakdown — show what was actually quoted
   if (j.scope_json) {
     html += '<div style="font-size:11px;padding:6px 0 2px;border-top:1px solid var(--sw-border);margin-top:6px;color:var(--sw-text-sec);">';
@@ -23393,6 +23445,7 @@ function renderMoneyView(data) {
       var statusLabel = doc.accepted_at ? 'Accepted' : doc.sent_to_client ? (doc.viewed_at ? 'Viewed' : 'Sent') : 'Draft';
       var statusBg = doc.accepted_at ? 'var(--sw-green)' : doc.sent_to_client ? '#2196F3' : '#e0e0e0';
       var statusCol = doc.accepted_at || doc.sent_to_client ? '#fff' : '#333';
+      // Kept (INT-37): the total shows only when above $0, so a missing one is never shown as $0.
       var snapTotal = doc.data_snapshot_json?.totalIncGST || doc.data_snapshot_json?.total || 0;
 
       html += '<div class="jd-money-card" style="cursor:pointer;" onclick="toggleQuoteDetailExpand(\'' + doc.id + '\')">';
@@ -23412,7 +23465,7 @@ function renderMoneyView(data) {
         snapItems.forEach(function(item) {
           var iDesc = item.description || item.name || '';
           var iQty = item.quantity || item.qty || 1;
-          var iPrice = item.unit_price || item.unitPrice || item.price || 0;
+          var iPrice = firstMoney(item.unit_price, item.unitPrice, item.price);
           html += '<div style="display:flex;gap:6px;padding:2px 0;color:var(--sw-text-sec);"><span style="flex:1;">' + escapeHtml(iDesc) + '</span>';
           if (iQty > 1) html += '<span>' + iQty + 'x</span>';
           html += '<span style="font-weight:600;">' + fmt$(iPrice) + '</span></div>';
@@ -23437,7 +23490,7 @@ function renderMoneyView(data) {
   }
   html += '</div>';
   html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Collected</span><strong style="color:var(--sw-green)">' + fmt$(invoicePaid) + '</strong></div></div>';
-  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Still to Invoice</span><strong style="color:' + (quoteVal - invoicedTotal > 0 ? 'var(--sw-orange)' : 'var(--sw-green)') + '">' + fmt$(Math.max(0, quoteVal - invoicedTotal)) + '</strong></div></div>';
+  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Still to Invoice</span><strong style="color:' + (quoteVal == null ? 'var(--sw-text-sec)' : quoteVal - invoicedTotal > 0 ? 'var(--sw-orange)' : 'var(--sw-green)') + '">' + fmt$(quoteVal == null ? null : Math.max(0, quoteVal - invoicedTotal), 'no quote total') + '</strong></div></div>';
 
   // Individual invoices — expandable cards
   if (salesInvoices.length > 0) {
@@ -23479,8 +23532,8 @@ function renderMoneyView(data) {
         lineItems.forEach(function(li) {
           var desc = li.Description || li.description || '';
           var qty = li.Quantity || li.quantity || 1;
-          var unitPrice = li.UnitAmount || li.unit_price || 0;
-          var lineTotal = li.LineAmount || li.total || (qty * unitPrice);
+          var unitPrice = firstMoney(li.UnitAmount, li.unit_price);
+          var lineTotal = lineTotalOf(firstMoney(li.LineAmount, li.total), qty, unitPrice);
           var account = li.AccountCode || li.account_code || '';
           html += '<tr style="border-bottom:1px solid var(--sw-border);">';
           html += '<td style="padding:4px;white-space:pre-wrap;line-height:1.4;">' + escapeHtml(desc) + '</td>';
@@ -23522,10 +23575,10 @@ function renderMoneyView(data) {
   if (costEstimate > 0) {
     html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Est. Costs</span><strong style="color:var(--sw-text-sec)">' + fmt$(costEstimate) + '</strong></div></div>';
   }
-  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>PO Spend (Actual)</span><strong style="color:var(--sw-red)">' + fmt$(poCosts) + '</strong></div>';
+  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>PO Spend (Actual)</span><strong style="color:var(--sw-red)">' + moneySumText(poSum) + '</strong></div>';
   if (costEstimate > 0) {
     var diff = poCosts - costEstimate;
-    var diffLabel = diff > 0 ? 'Over by ' + fmt$(diff) : diff < 0 ? 'Under by ' + fmt$(Math.abs(diff)) : 'On target';
+    var diffLabel = poSum.missing ? (diff > 0 ? 'Over by at least ' + fmt$(diff) : 'Over or under not known yet') : diff > 0 ? 'Over by ' + fmt$(diff) : diff < 0 ? 'Under by ' + fmt$(Math.abs(diff)) : 'On target';
     var diffColor = diff > 0 ? 'var(--sw-red)' : 'var(--sw-green)';
     html += '<div class="jd-money-card-sub" style="color:' + diffColor + '">' + diffLabel + '</div>';
   }
@@ -23562,7 +23615,7 @@ function renderMoneyView(data) {
     html += '<div class="jd-margin-bar-wrap">';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;">Cost vs Quote</div>';
     html += '<div class="jd-margin-bar"><div class="jd-margin-bar-cost" style="width:' + costBarPct + '%;background:' + marginColor + '"></div>';
-    html += '<span class="jd-margin-bar-label" style="color:' + marginColor + '">Margin: ' + marginPct + '%</span></div>';
+    html += '<span class="jd-margin-bar-label" style="color:' + marginColor + '">Margin: ' + (poSum.missing ? 'Unknown (' + poSum.missing + ' PO' + (poSum.missing === 1 ? '' : 's') + ' with no total)' : marginPct + '%') + '</span></div>';
     html += '</div>';
   }
   document.getElementById('jdMoney').innerHTML = html;
@@ -24186,10 +24239,10 @@ async function loadLabourReconciliation(jobId) {
   try {
     var data = await opsFetch('labour_reconciliation', { job_id: jobId });
     var recon = data.reconciliation || data;
-    var budget = recon.labour_budget || 0;
+    var budget = moneyOrNull(recon.labour_budget);
     var hoursLogged = recon.hours_logged || 0;
-    var labourCost = recon.labour_cost || 0;
-    var remainder = budget - labourCost;
+    var labourCost = moneyOrNull(recon.labour_cost);
+    var remainder = budget == null || labourCost == null ? null : budget - labourCost;
     var trades = recon.trades || [];
 
     var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Labour Reconciliation</div>';
@@ -24207,7 +24260,7 @@ async function loadLabourReconciliation(jobId) {
     html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-red);">' + fmt$(labourCost) + '</div></div>';
     html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
     html += '<div style="font-size:11px;color:var(--sw-text-sec);">Remainder</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + fmt$(remainder) + '</div></div>';
+    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder == null ? 'var(--sw-text-sec)' : remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + fmt$(remainder) + '</div></div>';
     html += '</div>';
 
     // Trades table
@@ -24273,15 +24326,18 @@ function renderDispatchCards(job, pos) {
 }
 
 function renderScopeComparison(job, pos) {
-  var quoteVal = job.pricing_json ? (job.pricing_json.totalIncGST || job.pricing_json.total || 0) : 0;
-  var ordered = pos.reduce(function(s, po) { return s + (po.total || 0); }, 0);
-  var gap = quoteVal - ordered;
-  if (quoteVal <= 0 && ordered <= 0) return '';
-  var gapColor = gap > 0 ? 'var(--sw-orange)' : gap < 0 ? 'var(--sw-red)' : 'var(--sw-green)';
+  var quoteVal = quoteValueOf(job.pricing_json);
+  var ordSum = moneySum(pos, 'total');
+  var ordered = ordSum.sum;
+  if (!(quoteVal > 0) && ordered <= 0 && !ordSum.missing) return '';
+  // The gap needs the quote and every PO total (INT-37)
+  var gapKnown = quoteVal != null && !ordSum.missing;
+  var gap = gapKnown ? quoteVal - ordered : null;
+  var gapColor = !gapKnown ? 'var(--sw-text-sec)' : gap > 0 ? 'var(--sw-orange)' : gap < 0 ? 'var(--sw-red)' : 'var(--sw-green)';
   return '<div style="margin-top:10px;padding:8px 12px;background:var(--sw-light);border-radius:6px;font-size:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">' +
-    '<span><strong>Quote:</strong> ' + fmt$(quoteVal) + '</span>' +
-    '<span><strong>Ordered:</strong> ' + fmt$(ordered) + '</span>' +
-    '<span style="color:' + gapColor + ';font-weight:600;"><strong>Gap:</strong> ' + fmt$(Math.abs(gap)) + (gap > 0 ? ' remaining' : gap < 0 ? ' over' : ' matched') + '</span>' +
+    '<span><strong>Quote:</strong> ' + fmt$(quoteVal, 'no quote total') + '</span>' +
+    '<span><strong>Ordered:</strong> ' + moneySumText(ordSum) + '</span>' +
+    '<span style="color:' + gapColor + ';font-weight:600;"><strong>Gap:</strong> ' + (gapKnown ? fmt$(Math.abs(gap)) + (gap > 0 ? ' remaining' : gap < 0 ? ' over' : ' matched') : 'Unknown') + '</span>' +
     '</div>';
 }
 
@@ -25190,6 +25246,7 @@ async function showHoverPopover(anchor, jobId) {
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></div>';
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Status</span><span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span></div>';
 
+    // Kept (INT-37): the Quote row shows only when there is a total above $0, so a missing one is never shown as $0.
     var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
     if (quoteVal) html += '<div class="jd-qv-row"><span class="jd-qv-label">Quote</span><strong style="color:var(--sw-green)">' + fmt$(quoteVal) + '</strong></div>';
 
@@ -25694,6 +25751,7 @@ async function openJobQuickView(jobId) {
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></div>';
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Status</span><span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span></div>';
 
+    // Kept (INT-37): the Quote row shows only when there is a total above $0, so a missing one is never shown as $0.
     var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
     if (quoteVal) html += '<div class="jd-qv-row"><span class="jd-qv-label">Quote</span><strong style="color:var(--sw-green)">' + fmt$(quoteVal) + '</strong></div>';
 
@@ -26677,6 +26735,7 @@ function updatePOLineTotals() {
   var total = 0;
   rows.forEach(function(row) {
     var qty = parseFloat(row.querySelector('[data-field="quantity"]').value) || 0;
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var price = parseFloat(row.querySelector('[data-field="unit_price"]').value) || 0;
     var lineTotal = qty * price;
     total += lineTotal;
@@ -26707,6 +26766,7 @@ function updateInvLineTotals() {
   var total = 0;
   rows.forEach(function(row) {
     var qty = parseFloat(row.querySelector('[data-field="quantity"]').value) || 0;
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var price = parseFloat(row.querySelector('[data-field="unit_price"]').value) || 0;
     var lineTotal = qty * price;
     total += lineTotal;
@@ -26732,6 +26792,7 @@ function gatherPOData() {
     var qty = parseFloat(row.querySelector('[data-field="quantity"]').value) || 1;
     var unit = row.querySelector('[data-field="unit"]');
     var unitVal = unit ? unit.value : 'ea';
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var price = parseFloat(row.querySelector('[data-field="unit_price"]').value) || 0;
     if (desc || price > 0) lineItems.push({ description: desc, quantity: qty, unit: unitVal, unit_price: price });
   });
@@ -27188,6 +27249,7 @@ function addDepositPreset(pct) {
   if (!_invJobCache) return;
   var pricing = _invJobCache.pricing_json;
   if (typeof pricing === 'string') pricing = JSON.parse(pricing);
+  // Kept (INT-37): a missing total stops here with a message, so no deposit is worked out from $0.
   var totalIncGst = pricing ? (pricing.totalIncGST || pricing.total || 0) : 0;
   if (totalIncGst <= 0) { alert('No pricing data on this job.'); return; }
   var depositIncGst = Math.round(totalIncGst * (pct / 100) * 100) / 100;
@@ -27205,9 +27267,10 @@ function addBalancePreset() {
   if (!_invJobCache || !_invJobDetailCache) return;
   var pricing = _invJobCache.pricing_json;
   if (typeof pricing === 'string') pricing = JSON.parse(pricing);
-  var totalIncGst = pricing ? (pricing.totalIncGST || pricing.total || 0) : 0;
+  var totalIncGst = quoteValueOf(pricing);
   var invSummary = _invJobDetailCache.invoice_summary;
-  var remaining = invSummary ? invSummary.remaining_to_invoice : totalIncGst;
+  var remaining = moneyOrNull(invSummary ? invSummary.remaining_to_invoice : totalIncGst);
+  if (remaining == null) { alert('The balance is unknown: this job has no quote total.'); return; }
   if (remaining <= 0) { alert('No remaining balance to invoice.'); return; }
   var exGst = Math.round((remaining / 1.1) * 100) / 100;
   addInvLine('Balance Due — ' + (_invJobCache.job_number || ''), 1, exGst);
@@ -27222,6 +27285,7 @@ function gatherInvoiceData() {
   rows.forEach(function(row) {
     var desc = row.querySelector('[data-field="description"]').value;
     var qty = parseFloat(row.querySelector('[data-field="quantity"]').value) || 1;
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var price = parseFloat(row.querySelector('[data-field="unit_price"]').value) || 0;
     if (desc || price > 0) lineItems.push({ description: desc, quantity: qty, unit_price: price, account_code: '200' });
   });
@@ -27352,8 +27416,8 @@ async function openAcceptModal(jobId) {
     document.getElementById('acceptAddress').value = j.site_address || '';
     document.getElementById('acceptSuburb').value = j.site_suburb || '';
     document.getElementById('acceptType').value = j.type || '';
-    var val = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
-    document.getElementById('acceptValue').value = fmt$(val);
+    var val = quoteValueOf(j.pricing_json);
+    document.getElementById('acceptValue').value = fmt$(val, 'no quote total');
   } catch (e) {
     console.error('Failed to load job for acceptance review:', e);
   }
@@ -27801,9 +27865,11 @@ function renderStaticBrief(data, el) {
 
   var cni = data.complete_not_invoiced || [];
   if (cni.length > 0) {
-    var totalVal = cni.reduce(function(s, j) { return s + (j.value || 0); }, 0);
+    // An unpriced job stores 0 in jobs.value, so 0 counts as no figure here (INT-37)
+    var cniSum = { sum: 0, missing: 0 };
+    cni.forEach(function(j) { var v = quoteValueOf(j.pricing_json, j.value); if (v == null || v <= 0) cniSum.missing++; else cniSum.sum += v; });
     html += '<li><strong>' + cni.length + ' completed job' + (cni.length !== 1 ? 's' : '') + '</strong> not yet invoiced' +
-      (totalVal > 0 ? ' (' + fmt$(totalVal) + ')' : '') + '</li>';
+      (cniSum.sum > 0 ? ' (' + moneySumText(cniSum, 'job') + ')' : cniSum.missing ? ' (value unknown)' : '') + '</li>';
   }
 
   html += '</ul>';
@@ -27846,20 +27912,21 @@ async function openCascadeModal(jobId) {
     var pricing = job.pricing_json;
     if (typeof pricing === 'string') pricing = JSON.parse(pricing);
     if (pricing && (pricing.items || pricing.total)) {
-      var items = pricing.items || [{ description: 'Total', quantity: 1, unit_price: pricing.total || pricing.amount || 0 }];
+      var items = pricing.items || [{ description: 'Total', quantity: 1, unit_price: firstMoney(pricing.total, pricing.amount) }];
       var html = '';
       var total = 0;
+      var missing = 0;
       items.forEach(function(li) {
         var qty = li.quantity || li.qty || 1;
-        var price = li.unit_price || li.unitPrice || li.price || li.amount || 0;
-        var subtotal = qty * price;
-        total += subtotal;
+        var price = firstMoney(li.unit_price, li.unitPrice, li.price, li.amount);
+        var subtotal = price == null ? null : qty * price;
+        if (subtotal == null) missing++; else total += subtotal;
         html += '<div class="li-row">' +
           '<span>' + (li.description || li.name || 'Item') + ' &times; ' + qty + '</span>' +
           '<span>' + fmt$(subtotal) + '</span>' +
         '</div>';
       });
-      html += '<div class="li-total"><span>Total</span><span>' + fmt$(total) + '</span></div>';
+      html += '<div class="li-total"><span>Total</span><span>' + moneySumText({ sum: total, missing: missing }, 'line') + '</span></div>';
       itemsEl.innerHTML = html;
     } else {
       itemsEl.innerHTML = '<div style="padding:12px; color:var(--sw-yellow); font-size:13px;">No pricing data on this job. Invoice will need manual line items.</div>';
@@ -28192,15 +28259,15 @@ async function openXeroInvoiceModal(jobId) {
   var summaryEl = document.getElementById('invoiceJobSummary');
   if (job) {
     var pricing = job.pricing_json || {};
-    var total = pricing.totalIncGST || pricing.total || job.value || 0;
-    var exGst = total / 1.1;
+    var total = quoteValueOf(pricing, job.value);
+    var exGst = total == null ? null : total / 1.1;
     summaryEl.innerHTML =
       '<div style="font-weight:700;font-size:14px;">' + escapeHtml(job.job_number || '') + ' — ' + escapeHtml(job.client_name || '') + '</div>' +
       '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;">' + escapeHtml([job.site_address, job.site_suburb].filter(Boolean).join(', ')) + '</div>' +
       '<div style="margin-top:8px;display:flex;gap:16px;font-size:13px;">' +
       '<span><strong>Inc GST:</strong> ' + fmt$(total) + '</span>' +
       '<span><strong>Ex GST:</strong> ' + fmt$(exGst) + '</span>' +
-      '<span><strong>GST:</strong> ' + fmt$(total - exGst) + '</span>' +
+      '<span><strong>GST:</strong> ' + fmt$(total == null ? null : total - exGst) + '</span>' +
       '</div>';
 
     // Show line items preview
@@ -28210,7 +28277,7 @@ async function openXeroInvoiceModal(jobId) {
       items.forEach(function(li) {
         lhtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid var(--sw-border);">';
         lhtml += '<span>' + escapeHtml(li.description || '') + ' x' + (li.quantity || 1) + '</span>';
-        lhtml += '<span>' + fmt$(li.total || (li.quantity || 1) * (li.unit_price || 0)) + '</span>';
+        lhtml += '<span>' + fmt$(lineTotalOf(li.total, li.quantity || 1, li.unit_price)) + '</span>';
         lhtml += '</div>';
       });
       document.getElementById('invoiceLinePreview').innerHTML = lhtml;
@@ -28289,6 +28356,7 @@ function updateQQLineTotals() {
   var totalCost = 0;
   rows.forEach(function(row) {
     var inputs = row.querySelectorAll('input');
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var qty = parseFloat(inputs[1].value) || 0;
     var price = parseFloat(inputs[2].value) || 0;
     var cost = parseFloat(inputs[3].value) || 0;
@@ -28338,6 +28406,7 @@ function gatherQQData() {
   document.querySelectorAll('#qqLineBody tr').forEach(function(row) {
     var inputs = row.querySelectorAll('input');
     var sel = row.querySelector('select');
+    // Kept (INT-37): a box the user types in; an empty box is a $0 line they can see and change.
     var qty = parseFloat(inputs[1].value) || 0;
     var price = parseFloat(inputs[2].value) || 0;
     var cost = parseFloat(inputs[3].value) || 0;

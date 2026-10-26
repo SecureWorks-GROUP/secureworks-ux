@@ -9579,11 +9579,13 @@ var CalOpsCore = (function () {
     });
   }
   // Who and which days a removal takes off, for its one confirm: the crew by
-  // name (watchers are not crew) and every painted day, in order.
+  // name and every day they are painted, in order. Watchers are not crew, and
+  // their dates go stale when the job is moved, so neither counts them.
   function removalSummary(rows, nameOf) {
     var crew = {}, days = {};
     (rows || []).forEach(function(ev) {
-      if (!isGhost(ev)) crew[nameOf ? nameOf(ev) : (ev.crew_name || '')] = true;
+      if (isGhost(ev)) return;
+      crew[nameOf ? nameOf(ev) : (ev.crew_name || '')] = true;
       paintedSpanDates(ev.scheduled_date, spanEnd(ev)).forEach(function(d) { days[d] = true; });
     });
     return { crew: Object.keys(crew).sort(), days: Object.keys(days).sort() };
@@ -12284,7 +12286,7 @@ window.rescheduleLockedJob = function(assignmentId) {
 
 function removeAssignment(assignmentId) {
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
-  if (window.__SW_CAL_DRAGV2_ENABLED && _calViewMode === 'schedule' && ev && ev.job_id && CalOpsCore.isLiveJobRow(ev)) {
+  if (window.__SW_CAL_DRAGV2_ENABLED && ev && ev.job_id && CalOpsCore.isLiveJobRow(ev)) {
     removeJobFromCalendar(ev);
     return;
   }
@@ -12306,28 +12308,25 @@ function removeAssignment(assignmentId) {
   );
 }
 
-// <calendar-job-remove> The Schedule view's line is the whole job, so its
-// Remove takes the whole allocation off the calendar: every booking of the
+// <calendar-job-remove> Remove on a job's booking, in either view, takes the
+// whole allocation off the calendar: every booking of the
 // job on every day, each crew member's and each office watcher (ghost) row,
 // read through the job-scoped read (CalOpsCore.jobRemovalRows), after one
 // confirm naming the job, its crew and its days. The line comes off at once
 // and the deletes run behind it; any booking the server keeps (an invoiced
-// one) goes back on and is named by person and day. The Crew view's Remove
-// stays one person's booking.
+// one) goes back on and is named by person and day.
 async function removeJobFromCalendar(ev) {
   var jobId = ev.job_id;
   if (_calSavingJobs[jobId]) { showToast('Still saving the last change to this job', 'warning'); return; }
   var jobRows = await calJobRows(jobId);
   if (!jobRows) { showToast('Not removed - could not read this job\'s bookings. Try again.', 'warning'); return; }
   var rows = CalOpsCore.jobRemovalRows(CalOpsCore.jobRowsForPlan(_calEvents, jobRows, jobId));
-  if (!rows.length) { showToast('Nothing to remove - this job has no bookings left', 'warning'); return; }
   var sum = CalOpsCore.removalSummary(rows, crewDisplayName);
+  if (!sum.crew.length) { showToast('Nothing to remove - this job has no bookings left', 'warning'); return; }
   var title = ((ev.client_name || '').trim() + ' ' + (ev.job_number || '')).trim() || 'this job';
-  var what = sum.crew.length
-    ? sum.crew.length + ' crew across ' + CalOpsCore.dayListLabel(sum.days)
-    : 'every booking on ' + CalOpsCore.dayListLabel(sum.days);
+  var what = sum.crew.length + ' crew across ' + CalOpsCore.dayListLabel(sum.days);
   var body = 'Remove <strong>' + escapeHtml(title) + '</strong> from the calendar: ' + escapeHtml(what) + '?';
-  if (sum.crew.length) body += '<br><span id="calRemoveJobCrew" style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(sum.crew.join(', ')) + ', every day.</span>';
+  body += '<br><span id="calRemoveJobCrew" style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(sum.crew.join(', ')) + ', every day.</span>';
   body += '<br><span style="font-size:12px;color:var(--sw-text-sec);">The job stays in the pipeline but will become unscheduled.</span>';
   showConfirmModal('Remove from calendar', body, 'Remove', function() {
     calRemoveJobBookings(jobId, rows, title);

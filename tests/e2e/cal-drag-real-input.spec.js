@@ -926,16 +926,21 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(1);
   });
 
-  test('the Crew view Remove still takes off only that person\'s booking', async ({ page }) => {
-    const { writes } = await bootCalendar(page, { events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4 });
+  test('Remove on one person\'s booking in the Crew view takes the whole allocation off too', async ({ page }) => {
+    const days = [D.MON, D.TUE];
+    const { writes, state } = await bootCalendar(page, { events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4 });
     await page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block').click();
     await expect(page.locator('#calJobPopup')).toHaveClass(/open/);
     await page.locator('#calJobPopup .btn-overflow').click();
     await page.locator('#calJobPopup .cal-popup-overflow button.btn-danger').click();
-    await expect(page.locator('#calConfirmModal')).toContainText('Remove Assignment');
+    await expect(page.locator('#calConfirmModal')).toContainText('Remove Milan Mall SWP-26595 from the calendar: 2 crew across ' + dayList(days) + '?');
+    await expect(page.locator('#calRemoveJobCrew')).toHaveText('Hugo, Liam, every day.');
     await page.locator('#confirmModalProceed').click();
-    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(1);
-    expect(writes.find((w) => w.action === 'delete_assignment').body.assignmentId).toBe('mm-hugo-0');
+    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(4);
+    expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort())
+      .toEqual(['mm-hugo-0', 'mm-hugo-1', 'mm-liam-0', 'mm-liam-1']);
+    await expect.poll(() => state.events.filter((e) => e.job_id === 'j-mm').length).toBe(0);
+    await expect(page.locator('.cal-swim-cell .cal-job-block')).toHaveCount(0);
   });
 });
 

@@ -11289,7 +11289,9 @@ function calPlanClashes(plan) {
 // move holds a target date, paints it, then saves it behind the painted grid
 // and offers the reschedule texts once every write has landed.
 async function calApplyJobPlan(jobId, kind, target, edge) {
+  _calSavingJobs[jobId] = true;
   var jobRows = await calJobRows(jobId);
+  delete _calSavingJobs[jobId];
   // Without the job's full set of bookings, the ones outside the loaded window
   // would be left behind, so the change waits for a read that works.
   if (!jobRows) {
@@ -11305,6 +11307,7 @@ async function calApplyJobPlan(jobId, kind, target, edge) {
   var full = CalOpsCore.jobSpan(live), shown = CalOpsCore.jobSpan(calJobBarRows(jobId));
   var dragged = kind === 'stretch' && edge === 'end' ? 'end' : 'start';
   if (!shown || full[dragged] !== shown[dragged]) {
+    renderCalendar();
     showToast('Not changed - this job runs past the calendar view; widen the view to change it', 'warning');
     return;
   }

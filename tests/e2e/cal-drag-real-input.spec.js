@@ -66,6 +66,9 @@ function fixtureEvents() {
 // default), { dragLs } to seed localStorage.sw_cal_dragv2 before load.
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents() };
+  // { holdJobRead }: every job_detail read waits until the test calls
+  // state.releaseJobRead().
+  const jobReadGate = new Promise((r) => { state.releaseJobRead = r; });
   const writes = [];
   // Crew texts the page sends through ghl-proxy send_sms. Stubbed: nothing
   // leaves the browser.
@@ -101,6 +104,7 @@ async function bootCalendar(page, opts = {}) {
     if (action === 'get_crew_availability') return json(opts.availability || []);
     if (action === 'list_users') return json({ users: opts.users || USERS });
     if (action === 'job_detail') {
+      if (opts.holdJobRead) await jobReadGate;
       const jobId = new URL(url).searchParams.get('jobId');
       return json({
         job: { id: jobId },
@@ -636,7 +640,6 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes).toHaveLength(0);
     // with the job's bookings read, the handle is no longer offered on the
     // window's edge
-    await page.evaluate(() => renderCalendar());
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.right')).toHaveCount(0);
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.left')).toHaveCount(1);
   });
@@ -651,6 +654,25 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     await expect(page.getByText('Not changed - this job runs past the calendar view; widen the view to change it')).toBeVisible();
     await page.waitForTimeout(300);
     expect(writes).toHaveLength(0);
+  });
+
+  test('a second drop while the first is still reading the job is refused, never planned over its stand-ins', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, holdJobRead: true,
+    });
+    await toSchedule(page);
+    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await bar.hover();
+    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    // the first drop is still waiting on the job read: nothing painted yet
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.THU + '"]'));
+    await expect(page.getByText('Still saving the last change to this job')).toBeVisible();
+    state.releaseJobRead();
+    await expect.poll(() => writes.filter((w) => w.action === 'create_assignment').length).toBe(1);
+    await expect(page.getByText('Duration updated')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
   });
 
   test('a booking just added is never acted on under its stand-in id before the calendar is read again', async ({ page }) => {

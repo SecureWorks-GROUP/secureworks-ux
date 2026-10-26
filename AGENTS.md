@@ -89,6 +89,15 @@ Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guards:
 `tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`.
 
+ONLY ORDERS ON ACTIVE JOBS ARE ON THE BOARD (Shaun 2026-10-26). An order with
+no job, or on a finished job (complete, invoiced, final_payment, get_review,
+archived, cancelled, lost, read from list_pos `job_status`), is kept off the
+board, its alerts, its filter lists and the Jarvis count by `poBoardOrders`
+(`// <po-board-active-jobs>`). A line says how many are hidden, with Show them,
+because this board is the only front end for Delete PO and Mark Paid.
+Financials > Purchase Orders still lists every order. Guard:
+`tests/e2e/ops-po-all-statuses.spec.js`.
+
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
 `confirmed` / `delivered` share the Sent / Confirmed / Delivered columns of the

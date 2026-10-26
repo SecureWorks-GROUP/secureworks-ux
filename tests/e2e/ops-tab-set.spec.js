@@ -1120,7 +1120,7 @@ test('Dispatch carries the live Purchase orders board below the Dispatch view', 
     responses: {
       list_pos: {
         purchase_orders: [
-          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
+          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_id: 'job-e2e-1', job_status: 'order_materials', job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
         ],
       },
     },
@@ -1147,7 +1147,7 @@ test('the Jarvis bar counts purchase orders as soon as a slow list arrives on Di
     responses: {
       list_pos: {
         purchase_orders: [
-          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
+          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_id: 'job-e2e-1', job_status: 'order_materials', job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
         ],
       },
     },

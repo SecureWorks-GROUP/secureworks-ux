@@ -5140,6 +5140,7 @@ __swOpsStampAssets([
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
       </div>
       <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Changes made here are real.</div>
+      <div id="matHiddenNote" style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px; display:none;"></div>
 
       <!-- Threshold alerts -->
       <div id="matAlerts" style="margin-bottom:8px;"></div>
@@ -20360,6 +20361,40 @@ function poStatusBadge(status) {
 }
 // </po-board-columns>
 
+// <po-board-active-jobs>
+// The Dispatch purchase order board shows only orders on jobs still being
+// worked (Shaun, 26 Oct 2026: a finished job's old draft, like SWF-26824,
+// has no place there). An order with no job, or on a finished job, is kept
+// off the board, its alerts and its filter lists. Nothing is deleted, and
+// Financials > Purchase Orders still lists every order. This board is the
+// only place for Delete PO, Invoice Rcvd and Mark Paid, so Show them puts the
+// hidden orders back until the page is reloaded. list_pos sends job_status
+// (backend #1170); until it does, every order with a job shows.
+var PO_FINISHED_JOB_STATUSES = ['complete', 'invoiced', 'final_payment', 'get_review', 'archived', 'cancelled', 'lost'];
+var _matShowFinished = false;
+function poOnActiveJob(po) {
+  return !!(po && po.job_id) && PO_FINISHED_JOB_STATUSES.indexOf(po.job_status) < 0;
+}
+function poBoardOrders() { return _matShowFinished ? _allPOs.slice() : _allPOs.filter(poOnActiveJob); }
+function renderMatHiddenNote() {
+  var el = document.getElementById('matHiddenNote');
+  if (!el) return;
+  var hidden = _allPOs.filter(function(po) { return poBoardColumnOf(po.status) !== '' && !poOnActiveJob(po); }).length;
+  el.style.display = hidden ? '' : 'none';
+  if (!hidden) { el.innerHTML = ''; return; }
+  var words = (hidden === 1 ? '1 order is' : hidden + ' orders are') + ' on a finished job or no job. ' +
+    (_matShowFinished ? 'They are shown below.' : 'They are not shown here. Financials > Purchase Orders lists every order.');
+  el.innerHTML = escapeHtml(words) + ' <button type="button" class="btn btn-secondary btn-sm" data-mat-show-finished style="font-size:11px; padding:2px 8px;" onclick="toggleMatShowFinished()">' +
+    (_matShowFinished ? 'Hide them' : 'Show them') + '</button>';
+}
+function toggleMatShowFinished() {
+  _matShowFinished = !_matShowFinished;
+  renderMaterialsKanban();
+  if (document.getElementById('matAdvFilters') && document.getElementById('matAdvFilters').style.display !== 'none') populateMatFilterDropdowns();
+  updateJarvisSummary();
+}
+// </po-board-active-jobs>
+
 // ── Materials Advanced Filter State ──
 var _matFilterJob = '';
 var _matFilterSupplier = '';
@@ -20391,7 +20426,8 @@ function populateMatFilterDropdowns() {
   // Job dropdown
   var jobSel = document.getElementById('matFilterJob');
   var jobs = {};
-  _allPOs.forEach(function(po) {
+  // See <po-board-active-jobs>.
+  poBoardOrders().forEach(function(po) {
     if (po.job_id && po.job_number) {
       jobs[po.job_id] = (po.job_number || '') + ' — ' + (po.client_name || '');
     }
@@ -20405,7 +20441,7 @@ function populateMatFilterDropdowns() {
   // Supplier dropdown
   var supSel = document.getElementById('matFilterSupplier');
   var suppliers = {};
-  _allPOs.forEach(function(po) { if (po.supplier_name) suppliers[po.supplier_name] = true; });
+  poBoardOrders().forEach(function(po) { if (po.supplier_name) suppliers[po.supplier_name] = true; });
   var supHtml = '<option value="">All Suppliers</option>';
   Object.keys(suppliers).sort().forEach(function(s) {
     supHtml += '<option value="' + escapeHtml(s) + '"' + (_matFilterSupplier === s ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
@@ -20451,7 +20487,8 @@ function renderMatAlerts() {
   var now = Date.now();
   var alerts = [];
 
-  _allPOs.forEach(function(po) {
+  // See <po-board-active-jobs>.
+  poBoardOrders().forEach(function(po) {
     if (['', 'draft', 'quote_requested'].indexOf(poBoardColumnOf(po.status)) >= 0) return;
     if (po.invoice_received_at || po.paid_at) return;
     var sinceDate = po.confirmed_at || po.ordered_at || po.created_at;
@@ -20484,13 +20521,14 @@ function renderMatAlerts() {
 function renderMaterialsKanban() {
   // Also render threshold alerts
   renderMatAlerts();
+  renderMatHiddenNote();
 
-  // See <po-board-columns>.
+  // See <po-board-columns> and <po-board-active-jobs>.
   var stages = PO_BOARD_COLUMNS.concat([PO_BOARD_OTHER_COLUMN]);
   var mainKeys = PO_BOARD_COLUMNS.map(function(c) { return c.key; });
 
   // Apply type filter
-  var filtered = _allPOs.filter(function(po) { return poBoardColumnOf(po.status) !== ''; });
+  var filtered = poBoardOrders().filter(function(po) { return poBoardColumnOf(po.status) !== ''; });
   if (_matTypeFilter !== 'all') {
     filtered = filtered.filter(function(po) { return po.job_type === _matTypeFilter; });
   }
@@ -28099,7 +28137,8 @@ function updateJarvisSummary() {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
     }
   } else if (view === 'dispatch') {
-    var poCount = _allPOs ? _allPOs.length : 0;
+    // The orders on the Dispatch board (see <po-board-active-jobs>).
+    var poCount = poBoardOrders().filter(function(po) { return poBoardColumnOf(po.status) !== ''; }).length;
     if (!_allPOsLoaded) text = 'Purchase orders loading...';
     else text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
   } else if (view === 'inbox') {

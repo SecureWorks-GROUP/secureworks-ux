@@ -59,6 +59,10 @@ function po(status, extra) {
     total: 100,
     line_items: [],
     communications: [],
+    // On a job still being worked, so the Dispatch board shows it (see
+    // <po-board-active-jobs>).
+    job_id: 'job-active',
+    job_status: 'order_materials',
     created_at: now,
     updated_at: now,
   }, extra);
@@ -437,4 +441,51 @@ test('the Gate Ledger counts a sent, confirmed or delivered order as materials o
     if (verdict === 'pass') await expect(materialsRow).not.toContainText('none sent yet');
     else await expect(materialsRow).toContainText('none sent yet');
   }
+});
+
+// <po-board-active-jobs> (Shaun, 26 Oct 2026): the Dispatch board shows only
+// orders on jobs still being worked. Financials still lists every order.
+test('the Dispatch board keeps orders on finished jobs, or with no job, off it; Financials still lists them', async ({ page }) => {
+  const orders = [
+    po('draft', { id: 'po-live', job_number: 'SWF-920100' }),
+    po('draft', { id: 'po-archived', po_number: 'PO-683376', job_id: 'job-done', job_number: 'SWF-26824', job_status: 'archived' }),
+    po('sent', { id: 'po-complete', job_id: 'job-complete', job_status: 'complete' }),
+    po('authorised', { id: 'po-nojob', job_id: null, job_status: null }),
+    // An older list_pos with no job_status: the order still shows.
+    po('confirmed', { id: 'po-oldapi', job_status: undefined }),
+    po('cancelled', { id: 'po-cancelled', job_status: 'archived' }),
+  ];
+  await bootOps(page, { responses: { list_pos: { purchase_orders: orders } } });
+  await openDispatch(page);
+  await expect(page.locator('#materialsKanban .kanban-card')).toHaveCount(2);
+  await expect(page.locator('#materialsKanban .kanban-card[data-po-id="po-live"]')).toBeVisible();
+  await expect(page.locator('#materialsKanban .kanban-card[data-po-id="po-oldapi"]')).toBeVisible();
+  await expect(page.locator('#materialsCount')).toHaveText('2');
+  // The cancelled order is off the board anyway, so it is not counted as hidden.
+  await expect(page.locator('#matHiddenNote')).toHaveText('3 orders are on a finished job or no job. They are not shown here. Financials > Purchase Orders lists every order. Show them');
+  await page.locator('#matFilterToggle').click();
+  await expect(page.locator('#matFilterJob option')).toHaveText(['All Jobs', /^SWF-920100/]);
+
+  // Show them puts the hidden orders back (Delete PO and Mark Paid live only
+  // on this board); Hide them takes them off again.
+  await page.locator('[data-mat-show-finished]').click();
+  await expect(page.locator('#materialsKanban .kanban-card')).toHaveCount(5);
+  await expect(page.locator('#materialsKanban .kanban-card[data-po-id="po-archived"]')).toBeVisible();
+  await expect(page.locator('#materialsCount')).toHaveText('5');
+  await expect(page.locator('#matHiddenNote')).toHaveText('3 orders are on a finished job or no job. They are shown below. Hide them');
+  await page.locator('[data-mat-show-finished]').click();
+  await expect(page.locator('#materialsKanban .kanban-card')).toHaveCount(2);
+
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials')).toHaveClass(/active/);
+  await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
+  await expect(page.locator('#poTableBody tr[data-po-id="po-archived"]')).toBeVisible();
+  await expect(page.locator('#poTableBody tr[data-po-id="po-nojob"]')).toBeVisible();
+});
+
+test('with every order on an active job there is no hidden-orders line', async ({ page }) => {
+  await bootOps(page, { responses: { list_pos: { purchase_orders: [po('draft'), po('sent')] } } });
+  await openDispatch(page);
+  await expect(page.locator('#materialsKanban .kanban-card')).toHaveCount(2);
+  await expect(page.locator('#matHiddenNote')).toBeHidden();
 });

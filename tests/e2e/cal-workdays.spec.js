@@ -430,4 +430,25 @@ test.describe('Whole-job move and stretch planners', () => {
     expect(text).toBe('Job rescheduled: SWP-26595 - Milan Mall\nSite: 4 Example Way, Malaga\nYour days: Mon 27 Jul, Tue 28 Jul, Wed 29 Jul, Fri 31 Jul\nOpen in Trade: https://secureworks-group.github.io/secureworks-ux/trade.html#job/job-1');
     expect(C.crewRescheduleText({ job_number: 'SWP-1', client_name: 'A' }, [], 'job-1')).toContain('Your days: none, you are no longer booked on this job');
   });
+
+  test('a job-level Remove takes every crew and watcher booking on every day, never history or a meeting', () => {
+    const row = (id, extra) => ({ assignment_id: id, job_id: 'j', scheduled_date: MON, scheduled_end: MON,
+      assignment_type: 'install', assignment_status: 'scheduled', ...extra });
+    const rows = [
+      row('h-mon', { user_id: 'u-h', crew_name: 'Henry' }),
+      row('i-span', { user_id: 'u-i', crew_name: 'Isaac', scheduled_date: WED, scheduled_end: MON2 }),
+      row('ghost', { user_id: 'u-s', crew_name: 'Shaun', role: 'observer', is_ghost: true, scheduled_date: TUE, scheduled_end: TUE }),
+      row('done', { user_id: 'u-h', crew_name: 'Henry', scheduled_date: TUE, scheduled_end: TUE, assignment_status: 'complete' }),
+      row('gone', { user_id: 'u-h', crew_name: 'Henry', status: 'cancelled' }),
+      row('meet', { user_id: 'u-h', crew_name: 'Henry', assignment_type: 'meeting' }),
+      row('pending-1', { user_id: 'u-h', crew_name: 'Henry', scheduled_date: THU, scheduled_end: THU }),
+    ];
+    const removed = C.jobRemovalRows(rows);
+    expect(removed.map((r) => r.assignment_id)).toEqual(['h-mon', 'i-span', 'ghost']);
+    const sum = C.removalSummary(removed, (ev) => ev.crew_name);
+    // the watcher is not crew and its stale day is not counted; a span counts every painted day, never the weekend between
+    expect(sum).toEqual({ crew: ['Henry', 'Isaac'], days: [MON, WED, THU, FRI, MON2] });
+    expect(C.dayListLabel(sum.days)).toBe('20, 22, 23, 24, 27 Jul');
+    expect(C.dayListLabel(['2026-11-30', '2026-12-01', '2026-12-02'])).toBe('30 Nov, 1, 2 Dec');
+  });
 });

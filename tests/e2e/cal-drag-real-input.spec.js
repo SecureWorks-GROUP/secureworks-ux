@@ -108,16 +108,20 @@ async function bootCalendar(page, opts = {}) {
       const jobId = new URL(url).searchParams.get('jobId');
       return json({
         job: { id: jobId },
+        // { extraJobRows }: rows only the job read carries (ghost watchers).
         assignments: state.events.filter((e) => e.job_id === jobId).map((e) => ({
           id: e.assignment_id, job_id: e.job_id, user_id: e.user_id, role: 'installer',
           status: e.assignment_status, scheduled_date: e.scheduled_date, scheduled_end: e.scheduled_end,
-        })),
+        })).concat((opts.extraJobRows || []).filter((a) => a.job_id === jobId)),
       });
     }
     if (action === 'update_assignment') {
       const body = route.request().postDataJSON();
       writes.push({ action, body });
       if (opts.writeDelayMs) await new Promise((r) => setTimeout(r, opts.writeDelayMs));
+      state.writesAnswered = (state.writesAnswered || 0) + 1;
+      // { writeFails }: every booking write is refused, after its delay.
+      if (opts.writeFails) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"database unavailable"}' });
       const ev = state.events.find((e) => e.assignment_id === body.assignmentId);
       if (ev) {
         if (body.scheduled_date) ev.scheduled_date = body.scheduled_date;
@@ -127,7 +131,18 @@ async function bootCalendar(page, opts = {}) {
       }
       return json({ ok: true });
     }
-    if (action === 'create_assignment' || action === 'delete_assignment' || action === 'send_client_update') {
+    if (action === 'delete_assignment') {
+      // { deleteDelayMs }: each delete is slow. { refuseDelete }: assignment
+      // id -> the refusal ops-api answers for it (an invoiced booking).
+      const body = route.request().postDataJSON();
+      writes.push({ action, body });
+      if (opts.deleteDelayMs) await new Promise((r) => setTimeout(r, opts.deleteDelayMs));
+      const refusal = (opts.refuseDelete || {})[body.assignmentId];
+      if (refusal) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: refusal }) });
+      state.events = state.events.filter((e) => e.assignment_id !== body.assignmentId);
+      return json({ ok: true });
+    }
+    if (action === 'create_assignment' || action === 'send_client_update') {
       const body = route.request().postDataJSON();
       writes.push({ action, body });
       if (action === 'create_assignment' && opts.keepCreates) {
@@ -695,8 +710,10 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
   });
 
   test('a booking just added is never acted on under its stand-in id before the calendar is read again', async ({ page }) => {
+    // The stand-in lasts as long as the slow read; long enough for the steps below on a busy runner.
+    test.setTimeout(40000);
     const { writes } = await bootCalendar(page, {
-      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, keepCreates: true, refreshDelayMs: 4000,
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 1)), users: CREW4, keepCreates: true, refreshDelayMs: 8000,
     });
     await toSchedule(page);
     const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
@@ -716,7 +733,7 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
     // once the read lands the real row replaces it
     await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm')
-      .map((e) => e.assignment_id).sort()), { timeout: 10000 }).toEqual(['mm-hugo-0', 'mm-hugo-1', 'new-1']);
+      .map((e) => e.assignment_id).sort()), { timeout: 15000 }).toEqual(['mm-hugo-0', 'mm-hugo-1', 'new-1']);
   });
 
   test('a failed read after a save takes the stand-ins off the grid and says so', async ({ page }) => {
@@ -742,5 +759,203 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort())
       .toEqual(['mm-hugo-2', 'mm-liam-2']);
     expect(writes.some((w) => w.action === 'create_assignment' || w.action === 'update_assignment')).toBe(false);
+  });
+  // The reschedule step opens on the drop, not after the saves. Live ops-api
+  // takes 3 to 5 seconds per booking write and a whole-job move writes in
+  // several rounds one after another, so waiting for the saves put the step
+  // 10 to 17 seconds after the drop.
+  test('the reschedule step opens the moment a multi-crew job is dropped, while its saves are still running', async ({ page }) => {
+    test.setTimeout(45000);
+    const { writes, texts, state } = await bootCalendar(page, {
+      events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4, writeDelayMs: 1500,
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+    const dropped = Date.now();
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/, { timeout: 1000 });
+    expect(Date.now() - dropped, 'drop to reschedule step').toBeLessThan(1000);
+    await expect(page.locator('#calConfirmModal')).toContainText('Send reschedule update?');
+    expect(state.writesAnswered || 0, 'no booking write has been answered yet').toBe(0);
+
+    // A press before the save lands waits for it and sends nothing yet.
+    const send = page.locator('#confirmModalProceed');
+    await send.click();
+    await expect(send).toHaveText('Saving...');
+    await expect(send).toBeDisabled();
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
+    expect(texts).toHaveLength(0);
+
+    // Once every write has landed, the texts go, about the saved days.
+    await expect.poll(() => writes.filter((w) => w.action === 'send_client_update').length, { timeout: 20000 }).toBe(1);
+    expect(state.writesAnswered).toBe(16);
+    await expect.poll(() => texts.length).toBe(3);
+    await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
+    for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
+  });
+
+  test('a save that fails behind a pressed reschedule step sends nothing and puts the job back', async ({ page }) => {
+    const { writes, texts } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE]), users: CREW4, writeDelayMs: 800, writeFails: true,
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/, { timeout: 1000 });
+    await page.locator('#confirmModalProceed').click();
+    await expect(page.locator('#confirmModalProceed')).toHaveText('Saving...');
+
+    await expect(page.locator('#calReschedSaveFailed')).toHaveText('The move did not save, so no text was sent. The calendar shows what was saved.');
+    await expect(page.locator('#calConfirmModal')).toContainText('Move not saved');
+    await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm' && e.user_id === 'u-hugo')
+      .map((e) => e.scheduled_date).sort())).toEqual([D.MON, D.TUE]);
+    await page.locator('#confirmModalProceed').click();
+    await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
+    expect(texts).toHaveLength(0);
+  });
+
+  test('a save that fails before any press turns the open step into "not saved"', async ({ page }) => {
+    const { writes, texts } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE]), users: CREW4, writeDelayMs: 500, writeFails: true,
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.locator('#calConfirmModal')).toContainText('Send reschedule update?', { timeout: 1000 });
+    await expect(page.locator('#calReschedSaveFailed')).toBeVisible();
+    await expect(page.locator('#calReschedClient')).toHaveCount(0);
+    await page.locator('#confirmModalProceed').click();
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
+    expect(texts).toHaveLength(0);
+  });
+
+  test('Cancel while the save is still running sends nothing, and the save still lands', async ({ page }) => {
+    const { writes, texts, state } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE]), users: CREW4, writeDelayMs: 800,
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/, { timeout: 1000 });
+    await page.locator('#confirmModalProceed').click();
+    await page.locator('#calConfirmModal .btn-cancel').click();
+    await expect.poll(() => state.writesAnswered || 0, { timeout: 10000 }).toBe(writes.filter((w) => w.action === 'update_assignment').length);
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
+    expect(texts).toHaveLength(0);
+    expect(datesOf(state, 'u-hugo')).toEqual([D.WED, D.THU]);
+  });
+
+  // <calendar-job-remove>: the Schedule view's Remove takes the whole
+  // allocation off: every crew member, every day, the office watcher rows too.
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function dayList(dates) {
+    const groups = [];
+    dates.forEach((ds) => {
+      const d = new Date(ds + 'T00:00:00'), m = MONTHS[d.getMonth()], last = groups[groups.length - 1];
+      if (last && last.m === m) last.days.push(d.getDate()); else groups.push({ m, days: [d.getDate()] });
+    });
+    return groups.map((g) => g.days.join(', ') + ' ' + g.m).join(', ');
+  }
+  const ghostRows = (days) => days.map((day, di) => ({
+    id: 'mm-ghost-' + di, job_id: 'j-mm', user_id: 'u-shaun', role: 'observer', is_ghost: true,
+    status: 'scheduled', scheduled_date: day, scheduled_end: day,
+  }));
+  async function pressScheduleRemove(page) {
+    await page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first().click();
+    await expect(page.locator('#calJobPopup')).toHaveClass(/open/);
+    await page.locator('#calJobPopup .btn-overflow').click();
+    await page.locator('#calJobPopup .cal-popup-overflow button.btn-danger').click();
+  }
+
+  test('Remove on a Schedule bar takes the whole allocation off at once: every crew member, every day, the watcher rows too', async ({ page }) => {
+    const days = [D.MON, D.WED, D.THU];
+    const { writes, state } = await bootCalendar(page, {
+      events: perDayRows(days), users: CREW4, extraJobRows: ghostRows(days), deleteDelayMs: 1500,
+    });
+    await toSchedule(page);
+    await pressScheduleRemove(page);
+    const modal = page.locator('#calConfirmModal');
+    await expect(modal).toContainText('Remove Milan Mall SWP-26595 from the calendar: 4 crew across ' + dayList(days) + '?');
+    await expect(page.locator('#calRemoveJobCrew')).toHaveText('Hugo, Liam, Nina, Priya, every day.');
+    expect(writes.filter((w) => w.action === 'delete_assignment')).toHaveLength(0);
+
+    await page.locator('#confirmModalProceed').click();
+    // The line comes off on the press, while the deletes are still answering.
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(0, { timeout: 500 });
+    await expect(page.locator('#calJobPopup')).not.toHaveClass(/open/);
+    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(15);
+    const deleted = writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort();
+    expect(deleted).toEqual(perDayRows(days).map((e) => e.assignment_id).concat(['mm-ghost-0', 'mm-ghost-1', 'mm-ghost-2']).sort());
+    await expect(page.getByText('Removed Milan Mall SWP-26595 from the calendar')).toBeVisible({ timeout: 5000 });
+    await expect.poll(() => state.events.filter((e) => e.job_id === 'j-mm').length).toBe(0);
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(0);
+  });
+
+  test('Remove keeps an invoiced booking the server refuses, names it by person and day, and puts it back', async ({ page }) => {
+    const days = [D.MON, D.TUE];
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4,
+      refuseDelete: { 'mm-liam-1': 'Booking is on an invoice and cannot be removed' },
+    });
+    await toSchedule(page);
+    await pressScheduleRemove(page);
+    await expect(page.locator('#calConfirmModal')).toContainText('2 crew across ' + dayList(days));
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(4);
+    const label = await page.evaluate((d) => fmtDate(d), D.TUE);
+    await expect(page.getByText('Removed Milan Mall SWP-26595 from the calendar, except: Liam on ' + label +
+      ' (Booking is on an invoice and cannot be removed)')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm').map((e) => e.assignment_id))).toEqual(['mm-liam-1']);
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(1);
+  });
+
+  test('a Remove the server refuses whole puts the job back and says so', async ({ page }) => {
+    const days = [D.MON];
+    await bootCalendar(page, {
+      events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4,
+      refuseDelete: { 'mm-hugo-0': 'down', 'mm-liam-0': 'down' },
+    });
+    await toSchedule(page);
+    await pressScheduleRemove(page);
+    await page.locator('#confirmModalProceed').click();
+    await expect(page.getByText('Not removed: Milan Mall SWP-26595 - down. The calendar shows what was saved.')).toBeVisible();
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(1);
+  });
+
+  test('Remove on one person\'s booking in the Crew view takes the whole allocation off too', async ({ page }) => {
+    const days = [D.MON, D.TUE];
+    const { writes, state } = await bootCalendar(page, { events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4 });
+    await page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block').click();
+    await expect(page.locator('#calJobPopup')).toHaveClass(/open/);
+    await page.locator('#calJobPopup .btn-overflow').click();
+    await page.locator('#calJobPopup .cal-popup-overflow button.btn-danger').click();
+    await expect(page.locator('#calConfirmModal')).toContainText('Remove Milan Mall SWP-26595 from the calendar: 2 crew across ' + dayList(days) + '?');
+    await expect(page.locator('#calRemoveJobCrew')).toHaveText('Hugo, Liam, every day.');
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(4);
+    expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort())
+      .toEqual(['mm-hugo-0', 'mm-hugo-1', 'mm-liam-0', 'mm-liam-1']);
+    await expect.poll(() => state.events.filter((e) => e.job_id === 'j-mm').length).toBe(0);
+    await expect(page.locator('.cal-swim-cell .cal-job-block')).toHaveCount(0);
+  });
+});
+
+test.describe('One booking, one crew member (Crew view)', () => {
+  test('the reschedule step opens the moment the booking is dropped, before its save is answered', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, { writeDelayMs: 3000 });
+    const src = page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block');
+    await realDrag(page, src, page.locator('.cal-swim-cell[data-date="' + D.THU + '"][data-crew="Hugo"]'));
+    const dropped = Date.now();
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/, { timeout: 1000 });
+    expect(Date.now() - dropped, 'drop to reschedule step').toBeLessThan(1000);
+    expect(state.writesAnswered || 0).toBe(0);
+    await page.locator('#confirmModalProceed').click();
+    await expect(page.locator('#confirmModalProceed')).toHaveText('Saving...');
+    await expect.poll(() => writes.filter((w) => w.action === 'send_client_update').length, { timeout: 8000 }).toBe(1);
+    expect(writes.find((w) => w.action === 'send_client_update').body).toMatchObject({ comms_trigger: 'install_rescheduled', template_vars: { new_date: D.THU } });
   });
 });

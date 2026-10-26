@@ -6343,6 +6343,10 @@ __swOpsStampAssets([
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-closeout.js?v=1'}]);
 </script>
+<!-- Deposit flag on fencing and patio jobs, voided or unpaid after the move (modules/ops-job-deposit-flag.js). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-deposit-flag.js?v=1'}]);
+</script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -17986,6 +17990,8 @@ function renderKanbanCard(j, status) {
   // <job-closeout-tags> fencing and patio close-out tags (while ?closeout=preview is on)
   // and the live Review text switch
   if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
+  // <job-deposit-flag> deposit voided or unpaid after the move (modules/ops-job-deposit-flag.js)
+  if (window.DepositFlagOps) html += DepositFlagOps.cardHtml(j, status);
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
   // Repair cards only: say so when the persisted board stage and the job's own
@@ -23596,6 +23602,8 @@ function renderOverviewView(data) {
   // <job-closeout-tags> the same close-out tags (preview only) and live Review text
   // switch on the job page
   if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
+  // <job-deposit-flag> the same flag on the job page, with Mark dealt with
+  if (window.DepositFlagOps) html += DepositFlagOps.detailHtml(data);
   var nextStatuses = getNextStatuses(j.status, j.type);
   nextStatuses.forEach(function(s) {
     var color = s === 'cancelled' ? 'var(--sw-red)' : 'var(--sw-dark)';

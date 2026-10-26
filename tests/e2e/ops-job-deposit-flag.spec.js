@@ -89,13 +89,14 @@ test('Mark dealt with: confirms, calls clear_job_deposit_flag, and the flag leav
   await btn.click();
   await expect(page.locator('#e2eDetail .jd-deposit-flag')).toHaveCount(1);
   expect(calls).toHaveLength(0);
-  page.once('dialog', (d) => { expect(d.message()).toContain('Mark the deposit flag as dealt with?'); d.accept(); });
+  page.once('dialog', (d) => { expect(d.message()).toContain('Mark the deposit flag as dealt with?'); expect(d.message()).not.toMatch(/[–—]/); d.accept(); });
   await btn.click();
   await expect(page.locator('#e2eDetail .jd-deposit-flag')).toHaveCount(0);
   await expect(page.locator('#e2eCards .deposit-flag')).toHaveCount(0);
   expect(calls).toHaveLength(1);
   expect(calls[0]).toMatchObject({ job_id: 'f1' });
   await expect(page.locator('#toastContainer')).toContainText('Deposit flag marked as dealt with.');
+  expect(await page.locator('#toastContainer').innerText()).not.toMatch(/[–—]/);
 
   // A redraw from the same cached rows stays cleared.
   await paint(page);
@@ -119,3 +120,24 @@ test('a refused clear keeps the flag and says why in words', async ({ page }) =>
   await expect(page.locator('#e2eDetail [data-deposit-flag-clear="f1"]')).toBeEnabled();
   await expect(page.locator('#e2eCards .deposit-flag')).toHaveCount(1);
 });
+
+for (const [name, answer] of [
+  ['the connection drops before the answer', (route) => route.abort('failed')],
+  ['the answer is not one we know', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, action: 'something_else' }) })],
+]) {
+  test(`unknown outcome when ${name}: never says nothing was changed`, async ({ page }) => {
+    await signIn(page);
+    await page.route(CLEAR_ROUTE, answer);
+    await openOps(page);
+    await paint(page,
+      [{ job: Object.assign({}, base, { deposit_flag: Object.assign({}, flag) }), status: 'order_materials' }],
+      { job: { id: 'f1', type: 'fencing', status: 'order_materials' }, deposit_flag: Object.assign({}, flag) });
+    page.once('dialog', (d) => d.accept());
+    await page.locator('#e2eDetail [data-deposit-flag-clear="f1"]').click();
+    const toast = page.locator('#toastContainer');
+    await expect(toast).toContainText('Could not tell whether the deposit flag was cleared. Refresh the job to check.');
+    await expect(toast).not.toContainText('Nothing was changed');
+    expect(await toast.innerText()).not.toMatch(/[–—]/);
+    await expect(page.locator('#e2eDetail [data-deposit-flag-clear="f1"]')).toBeEnabled();
+  });
+}

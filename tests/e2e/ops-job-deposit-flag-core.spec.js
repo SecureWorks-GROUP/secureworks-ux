@@ -68,12 +68,36 @@ test.describe('Deposit flag core (extracted from modules/ops-job-deposit-flag.js
   });
 
   test('refusals are in words, never codes', () => {
-    expect(C.refusalWords({ code: 'operator_access_required' })).toBe('Only signed-in office staff can clear a deposit flag. Nothing was changed.');
-    expect(C.refusalWords({ body: { code: 'state_unwritable' } })).toBe('The deposit flag could not be cleared. Nothing was changed.');
-    expect(C.refusalWords(null)).toBe('The deposit flag could not be cleared. Nothing was changed.');
+    expect(C.refusalWords({ status: 403, code: 'operator_access_required' })).toBe('Only signed-in office staff can clear a deposit flag. Nothing was changed.');
+    expect(C.refusalWords({ status: 503, body: { code: 'state_unwritable' } })).toBe('The deposit flag could not be cleared. Nothing was changed.');
+  });
+
+  test('a failure with no HTTP answer is unknown, never "Nothing was changed"', () => {
+    const unknown = 'Could not tell whether the deposit flag was cleared. Refresh the job to check.';
+    expect(C.refusalWords(new TypeError('Failed to fetch'))).toBe(unknown);
+    expect(C.refusalWords(new Error('unexpected answer'))).toBe(unknown);
+    expect(C.refusalWords({ code: 'operator_access_required' })).toBe(unknown);
+    expect(C.refusalWords(null)).toBe(unknown);
   });
 
   test('no long dash in anything the module shows', () => {
-    expect(SOURCE).not.toMatch(/[–—]/);
+    const shown = [
+      C.cardHtml({ id: 'f1', deposit_flag: voided }),
+      C.cardHtml({ id: 'f1', deposit_flag: unpaid }),
+      C.cardHtml({ id: 'f1', deposit_flag: { reason: 'some_new_reason' } }),
+      C.detailHtml('f1', voided, false),
+      C.detailHtml('f1', unpaid, false),
+      C.detailHtml('f1', { reason: 'some_new_reason', invoice_status: 'VOIDED' }, false),
+      C.detailHtml('f1', null, true),
+      C.label(voided),
+      C.invoiceWords({ reason: 'deposit_voided', invoice_status: 'VOIDED' }),
+      C.refusalWords({ status: 403, code: 'operator_access_required' }),
+      C.refusalWords({ status: 503, code: 'state_unwritable' }),
+      C.refusalWords(new TypeError('Failed to fetch')),
+    ];
+    for (const s of shown) {
+      expect(s).not.toBe('');
+      expect(s).not.toMatch(/[–—]/);
+    }
   });
 });

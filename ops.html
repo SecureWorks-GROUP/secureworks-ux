@@ -6420,7 +6420,7 @@ window.__SW_CAL_V3_ENABLED = (function () {
 })();
 // ── Calendar Holidays tick box and colours (live for everyone) ──
 // The v3 Show row has a Holidays tick box that alone covers holidays and company
-// days (Business keeps meetings, leave and reminders), and v3 colours are:
+// days (Business keeps meetings and reminders; Leave has its own box), and v3 colours are:
 // patios blue, fencing yellow, repairs green, make safes purple, holidays and
 // company days bright red, business grey. The old ?calholidays switch and its
 // localStorage.sw_cal_holidays_preview key are gone and ignored.
@@ -11074,7 +11074,7 @@ async function calStagingOccupancy(jobId) {
 // The job-scoped read behind every drag (its rows outside the window, and the
 // cancelled / completed rows the feed hides). It starts when the drag starts,
 // so it is usually in hand by the drop, and is kept for a minute; every save
-// on the job drops it. ops-api has no lighter read of one job's bookings than
+// on the job, and every loadCalendar(), drops it. ops-api has no lighter read of one job's bookings than
 // job_detail today. A failed read answers null: a Crew-view booking stages
 // against the loaded window alone, as before, and a whole-job change refuses.
 var _calJobRowsCache = {};
@@ -11626,11 +11626,12 @@ async function submitScheduleFromModal(jobId) {
   }
 }
 
-// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so the
-// Schedule view can never re-resolve crew by display NAME — a name lookup can
-// land on a different person (deactivated user, duplicate display names) and
-// silently turn a move into a reassign. Crew-view callers omit opts and keep
-// the name-resolution that powers cross-row reassignment.
+// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so a
+// caller can never re-resolve crew by display NAME — a name lookup can land on
+// a different person (deactivated user, duplicate display names) and silently
+// turn a move into a reassign. No caller passes it today: the Schedule view
+// moves whole jobs through calApplyJobPlan. Crew-view callers omit opts and
+// keep the name-resolution that powers cross-row reassignment.
 async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // Find the assignment in events
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
@@ -11692,7 +11693,7 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   }
   var newUserId;
   if (opts && 'pinnedUserId' in opts) {
-    // CP1 (dragv2): Schedule-view moves pin the event's own user_id — never a
+    // CP1 (dragv2): a pinned move keeps the event's own user_id — never a
     // name lookup, so this path can never produce a reassign plan.
     newUserId = opts.pinnedUserId;
   } else {

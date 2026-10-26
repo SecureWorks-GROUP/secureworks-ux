@@ -88,14 +88,14 @@ test('every invoice shows its real amount and Xero state in Invoice history, Rec
   await expect(row('e-approved-deleted')).toContainText('Voided');
   await expect(row('f-legacy-paid')).toContainText('$1,556.00');
   await expect(row('f-legacy-paid')).toContainText('Invoiced $1,711.60');
-  await expect(row('f-legacy-paid')).toContainText('Paid 17 Apr 2026');
+  await expect(row('f-legacy-paid')).toContainText('Paid (Xero) 17 Apr 2026');
 
   await page.locator('[data-view="profile"]').click();
   const profile = page.locator('#profileInvoiceList');
   await expect(profile.locator('[data-profile-invoice]')).toHaveCount(INVOICES.length);
   await expect(profile).not.toContainText('Figures unavailable');
   await expect(profile.locator('[data-profile-invoice="f-legacy-paid"]')).toContainText('$1,556.00');
-  await expect(profile.locator('[data-profile-invoice="f-legacy-paid"]')).toContainText('Paid 17 Apr 2026');
+  await expect(profile.locator('[data-profile-invoice="f-legacy-paid"]')).toContainText('Paid (Xero) 17 Apr 2026');
   await expect(profile.locator('[data-profile-invoice="d-deleted"]')).toContainText('Voided');
 });
 

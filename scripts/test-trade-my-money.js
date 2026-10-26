@@ -70,7 +70,7 @@ check('guard does not misfire when fund is zero', zeroFund.legacy_full_carve_out
 const period = M.periodHTML('This month', { invoices: 1, gross_earned: 1000, super_amount: 120, paid_total: 0, outstanding: 940 });
 check('My money period line reads 120 / 60 / 60 / 940', period.indexOf('Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00') !== -1 && period.indexOf('You get $940.00') !== -1);
 
-check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-10' }).label === 'Paid 10 Aug 2026');
+check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-10' }).label === 'Paid (Xero) 10 Aug 2026');
 check('status: PAID bill without our flag is still paid', M.statusOf({ xero_bill_status: 'PAID' }).cls === 'paid');
 check('status: authorised bill is approved in Xero', M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED' }).label === 'Approved in Xero');
 check('status: voided', M.statusOf({ xero_bill_status: 'VOIDED' }).label === 'Voided');
@@ -114,7 +114,7 @@ check('no em dash, no old brand', view.indexOf('—') === -1 && view.indexOf('Se
 // ── Live audit 2026-09-23 (anonymised shapes of real trade_invoices rows) ──
 // Every status combination found in production, and what the trade must see.
 const liveStatuses = [
-  [{ status: 'paid', xero_bill_status: 'PAID', paid: true, paid_at: '2026-09-04T02:00:00Z' }, 'Paid 4 Sep 2026', 'paid'],
+  [{ status: 'paid', xero_bill_status: 'PAID', paid: true, paid_at: '2026-09-04T02:00:00Z' }, 'Paid (Xero) 4 Sep 2026', 'paid'],
   [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 0 }, 'Approved in Xero', 'owed'],
   [{ status: 'pushed_to_xero', xero_bill_status: 'DRAFT', amount_paid: 0 }, 'Waiting on office', 'sent'],
   [{ status: 'pending_acknowledgment', xero_bill_status: null }, 'Waiting on office', 'sent'],

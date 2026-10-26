@@ -7960,7 +7960,7 @@ async function loadMyActions() {
           if (a.job_number) detail.push(a.job_number + (a.client_name ? ' - ' + a.client_name : ''));
           if (a.due_date) {
             var dateLabel = formatDateShort(a.due_date);
-            if (isOverdue) dateLabel = '<span style="color:var(--sw-red);font-weight:600;">OVERDUE ' + dateLabel + '</span>';
+            if (isOverdue) dateLabel = '<span style="color:var(--sw-red);font-weight:600;">Late ' + dateLabel + '</span>';
             else if (isDueToday) dateLabel = '<span style="color:#D97706;font-weight:600;">TODAY</span>';
             detail.push(dateLabel);
           }
@@ -12292,6 +12292,13 @@ function computeSubStage(j, status) {
   }
 }
 
+// computeSubStage's words are also keys (SUB_STAGE_ORDER, getNextAction), so
+// only the printed label is put in sentence case (doc 3 section 5).
+function subStageLabel(sub) {
+  if (!sub) return sub;
+  return sub.charAt(0) + sub.slice(1).toLowerCase();
+}
+
 var SUB_STAGE_ORDER = {
   quoted: ['Quote Sent', 'Following Up'],
   accepted: ['Create Invoice', 'Awaiting Deposit', 'Deposit Received'],
@@ -12430,7 +12437,7 @@ function renderKanban(container, columns) {
         var isLast = idx === lastIdx;
         var subColor = isLast ? '#27AE60' : 'var(--sw-text-sec)';
         html += '<div class="kanban-substage-header" onclick="toggleSubstage(this)" style="color:' + subColor + ';">';
-        html += subName + ' <span class="count">' + subJobs.length + '</span></div>';
+        html += subStageLabel(subName) + ' <span class="count">' + subJobs.length + '</span></div>';
         html += '<div class="kanban-substage-group">';
         subJobs.forEach(function(j) {
           html += renderKanbanCard(j, status);
@@ -17812,7 +17819,7 @@ function invoiceActions(inv) {
     return '<button class="btn btn-sm btn-blue" onclick="sendInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\')">Send</button> ' +
            '<button class="btn btn-sm btn-red" onclick="voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + (inv.total || 0) + ')">Void</button>';
   }
-  if (status === 'PAID') return '<span style="color:var(--sw-text-sec);font-size:12px;">Paid</span>';
+  if (status === 'PAID') return '<span style="color:var(--sw-text-sec);font-size:12px;">Paid (Xero)</span>';
   if (status === 'VOIDED' || status === 'DELETED') return '<span style="color:var(--sw-text-sec);font-size:12px;">&mdash;</span>';
   return '';
 }
@@ -20064,7 +20071,8 @@ function renderMaterialsKanban() {
       // TODO: Add invoice_received_at, paid_at, xero_bill_id columns to purchase_orders table
       var invoiceStatus = '';
       if (po.paid_at) {
-        invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Paid</span>';
+        // paid_at is the office's own mark (markPOPaid), not Xero's record.
+        invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Says paid</span>';
       } else if (po.invoice_received_at) {
         invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Invoice received</span>';
       } else if (stage.key !== 'draft') {
@@ -22882,7 +22890,7 @@ function renderOverviewView(data) {
     { label: 'Lead received', done: !!j.created_at, date: j.created_at },
     { label: 'Quote sent', done: !!j.quoted_at, date: j.quoted_at, extra: quoteVal > 0 ? fmt$(quoteVal) : '' },
     { label: 'Quote accepted', done: !!j.accepted_at, date: j.accepted_at },
-    { label: 'Deposit invoiced', done: depInvs.length > 0, extra: depPaid.length > 0 ? 'Paid' : depInvs.length > 0 ? 'Sent' : '' },
+    { label: 'Deposit invoiced', done: depInvs.length > 0, extra: depPaid.length > 0 ? 'Paid (Xero)' : depInvs.length > 0 ? xeroInvoiceWord(depInvs[0]) : '' },
     { label: 'Materials ordered', done: (data.purchase_orders || []).length > 0, extra: (data.purchase_orders || []).length + ' POs' },
     { label: 'Crew assigned', done: (data.assignments || []).length > 0, extra: (data.assignments || []).length + ' assignments' },
     { label: 'Build complete', done: !!j.completed_at, date: j.completed_at },
@@ -23430,8 +23438,8 @@ function renderMoneyView(data) {
       html += '<strong>' + fmt$(inv.total) + '</strong></div>';
       html += '<div class="jd-money-card-sub">';
       if (inv.due_date) html += 'Due ' + fmtDate(inv.due_date);
-      if (!isDraft) html += ' &middot; Paid: <strong style="color:var(--sw-green);">' + fmt$(amountPaid) + '</strong>';
-      if (amountDue > 0 && !isDraft) html += ' &middot; Owing: <strong style="color:' + (isOverdue ? 'var(--sw-red)' : 'var(--sw-dark)') + ';">' + fmt$(amountDue) + '</strong>';
+      if (!isDraft) html += ' &middot; Paid (Xero): <strong style="color:var(--sw-green);">' + fmt$(amountPaid) + '</strong>';
+      if (amountDue > 0 && !isDraft) html += ' &middot; ' + (isOverdue ? 'Owed · past due' : 'Owed') + ': <strong style="color:' + (isOverdue ? 'var(--sw-red)' : 'var(--sw-dark)') + ';">' + fmt$(amountDue) + '</strong>';
       html += '</div>';
 
       // Expandable detail
@@ -25748,7 +25756,7 @@ async function openJobQuickView(jobId) {
     var action = getNextAction(actionJob);
     if (action && action.stage) {
       footerHtml += '<div class="next-step-bar">';
-      footerHtml += '<div class="next-step-label"><span class="next-step-stage">' + action.stage + '</span>';
+      footerHtml += '<div class="next-step-label"><span class="next-step-stage">' + subStageLabel(action.stage) + '</span>';
       if (action.hint) footerHtml += '<span class="next-step-hint">' + action.hint + '</span>';
       footerHtml += '</div><div class="next-step-actions">';
       action.actions.forEach(function(a) {
@@ -27017,7 +27025,7 @@ function scanSupplierQuote(poId) {
 }
 
 async function pushPOToXero(poId) {
-  if (!confirm('Push this PO to Xero?')) return;
+  if (!confirm('Add this PO to Xero for approval?')) return;
   try {
     await opsPost('push_po_to_xero', { id: poId });
     showToast('PO awaiting approval in Xero', 'success');
@@ -28623,7 +28631,7 @@ async function markPOPaid(poId) {
   if (!confirm('Mark this PO as paid?')) return;
   try {
     await opsPost('update_po', { id: poId, notes: '[Paid ' + new Date().toLocaleDateString('en-AU') + ']' });
-    showToast('PO marked as paid', 'success');
+    showToast('PO marked: says paid', 'success');
     loadMaterials();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');

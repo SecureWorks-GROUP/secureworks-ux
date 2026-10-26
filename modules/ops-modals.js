@@ -901,10 +901,10 @@ function scanSupplierQuote(poId) {
 }
 
 async function pushPOToXero(poId) {
-  if (!confirm('Push this PO to Xero?')) return;
+  if (!confirm('Add this PO to Xero for approval?')) return;
   try {
     await opsPost('push_po_to_xero', { id: poId });
-    showToast('PO pushed to Xero', 'success');
+    showToast('PO awaiting approval in Xero', 'success');
     loadPOs();
   } catch (e) {
     alert('Failed to push PO: ' + e.message);

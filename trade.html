@@ -22695,11 +22695,13 @@
     // part paid is checked before "approved"; and a bill deleted or voided in
     // Xero outranks our own row status (a `pushed_to_xero` / `approved` row
     // whose bill was DELETED used to read as still in progress).
+    // A trade invoice's 'paid' status is set by xero-sync when Xero says PAID
+    // (trade_bill_status.ts), so every paid row reads Paid (Xero).
     function statusOf(row) {
       row = row || {};
       var bill = String(row.xero_bill_status || '').toUpperCase();
       var ours = String(row.status || '');
-      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
+      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid (Xero)' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
       if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
       if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
       if (ours === 'ops-reject' || ours === 'failed' || ours === 'rejected') return { label: 'Not accepted', cls: 'void' };

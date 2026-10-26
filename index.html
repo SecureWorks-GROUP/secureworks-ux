@@ -1647,7 +1647,7 @@
         <div class="cockpit-stat" id="cpArCard" onclick="showView('reports')" style="cursor:pointer;" title="View Aged Receivables">
           <div class="cockpit-stat-icon">!</div>
           <div class="cockpit-stat-body">
-            <div class="cockpit-stat-label">Overdue AR</div>
+            <div class="cockpit-stat-label">Owed to us</div>
             <div class="cockpit-stat-value" id="cpOverdueAR">—</div>
             <div class="cockpit-stat-sub" id="cpOverdueARSub"></div>
           </div>
@@ -1778,7 +1778,7 @@
           <div class="report-stat-sub" id="rptMarginSub"></div>
         </div>
         <div class="report-stat" id="rptReceivablesCard">
-          <div class="report-stat-label">Outstanding Receivables</div>
+          <div class="report-stat-label">Owed to us</div>
           <div class="report-stat-value" id="rptReceivables">—</div>
           <div class="report-stat-sub" id="rptReceivablesSub"></div>
         </div>
@@ -2037,15 +2037,15 @@
       <!-- Summary stats -->
       <div class="report-stats" id="debtStats">
         <div class="report-stat">
-          <div class="report-stat-label">Total Outstanding</div>
+          <div class="report-stat-label">Total owed</div>
           <div class="report-stat-value" id="debtTotal">—</div>
         </div>
         <div class="report-stat">
-          <div class="report-stat-label">Clients Owing</div>
+          <div class="report-stat-label">Clients who owe</div>
           <div class="report-stat-value" id="debtClients">—</div>
         </div>
         <div class="report-stat">
-          <div class="report-stat-label">Overdue Invoices</div>
+          <div class="report-stat-label">Invoices owed</div>
           <div class="report-stat-value" id="debtInvoices">—</div>
         </div>
         <div class="report-stat rag-red">
@@ -2058,7 +2058,7 @@
       <div class="filter-bar" style="margin-top:16px;">
         <span style="font-size:12px;color:var(--sw-text-sec);margin-right:8px;">Show:</span>
         <button class="filter-chip active" onclick="filterDebt('all', this)">All</button>
-        <button class="filter-chip" onclick="filterDebt('overdue', this)">Overdue Only</button>
+        <button class="filter-chip" onclick="filterDebt('overdue', this)">Past due only</button>
         <button class="filter-chip" onclick="filterDebt('90+', this)">90+ Days</button>
       </div>
 
@@ -5916,7 +5916,7 @@ function renderJobPanel(job, docs, invoices, events) {
     if (totalPaid > 0 || totalDue > 0) {
       html += '<div style="display:flex;gap:16px;margin-top:6px;font-size:12px;">';
       if (totalPaid > 0) html += '<span class="jp-inv-paid">Paid: $' + totalPaid.toLocaleString('en-AU', {maximumFractionDigits:2}) + '</span>';
-      if (totalDue > 0) html += '<span class="jp-inv-due">Outstanding: $' + totalDue.toLocaleString('en-AU', {maximumFractionDigits:2}) + '</span>';
+      if (totalDue > 0) html += '<span class="jp-inv-due">Owed: $' + totalDue.toLocaleString('en-AU', {maximumFractionDigits:2}) + '</span>';
       html += '</div>';
     }
   }

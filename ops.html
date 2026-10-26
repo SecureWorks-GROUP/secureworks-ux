@@ -12050,9 +12050,11 @@ function __renderedStagesFor(typeKey) {
   // 2026-05-04 fix: comment above (line 6818) listed processing+deposit as preserved
   // but the array was missing them. Caused per-type kanbans (fencing/patio tabs) to
   // silently drop jobs in those statuses even after the backend column-bucketing fix.
-  // Q2 (2026-05-03) shows 2 live `processing` jobs (1 fencing, 1 patio); 0 deposit
-  // jobs today but kept for forward-compatibility.
-  var preserve = ['schedule_install', 'rectification', 'final_payment', 'get_review', 'processing', 'deposit'];
+  // Q2 (2026-05-03) shows 2 live `processing` jobs (1 fencing, 1 patio).
+  // `deposit` is a legacy duplicate of Awaiting Deposit (Captain 2026-10-26: hide
+  // it). It is not a standing column: __stagesWithHeldDeposit adds it back only
+  // while a job still holds that status, so such a job never vanishes.
+  var preserve = ['schedule_install', 'rectification', 'final_payment', 'get_review', 'processing'];
   preserve.forEach(function (p) {
     if (canonical.indexOf(p) === -1) {
       // insert in stage_order position
@@ -12073,6 +12075,15 @@ function __renderedStagesFor(typeKey) {
 var FENCING_STAGES = __renderedStagesFor('fencing');
 var PATIO_STAGES = __renderedStagesFor('patio');
 var DECKING_STAGES = __renderedStagesFor('decking');
+// <deposit-column-hidden> The legacy Deposit column shows, right after Awaiting
+// Deposit, only when a job still has status `deposit`; otherwise it is hidden.
+function __stagesWithHeldDeposit(stages, columns) {
+  if (!columns || !(columns.deposit || []).length || stages.indexOf('deposit') !== -1) return stages;
+  var out = stages.slice();
+  var at = out.indexOf('awaiting_deposit');
+  if (at === -1) out.push('deposit'); else out.splice(at + 1, 0, 'deposit');
+  return out;
+}
 // Release 12 (Rescue SES): 'decision_required' is the Captain Decision column —
 // cards whose evidence contradicts itself (e.g. closed with no issued invoice and
 // no report). The engine refuses to guess their column; the captain resolves each
@@ -12128,7 +12139,7 @@ function renderJobs(data) {
 }
 
 function renderFencingKanban(container, columns) {
-  var parts = __partitionStages(FENCING_STAGES);
+  var parts = __partitionStages(__stagesWithHeldDeposit(FENCING_STAGES, columns));
   var html = '<div style="display:flex;gap:8px;height:100%;">';
   html += __renderSalesDrawer(columns, parts.sales);
   html += '<div class="kanban-container" style="flex:1;">';
@@ -12175,7 +12186,7 @@ function renderFencingKanban(container, columns) {
 }
 
 function renderPatioKanban(container, columns) {
-  var stages = _pipelineTab === 'decking' ? DECKING_STAGES : PATIO_STAGES;
+  var stages = __stagesWithHeldDeposit(_pipelineTab === 'decking' ? DECKING_STAGES : PATIO_STAGES, columns);
   var parts = __partitionStages(stages);
   var html = '<div style="display:flex;gap:8px;height:100%;">';
   html += __renderSalesDrawer(columns, parts.sales);
@@ -17282,11 +17293,12 @@ function kanbanDragAllowed(fromStatus, toStatus) {
   if (_pipelineTab === 'fencing') {
     // Free movement: any fencing stage → any other fencing stage (incl. archived). No cancelled.
     var allFencing = FENCING_STAGES.concat(['archived']);
-    return allFencing.indexOf(fromStatus) !== -1 && allFencing.indexOf(toStatus) !== -1;
+    // A held legacy `deposit` job may be dragged out, never into it (<deposit-column-hidden>).
+    return (allFencing.indexOf(fromStatus) !== -1 || fromStatus === 'deposit') && allFencing.indexOf(toStatus) !== -1;
   }
   if (_pipelineTab === 'patio' || _pipelineTab === 'decking') {
     var allPatio = PATIO_STAGES.concat(['archived']);
-    return allPatio.indexOf(fromStatus) !== -1 && allPatio.indexOf(toStatus) !== -1;
+    return (allPatio.indexOf(fromStatus) !== -1 || fromStatus === 'deposit') && allPatio.indexOf(toStatus) !== -1;
   }
   if (_pipelineTab === 'makesafes') {
     return MAKESAFES_STAGES.indexOf(fromStatus) !== -1 && MAKESAFES_STAGES.indexOf(toStatus) !== -1;
@@ -25880,6 +25892,23 @@ function getNextStatuses(current, jobType) {
       'complete': ['archived'],
     };
     return ft[current] || [];
+  }
+  if (jobType === 'patio') {
+    // Patio waits on its deposit like fencing (Captain 2026-10-26), then follows
+    // the stage gate engine's patio ladder (modules/ops-stage-gate-engine.js).
+    var pt = {
+      'quoted': ['accepted', 'cancelled'],
+      'accepted': ['awaiting_deposit', 'approvals', 'processing'],
+      'awaiting_deposit': ['approvals', 'order_materials', 'processing'],
+      'deposit': ['awaiting_deposit', 'approvals', 'processing'],
+      'approvals': ['processing'],
+      'processing': ['in_progress'],
+      'scheduled': ['in_progress', 'cancelled'],
+      'in_progress': ['complete', 'cancelled'],
+      'complete': ['invoiced'],
+      'invoiced': [],
+    };
+    return pt[current] || [];
   }
   var transitions = {
     'quoted': ['accepted', 'cancelled'],

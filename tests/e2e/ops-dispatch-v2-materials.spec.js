@@ -85,7 +85,9 @@ const longDate = (iso) => (iso ? new Date(iso + 'T00:00:00Z').toLocaleDateString
 function fakeV2(seed = {}) {
   let clock = Date.parse('2026-10-23T01:00:00.000Z');
   const stamp = () => new Date((clock += 1000)).toISOString();
-  const fake = { jobs: {}, testDone: false, fail: {}, sendOutcome: [], uploads: [], n: { photo: 0, email: 0 } };
+  // autoFill: the server's auto_fill answer is on (backend #1168). scopeSupplier[job]
+  // is the supplier the job's scope names, when it has an approved order email.
+  const fake = { jobs: {}, testDone: false, fail: {}, sendOutcome: [], uploads: [], n: { photo: 0, email: 0 }, autoFill: false, scopeSupplier: {}, filled: {} };
   const NUMS = { 'job-f1': 'SWF-920001', 'job-p1': 'SWP-920002' };
   const TYPES = { 'job-f1': 'fencing', 'job-p1': 'patio' };
   const SCOPE = {
@@ -112,6 +114,7 @@ function fakeV2(seed = {}) {
       team_cc: { email: TEAM[j.work_type] || null, open_question: null }, from: ADMIN, test_send_done: fake.testDone,
       main_supplier_id: main, main_supplier_ticked: !!(j.main && j.boxes.includes(j.main)),
       can_suggest: ['fencing', 'patio'].includes(j.work_type) && !j.lines.length,
+      auto_fill: fake.autoFill && j.work_type === 'fencing' && !j.lines.length && !fake.filled[id],
       draft_list: { lines: j.lines.filter((l) => l.supplier_id === null).map(lineOut), photos: j.photos.filter((p) => p.supplier_id === null) },
       suppliers: j.boxes.map((sid, i) => {
         const s = SUPPLIERS[sid];
@@ -204,11 +207,18 @@ function fakeV2(seed = {}) {
       const f = forced('dispatch_v2_suggest_draft');
       if (f) return f;
       const j = job(b.job_id);
+      if (b.auto === true && j.work_type !== 'fencing') return no(409, 'no_auto_fill');
+      if (b.auto === true && fake.filled[b.job_id]) return no(409, 'already_filled');
       if (j.lines.length) return no(409, 'lines_exist');
-      const added = (SCOPE[b.job_id] || []).map(([d, q], i) => ({ id: LID(800 + i), supplier_id: null, description: d, quantity: q, unit: null, detail: null, profile: null, colour: null,
+      // The scope's supplier gets a box, and the lines go straight into it.
+      const sid = fake.scopeSupplier[b.job_id] || null;
+      if (sid && !j.boxes.includes(sid)) j.boxes.push(sid);
+      const added = (SCOPE[b.job_id] || []).map(([d, q], i) => ({ id: LID(800 + i), supplier_id: sid, description: d, quantity: q, unit: null, detail: null, profile: null, colour: null,
         status: 'not_reviewed', source: 'scope', sent_on_email_id: null, updated_at: stamp() }));
       j.lines.push(...added);
-      return { success: true, added: added.length, lines: added.map(lineOut), notes: ['1 panel is marked long width in the scope. Check the panel line with the supplier.'] };
+      fake.filled[b.job_id] = true;
+      return { success: true, added: added.length, lines: added.map(lineOut), notes: ['1 panel is marked long width in the scope. Check the panel line with the supplier.'],
+        supplier: sid ? { supplier_id: sid, name: SUPPLIERS[sid].name } : null };
     },
     dispatch_v2_add_supplier: (url, b) => {
       const f = forced('dispatch_v2_add_supplier');
@@ -447,6 +457,41 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     await mat.locator('[data-dpc-v2="retry"]').click();
     await expect(mat.locator('.dpc-v2-draft')).toBeVisible();
     expect(calls.filter((a) => a === 'dispatch_v2_materials')).toHaveLength(2);
+  });
+
+  test('a fencing job fills itself from the scope once when it opens, into the box of the supplier the scope names', async ({ page }) => {
+    const fake = fakeV2();
+    fake.autoFill = true;
+    fake.scopeSupplier['job-f1'] = SID(1);
+    const { root, mat, writes } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel Pty Ltd');
+    await expect(acacia.locator('[data-dpc-v2-cell="description"]')).toHaveCount(2);
+    await expect(draftOf(mat)).toContainText('2 lines filled in from the scope into the Acacia Steel Pty Ltd box. Check each one, then press Make email on that box.');
+    await expect(draftOf(mat).locator('.dpc-msg-notes li')).toHaveText(['1 panel is marked long width in the scope. Check the panel line with the supplier.']);
+    await expect(draftOf(mat).locator('[data-dpc-v2-cell="description"]')).toHaveCount(0);
+    await expect(draftOf(mat).locator('[data-dpc-v2="suggest"]')).toHaveCount(0);
+    await expect(acacia.locator('[data-dpc-v2="make"]')).toBeVisible();
+    expect(writes().map((c) => [c.action, c.body.job_id, c.body.auto])).toEqual([['dispatch_v2_suggest_draft', 'job-f1', true]]);
+    // A patio job never fills itself, and going back to the fencing job does not fill it again.
+    await root.locator('.dpc-job', { hasText: 'SWP-920002' }).click();
+    await expect(draftOf(mat).locator('[data-dpc-v2="suggest"]')).toHaveText('Fill from the scope');
+    await root.locator('.dpc-job', { hasText: 'SWF-920001' }).click();
+    await expect(acacia.locator('[data-dpc-v2-cell="description"]')).toHaveCount(2);
+    expect(writes()).toHaveLength(1);
+  });
+
+  test('an auto fill the server says was done before shows the latest with no message, and the button still fills', async ({ page }) => {
+    const fake = fakeV2();
+    fake.autoFill = true;
+    fake.fail.dispatch_v2_suggest_draft = [{ status: 409, body: { error: 'This job was filled from the scope before', code: 'already_filled' } }];
+    const { mat, of, writes } = await boot(page, fake);
+    await expect.poll(() => of('dispatch_v2_materials').length).toBe(2);
+    await expect(draftOf(mat).locator('.dpc-card-msg')).toHaveCount(0);
+    expect(writes().map((c) => ({ job_id: c.body.job_id, auto: c.body.auto }))).toEqual([{ job_id: 'job-f1', auto: true }]);
+    await draftOf(mat).locator('[data-dpc-v2="suggest"]').click();
+    await expect(draftOf(mat)).toContainText('2 lines filled in from the scope. Check each one before ordering.');
+    await expect(draftOf(mat).locator('[data-dpc-v2-cell="description"]')).toHaveCount(2);
+    expect(writes().map((c) => ({ job_id: c.body.job_id, auto: c.body.auto }))).toEqual([{ job_id: 'job-f1', auto: true }, { job_id: 'job-f1' }]);
   });
 
   test('Fill from the scope sends one suggest; a typed line saves once with a new id and no stamp; an edit sends its stamp', async ({ page }) => {

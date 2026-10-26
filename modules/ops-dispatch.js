@@ -4082,6 +4082,9 @@
       v2Merge(e, v2From(resp));
       e.status = 'ok';
       paintV2If(jobId);
+      // A fencing job with an empty list that was never filled: fill it from
+      // the scope now, once, so nobody has to press Fill from the scope.
+      if (resp.auto_fill === true && !e.autoTried && !e.local.length) { e.autoTried = true; v2Suggest(jobId, true); }
     }).catch(function () {
       if (token !== e.token) return;
       // A quiet re-read that fails keeps the last good answer on screen.
@@ -4297,22 +4300,34 @@
     });
   }
 
-  function v2Suggest(jobId) {
+  // auto: the screen filling a fencing job by itself when it opens (the
+  // materials read said auto_fill). The server fills a job that way only
+  // once, so a refusal for that just shows the latest, with no message.
+  var V2_AUTO_QUIET = ['already_filled', 'lines_exist', 'no_auto_fill'];
+  function v2Suggest(jobId, auto) {
     var e = v2Entry(jobId);
     if (!e || e.status !== 'ok' || e.busy.suggest) return;
     e.busy.suggest = true;
     delete e.msg.draft;
     paintV2();
-    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_suggest_draft', { job_id: jobId }); }).then(v2Ok).then(function (resp) {
+    var body = auto ? { job_id: jobId, auto: true } : { job_id: jobId };
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_suggest_draft', body); }).then(v2Ok).then(function (resp) {
       delete e.busy.suggest;
       var n = Number(resp.added) || 0;
       // The scope reader's notes (a long panel, a height with no post rule, a
       // gate with no size) are shown under the message, never guessed into a line.
       var notes = Array.isArray(resp.notes) ? resp.notes.filter(function (t) { return typeof t === 'string' && t; }) : [];
-      e.msg.draft = { text: n ? v2Count(n, 'line', 'lines') + ' filled in from the scope. Check each one before ordering.' : 'The scope had nothing to fill in. Type the lines in.', notes: notes };
+      // The scope named a supplier with an approved order email: the lines
+      // went straight into that supplier's box.
+      var box = isObj(resp.supplier) ? text(resp.supplier.name) : '';
+      var words = !n ? 'The scope had nothing to fill in. Type the lines in.'
+        : box ? v2Count(n, 'line', 'lines') + ' filled in from the scope into the ' + box + ' box. Check each one, then press Make email on that box.'
+        : v2Count(n, 'line', 'lines') + ' filled in from the scope. Check each one before ordering.';
+      e.msg.draft = { text: words, notes: notes };
       readV2(jobId, true);
     }, function (err) {
       delete e.busy.suggest;
+      if (auto && err && V2_AUTO_QUIET.indexOf(err.code) >= 0) { paintV2If(jobId); readV2(jobId, true); return; }
       v2Fail(jobId, 'draft', err, 'Nothing was filled in.');
     });
   }

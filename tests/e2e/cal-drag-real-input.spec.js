@@ -317,7 +317,7 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     expect(friSeg.width, 'the Fri segment must not paint across Sat/Sun').toBeLessThan(cell.width * 1.5);
   });
 
-  test('weekend-crossing job: dragging the FIRST segment reschedules the whole job', async ({ page }) => {
+  test('weekend-crossing booking: dragging the FIRST segment moves its one row', async ({ page }) => {
     const { writes } = await bootCalendar(page);
     await toSchedule(page);
     // Segments render in date order: first() = the Friday segment.
@@ -335,7 +335,7 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     expect(move.body.crew_name).toBe('Priya');
   });
 
-  test('weekend-crossing job: dragging the RESUME segment reschedules the whole job', async ({ page }) => {
+  test('weekend-crossing booking: dragging the RESUME segment moves its one row', async ({ page }) => {
     const { writes } = await bootCalendar(page);
     await toSchedule(page);
     const monSeg = page.locator('.cal-schedule-bar[data-job-id="j-3"]').last();
@@ -493,7 +493,7 @@ test.describe('dragv2 default-on gating', () => {
 // one booking per person per day, across a weekend. Grabbing it anywhere and
 // dropping it on a new start day moves the WHOLE job by working days, every
 // person together, with the job's own rows never counted as clashes.
-test.describe('Whole job, one booking per person per day (Milan Mall shape)', () => {
+test.describe('One booking per person per day (Milan Mall shape): each bar stands on its own', () => {
   // Pin the page's today to this spec's first Monday so every day below is
   // inside the 2-week window whatever weekday the suite runs on.
   test.beforeEach(async ({ page }) => {
@@ -524,39 +524,54 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first()).toBeVisible();
   }
 
-  test('drag the Friday piece onto Monday: every person moves one working day, painted at once', async ({ page }) => {
+  // Captain 2026-10-27: a drag moves the bar that was grabbed and nothing
+  // else. The job's other bars (Fri before the weekend, Thu after the gap)
+  // are other bookings and stay where they are.
+  const bar = (page, firstRowId) => page.locator('.cal-schedule-bar[data-assignment-id="' + firstRowId + '"]');
+  test('drag one bar: every person on it moves, painted at once, and the job\'s other bars stay', async ({ page }) => {
     const { writes, state } = await bootCalendar(page, {
       events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4, writeDelayMs: 1500,
     });
     await toSchedule(page);
-    // the Friday piece, before the weekend break
-    const friPiece = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
-    await realDrag(page, friPiece, page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(3);
+    // the Mon-Tue bar after the weekend, one working day later
+    await realDrag(page, bar(page, 'mm-hugo-1'), page.locator('.cal-schedule-cell[data-date="' + D.TUE2 + '"]'));
 
     // On screen at once, while the server is still answering, and the grid
     // never blanks to the loading state.
     await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-mm' && e.user_id === 'u-hugo')
-      .map((e) => e.scheduled_date).sort()), { timeout: 1000 }).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
+      .map((e) => e.scheduled_date).sort()), { timeout: 1000 }).toEqual([D.FRI, D.TUE2, D.WED2, D.THU2]);
     await expect(page.locator('#calendarBody .cal-loading')).toHaveCount(0);
 
-    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length, { timeout: 15000 }).toBe(16);
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length, { timeout: 15000 }).toBe(8);
     await expect(page.locator('body')).not.toContainText('Not moved');
-    for (const u of CREW4) await expect.poll(() => datesOf(state, u.id), { message: u.name }).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
-    // every write keeps the booking one day long
-    expect(writes.filter((w) => w.action === 'update_assignment').every((w) => w.body.scheduled_date === w.body.scheduled_end)).toBe(true);
+    for (const u of CREW4) await expect.poll(() => datesOf(state, u.id), { message: u.name }).toEqual([D.FRI, D.TUE2, D.WED2, D.THU2]);
+    // only the grabbed bar's bookings are written, each kept one day long
+    const moved = writes.filter((w) => w.action === 'update_assignment');
+    expect(moved.every((w) => /^mm-[a-z]+-[12]$/.test(w.body.assignmentId))).toBe(true);
+    expect(moved.every((w) => w.body.scheduled_date === w.body.scheduled_end)).toBe(true);
     // a person's day is never written onto a date another of their rows still holds
-    const order = writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId);
-    // (Tue leaves for Wed before Mon takes Tue, and Mon leaves before Fri takes it)
+    const order = moved.map((w) => w.body.assignmentId);
+    // (Tue leaves for Wed before Mon takes Tue)
     expect(order.indexOf('mm-hugo-2')).toBeLessThan(order.indexOf('mm-hugo-1'));
-    expect(order.indexOf('mm-hugo-1')).toBeLessThan(order.indexOf('mm-hugo-0'));
     await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+  });
+
+  test('the Friday piece moves alone: the bars after the weekend are other bookings', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, { events: perDayRows([D.FRI, D.MON2, D.TUE2]), users: CREW4 });
+    await toSchedule(page);
+    await realDrag(page, bar(page, 'mm-hugo-0'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(4);
+    await page.waitForTimeout(300);
+    expect(writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId).sort())
+      .toEqual(['mm-hugo-0', 'mm-liam-0', 'mm-nina-0', 'mm-priya-0']);
+    for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.WED, D.MON2, D.TUE2]);
   });
 
   test('the reschedule step also offers the crew text: one each, from the office number, naming who has no phone', async ({ page }) => {
     const { writes, texts } = await bootCalendar(page, { events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4 });
     await toSchedule(page);
-    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
-      page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+    await realDrag(page, bar(page, 'mm-hugo-0'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
     const modal = page.locator('#calConfirmModal');
     await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
     await expect(modal).toContainText('Send reschedule update?');
@@ -579,7 +594,8 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     }
     const hugo = texts.find((t) => t.phone === '+61400000001').message;
     const label = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/,/g, '');
-    expect(hugo).toContain('Your days: ' + [D.MON2, D.TUE2, D.WED2, FRI2].map(label).join(', '));
+    // every day the person is on the job, not only the moved bar's
+    expect(hugo).toContain('Your days: ' + [D.WED, D.MON2, D.TUE2, D.THU2].map(label).join(', '));
     expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(1);
     await expect(page.getByText(/Crew texted: Hugo, Liam, Nina/)).toBeVisible();
     await expect(page.getByText(/No phone on file, not texted: Priya/).last()).toBeVisible();
@@ -636,39 +652,59 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes.some((w) => w.action === 'update_assignment' || w.action === 'delete_assignment')).toBe(false);
   });
 
-  // The loaded window is today forward for two weeks (to D.MON + 13). A job
-  // whose bookings reach past it must never be planned from the edge that is
-  // only the window's.
+  // The loaded window is today forward for two weeks (to D.MON + 13). A
+  // job's bookings past it, or before it, are other bookings: they never
+  // stop a bar in view from moving or stretching, and never move with it.
   const MON3 = isoStr(plusDays(monA, 14));
   const FRI0 = isoStr(plusDays(monA, -3));
 
-  test('a job running past the view: its end handle refuses rather than removing the days out of sight', async ({ page }) => {
-    const { writes } = await bootCalendar(page, {
+  test('a job with bookings past the view: its bar\'s end handle stretches that bar only', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, {
       events: perDayRows([D.THU2, MON3], CREW4.slice(0, 2)), users: CREW4, windowOnly: true,
     });
     await toSchedule(page);
-    const bar = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
-    await bar.hover();
-    await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + FRI2 + '"]'));
-    await expect(page.getByText('Not changed - this job runs past the calendar view; widen the view to change it')).toBeVisible();
+    const thu = page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first();
+    await thu.hover();
+    await realDrag(page, thu.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + FRI2 + '"]'));
+    // each person's one-row Thursday booking now runs Thu to Fri
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(2);
     await page.waitForTimeout(300);
-    expect(writes).toHaveLength(0);
-    // with the job's bookings read, the handle is no longer offered on the
-    // window's edge
-    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.right')).toHaveCount(0);
-    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"] .cal-resize-handle.left')).toHaveCount(1);
+    expect(writes.filter((w) => w.action === 'update_assignment').map((w) => [w.body.assignmentId, w.body.scheduled_date, w.body.scheduled_end]).sort())
+      .toEqual([['mm-hugo-0', D.THU2, FRI2], ['mm-liam-0', D.THU2, FRI2]]);
+    expect(writes.some((w) => w.action === 'create_assignment' || w.action === 'delete_assignment')).toBe(false);
+    await expect(page.locator('body')).not.toContainText('runs past the calendar view');
+    expect(state.events.filter((e) => e.scheduled_date === MON3)).toHaveLength(2);
   });
 
-  test('a job that started before the view: a move refuses rather than taking the hidden first day as the drop', async ({ page }) => {
-    const { writes } = await bootCalendar(page, {
+  test('a job with a booking before the view: the bar in view moves alone', async ({ page }) => {
+    const { writes, state } = await bootCalendar(page, {
       events: perDayRows([FRI0, D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4, windowOnly: true,
     });
     await toSchedule(page);
     await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
       page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
-    await expect(page.getByText('Not changed - this job runs past the calendar view; widen the view to change it')).toBeVisible();
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(4);
     await page.waitForTimeout(300);
-    expect(writes).toHaveLength(0);
+    await expect(page.locator('body')).not.toContainText('runs past the calendar view');
+    expect(datesOf(state, 'u-hugo')).toEqual([FRI0, D.WED, D.THU]);
+    expect(datesOf(state, 'u-liam')).toEqual([FRI0, D.WED, D.THU]);
+  });
+
+  // Michael Johnson SWP-26183, 27 Oct 2026: unfinished bookings weeks
+  // earlier, out of view, refused the drag of its 28 Oct booking.
+  test('a booking whose job has old unfinished days out of view drags on its own', async ({ page }) => {
+    const longAgo = [isoStr(plusDays(monA, -49)), isoStr(plusDays(monA, -35))];
+    const rows = perDayRows(longAgo, CREW4.slice(0, 2)).concat(perDayRows([D.WED], CREW4.slice(0, 1)).map((e) => ({ ...e, assignment_id: 'mm-hugo-now' })));
+    const { writes, state } = await bootCalendar(page, { events: rows, users: CREW4, windowOnly: true });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.THU + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(1);
+    await page.waitForTimeout(300);
+    expect(writes.find((w) => w.action === 'update_assignment').body).toMatchObject({ assignmentId: 'mm-hugo-now', scheduled_date: D.THU, scheduled_end: D.THU });
+    await expect(page.locator('body')).not.toContainText('runs past the calendar view');
+    expect(datesOf(state, 'u-hugo')).toEqual([longAgo[0], longAgo[1], D.THU]);
+    expect(datesOf(state, 'u-liam')).toEqual(longAgo);
   });
 
   test('a second drop while the first is still reading the job is refused, never planned over its stand-ins', async ({ page }) => {
@@ -696,7 +732,7 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     // a drop back on the job's own first day changes nothing, but reads the job
     await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
       page.locator('.cal-schedule-cell[data-date="' + D.MON + '"]'));
-    await expect.poll(() => page.evaluate(() => !!calJobSpanInHand('j-mm'))).toBe(true);
+    await expect.poll(() => page.evaluate(() => !!(_calJobRowsCache['j-mm'] && _calJobRowsCache['j-mm'].rows))).toBe(true);
     // another edit removes Liam's Tuesday, and the page reloads the calendar as every such write does
     state.events = state.events.filter((e) => e.assignment_id !== 'mm-liam-1');
     await page.evaluate(() => loadCalendar());
@@ -761,8 +797,8 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(writes.some((w) => w.action === 'create_assignment' || w.action === 'update_assignment')).toBe(false);
   });
   // The reschedule step opens on the drop, not after the saves. Live ops-api
-  // takes 3 to 5 seconds per booking write and a whole-job move writes in
-  // several rounds one after another, so waiting for the saves put the step
+  // takes 3 to 5 seconds per booking write and a multi-crew, multi-day bar
+  // writes in several rounds one after another, so waiting for the saves put the step
   // 10 to 17 seconds after the drop.
   test('the reschedule step opens the moment a multi-crew job is dropped, while its saves are still running', async ({ page }) => {
     test.setTimeout(45000);
@@ -770,8 +806,7 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
       events: perDayRows([D.FRI, D.MON2, D.TUE2, D.THU2]), users: CREW4, writeDelayMs: 1500,
     });
     await toSchedule(page);
-    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
-      page.locator('.cal-schedule-cell[data-date="' + D.MON2 + '"]'));
+    await realDrag(page, bar(page, 'mm-hugo-1'), page.locator('.cal-schedule-cell[data-date="' + D.TUE2 + '"]'));
     const dropped = Date.now();
     await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/, { timeout: 1000 });
     expect(Date.now() - dropped, 'drop to reschedule step').toBeLessThan(1000);
@@ -788,10 +823,10 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
 
     // Once every write has landed, the texts go, about the saved days.
     await expect.poll(() => writes.filter((w) => w.action === 'send_client_update').length, { timeout: 20000 }).toBe(1);
-    expect(state.writesAnswered).toBe(16);
+    expect(state.writesAnswered).toBe(8);
     await expect.poll(() => texts.length).toBe(3);
     await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
-    for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.MON2, D.TUE2, D.WED2, FRI2]);
+    for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.FRI, D.TUE2, D.WED2, D.THU2]);
   });
 
   test('a save that fails behind a pressed reschedule step sends nothing and puts the job back', async ({ page }) => {
@@ -849,8 +884,9 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     expect(datesOf(state, 'u-hugo')).toEqual([D.WED, D.THU]);
   });
 
-  // <calendar-job-remove>: the Schedule view's Remove takes the whole
-  // allocation off: every crew member, every day, the office watcher rows too.
+  // <calendar-job-remove>: Remove takes one person off one day, or clears
+  // one day; the whole job comes off only from "Remove whole job from
+  // calendar" (Captain 2026-10-27).
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   function dayList(dates) {
     const groups = [];
@@ -864,23 +900,72 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     id: 'mm-ghost-' + di, job_id: 'j-mm', user_id: 'u-shaun', role: 'observer', is_ghost: true,
     status: 'scheduled', scheduled_date: day, scheduled_end: day,
   }));
-  async function pressScheduleRemove(page) {
-    await page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first().click();
+  async function openRemoveMenu(page, block) {
+    await block.click();
     await expect(page.locator('#calJobPopup')).toHaveClass(/open/);
     await page.locator('#calJobPopup .btn-overflow').click();
-    await page.locator('#calJobPopup .cal-popup-overflow button.btn-danger').click();
+    return page.locator('#calJobPopup .cal-popup-overflow');
   }
+  const deletedIds = (writes) => writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort();
 
-  test('Remove on a Schedule bar takes the whole allocation off at once: every crew member, every day, the watcher rows too', async ({ page }) => {
+  test('Remove on a Schedule bar offers each person on that day, the day, and the whole job by name', async ({ page }) => {
+    const days = [D.MON, D.WED, D.FRI];
+    const { writes, state } = await bootCalendar(page, { events: perDayRows(days), users: CREW4, extraJobRows: ghostRows(days) });
+    await toSchedule(page);
+    const menu = await openRemoveMenu(page, bar(page, 'mm-hugo-1'));
+    const wed = await page.evaluate((d) => fmtDate(d), D.WED);
+    await expect(menu.locator('[data-remove="person"]')).toHaveText(['Hugo', 'Liam', 'Nina', 'Priya'].map((n) => 'Remove ' + n + ' from ' + wed));
+    await expect(menu.locator('[data-remove="day"]')).toHaveText('Clear ' + wed + ' (everyone)');
+    await expect(menu.locator('[data-remove="job"]')).toHaveText('Remove whole job from calendar');
+
+    await menu.locator('[data-remove="person"]', { hasText: 'Liam' }).click();
+    const modal = page.locator('#calConfirmModal');
+    await expect(modal).toContainText('Take Liam off Milan Mall SWP-26595 on ' + wed + '?');
+    await expect(page.locator('#calRemoveKeeps')).toHaveText('Everyone else that day, and every other day of this job, stays.');
+    expect(writes.filter((w) => w.action === 'delete_assignment')).toHaveLength(0);
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => deletedIds(writes)).toEqual(['mm-liam-1']);
+    await expect(page.getByText('Removed Liam from Milan Mall SWP-26595 on ' + wed)).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(deletedIds(writes)).toEqual(['mm-liam-1']);
+    expect(state.events.filter((e) => e.job_id === 'j-mm')).toHaveLength(11);
+    expect(datesOf(state, 'u-liam')).toEqual([D.MON, D.FRI]);
+    expect(datesOf(state, 'u-hugo')).toEqual(days);
+  });
+
+  test('Clear a day takes everyone off that day and leaves every other day', async ({ page }) => {
+    const days = [D.MON, D.WED, D.FRI];
+    const { writes, state } = await bootCalendar(page, { events: perDayRows(days), users: CREW4, extraJobRows: ghostRows(days), deleteDelayMs: 1500 });
+    await toSchedule(page);
+    const menu = await openRemoveMenu(page, bar(page, 'mm-hugo-1'));
+    await menu.locator('[data-remove="day"]').click();
+    const wed = await page.evaluate((d) => fmtDate(d), D.WED);
+    await expect(page.locator('#calConfirmModal')).toContainText('Clear ' + wed + ' on Milan Mall SWP-26595: Hugo, Liam, Nina, Priya?');
+    await expect(page.locator('#calRemoveKeeps')).toHaveText('Every other day of this job stays.');
+    await page.locator('#confirmModalProceed').click();
+    // the day comes off on the press, while the deletes are still answering
+    await expect(bar(page, 'mm-hugo-1')).toHaveCount(0, { timeout: 500 });
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(2);
+    await expect.poll(() => deletedIds(writes)).toEqual(['mm-hugo-1', 'mm-liam-1', 'mm-nina-1', 'mm-priya-1']);
+    await expect(page.getByText('Removed Milan Mall SWP-26595 on ' + wed)).toBeVisible({ timeout: 5000 });
+    // the watcher rows are ops-api's to drop once nobody is on the day
+    expect(writes.some((w) => w.action === 'delete_assignment' && w.body.assignmentId.startsWith('mm-ghost'))).toBe(false);
+    for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.MON, D.FRI]);
+  });
+
+  test('Remove whole job from calendar, chosen by name, takes every booking off: every crew member, every day, the watcher rows too', async ({ page }) => {
     const days = [D.MON, D.WED, D.THU];
     const { writes, state } = await bootCalendar(page, {
       events: perDayRows(days), users: CREW4, extraJobRows: ghostRows(days), deleteDelayMs: 1500,
     });
     await toSchedule(page);
-    await pressScheduleRemove(page);
+    const menu = await openRemoveMenu(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first());
+    await menu.locator('[data-remove="job"]').click();
     const modal = page.locator('#calConfirmModal');
-    await expect(modal).toContainText('Remove Milan Mall SWP-26595 from the calendar: 4 crew across ' + dayList(days) + '?');
+    await expect(modal).toContainText('Remove the whole job Milan Mall SWP-26595 from the calendar: 12 bookings, 4 crew across ' + dayList(days) + '?');
     await expect(page.locator('#calRemoveJobCrew')).toHaveText('Hugo, Liam, Nina, Priya, every day.');
+    await expect(modal).toContainText('Paid (invoiced) days stay.');
+    await expect(page.locator('#confirmModalProceed')).toHaveText('Remove whole job');
     expect(writes.filter((w) => w.action === 'delete_assignment')).toHaveLength(0);
 
     await page.locator('#confirmModalProceed').click();
@@ -888,22 +973,22 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(0, { timeout: 500 });
     await expect(page.locator('#calJobPopup')).not.toHaveClass(/open/);
     await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(15);
-    const deleted = writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort();
-    expect(deleted).toEqual(perDayRows(days).map((e) => e.assignment_id).concat(['mm-ghost-0', 'mm-ghost-1', 'mm-ghost-2']).sort());
+    expect(deletedIds(writes)).toEqual(perDayRows(days).map((e) => e.assignment_id).concat(['mm-ghost-0', 'mm-ghost-1', 'mm-ghost-2']).sort());
     await expect(page.getByText('Removed Milan Mall SWP-26595 from the calendar')).toBeVisible({ timeout: 5000 });
     await expect.poll(() => state.events.filter((e) => e.job_id === 'j-mm').length).toBe(0);
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(0);
   });
 
-  test('Remove keeps an invoiced booking the server refuses, names it by person and day, and puts it back', async ({ page }) => {
+  test('Remove whole job keeps an invoiced booking the server refuses, names it by person and day, and puts it back', async ({ page }) => {
     const days = [D.MON, D.TUE];
     const { writes } = await bootCalendar(page, {
       events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4,
       refuseDelete: { 'mm-liam-1': 'Booking is on an invoice and cannot be removed' },
     });
     await toSchedule(page);
-    await pressScheduleRemove(page);
-    await expect(page.locator('#calConfirmModal')).toContainText('2 crew across ' + dayList(days));
+    const menu = await openRemoveMenu(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first());
+    await menu.locator('[data-remove="job"]').click();
+    await expect(page.locator('#calConfirmModal')).toContainText('4 bookings, 2 crew across ' + dayList(days));
     await page.locator('#confirmModalProceed').click();
     await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(4);
     const label = await page.evaluate((d) => fmtDate(d), D.TUE);
@@ -913,38 +998,78 @@ test.describe('Whole job, one booking per person per day (Milan Mall shape)', ()
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(1);
   });
 
-  test('a Remove the server refuses whole puts the job back and says so', async ({ page }) => {
+  test('a whole-job Remove the server refuses whole puts the job back and says so', async ({ page }) => {
     const days = [D.MON];
     await bootCalendar(page, {
       events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4,
       refuseDelete: { 'mm-hugo-0': 'down', 'mm-liam-0': 'down' },
     });
     await toSchedule(page);
-    await pressScheduleRemove(page);
+    const menu = await openRemoveMenu(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first());
+    await menu.locator('[data-remove="job"]').click();
     await page.locator('#confirmModalProceed').click();
     await expect(page.getByText('Not removed: Milan Mall SWP-26595 - down. The calendar shows what was saved.')).toBeVisible();
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(1);
   });
 
-  test('Remove on one person\'s booking in the Crew view takes the whole allocation off too', async ({ page }) => {
+  test('Remove on one person\'s booking in the Crew view takes only that person off that day', async ({ page }) => {
     const days = [D.MON, D.TUE];
     const { writes, state } = await bootCalendar(page, { events: perDayRows(days, CREW4.slice(0, 2)), users: CREW4 });
-    await page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block').click();
-    await expect(page.locator('#calJobPopup')).toHaveClass(/open/);
-    await page.locator('#calJobPopup .btn-overflow').click();
-    await page.locator('#calJobPopup .cal-popup-overflow button.btn-danger').click();
-    await expect(page.locator('#calConfirmModal')).toContainText('Remove Milan Mall SWP-26595 from the calendar: 2 crew across ' + dayList(days) + '?');
-    await expect(page.locator('#calRemoveJobCrew')).toHaveText('Hugo, Liam, every day.');
+    const menu = await openRemoveMenu(page, page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block'));
+    const mon = await page.evaluate((d) => fmtDate(d), D.MON);
+    // the clicked person only, then the day and the whole job
+    await expect(menu.locator('[data-remove="person"]')).toHaveText(['Remove Hugo from ' + mon]);
+    await expect(menu.locator('[data-remove="day"]')).toHaveText('Clear ' + mon + ' (everyone)');
+    await menu.locator('[data-remove="person"]').click();
+    await expect(page.locator('#calConfirmModal')).toContainText('Take Hugo off Milan Mall SWP-26595 on ' + mon + '?');
     await page.locator('#confirmModalProceed').click();
-    await expect.poll(() => writes.filter((w) => w.action === 'delete_assignment').length).toBe(4);
-    expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.body.assignmentId).sort())
-      .toEqual(['mm-hugo-0', 'mm-hugo-1', 'mm-liam-0', 'mm-liam-1']);
-    await expect.poll(() => state.events.filter((e) => e.job_id === 'j-mm').length).toBe(0);
-    await expect(page.locator('.cal-swim-cell .cal-job-block')).toHaveCount(0);
+    await expect.poll(() => deletedIds(writes)).toEqual(['mm-hugo-0']);
+    await page.waitForTimeout(300);
+    expect(deletedIds(writes)).toEqual(['mm-hugo-0']);
+    expect(datesOf(state, 'u-hugo')).toEqual([D.TUE]);
+    expect(datesOf(state, 'u-liam')).toEqual([D.MON, D.TUE]);
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block')).toHaveCount(0);
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Liam"] .cal-job-block')).toHaveCount(1);
+  });
+
+  // Michael Johnson SWP-26183: Isaac and Henry on an old day, Isaac alone on
+  // a day in view. Removing Isaac from the day in view leaves the old day,
+  // both of them, exactly as it was.
+  test('Remove one person from a day in view never touches the job\'s old bookings out of view', async ({ page }) => {
+    const old = isoStr(plusDays(monA, -49));
+    const rows = perDayRows([old], CREW4.slice(0, 2)).concat(perDayRows([D.WED], CREW4.slice(0, 1)).map((e) => ({ ...e, assignment_id: 'mm-hugo-now' })));
+    const { writes, state } = await bootCalendar(page, { events: rows, users: CREW4, windowOnly: true });
+    const menu = await openRemoveMenu(page, page.locator('.cal-swim-cell[data-date="' + D.WED + '"][data-crew="Hugo"] .cal-job-block'));
+    // one person on the day: no separate Clear
+    await expect(menu.locator('[data-remove="day"]')).toHaveCount(0);
+    await menu.locator('[data-remove="person"]').click();
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => deletedIds(writes)).toEqual(['mm-hugo-now']);
+    await page.waitForTimeout(300);
+    expect(deletedIds(writes)).toEqual(['mm-hugo-now']);
+    expect(datesOf(state, 'u-hugo')).toEqual([old]);
+    expect(datesOf(state, 'u-liam')).toEqual([old]);
   });
 });
 
 test.describe('One booking, one crew member (Crew view)', () => {
+  test('Remove a person from the middle day of a longer booking keeps the days either side, the rest sent quietly', async ({ page }) => {
+    const { writes } = await bootCalendar(page);
+    await page.locator('.cal-swim-cell[data-date="' + D.TUE + '"][data-crew="Hugo"] .cal-job-block').click();
+    await page.locator('#calJobPopup .btn-overflow').click();
+    const tue = await page.evaluate((d) => fmtDate(d), D.TUE);
+    await page.locator('#calJobPopup [data-remove="person"]', { hasText: 'Remove Hugo from ' + tue }).click();
+    await expect(page.locator('#calConfirmModal')).toContainText('Take Hugo off Jane Citizen SWF-101 on ' + tue + '?');
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => writes.length).toBe(2);
+    expect(writes.find((w) => w.action === 'update_assignment').body).toMatchObject({ assignmentId: 'a-jane', scheduled_date: D.MON, scheduled_end: D.MON, duration_days: 1 });
+    expect(writes.find((w) => w.action === 'create_assignment').body).toMatchObject({
+      jobId: 'j-1', userId: 'u-hugo', scheduledDate: D.WED, scheduledEnd: D.WED, durationDays: 1, suppress_notifications: true,
+    });
+    expect(writes.some((w) => w.action === 'delete_assignment')).toBe(false);
+    await expect(page.getByText('Removed Hugo from Jane Citizen SWF-101 on ' + tue)).toBeVisible();
+  });
+
   test('the reschedule step opens the moment the booking is dropped, before its save is answered', async ({ page }) => {
     const { writes, state } = await bootCalendar(page, { writeDelayMs: 3000 });
     const src = page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block');

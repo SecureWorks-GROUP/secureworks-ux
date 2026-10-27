@@ -297,9 +297,9 @@ test.describe('CP1 staging occupancy — job-scoped assignment rows over the loa
   });
 });
 
-// Whole-job move and stretch (Captain, Milan Mall SWP-26595): a multi-crew job
+// Bar move and stretch (Captain, Milan Mall SWP-26595): a multi-crew job
 // stored one booking per person per day, across a weekend.
-test.describe('Whole-job move and stretch planners', () => {
+test.describe('Bar move, stretch and remove planners', () => {
   const crew = ['u-h', 'u-i', 'u-n', 'u-r'];
   const days = [FRI, MON2, TUE2, '2026-07-30'];
   function milanRows() {
@@ -447,8 +447,62 @@ test.describe('Whole-job move and stretch planners', () => {
     expect(removed.map((r) => r.assignment_id)).toEqual(['h-mon', 'i-span', 'ghost']);
     const sum = C.removalSummary(removed, (ev) => ev.crew_name);
     // the watcher is not crew and its stale day is not counted; a span counts every painted day, never the weekend between
-    expect(sum).toEqual({ crew: ['Henry', 'Isaac'], days: [MON, WED, THU, FRI, MON2] });
+    expect(sum).toEqual({ crew: ['Henry', 'Isaac'], days: [MON, WED, THU, FRI, MON2], bookings: 2 });
     expect(C.dayListLabel(sum.days)).toBe('20, 22, 23, 24, 27 Jul');
     expect(C.dayListLabel(['2026-11-30', '2026-12-01', '2026-12-02'])).toBe('30 Nov, 1, 2 Dec');
+  });
+  // Each booking stands on its own (Captain 2026-10-27, Michael Johnson
+  // SWP-26183): Isaac and Henry on 8 Sep, Isaac alone on 28 Oct.
+  const SEP8 = '2026-09-08', OCT28 = '2026-10-28';
+  const booking = (id, user, s, e, extra) => ({ assignment_id: id, job_id: 'j', user_id: user, crew_name: user,
+    scheduled_date: s, scheduled_end: e, assignment_type: 'install', assignment_status: 'scheduled', ...extra });
+  const mjRows = () => [
+    booking('i-sep', 'u-isaac', SEP8, SEP8), booking('h-sep', 'u-henry', SEP8, SEP8),
+    booking('i-oct', 'u-isaac', OCT28, OCT28),
+    booking('g-sep', 'u-shaun', SEP8, SEP8, { role: 'observer', is_ghost: true }),
+  ];
+
+  test('a bar\'s bookings are the live rows painted on its days, never the job\'s other days', () => {
+    expect(C.barRows(mjRows(), OCT28, OCT28).map((r) => r.assignment_id)).toEqual(['i-oct']);
+    expect(C.barRows(mjRows(), SEP8, SEP8).map((r) => r.assignment_id)).toEqual(['i-sep', 'h-sep']);
+    // moving the 28 Oct bar moves only Isaac's 28 Oct booking
+    const plan = C.planJobMove(C.barRows(mjRows(), OCT28, OCT28), '2026-10-29');
+    expect(plan.updates.map((u) => [u.ev.assignment_id, u.update.scheduled_date])).toEqual([['i-oct', '2026-10-29']]);
+    // a row that runs past the bar moves whole: one row Fri to Mon, grabbed by its Mon piece
+    const span = [booking('p', 'u-p', FRI, MON2), booking('q', 'u-q', MON2, MON2), booking('r', 'u-q', WED, WED)];
+    expect(C.barRows(span, MON2, MON2).map((r) => r.assignment_id)).toEqual(['p', 'q']);
+    expect(C.barRows(span, FRI, FRI).map((r) => r.assignment_id)).toEqual(['p']);
+    // history and a cancelled row are not bookings to move
+    expect(C.barRows([booking('d', 'u-a', MON, MON, { assignment_status: 'complete' }), booking('c', 'u-a', MON, MON, { status: 'cancelled' })], MON, MON)).toEqual([]);
+  });
+
+  test('a day removal takes one person, or everyone, off that one day and nothing else', () => {
+    // Remove Isaac from 8 Sep: Henry stays that day, Isaac stays on 28 Oct, the watcher is left to ops-api
+    let plan = C.planDayRemoval(mjRows(), SEP8, 'u:u-isaac');
+    expect(plan.deletes.map((d) => d.ev.assignment_id)).toEqual(['i-sep']);
+    expect(plan.updates).toEqual([]);
+    expect(plan.creates).toEqual([]);
+    // Clear 8 Sep: both crew that day, never 28 Oct
+    plan = C.planDayRemoval(mjRows(), SEP8, null);
+    expect(plan.deletes.map((d) => d.ev.assignment_id)).toEqual(['i-sep', 'h-sep']);
+    // a booking that runs over several days only loses the day: the first day, the last, or one in the middle
+    const span = () => [booking('s', 'u-a', MON, FRI, { duration_days: 5, start_time: '07:00', confirmation_status: 'tentative' })];
+    plan = C.planDayRemoval(span(), MON, 'u:u-a');
+    expect(plan.updates.map((u) => [u.update.scheduled_date, u.update.scheduled_end, u.update.duration_days])).toEqual([[TUE, FRI, 4]]);
+    plan = C.planDayRemoval(span(), FRI, null);
+    expect(plan.updates.map((u) => [u.update.scheduled_date, u.update.scheduled_end, u.update.duration_days])).toEqual([[MON, THU, 4]]);
+    plan = C.planDayRemoval(span(), WED, null);
+    expect(plan.updates.map((u) => [u.update.scheduled_date, u.update.scheduled_end, u.update.duration_days])).toEqual([[MON, TUE, 2]]);
+    expect(plan.creates.map((c) => [c.create.userId, c.create.scheduledDate, c.create.scheduledEnd, c.create.durationDays,
+      c.create.startTime, c.create.suppress_notifications])).toEqual([['u-a', THU, FRI, 2, '07:00', true]]);
+    // the split shows as it will be saved: Mon-Tue and Thu-Fri
+    const after = C.applyPlanToEvents(span(), plan);
+    expect(after.map((e) => [e.scheduled_date, e.scheduled_end])).toEqual([[MON, TUE], [THU, FRI]]);
+    expect(C.crewDays(after)['u:u-a'].days).toEqual([MON, TUE, THU, FRI]);
+    // a Fri to Mon booking losing Fri starts on the Monday, the weekend between still a break
+    plan = C.planDayRemoval([booking('w', 'u-a', FRI, MON2)], FRI, null);
+    expect(plan.updates.map((u) => [u.update.scheduled_date, u.update.scheduled_end])).toEqual([[MON2, MON2]]);
+    // nobody booked that day: nothing to do
+    expect(C.planDayRemoval(mjRows(), OCT28, 'u:u-henry').deletes).toEqual([]);
   });
 });

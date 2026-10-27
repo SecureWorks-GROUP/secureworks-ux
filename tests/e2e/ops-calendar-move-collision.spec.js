@@ -272,9 +272,11 @@ test('Schedule-view move orders same-person day rows safely and keeps ghost mirr
   assertUnique(rows);
 });
 
-test('a separate visit of the same job moves with it instead of blocking the drop', async ({ page }) => {
-  // Hugo has Mon and Wed on this job, two bars. The whole job moves: the drop
-  // day is its new first day and the Wed visit keeps its working-day gap.
+test('a bar dropped on the same person\'s other visit of the job is refused, and a drop elsewhere moves only that bar', async ({ page }) => {
+  // Hugo has Mon and Wed on this job, two bars, two bookings (Captain
+  // 2026-10-27: each booking stands on its own). Mon dropped on Wed would put
+  // two of his bookings on one date, so it is refused and both stay; Mon
+  // dropped on Thu moves Mon only and Wed stays where it is.
   const rows = [
     assignment('h-source', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
     assignment('h-existing', 'u-hugo', 'Hugo', D.WED, { role: 'lead_installer' }),
@@ -283,16 +285,21 @@ test('a separate visit of the same job moves with it instead of blocking the dro
   ];
   const { writes } = await bootCalendar(page, { rows });
   await page.locator('#btnViewSchedule').click();
+  await expect(page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]')).toHaveCount(2);
   const sourceBar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
   await realDrag(page, sourceBar, page.locator(`.cal-schedule-cell[data-date="${D.WED}"]`));
+  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(writes).toHaveLength(0);
 
-  await expect.poll(() => writes.length).toBe(2);
+  await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first(),
+    page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
+  await expect.poll(() => writes.length).toBe(1);
+  await page.waitForTimeout(300);
+  expect(writes.map((w) => w.body.assignmentId)).toEqual(['h-source']);
+  expect(rows.find((row) => row.id === 'h-source').scheduled_date).toBe(D.THU);
+  expect(rows.find((row) => row.id === 'h-existing').scheduled_date).toBe(D.WED);
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
-  await expect(page.locator('body')).not.toContainText('Already scheduled there');
-  // Wed has to leave before Mon can land on it
-  expect(writes.map((w) => w.body.assignmentId)).toEqual(['h-existing', 'h-source']);
-  expect(rows.find((row) => row.id === 'h-source').scheduled_date).toBe(D.WED);
-  expect(rows.find((row) => row.id === 'h-existing').scheduled_date).toBe(D.FRI);
   assertUnique(rows);
 });
 
@@ -336,11 +343,11 @@ test('crew reassignment onto an existing job/person/date skips before delete-and
   assertUnique(rows);
 });
 
-test('a visit of the job the calendar feed left out moves with the job instead of hitting Postgres', async ({ page }) => {
+test('a visit of the job the calendar feed left out still holds its date: the bar is refused, never sent into Postgres', async ({ page }) => {
   // Hugo holds Mon+Tue (one bar) and a separate Fri visit that the truncated
-  // feed did not deliver. Dragging the bar to Thu shifts Tue -> Fri, which the
-  // window snapshot alone cannot see; the job-scoped read supplies the Fri row
-  // so it moves first (to the following Wed) and nothing collides.
+  // feed did not deliver. Dragging the bar to Thu would put Tue on Fri, which
+  // the window snapshot alone cannot see; the job-scoped read supplies the Fri
+  // row, it stays where it is (another booking) and the bar is refused whole.
   const rows = [
     assignment('h-0', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
     assignment('h-1', 'u-hugo', 'Hugo', D.TUE, { role: 'lead_installer' }),
@@ -355,12 +362,12 @@ test('a visit of the job the calendar feed left out moves with the job instead o
   const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
   await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
 
-  await expect.poll(() => writes.length).toBe(3);
+  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  await page.waitForTimeout(300);
+  expect(writes).toHaveLength(0);
   const byId = Object.fromEntries(rows.map((row) => [row.id, row.scheduled_date]));
-  expect([byId['h-0'], byId['h-1'], byId['h-hidden']]).toEqual([D.THU, D.FRI, addIsoDays(D.MON, 9)]);
-  expect(writes.findIndex((w) => w.body.assignmentId === 'h-hidden'))
-    .toBeLessThan(writes.findIndex((w) => w.body.assignmentId === 'h-1'));
+  expect([byId['h-0'], byId['h-1'], byId['h-hidden']]).toEqual([D.MON, D.TUE, D.FRI]);
   assertUnique(rows);
 });
 
@@ -513,10 +520,11 @@ test('a multi-crew bar blocked by a completed row names it as completed in the c
   assertUnique(rows);
 });
 
-test('a separate visit of the same crew member moves with the whole job, chained safely', async ({ page }) => {
-  // Hugo and Isaac share Mon+Tue and Isaac also has the job's Fri visit. The
-  // whole job moves to Thu: Isaac's Fri goes to the following Wed first, so his
-  // Tue can take Fri; nobody is left behind and no write hits the unique key.
+test('another visit of the same crew member stays put and refuses only the bar that would land on it', async ({ page }) => {
+  // Hugo and Isaac share Mon+Tue and Isaac also has the job's Fri visit, a
+  // booking of its own. The Mon+Tue bar dropped on Thu would put Isaac's Tue
+  // on his Fri: the bar is all-or-nothing, so nobody moves and the Fri visit
+  // is named. Dropped on Wed instead, the bar moves and Fri is untouched.
   const rows = [
     assignment('h-0', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
     assignment('h-1', 'u-hugo', 'Hugo', D.TUE, { role: 'lead_installer' }),
@@ -532,14 +540,18 @@ test('a separate visit of the same crew member moves with the whole job, chained
   await expect(page.locator(`.cal-schedule-bar[data-job-id="job-consecutive"]`)).toHaveCount(2);
   const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
   await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
+  await expect(page.getByText(`Not moved — 1 existing visit kept: Isaac on ${fmtDate(D.FRI)}`)).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(writes).toHaveLength(0);
 
-  await expect.poll(() => writes.length).toBe(5);
+  await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first(),
+    page.locator(`.cal-schedule-cell[data-date="${D.WED}"]`));
+  await expect.poll(() => writes.length).toBe(4);
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
   const byId = Object.fromEntries(rows.map((row) => [row.id, row.scheduled_date]));
   expect([byId['h-0'], byId['h-1'], byId['i-0'], byId['i-1'], byId['i-fri']])
-    .toEqual([D.THU, D.FRI, D.THU, D.FRI, addIsoDays(D.MON, 9)]);
-  expect(rows.filter((row) => row.is_ghost).map((row) => row.scheduled_date).sort())
-    .toEqual([D.THU, D.FRI, addIsoDays(D.MON, 9)].sort());
+    .toEqual([D.WED, D.THU, D.WED, D.THU, D.FRI]);
+  expect(writes.some((w) => w.body.assignmentId === 'i-fri')).toBe(false);
   assertUnique(rows);
 });
 
@@ -573,7 +585,7 @@ test('a stretch that would remove an invoiced day says so plainly and puts the b
   assertUnique(rows);
 });
 
-test('a whole-job drag whose job read failed moves nothing and says so, never leaving rows behind', async ({ page }) => {
+test('a bar drag whose job read failed moves nothing and says so', async ({ page }) => {
   const { rows, writes } = await bootCalendar(page, { jobDetailFails: true });
   await page.locator('#btnViewSchedule').click();
   const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();

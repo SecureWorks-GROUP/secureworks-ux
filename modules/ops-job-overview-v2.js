@@ -747,17 +747,17 @@ var JobOverviewV2Core = (function () {
       var d = i.invoiceDate || i.createdAt;
       if (d) meta.push(shortDate(d, now));
       var pill;
-      if (i.status === 'SUBMITTED') pill = { cls: 'warn', words: 'Awaiting approval, cannot be paid' };
-      else if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft, cannot be paid' };
+      if (i.status === 'SUBMITTED') pill = { cls: 'warn', words: 'Awaiting approval in Xero, cannot be paid' };
+      else if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft in Xero, cannot be paid' };
       else if (i.status === 'DELETED') pill = { cls: 'sup', words: 'Deleted in Xero' };
       else if (i.status === 'VOIDED') pill = { cls: 'sup', words: 'Voided in Xero' };
-      else if (i.status === 'PAID') pill = { cls: 'acc', words: 'Paid' + (i.paidOn ? ' ' + shortDate(i.paidOn, now) : '') };
+      else if (i.status === 'PAID') pill = { cls: 'acc', words: 'Paid (Xero)' + (i.paidOn ? ' ' + shortDate(i.paidOn, now) : '') };
       else {
         var owing = i.due != null ? i.due : Math.max(0, i.total - i.paid);
         var overdue = owing > 0 && i.dueDate && perthDayKey(i.dueDate) && perthDayKey(i.dueDate) < today;
         if (i.paid > 0 && owing > 0) meta.push('paid ' + money(i.paid));
         if (i.dueDate && owing > 0) meta.push('due ' + shortDate(i.dueDate, now));
-        pill = overdue ? { cls: 'warn', words: 'Overdue ' + money(owing) } : (owing > 0 ? { cls: 'info', words: 'Owing ' + money(owing) } : { cls: 'info', words: 'Issued' });
+        pill = overdue ? { cls: 'warn', words: 'Owed · past due ' + money(owing) } : (owing > 0 ? { cls: 'info', words: 'Owed ' + money(owing) } : { cls: 'info', words: 'Approved in Xero' });
       }
       if (i.byName) meta.push('matched by name only');
       (dead ? faded : live).push({
@@ -812,18 +812,18 @@ var JobOverviewV2Core = (function () {
   var QUOTE_APP_RE = /^App recorded quote\s+(?:(Q-[\w-]+)\s+)?v(\d+)\s+sent/i;
   var STATUS_INTO_RE = /status set to ([a-z _]+?)(?:\s*\(from\b|\.|$)/i;
   var MILESTONE_STATUS = ['accepted', 'scheduled', 'in progress', 'in_progress', 'complete', 'completed'];
-  var STATE_WORDS = { draft: 'Draft, not issued (a draft cannot be paid)', voided: 'Voided or deleted in Xero', deleted: 'Deleted in Xero',
-    paid: 'Paid', delivered: 'Delivered', failed: 'Did not send', accepted: 'Accepted', superseded: 'Replaced by a later version' };
+  var STATE_WORDS = { draft: 'Draft in Xero (a draft cannot be paid)', voided: 'Voided or deleted in Xero', deleted: 'Deleted in Xero',
+    paid: 'Paid (Xero)', delivered: 'Delivered', failed: 'Did not send', accepted: 'Accepted', superseded: 'Replaced by a later version' };
 
-  // "Draft invoice INV-9002 · $3,571.43, not issued" from the story's longer sentence.
+  // "Draft invoice INV-9002 · $3,571.43, draft in Xero" from the story's longer sentence.
   function invoiceTitle(r) {
     var m = /\b(INV-[\w-]+)/.exec(r.what);
     var name = m ? m[1] : 'invoice';
     var amt = isFinite(r.amount) ? DOT + money(r.amount) : '';
-    if (r.state === 'draft') return 'Draft invoice ' + name + amt + ', not issued';
+    if (r.state === 'draft') return 'Draft invoice ' + name + amt + ', draft in Xero';
     if (r.state === 'voided' || r.state === 'deleted') return 'Invoice ' + name + (/deleted/i.test(r.what) ? ' deleted' : ' voided') + ' in Xero';
-    if (r.state === 'paid') return 'Invoice ' + name + ' paid' + amt;
-    if (r.state) return 'Invoice ' + name + ' issued' + amt;
+    if (r.state === 'paid') return 'Invoice ' + name + ' paid (Xero)' + amt;
+    if (r.state) return 'Invoice ' + name + ' approved in Xero' + amt;
     return cut(r.what, 84);
   }
   function quoteLabel(num0, ver) { return 'Quote ' + (num0 ? num0 + ' ' : '') + 'v' + ver; }
@@ -989,7 +989,7 @@ var JobOverviewV2Core = (function () {
       if (i.byName) return;
       var when0 = i.invoiceDate || i.createdAt;
       var name = 'Invoice ' + (i.number || '(no number)');
-      if (i.status === 'DRAFT') add(when0, 'Draft invoice ' + (i.number || '') + ', ' + money(i.total) + ', not issued', 'wn', 'Xero', ['A draft cannot be paid.']);
+      if (i.status === 'DRAFT') add(when0, 'Draft invoice ' + (i.number || '') + ', ' + money(i.total) + ', draft in Xero', 'wn', 'Xero', ['A draft cannot be paid.']);
       else if (i.status === 'VOIDED' || i.status === 'DELETED') add(when0, name + ' ' + (i.status === 'DELETED' ? 'deleted' : 'voided') + ' in Xero', 'mu', 'Xero');
       else {
         add(when0, name + ' issued, ' + money(i.total), 'ms', 'Xero');
@@ -1464,9 +1464,9 @@ var JobOverviewV2 = (function () {
       h += '<div class="ov2-value-check" id="ov2ValueCheck"><p>' + esc((s.value != null ? 'Recorded value ' + C.money(s.value) + '. ' : '') + 'Source: ' + authority.basis + '. ' + (authority.recordOnly ? 'The story card has not checked this contract value.' : 'This is not a confirmed contract value.')) + '</p>' +
         authority.checks.map(function (s) { return '<p>' + esc(s) + '</p>'; }).join('') + '</div>';
     }
-    h += '<div class="ov2-mrow" id="ov2Paid">Invoiced ' + esc(C.money(s.invoiced)) + DOT + 'Paid ' + esc(C.money(s.paid)) + DOT + 'inc GST</div>';
-    if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', not issued</div>';
-    else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', not issued') + '</div>';
+    h += '<div class="ov2-mrow" id="ov2Paid">Invoiced ' + esc(C.money(s.invoiced)) + DOT + 'Paid (Xero) ' + esc(C.money(s.paid)) + DOT + 'inc GST</div>';
+    if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', draft in Xero</div>';
+    else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', draft in Xero') + '</div>';
     if (s.nameOnly) h += '<div class="ov2-mrow">' + esc(C.plural(s.nameOnly, 'Xero invoice') + ' matched by name only, not counted') + '</div>';
     if (s.splitWarning) h += '<div class="ov2-mrow ov2-warnt" id="ov2SplitWarning">' + esc(s.splitWarning) + '</div>';
     var chips = s.splits.map(function (sp) { return '<span class="ov2-chip">' + esc(sp.who + ' ' + C.money(sp.amount)) + '</span>'; }).join('');
@@ -1567,7 +1567,7 @@ var JobOverviewV2 = (function () {
     }).join('') + '</ol></div>';
   }
   function storyMoneyHtml(m) {
-    var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid', m.money.paid]];
+    var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid (Xero)', m.money.paid]];
     var h = '<div class="ov2-story-money" aria-label="Job money">' + cells.map(function (c) {
       return '<div><span>' + c[0] + '</span><strong>' + esc(c[1] == null ? 'Not recorded' : C.money(c[1])) + '</strong></div>';
     }).join('') + '</div>';
@@ -1592,11 +1592,11 @@ var JobOverviewV2 = (function () {
     if (!held) return '';
     var list = C.heldList(held);
     var items = list.items, count = list.count;
-    var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Held messages, job not certain"><h3>Held messages, job not certain</h3>' +
+    var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Messages, job not certain"><h3>Messages, job not certain</h3>' +
       '<p>These messages may belong to this job or another job. They are not settled facts or open items for this job.</p>' +
-      '<p>' + esc(items.length + ' of ' + count + ' held messages shown.') + '</p>';
+      '<p>' + esc(items.length + ' of ' + count + ' messages shown.') + '</p>';
     if (held.why) h += '<p>' + esc(C.clean(held.why)) + '</p>';
-    if (!items.length) h += '<p>Held message content is unavailable in this read.</p>';
+    if (!items.length) h += '<p>Message content is unavailable in this read.</p>';
     items.forEach(function (r) {
       var x = r.x, call = r.call;
       // Held calls obey the same no-transcript rule as the conversation. A safe
@@ -1605,7 +1605,7 @@ var JobOverviewV2 = (function () {
       var meta = [x.at ? C.stamp(x.at, m.now) : 'Date not recorded', call ? 'Call' : C.clean(x.channel),
         call && r.secs != null ? C.callWords(r.secs) : '',
         C.clean(x.from), x.ours ? 'From us' : C.clean(x.from_role)].filter(Boolean).join(DOT);
-      h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Held, job not certain</strong>' +
+      h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Job not certain</strong>' +
         '<div class="ov2-im">' + esc(meta) + '</div>' +
         (x.subject ? '<p>' + esc(C.clean(x.subject)) + '</p>' : '') +
         '<p class="ov2-held-words">' + esc(words || (call ? 'Call summary unavailable. Transcript words are not shown; commitments in this call may still need review.' : 'Message words unavailable.')) + '</p>' +

@@ -4735,7 +4735,7 @@ __swOpsStampAssets([
         <div class="stat-card" id="statOverdue" onclick="showView('debt')" role="link" tabindex="0" onkeydown="if(event.key==='Enter')showView('debt')" title="Open Debt" style="cursor:pointer;">
           <div class="stat-icon"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
           <div class="stat-body">
-            <div class="stat-label">Overdue Invoices</div>
+            <div class="stat-label">Owed · past due</div>
             <div class="stat-value" id="valOverdue">-</div>
             <div class="stat-sub" id="subOverdue"></div>
           </div>
@@ -4933,10 +4933,10 @@ __swOpsStampAssets([
         <div class="stat-grid" id="invoiceStats" style="grid-template-columns: repeat(3, 1fr);"></div>
         <div class="filter-bar">
           <button class="filter-chip active" onclick="filterInvoiceStatus('all')" data-inv-status="all">All</button>
-          <button class="filter-chip" onclick="filterInvoiceStatus('DRAFT')" data-inv-status="DRAFT">Draft</button>
-          <button class="filter-chip" onclick="filterInvoiceStatus('AUTHORISED')" data-inv-status="AUTHORISED">Sent</button>
-          <button class="filter-chip" onclick="filterInvoiceStatus('PAID')" data-inv-status="PAID">Paid</button>
-          <button class="filter-chip" onclick="filterInvoiceStatus('overdue')" data-inv-status="overdue">Overdue</button>
+          <button class="filter-chip" onclick="filterInvoiceStatus('DRAFT')" data-inv-status="DRAFT">Draft in Xero</button>
+          <button class="filter-chip" onclick="filterInvoiceStatus('AUTHORISED')" data-inv-status="AUTHORISED">Approved in Xero</button>
+          <button class="filter-chip" onclick="filterInvoiceStatus('PAID')" data-inv-status="PAID">Paid (Xero)</button>
+          <button class="filter-chip" onclick="filterInvoiceStatus('overdue')" data-inv-status="overdue">Owed · past due</button>
           <input type="date" class="form-input" id="invDateFrom" style="width:130px;font-size:12px;padding:4px 8px;" onchange="loadInvoices()" title="From date">
           <input type="date" class="form-input" id="invDateTo" style="width:130px;font-size:12px;padding:4px 8px;" onchange="loadInvoices()" title="To date">
           <input type="text" class="filter-search" id="invSearch" placeholder="Search contact / invoice#..." oninput="filterInvoiceSearch()" style="width:180px;">
@@ -5001,9 +5001,9 @@ __swOpsStampAssets([
         <div class="filter-bar">
           <button class="filter-chip active" onclick="filterPOStatus('all')" data-po-status="all">All</button>
           <button class="filter-chip" onclick="filterPOStatus('draft')" data-po-status="draft">Draft</button>
-          <button class="filter-chip" onclick="filterPOStatus('submitted')" data-po-status="submitted">Sent</button>
-          <button class="filter-chip" onclick="filterPOStatus('authorised')" data-po-status="authorised">Confirmed</button>
-          <button class="filter-chip" onclick="filterPOStatus('billed')" data-po-status="billed">Delivered</button>
+          <button class="filter-chip" onclick="filterPOStatus('submitted')" data-po-status="submitted">Sent · Awaiting approval in Xero</button>
+          <button class="filter-chip" onclick="filterPOStatus('authorised')" data-po-status="authorised">Supplier confirmed · Approved in Xero</button>
+          <button class="filter-chip" onclick="filterPOStatus('billed')" data-po-status="billed">Billed · Delivered</button>
           <div style="flex:1;"></div>
           <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ Create PO</button>
         </div>
@@ -5208,10 +5208,10 @@ __swOpsStampAssets([
             <div style="display:flex; gap:6px; flex-wrap:wrap; padding-top:2px;">
               <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="draft" checked onchange="applyMatFilters()"> Draft</label>
               <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="approved" checked onchange="applyMatFilters()"> Approved</label>
-              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="submitted" checked onchange="applyMatFilters()"> Sent</label>
-              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="quote_requested" checked onchange="applyMatFilters()"> Quoted</label>
-              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="authorised" checked onchange="applyMatFilters()"> Confirmed</label>
-              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="billed" checked onchange="applyMatFilters()"> Delivered</label>
+              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="submitted" checked onchange="applyMatFilters()"> Sent · Awaiting approval in Xero</label>
+              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="quote_requested" checked onchange="applyMatFilters()"> Quote asked</label>
+              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="authorised" checked onchange="applyMatFilters()"> Supplier confirmed · Approved in Xero</label>
+              <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="mat-status-cb" value="billed" checked onchange="applyMatFilters()"> Billed · Delivered</label>
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="clearMatFilters()" style="font-size:11px; padding:4px 10px;">Clear</button>
@@ -6530,8 +6530,11 @@ function localDateStr(d) {
 // HELPERS
 // ════════════════════════════════════════════════════════════
 
-function fmt$(n) {
-  if (n == null || isNaN(n)) return '$0.00';
+// An amount we do not have reads Unknown, never $0 (R-22, doc 3 section 5). A
+// caller that knows why passes the reason. Form totals pass 0 for an empty
+// field, so they still read $0.00.
+function fmt$(n, reason) {
+  if (n == null || n === '' || isNaN(n)) return reason ? 'Unknown: ' + reason : 'Unknown';
   return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -6544,6 +6547,28 @@ function fmtTime(t) {
   if (!t) return '';
   return t.slice(0, 5);
 }
+
+// <xero-invoice-words> One word for each Xero state of an invoice or bill, in
+// Xero's terms (doc 3 section 5, INT-17.1). A sales invoice with money due reads
+// Owed, and Owed · past due once its due date has gone.
+var XERO_INVOICE_WORDS = {
+  DRAFT: 'Draft in Xero',
+  SUBMITTED: 'Awaiting approval in Xero',
+  AUTHORISED: 'Approved in Xero',
+  PAID: 'Paid (Xero)',
+  VOIDED: 'Voided in Xero',
+  DELETED: 'Deleted in Xero'
+};
+function xeroInvoiceWord(inv, isPastDue) {
+  var st = String((inv && inv.status) || '').toUpperCase();
+  if (isPastDue) return 'Owed · past due';
+  if (st === 'AUTHORISED' && String(inv.invoice_type || 'ACCREC').toUpperCase() === 'ACCREC') {
+    var due = parseFloat(inv.amount_due);
+    if (!(due <= 0)) return parseFloat(inv.amount_paid) > 0 ? 'Owed · Part paid (Xero)' : 'Owed';
+  }
+  return XERO_INVOICE_WORDS[st] || (st ? st.charAt(0) + st.slice(1).toLowerCase() : 'Status not recorded');
+}
+// </xero-invoice-words>
 
 // ── Weather (BOM Australia — Perth metro, geohash qd66hrm) ──
 var WEATHER_CACHE_KEY = 'sw_weather_cache_bom';
@@ -8001,7 +8026,7 @@ async function loadMyActions() {
           if (a.job_number) detail.push(a.job_number + (a.client_name ? ' - ' + a.client_name : ''));
           if (a.due_date) {
             var dateLabel = formatDateShort(a.due_date);
-            if (isOverdue) dateLabel = '<span style="color:var(--sw-red);font-weight:600;">OVERDUE ' + dateLabel + '</span>';
+            if (isOverdue) dateLabel = '<span style="color:var(--sw-red);font-weight:600;">Late ' + dateLabel + '</span>';
             else if (isDueToday) dateLabel = '<span style="color:#D97706;font-weight:600;">TODAY</span>';
             detail.push(dateLabel);
           }
@@ -13069,6 +13094,13 @@ function computeSubStage(j, status) {
   }
 }
 
+// computeSubStage's words are also keys (SUB_STAGE_ORDER, getNextAction), so
+// only the printed label is put in sentence case (doc 3 section 5).
+function subStageLabel(sub) {
+  if (!sub) return sub;
+  return sub.charAt(0) + sub.slice(1).toLowerCase();
+}
+
 var SUB_STAGE_ORDER = {
   quoted: ['Quote Sent', 'Following Up'],
   accepted: ['Create Invoice', 'Awaiting Deposit', 'Deposit Received'],
@@ -13207,7 +13239,7 @@ function renderKanban(container, columns) {
         var isLast = idx === lastIdx;
         var subColor = isLast ? '#27AE60' : 'var(--sw-text-sec)';
         html += '<div class="kanban-substage-header" onclick="toggleSubstage(this)" style="color:' + subColor + ';">';
-        html += subName + ' <span class="count">' + subJobs.length + '</span></div>';
+        html += subStageLabel(subName) + ' <span class="count">' + subJobs.length + '</span></div>';
         html += '<div class="kanban-substage-group">';
         subJobs.forEach(function(j) {
           html += renderKanbanCard(j, status);
@@ -16999,7 +17031,7 @@ function getMakesafeMapVisual(j) {
   var crew = getMakesafeCrewLabel(j) || j.assigned_trade || '';
   var assigned = !!crew && crew.toLowerCase() !== 'unallocated';
   var allocationState = 'held';
-  var allocationLabel = 'Held / unassigned';
+  var allocationLabel = 'No crew yet';
   if (j.on_road) { allocationState = 'on_road'; allocationLabel = 'On road'; }
   else if (stage === 'completed') { allocationState = 'completed'; allocationLabel = 'Completed'; }
   else if (stage === 'archive') { allocationState = 'archive'; allocationLabel = 'Archive'; }
@@ -17170,7 +17202,7 @@ function renderMakesafeMapSidePanel(jobs, noLocation, filter) {
   html += '<div style="background:#F8FAFC;border:1px solid var(--sw-border);border-radius:9px;padding:8px;margin-bottom:12px;">'
     + '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:5px;">Map key: allocation first</div>'
     + '<div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11px;">'
-    + '<span style="color:#E74C3C;font-weight:800;">● Held / unassigned</span>'
+    + '<span style="color:#E74C3C;font-weight:800;">● No crew yet</span>'
     + '<span style="color:#F59E0B;font-weight:800;">● Rung / claimable</span>'
     + '<span style="color:#E67E22;font-weight:800;">● Direct allocated</span>'
     + '<span style="color:#9B59B6;font-weight:800;">● Docs ready</span>'
@@ -18540,8 +18572,8 @@ async function loadInvoices() {
 function renderInvoiceStats(summary) {
   var container = document.getElementById('invoiceStats');
   container.innerHTML =
-    '<div class="stat-card"><div class="stat-body"><div class="stat-label">Outstanding</div><div class="stat-value">' + fmt$(summary.outstanding) + '</div></div></div>' +
-    '<div class="stat-card ' + (summary.overdue > 0 ? 'rag-red' : 'rag-green') + '"><div class="stat-body"><div class="stat-label">Overdue</div><div class="stat-value">' + fmt$(summary.overdue) + '</div></div></div>' +
+    '<div class="stat-card"><div class="stat-body"><div class="stat-label">Owed</div><div class="stat-value">' + fmt$(summary.outstanding) + '</div></div></div>' +
+    '<div class="stat-card ' + (summary.overdue > 0 ? 'rag-red' : 'rag-green') + '"><div class="stat-body"><div class="stat-label">Owed · past due</div><div class="stat-value">' + fmt$(summary.overdue) + '</div></div></div>' +
     '<div class="stat-card"><div class="stat-body"><div class="stat-label">Total Records</div><div class="stat-value">' + (summary.total || '-') + '</div></div></div>';
 }
 
@@ -18590,7 +18622,7 @@ function invoiceActions(inv) {
     return '<button class="btn btn-sm btn-blue" onclick="sendInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\')">Send</button> ' +
            '<button class="btn btn-sm btn-red" onclick="voidInvoice(\'' + inv.xero_invoice_id + '\',\'' + (inv.invoice_number || '') + '\',' + (inv.total || 0) + ')">Void</button>';
   }
-  if (status === 'PAID') return '<span style="color:var(--sw-text-sec);font-size:12px;">Paid</span>';
+  if (status === 'PAID') return '<span style="color:var(--sw-text-sec);font-size:12px;">Paid (Xero)</span>';
   if (status === 'VOIDED' || status === 'DELETED') return '<span style="color:var(--sw-text-sec);font-size:12px;">&mdash;</span>';
   return '';
 }
@@ -18628,7 +18660,7 @@ function renderInvoiceTable(invoices) {
     html += '<td>' + (inv.invoice_number || '-') + '</td>';
     html += '<td style="font-size:11px; color:var(--sw-mid);">' + (inv.reference || '-') + '</td>';
     html += '<td>' + (inv.contact_name || '-') + '</td>';
-    html += '<td><span class="status-badge ' + inv.status.toLowerCase() + (isOverdue ? ' overdue' : '') + '">' + (isOverdue ? 'OVERDUE' : inv.status) + '</span></td>';
+    html += '<td><span class="status-badge ' + inv.status.toLowerCase() + (isOverdue ? ' overdue' : '') + '">' + escapeHtml(xeroInvoiceWord(inv, isOverdue)) + '</span></td>';
     html += '<td style="font-family:var(--sw-font-num);">' + fmt$(inv.total) + '</td>';
     html += '<td style="font-family:var(--sw-font-num);' + (isOverdue ? ' color:var(--sw-red); font-weight:700;' : '') + '">' + fmt$(inv.amount_due) + '</td>';
     html += '<td>' + fmtDate(inv.due_date) + '</td>';
@@ -18648,7 +18680,7 @@ function showGlobalInvoicePreview(inv) {
   var amountPaid = parseFloat(inv.amount_paid) || 0;
   var sBg = isOverdue ? 'var(--sw-red)' : isDraft ? '#e0e0e0' : inv.status === 'AUTHORISED' ? '#2196F3' : (inv.status === 'SENT' || inv.status === 'SUBMITTED') ? 'var(--sw-orange)' : isPaid ? 'var(--sw-green)' : '#e0e0e0';
   var sCol = isDraft ? '#333' : '#fff';
-  var sLabel = isOverdue ? 'OVERDUE' : inv.status;
+  var sLabel = escapeHtml(xeroInvoiceWord(inv, isOverdue));
 
   var html = '';
   // Header
@@ -18692,7 +18724,7 @@ function showGlobalInvoicePreview(inv) {
 
   // Status timeline
   html += '<div style="display:flex;align-items:center;gap:4px;padding:8px 0;font-size:11px;border-top:1px solid var(--sw-border);flex-wrap:wrap;">';
-  [{l:'Created',d:true},{l:'Approved',d:['AUTHORISED','SENT','SUBMITTED','PAID'].indexOf(inv.status)>=0},{l:'Sent',d:['SENT','SUBMITTED'].indexOf(inv.status)>=0||isPaid},{l:'Paid',d:isPaid}].forEach(function(s,i){
+  [{l:'Created',d:true},{l:inv.status==='SUBMITTED'?'Awaiting approval in Xero':'Approved in Xero',d:['AUTHORISED','SENT','PAID'].indexOf(inv.status)>=0},{l:'Sent',d:inv.status==='SENT'},{l:'Paid (Xero)',d:isPaid}].forEach(function(s,i){
     if(i>0) html+='<span style="color:var(--sw-text-sec);font-size:9px;">&rarr;</span>';
     html+='<span style="color:'+(s.d?'var(--sw-green)':'var(--sw-text-sec)')+';font-weight:'+(s.d?'600':'400')+';">'+(s.d?'&#10003; ':'')+s.l+'</span>';
   });
@@ -18828,7 +18860,7 @@ function renderPOTable(pos) {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No purchase orders' + (_poStatusFilter !== 'all' ? ' with status "' + _poStatusFilter + '"' : '') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No purchase orders' + (_poStatusFilter !== 'all' ? ' with status "' + (PO_BOARD_COLUMNS.filter(function(c) { return c.key === _poStatusFilter; }).map(function(c) { return c.label; })[0] || _poStatusFilter) + '"' : '') + '</td></tr>';
     return;
   }
 
@@ -18847,7 +18879,7 @@ function renderPOTable(pos) {
     if (isDispatchPO(po)) {
       html += '<span style="font-size:11px; color:var(--sw-text-sec);">Made in Dispatch</span>';
     } else if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
-      html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Push to Xero</button>';
+      html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Add to Xero for approval</button>';
     }
     if (po.job_id) {
       html += ' <button class="btn btn-secondary btn-sm" onclick="openJobPeek(\'' + po.job_id + '\')" style="font-size:10px; padding:2px 6px;">Job</button>';
@@ -19097,12 +19129,17 @@ function _jpMoney(v, unknownText) {
   if (n == null) return '<span class="jp-unk">' + _jpEsc(unknownText || 'Unknown') + '</span>';
   return _jpEsc(fmt$(n));
 }
-function _jpProfit(v) {
+// Profit and margin hidden because the costs fail the check read Withheld
+// (doc 3 section 5); Unknown stays for a single figure we do not have.
+var JP_WITHHELD = '<span class="jp-unk">Withheld: costs incomplete</span>';
+function _jpProfit(v, withheld) {
+  if (withheld) return JP_WITHHELD;
   var n = _jpNum(v);
   if (n == null) return '<span class="jp-unk">Unknown</span>';
   return '<span class="' + (n < 0 ? 'jp-neg' : 'jp-pos') + '">' + _jpEsc(fmt$(n)) + '</span>';
 }
-function _jpPct(v) {
+function _jpPct(v, withheld) {
+  if (withheld) return JP_WITHHELD;
   var n = _jpNum(v);
   if (n == null) return '<span class="jp-unk">Unknown</span>';
   return '<span class="' + (n < 0 ? 'jp-neg' : '') + '">' + n.toFixed(1) + '%</span>';
@@ -19117,8 +19154,10 @@ function _jpDate(d) {
   if (!dateOnly) opts.timeZone = 'Australia/Perth';
   return dt.toLocaleDateString('en-AU', opts);
 }
+// Every paid flag on the job profit read is Xero's PAID (v_job_profit; a trade
+// invoice's 'paid' is set by xero-sync when its bill is PAID).
 function _jpPaid(paid, paidOn) {
-  if (paid === true) return '<span class="jp-tag ok">Paid' + (paidOn ? ' ' + _jpDate(paidOn) : '') + '</span>';
+  if (paid === true) return '<span class="jp-tag ok">Paid (Xero)' + (paidOn ? ' ' + _jpDate(paidOn) : '') + '</span>';
   if (paid === false) return '<span class="jp-tag mute">Not paid</span>';
   return '<span class="jp-unk">Unknown</span>';
 }
@@ -19266,8 +19305,8 @@ function _jpRenderList() {
         + '<td class="num">' + _jpMoney(j.actual_cost_ex) + '</td>'
         + '<td class="num">' + _jpMoney(j.invoiced_ex) + '</td>'
         + '<td class="num">' + _jpMoney(j.collected_ex) + '</td>'
-        + '<td class="num">' + _jpProfit(_jpProfitOf(j)) + '</td>'
-        + '<td class="num">' + _jpPct(_jpMarginOf(j)) + '</td>'
+        + '<td class="num">' + _jpProfit(_jpProfitOf(j), _jpCostUnknown(j)) + '</td>'
+        + '<td class="num">' + _jpPct(_jpMarginOf(j), _jpCostUnknown(j)) + '</td>'
         + '<td>' + _jpConfidence(j) + '</td>'
         + '</tr>';
     }).join('');
@@ -19372,9 +19411,9 @@ function _jpRenderDetail(data) {
     + _jpCard('Expected cost', _jpMoney(_jpExpected(j, j.expected_cost_ex), 'Not fixed at quote'), _jpExpected(j, j.expected_cost_ex) != null ? _jpEsc(String(j.expected_source).replace(/_/g, ' ')) : 'no cost fixed at a quote; never a live estimate')
     + _jpCard('Actual cost', _jpMoney(j.actual_cost_ex), 'costs linked line by line')
     + _jpCard('Invoiced', _jpMoney(j.invoiced_ex), j.invoice_count != null ? _jpEsc(j.invoice_count + ' invoice' + (Number(j.invoice_count) === 1 ? '' : 's')) : '')
-    + _jpCard('Collected', _jpMoney(j.collected_ex), j.revenue_verified_paid ? 'paid in Xero' + (j.revenue_last_paid_on ? ' ' + _jpDate(j.revenue_last_paid_on) : '') : 'not verified paid')
-    + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j)), '')
-    + _jpCard('Margin', _jpPct(_jpMarginOf(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
+    + _jpCard('Collected', _jpMoney(j.collected_ex), j.revenue_verified_paid ? 'Paid (Xero)' + (j.revenue_last_paid_on ? ' ' + _jpDate(j.revenue_last_paid_on) : '') : 'not verified paid')
+    + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j), _jpCostUnknown(j)), '')
+    + _jpCard('Margin', _jpPct(_jpMarginOf(j), _jpCostUnknown(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
     + '</div>';
 
   // Expected vs actual by lane
@@ -19849,7 +19888,7 @@ function renderTradeBillTable(invoices) {
     }
     if ((inv.status === 'approved' || inv.status === 'acknowledged') && !inv.xero_bill_id) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
-      html += '<button onclick="retryPushToXero(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry push to Xero</button>';
+      html += '<button onclick="retryPushToXero(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry: add to Xero as a draft</button>';
       html += '</div>';
     }
     html += '</td>';
@@ -19864,7 +19903,7 @@ function approveTradeInvoice(invoiceId) {
   opsPost('approve_trade_invoice', { invoice_id: invoiceId }).then(function() {
     return opsPost('push_trade_invoice_to_xero', { invoice_id: invoiceId });
   }).then(function() {
-    showToast('Approved and pushed to Xero', 'success');
+    showToast('Approved. Draft in Xero', 'success');
     loadTradeBills();
   }).catch(function(e) {
     // Approve may have succeeded even if the push failed — reload to reflect state.
@@ -19877,7 +19916,7 @@ function approveTradeInvoice(invoiceId) {
 // Uses the same endpoint as the approve flow — the backend already accepts approved status.
 function retryPushToXero(invoiceId) {
   opsPost('push_trade_invoice_to_xero', { invoice_id: invoiceId }).then(function() {
-    showToast('Pushed to Xero', 'success');
+    showToast('Draft in Xero', 'success');
     loadTradeBills();
   }).catch(function(e) {
     showToast('Error: ' + (e && e.message ? e.message : 'push failed'), 'warning');
@@ -20225,8 +20264,8 @@ function _mrqDetailHtml(r) {
     var facts = [];
     if (inv.reference) facts.push('Reference: ' + inv.reference);
     if (inv.status) facts.push('Xero status: ' + inv.status);
-    if (String(inv.status || '').toUpperCase() === 'PAID') facts.push('Paid in Xero');
-    else if (Number(inv.amount_due) > 0) facts.push(fmt$(inv.amount_due) + ' still owed');
+    if (String(inv.status || '').toUpperCase() === 'PAID') facts.push('Paid (Xero)');
+    else if (Number(inv.amount_due) > 0) facts.push('Owed ' + fmt$(inv.amount_due));
     if (inv.line_amount_types) facts.push('Lines are ' + String(inv.line_amount_types).toLowerCase().replace('exclusive', 'ex GST').replace('inclusive', 'inc GST'));
     if (facts.length) h += '<div class="mrq-facts">' + escapeAttr(facts.join(' · ')) + '</div>';
   }
@@ -20539,8 +20578,10 @@ function dismissPriceItem(id) {
 // status can never again match no column and drop off the board.
 // The back end allows eleven statuses (purchase_orders_status_check):
 // quote_requested, draft, approved, submitted, authorised, sent, confirmed,
-// delivered, billed, cancelled, deleted. submitted / authorised / billed are the
-// older words for sent / confirmed / delivered, so each pair shares a column.
+// delivered, billed, cancelled, deleted. submitted / authorised / billed come
+// from Xero (xero-sync: SUBMITTED, AUTHORISED, BILLED) and share a column with
+// sent / confirmed / delivered. Each status keeps its own word (doc 3 section 5,
+// INT-17.1), so a billed order never reads as delivered stock.
 // The six main columns are always drawn. Other is drawn only when it holds an
 // order: it catches every status this page does not know, and a blank one.
 // A cancelled order is off the board on purpose and has no column. list_pos
@@ -20548,10 +20589,10 @@ function dismissPriceItem(id) {
 var PO_BOARD_COLUMNS = [
   { key: 'draft', label: 'Draft', color: '#95A5A6', statuses: ['draft'] },
   { key: 'approved', label: 'Approved', color: '#2980B9', statuses: ['approved'] },
-  { key: 'submitted', label: 'Sent', color: '#3498DB', statuses: ['submitted', 'sent'] },
-  { key: 'quote_requested', label: 'Quoted', color: '#8E44AD', statuses: ['quote_requested'] },
-  { key: 'authorised', label: 'Confirmed', color: '#E67E22', statuses: ['authorised', 'confirmed'] },
-  { key: 'billed', label: 'Delivered', color: '#27AE60', statuses: ['billed', 'delivered'] },
+  { key: 'submitted', label: 'Sent · Awaiting approval in Xero', color: '#3498DB', statuses: ['submitted', 'sent'] },
+  { key: 'quote_requested', label: 'Quote asked', color: '#8E44AD', statuses: ['quote_requested'] },
+  { key: 'authorised', label: 'Supplier confirmed · Approved in Xero', color: '#E67E22', statuses: ['authorised', 'confirmed'] },
+  { key: 'billed', label: 'Billed · Delivered', color: '#27AE60', statuses: ['billed', 'delivered'] },
 ];
 var PO_BOARD_OTHER_COLUMN = { key: 'other', label: 'Other', color: '#7F8C8D', statuses: [] };
 var PO_OFF_BOARD_STATUSES = ['cancelled', 'deleted'];
@@ -20563,9 +20604,23 @@ function poBoardColumnOf(status) {
   }
   return 'other';
 }
-// The word shown for a status: its column's word, or the stored status itself
-// for one with no main column.
+// The word shown for one order's status. Two statuses share each of the last
+// three columns, so the word is the status's own, not the column's.
+var PO_STATUS_WORDS = {
+  draft: 'Draft',
+  approved: 'Approved',
+  sent: 'Sent',
+  submitted: 'Awaiting approval in Xero',
+  quote_requested: 'Quote asked',
+  confirmed: 'Supplier confirmed',
+  authorised: 'Approved in Xero',
+  delivered: 'Delivered',
+  billed: 'Billed'
+};
+// The word shown for a status: its own word, or the stored status itself for
+// one with no main column.
 function poStatusLabel(status) {
+  if (PO_STATUS_WORDS[status]) return PO_STATUS_WORDS[status];
   var key = poBoardColumnOf(status);
   for (var i = 0; i < PO_BOARD_COLUMNS.length; i++) {
     if (PO_BOARD_COLUMNS[i].key === key) return PO_BOARD_COLUMNS[i].label;
@@ -20832,7 +20887,7 @@ function renderMaterialsKanban() {
 
       // Workflow step indicator
       var wfSteps = ['draft','approved','sent','quoted','confirmed','delivered'];
-      var wfLabels = ['Draft','Approved','Sent','Quoted','Confirmed','Delivered'];
+      var wfLabels = PO_BOARD_COLUMNS.map(function(c) { return c.label; });
       var wfColors = ['#95A5A6','#2980B9','#3498DB','#8E44AD','#E67E22','#27AE60'];
       // The steps are the six main columns in order. An unknown status has no
       // step, so it shows its own word and no progress bar.
@@ -20845,7 +20900,7 @@ function renderMaterialsKanban() {
           html += '<div title="' + wfLabels[idx] + '" style="flex:1;height:4px;border-radius:2px;background:' + bg + ';"></div>';
         });
         html += '</div>';
-        html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
+        html += '<div class="po-status-word" style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + escapeAttr(poStatusLabel(po.status)) + '</div>';
       } else {
         html += '<div class="po-status-word" style="font-size:10px;color:var(--sw-text-sec);font-weight:600;margin:6px 0 4px;">Status: ' + escapeAttr(poStatusLabel(po.status)) + '</div>';
       }
@@ -20862,7 +20917,8 @@ function renderMaterialsKanban() {
       // TODO: Add invoice_received_at, paid_at, xero_bill_id columns to purchase_orders table
       var invoiceStatus = '';
       if (po.paid_at) {
-        invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Paid</span>';
+        // paid_at is the office's own mark (markPOPaid), not Xero's record.
+        invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Says paid</span>';
       } else if (po.invoice_received_at) {
         invoiceStatus = '<span style="color:var(--sw-green);font-size:11px;font-weight:600;">Invoice received</span>';
       } else if (stage.key !== 'draft') {
@@ -21896,9 +21952,9 @@ async function renderJarvisView(data) {
     var outstanding = expectedTotal > 0 ? Math.max(0, expectedTotal - amountPaid) : 0;
     var paymentLine;
     if (!invoices.length) paymentLine = 'No invoice yet';
-    else if (amountPaid === 0) paymentLine = '$' + Math.round(amountInvoiced).toLocaleString() + ' invoiced, unpaid';
-    else if (expectedTotal && amountPaid >= expectedTotal - 1) paymentLine = 'Fully paid';
-    else paymentLine = '$' + Math.round(amountPaid).toLocaleString() + ' paid · $' + Math.round(outstanding).toLocaleString() + ' outstanding';
+    else if (amountPaid === 0) paymentLine = '$' + Math.round(amountInvoiced).toLocaleString() + ' invoiced, owed';
+    else if (expectedTotal && amountPaid >= expectedTotal - 1) paymentLine = 'Paid (Xero)';
+    else paymentLine = '$' + Math.round(amountPaid).toLocaleString() + ' paid (Xero) · $' + Math.round(outstanding).toLocaleString() + ' owed';
 
     // Risk derivation — prefer intel, fallback to readiness
     var risk;
@@ -23729,12 +23785,12 @@ function renderOverviewView(data) {
     { label: 'Lead received', done: !!j.created_at, date: j.created_at },
     { label: 'Quote sent', done: !!j.quoted_at, date: j.quoted_at, extra: quoteVal > 0 ? fmt$(quoteVal) : '' },
     { label: 'Quote accepted', done: !!j.accepted_at, date: j.accepted_at },
-    { label: 'Deposit invoiced', done: depInvs.length > 0, extra: depPaid.length > 0 ? 'Paid' : depInvs.length > 0 ? 'Sent' : '' },
+    { label: 'Deposit invoiced', done: depInvs.length > 0, extra: depPaid.length > 0 ? 'Paid (Xero)' : depInvs.length > 0 ? xeroInvoiceWord(depInvs[0]) : '' },
     { label: 'Materials ordered', done: (data.purchase_orders || []).length > 0, extra: (data.purchase_orders || []).length + ' POs' },
     { label: 'Crew assigned', done: (data.assignments || []).length > 0, extra: (data.assignments || []).length + ' assignments' },
     { label: 'Build complete', done: !!j.completed_at, date: j.completed_at },
     { label: 'Invoiced', done: salesInvs.length > 0 },
-    { label: 'Paid', done: paidInvs.length > 0 },
+    { label: 'Paid (Xero)', done: paidInvs.length > 0 },
   ];
   checkSteps.forEach(function(s) {
     var icon = s.done ? '<span style="color:var(--sw-green);">&#9989;</span>' : '<span style="color:var(--sw-border);">&#9744;</span>';
@@ -24281,15 +24337,15 @@ function renderMoneyView(data) {
 
       var sBg = isOverdue ? 'var(--sw-red)' : isDraft ? '#e0e0e0' : inv.status === 'AUTHORISED' ? '#2196F3' : isPaid ? 'var(--sw-green)' : 'var(--sw-orange)';
       var sCol = isDraft ? '#333' : '#fff';
-      var sLabel = isOverdue ? 'OVERDUE' : inv.status;
+      var sLabel = escapeHtml(xeroInvoiceWord(inv, isOverdue));
 
       html += '<div class="jd-money-card" style="cursor:pointer;' + (isOverdue ? 'border-left:3px solid var(--sw-red);' : '') + '" onclick="toggleInvDetailExpand(\'' + invCardId + '\')">';
       html += '<div class="jd-money-card-head"><span>' + (inv.invoice_number || 'Draft') + ' <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:' + sBg + ';color:' + sCol + ';vertical-align:middle;margin-left:4px;">' + sLabel + '</span></span>';
       html += '<strong>' + fmt$(inv.total) + '</strong></div>';
       html += '<div class="jd-money-card-sub">';
       if (inv.due_date) html += 'Due ' + fmtDate(inv.due_date);
-      if (!isDraft) html += ' &middot; Paid: <strong style="color:var(--sw-green);">' + fmt$(amountPaid) + '</strong>';
-      if (amountDue > 0 && !isDraft) html += ' &middot; Owing: <strong style="color:' + (isOverdue ? 'var(--sw-red)' : 'var(--sw-dark)') + ';">' + fmt$(amountDue) + '</strong>';
+      if (!isDraft) html += ' &middot; Paid (Xero): <strong style="color:var(--sw-green);">' + fmt$(amountPaid) + '</strong>';
+      if (amountDue > 0 && !isDraft) html += ' &middot; ' + (isOverdue ? 'Owed · past due' : 'Owed') + ': <strong style="color:' + (isOverdue ? 'var(--sw-red)' : 'var(--sw-dark)') + ';">' + fmt$(amountDue) + '</strong>';
       html += '</div>';
 
       // Expandable detail
@@ -26645,7 +26701,7 @@ async function openJobQuickView(jobId) {
     var action = getNextAction(actionJob);
     if (action && action.stage) {
       footerHtml += '<div class="next-step-bar">';
-      footerHtml += '<div class="next-step-label"><span class="next-step-stage">' + action.stage + '</span>';
+      footerHtml += '<div class="next-step-label"><span class="next-step-stage">' + subStageLabel(action.stage) + '</span>';
       if (action.hint) footerHtml += '<span class="next-step-hint">' + action.hint + '</span>';
       footerHtml += '</div><div class="next-step-actions">';
       action.actions.forEach(function(a) {
@@ -27944,10 +28000,10 @@ function dispatchPORefusedText(err) {
 }
 
 async function pushPOToXero(poId) {
-  if (!confirm('Push this PO to Xero?')) return;
+  if (!confirm('Add this PO to Xero for approval?')) return;
   try {
     await opsPost('push_po_to_xero', { id: poId });
-    showToast('PO pushed to Xero', 'success');
+    showToast('PO awaiting approval in Xero', 'success');
     loadPOs();
   } catch (e) {
     var refused = dispatchPORefusedText(e);
@@ -28374,8 +28430,8 @@ function updateJarvisSummary() {
     if (_invoiceSummaryCache) {
       var s = _invoiceSummaryCache;
       var parts = [];
-      if (s.outstanding) parts.push(fmt$(s.outstanding) + ' outstanding');
-      if (s.overdue) parts.push(fmt$(s.overdue) + ' overdue');
+      if (s.outstanding) parts.push(fmt$(s.outstanding) + ' owed');
+      if (s.overdue) parts.push(fmt$(s.overdue) + ' owed · past due');
       text = parts.length > 0 ? parts.join(' · ') : (_allInvoices.length + ' invoices loaded');
     } else {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
@@ -29553,7 +29609,7 @@ async function markPOPaid(poId) {
   if (!confirm('Mark this PO as paid?')) return;
   try {
     await opsPost('update_po', { id: poId, notes: '[Paid ' + new Date().toLocaleDateString('en-AU') + ']' });
-    showToast('PO marked as paid', 'success');
+    showToast('PO marked: says paid', 'success');
     loadMaterials();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');

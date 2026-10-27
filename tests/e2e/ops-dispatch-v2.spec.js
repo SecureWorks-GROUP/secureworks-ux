@@ -589,8 +589,8 @@ test.describe('Dispatch v2 and the old PO board', () => {
     await page.locator('.header-nav button[data-view="financials"]').click();
     await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
     await expect(page.locator('#poTableBody tr[data-po-id="po-d"]')).toContainText('Made in Dispatch');
-    await expect(page.locator('#poTableBody tr[data-po-id="po-d"]')).not.toContainText('Push to Xero');
-    await expect(page.locator('#poTableBody tr[data-po-id="po-o"]')).toContainText('Push to Xero');
+    await expect(page.locator('#poTableBody tr[data-po-id="po-d"]')).not.toContainText('Add to Xero for approval');
+    await expect(page.locator('#poTableBody tr[data-po-id="po-o"]')).toContainText('Add to Xero for approval');
   });
 
   test("the backend's dispatch_po_refused answer is shown in its own words", async ({ page }) => {
@@ -601,7 +601,7 @@ test.describe('Dispatch v2 and the old PO board', () => {
     page.on('dialog', (dlg) => dlg.accept());
     await page.locator('.header-nav button[data-view="financials"]').click();
     await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
-    await page.locator('#poTableBody tr[data-po-id="po-o"] button', { hasText: 'Push to Xero' }).click();
+    await page.locator('#poTableBody tr[data-po-id="po-o"] button', { hasText: 'Add to Xero for approval' }).click();
     await expect(page.locator('#toastContainer')).toContainText('This order was made in Dispatch. Send it from Dispatch.');
     expect(of('push_po_to_xero')).toHaveLength(1);
   });

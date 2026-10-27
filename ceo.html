@@ -755,9 +755,9 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Overdue Receivables</div>
+        <div class="card-title">Owed · past due</div>
         <div class="bucket-row" id="arBuckets"></div>
-        <div class="card-title" style="margin-top:16px;">Top Overdue Clients</div>
+        <div class="card-title" style="margin-top:16px;">Top clients owed · past due</div>
         <div style="overflow-x:auto;">
           <table class="data-table" id="arTable">
             <thead>
@@ -1136,8 +1136,9 @@ window.addEventListener('scroll', () => {
 // HELPERS
 // ════════════════════════════════════════════════════════════
 
+// A figure we do not have reads Unknown, never a dash or $0 (R-22, doc 3 section 5).
 function fmtK(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   const sign = n < 0 ? '-' : '';
   const abs = Math.abs(n);
   if (abs >= 1000000) return sign + '$' + (abs / 1000000).toFixed(1) + 'M';
@@ -1146,12 +1147,12 @@ function fmtK(n) {
 }
 
 function fmtDollar(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   return '$' + Math.round(n).toLocaleString();
 }
 
 function fmtPct(n) {
-  if (n == null) return '—';
+  if (n == null) return 'Unknown';
   return Math.round(n) + '%';
 }
 
@@ -1650,7 +1651,7 @@ function renderDivisionPL() {
   if (dp.unallocated_costs > 500) {
     document.getElementById('divisionPLAlert').style.display = 'block';
     document.getElementById('divisionPLAlert').innerHTML =
-      '<div class="alert-card warning"><div class="alert-title">Unallocated Costs: ' + fmtDollar(dp.unallocated_costs) + '</div>' +
+      '<div class="alert-card warning"><div class="alert-title">Costs with no division in Xero: ' + fmtDollar(dp.unallocated_costs) + '</div>' +
       '<div>These costs appear in the total P&L but aren\'t tagged to any division in Xero. ' +
       'Could be wages, overheads, or receipts missing a tracking category. ' +
       'This gap makes individual division margins look better than reality.</div></div>';
@@ -2161,7 +2162,7 @@ function clearChat() {
       '<div class="chat-quick-prompts">' +
         '<button class="chat-quick-prompt" onclick="sendQuickPrompt(\'Are we on track for $180K this month?\')">Month summary</button>' +
         '<button class="chat-quick-prompt" onclick="sendQuickPrompt(\'What\\\'s our margin looking like?\')">Margins</button>' +
-        '<button class="chat-quick-prompt" onclick="sendQuickPrompt(\'Show me top overdue invoices\')">Overdue AR</button>' +
+        '<button class="chat-quick-prompt" onclick="sendQuickPrompt(\'Show me top overdue invoices\')">Owed · past due</button>' +
         '<button class="chat-quick-prompt" onclick="sendQuickPrompt(\'Compare fencing vs patio profitability\')">Type analysis</button>' +
       '</div>' +
     '</div>';
@@ -2331,7 +2332,7 @@ setInterval(function() { loadReport(); }, 300000);
       <div class="chat-quick-prompts">
         <button class="chat-quick-prompt" onclick="sendQuickPrompt('Are we on track for $180K this month?')">Month summary</button>
         <button class="chat-quick-prompt" onclick="sendQuickPrompt('What's our margin looking like?')">Margins</button>
-        <button class="chat-quick-prompt" onclick="sendQuickPrompt('Show me top overdue invoices')">Overdue AR</button>
+        <button class="chat-quick-prompt" onclick="sendQuickPrompt('Show me top overdue invoices')">Owed · past due</button>
         <button class="chat-quick-prompt" onclick="sendQuickPrompt('Compare fencing vs patio profitability')">Type analysis</button>
       </div>
     </div>

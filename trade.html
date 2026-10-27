@@ -22538,7 +22538,7 @@
 
     // Xero ref
     if (inv.xero_bill_id) {
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--sw-text-sec)">Synced to Xero</div>';
+      html += '<div style="margin-top:8px;font-size:12px;color:var(--sw-text-sec)">In Xero as a bill</div>';
     }
 
     // Delete button (not for paid invoices)
@@ -22695,17 +22695,19 @@
     // part paid is checked before "approved"; and a bill deleted or voided in
     // Xero outranks our own row status (a `pushed_to_xero` / `approved` row
     // whose bill was DELETED used to read as still in progress).
+    // A trade invoice's 'paid' status is set by xero-sync when Xero says PAID
+    // (trade_bill_status.ts), so every paid row reads Paid (Xero).
     function statusOf(row) {
       row = row || {};
       var bill = String(row.xero_bill_status || '').toUpperCase();
       var ours = String(row.status || '');
-      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
+      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid (Xero)' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
       if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
       if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
       if (ours === 'ops-reject' || ours === 'failed' || ours === 'rejected') return { label: 'Not accepted', cls: 'void' };
       if (ours === 'pending_ops_review' || ours === 'queried') return { label: 'Under review', cls: 'review' };
       if (Number(row.amount_paid || 0) > 0) return { label: 'Part paid', cls: 'owed' };
-      if (bill === 'AUTHORISED') return { label: 'Approved, awaiting payment', cls: 'owed' };
+      if (bill === 'AUTHORISED') return { label: 'Approved in Xero', cls: 'owed' };
       return { label: 'Waiting on office', cls: 'sent' };
     }
     function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
@@ -22801,7 +22803,7 @@
       h += '<div class="mm-stats">';
       h += statHTML('Earned', money(t.gross_earned), 'earned');
       h += statHTML('Paid to you', money(t.paid_total), 'paid');
-      h += statHTML('Still owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
+      h += statHTML('Owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
       h += '</div>';
       var split = resolveSuperSplit(t);
       h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.worker_withhold) + ' from you &middot; company covers ' + money(split.company_contribution);
@@ -22811,8 +22813,8 @@
       // gross_earned, so Earned and Super leave them out while Paid and Still
       // owed count them. Say exactly that rather than let Paid look bigger
       // than Earned for no reason.
-      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and still owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
-      // The server's Paid to you and Still owed are already reduced by a
+      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
+      // The server's Paid to you and Owed are already reduced by a
       // weekly deduction; only "You get", worked out here from the super
       // split, is not. So a period whose invoices carry one names what came
       // off them. [trade-recurring-deduction]
@@ -27912,11 +27914,11 @@
         if (xeroWarn) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.xero_bill_number) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Draft bill in Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero as draft bill</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Draft bill in Xero</div>';
         } else {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not add it to Xero. The office will add it.</div>';
         }
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';

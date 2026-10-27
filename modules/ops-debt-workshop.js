@@ -7,6 +7,9 @@
 // W1 (overview): a donut of the five categories by amount, job type filters, a legend
 //   that picks the list, one row per invoice (companies grouped), Jan's visit list on
 //   Bad debt, and a quiet footer (paid this week, needs a look, not chased, not due yet).
+//   Under the chart, "Total owed to us" (approved 20 Oct 2026): every open invoice, with
+//   lines that add up to it (Debt is the chart's figure), "Matches Xero" or which invoices
+//   differ, and the drafts not sent. Display only: it changes no chase rule, text or gate.
 // W2 (job screen): a status strip with the ladder of follow-up steps, then three calm
 //   columns: the job story, money and documents; the chat window; notes.
 //   The chat window (approved 16 Oct 2026, shaped like GoHighLevel's): who we are texting
@@ -18,7 +21,7 @@
 // The debt report: "Debt report" (top right of W1) opens the live debt position as its own
 //   view, read fresh each time, with Download PDF and Send to Marnin (owner only, asks first).
 //
-// Reads:  debt_ws_overview, debt_ws_job, debt_ws_document, get_invoice_pdf,
+// Reads:  debt_ws_overview (with total_owed and xero_check), debt_ws_job, debt_ws_document, get_invoice_pdf,
 //         debt_ws_statement_preview, debt_ws_jan_list, debt_ws_report, debt_ws_report_pdf.
 // Writes: debt_ws_note (any staff), and owner only: debt_ws_decide (send, skip or dismiss),
 //         debt_ws_set_category (a move card, Keep chasing, or Change beside the pill),
@@ -710,7 +713,48 @@ var DebtWorkshopCore = (function () {
     return REPORT_REFUSALS[code] || refusalText(x);
   }
 
+  // ── Total owed to us (approved 20 Oct 2026) ──
+  // The backend works out every open invoice and its breakdown (debt_ws_overview.total_owed,
+  // the same code as the debt report), so the lines always add up to the total. The screen
+  // only shows it: nothing in it is chased, and the chart above is unchanged. An older
+  // backend sends no total_owed, and then nothing is shown.
+  function owedView(ov) {
+    var t = ov && ov.total_owed;
+    if (!t || typeof t !== 'object' || !Array.isArray(t.lines)) return null;
+    var sumC = 0, n = 0;
+    var lines = t.lines.filter(function (l) { return l && typeof l === 'object'; }).map(function (l) {
+      sumC += cents(l.amount); n += num(l.count);
+      return { key: String(l.key || ''), name: String(l.name || ''), sub: String(l.sub || ''), count: num(l.count), amount: num(l.amount), invoices: Array.isArray(l.invoices) ? l.invoices : [] };
+    });
+    return { count: num(t.count), amount: num(t.amount), lines: lines, addsUp: t.adds_up !== false && sumC === cents(t.amount) && n === num(t.count) };
+  }
+  // The Debt line's small words: the chart above shows all jobs only on the All jobs filter.
+  function owedDebtSub(sub, filterKey, filterLabel) {
+    if (!filterKey || filterKey === 'all') return sub;
+    return 'All jobs. The chart above shows ' + String(filterLabel || '').toLowerCase() + ' only';
+  }
+  // The line under the total, from debt_ws_overview.xero_check: Matches Xero, Does not match
+  // Xero (with the invoices), or not checked yet. Null for an older backend that sends none.
+  function xeroCheckLine(xc, today) {
+    if (!xc || typeof xc !== 'object' || !xc.status) return null;
+    var day = perthDay(xc.checked_at), time = perthTime(xc.checked_at);
+    var when = time ? 'checked ' + time + (day && day !== today ? ' ' + whenWords(day, today) : '') + (xc.stale ? ', over 3 hours ago' : '') : '';
+    if (xc.status === 'matches') return { cls: 'ok', text: 'Matches Xero', when: when, list: false };
+    if (xc.status === 'differs') {
+      var diffs = Array.isArray(xc.differences) ? xc.differences : [];
+      return { cls: 'warn', text: String(xc.words || 'Does not match Xero'), when: when, list: diffs.length > 0 };
+    }
+    return { cls: 'grey', text: String(xc.words || 'Not checked against Xero yet'), when: '', list: false };
+  }
+  // "Drafts not sent: 3 invoices, $4,120.00. Not in the total." Empty when there are none.
+  function draftsLine(xc) {
+    var d = xc && xc.drafts;
+    if (!d || typeof d !== 'object' || !num(d.count)) return '';
+    return 'Drafts not sent: ' + plural(num(d.count), 'invoice', 'invoices') + ', ' + money(d.amount) + '. Not in the total.';
+  }
+
   return {
+    owedView: owedView, owedDebtSub: owedDebtSub, xeroCheckLine: xeroCheckLine, draftsLine: draftsLine,
     CATS: CATS, FILTERS: FILTERS, BADGES: BADGES, STEPS: STEPS, REFUSALS: REFUSALS, SENDING_OFF_WORDS: SENDING_OFF_WORDS,
     nameFromEmail: nameFromEmail, reportSendLabel: reportSendLabel, reportGate: reportGate, reportRoute: reportRoute,
     reportLastSent: reportLastSent, reportRefusalText: reportRefusalText,
@@ -900,6 +944,23 @@ function dwCss() {
     // Footer
     '.dw-foot{display:flex;gap:10px 26px;flex-wrap:wrap;font-size:12.5px;color:var(--dw-mid);padding:0 4px}',
     '.dw-foot b{color:var(--dw-dark)}.dw-foot .paid b{color:var(--dw-sage)}.dw-foot .grey,.dw-foot .grey b{color:var(--dw-midl);font-weight:500}',
+    // Total owed to us (under the chart)
+    '.dw-owed{padding:20px 30px 16px}',
+    '.dw-owed-h{display:flex;justify-content:space-between;align-items:flex-end;gap:6px 16px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--dw-soft)}',
+    '.dw-owed-h h2{margin:0;font-size:15px;font-weight:700;color:var(--dw-dark)}.dw-owed-h .s{font-size:12.5px;color:var(--dw-midl);margin-top:3px}',
+    '.dw-owed-h .v{font-size:24px;font-weight:700;letter-spacing:-.02em;color:var(--dw-dark);line-height:1.1}',
+    '.dw-owed-ls{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:2px 32px;padding:8px 0}',
+    '#viewDebt .dw-owl{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:9px 10px;border:1px solid transparent;border-radius:var(--dw-r);background:none;text-align:left;cursor:pointer;color:inherit;width:100%;font-size:13px}',
+    '#viewDebt .dw-owl:hover:not(:disabled){background:var(--dw-faint)}#viewDebt .dw-owl:disabled{cursor:default}',
+    '.dw-owl .nm{font-weight:600;display:block;color:var(--dw-dark)}.dw-owl .ds{font-size:11.5px;color:var(--dw-midl);display:block;margin-top:1px}',
+    '.dw-owl .ct{font-size:12px;color:var(--dw-mid);white-space:nowrap}.dw-owl .am{font-weight:700;white-space:nowrap;text-align:right;min-width:90px}',
+    '.dw-owl.zero .nm,.dw-owl.zero .am,.dw-owl.zero .ct{color:var(--dw-midl);font-weight:500}',
+    '.dw-owed-f{display:flex;gap:6px 22px;flex-wrap:wrap;align-items:baseline;padding-top:10px;border-top:1px solid var(--dw-soft);font-size:12.5px}',
+    '#viewDebt .dw-xchk{display:inline-flex;gap:8px;align-items:baseline;flex-wrap:wrap;background:none;border:0;padding:0;font-size:12.5px;color:inherit;text-align:left}',
+    '.dw-xchk.ok b{color:var(--dw-sage)}.dw-xchk.warn b{color:var(--dw-red)}.dw-xchk.grey b{color:var(--dw-mid);font-weight:600}.dw-xchk span{color:var(--dw-midl)}',
+    '#viewDebt button.dw-xchk{cursor:pointer}#viewDebt button.dw-xchk b{text-decoration:underline;text-underline-offset:2px}',
+    '.dw-drafts{color:var(--dw-midl)}',
+    '@media (max-width:640px){.dw-owed{padding:16px}.dw-owed-ls{grid-template-columns:minmax(0,1fr)}#viewDebt .dw-owl{gap:10px;padding:9px 4px}.dw-owl .am{min-width:0}}',
     '#viewDebt .dw-link,.dw-modal .dw-link{background:none;border:0;padding:0;font-size:12.5px;color:var(--dw-mid);text-decoration:underline;text-underline-offset:2px;cursor:pointer}',
     '#viewDebt .dw-link:hover,.dw-modal .dw-link:hover{color:var(--dw-orh)}',
     '#viewDebt .dw-link:disabled{opacity:.45;cursor:not-allowed;text-decoration:none}',
@@ -1261,7 +1322,51 @@ function dwListHtml() {
   var ovCard = '<div class="dw-card dw-ov">' + donut + legend + '</div>';
 
   var jan = cur.cat === 'bad_debt' && DW.jt !== 'insurance' ? dwJanHtml() : '';
-  return '<div class="dw">' + head + ovCard + jan + dwListCardHtml(cur, s, today) + dwFootHtml(ov) + '</div>';
+  return '<div class="dw">' + head + ovCard + dwOwedHtml(ov, filter) + jan + dwListCardHtml(cur, s, today) + dwFootHtml(ov) + '</div>';
+}
+
+// "Total owed to us": every open invoice, directly under the chart. Each line opens the
+// invoices in it; the check line says whether our Xero copy matched Xero (and which
+// invoices differ). Nothing here is chased. An older backend sends nothing: no card.
+function dwOwedHtml(ov, filter) {
+  var C = DebtWorkshopCore, o = C.owedView(ov);
+  if (!o) return '';
+  var xl = C.xeroCheckLine(ov.xero_check, dwToday()), drafts = C.draftsLine(ov.xero_check);
+  var lines = o.lines.map(function (l) {
+    var sub = l.key === 'debt' ? C.owedDebtSub(l.sub, DW.jt, filter && filter.label) : l.sub;
+    return '<button type="button" class="dw-owl' + (l.count ? '' : ' zero') + '" data-dw="owed" data-k="' + dwEsc(l.key) + '"' + dwDis(!l.count) + '>' +
+      '<span><span class="nm">' + dwEsc(l.name) + '</span><span class="ds">' + dwEsc(sub) + '</span></span>' +
+      '<span class="ct">' + dwEsc(C.plural(l.count, 'invoice', 'invoices')) + '</span><span class="am">' + dwEsc(C.money(l.amount)) + '</span></button>';
+  }).join('');
+  var inner = xl ? '<b>' + dwEsc(xl.text) + '</b>' + (xl.when ? '<span>' + dwEsc(xl.when) + '</span>' : '') : '';
+  var check = !xl ? '' : xl.list
+    ? '<button type="button" class="dw-xchk ' + xl.cls + '" data-dw="xero-check" id="dwXeroCheck">' + inner + '</button>'
+    : '<div class="dw-xchk ' + xl.cls + '" id="dwXeroCheck">' + inner + '</div>';
+  var foot = check || drafts ? '<div class="dw-owed-f">' + check + (drafts ? '<div class="dw-drafts" id="dwDrafts">' + dwEsc(drafts) + '</div>' : '') + '</div>' : '';
+  return '<div class="dw-card dw-owed" id="dwOwed">' +
+    '<div class="dw-owed-h"><div><h2>Total owed to us</h2><div class="s">' + dwEsc(C.plural(o.count, 'open invoice', 'open invoices')) + ', the debt above included</div></div>' +
+    '<div class="v" id="dwOwedTotal">' + dwEsc(C.money(o.amount)) + '</div></div>' +
+    '<div class="dw-owed-ls" id="dwOwedLines">' + lines + '</div>' + foot + '</div>';
+}
+function dwOwedModal(k) {
+  var C = DebtWorkshopCore, o = C.owedView(DW.ov || {});
+  var l = o && o.lines.filter(function (x) { return x.key === k; })[0];
+  if (!l) return;
+  var li = l.invoices.map(function (i) {
+    return '<li><div><b>' + dwEsc(i.payer || 'Unknown payer') + '</b><div class="d">' + dwEsc([i.invoice_number, i.job_number, i.detail].filter(Boolean).join(' \u00b7 ')) + '</div></div><span class="a">' + dwEsc(C.money(i.amount)) + '</span></li>';
+  });
+  dwModal({ title: l.name + ': ' + C.money(l.amount), size: 'sm', top: dwEsc(l.sub),
+    body: li.length ? '<ul class="dw-mlist">' + li.join('') + '</ul>' : '<div class="dw-empty">Nothing to show.</div>' });
+}
+function dwXeroCheckModal() {
+  var C = DebtWorkshopCore, xc = (DW.ov || {}).xero_check || {}, diffs = Array.isArray(xc.differences) ? xc.differences : [];
+  var li = diffs.map(function (d) {
+    return '<li><div><b>' + dwEsc(d.invoice_number || 'An invoice') + '</b><div class="d">' + dwEsc([d.contact_name, d.words].filter(Boolean).join(' \u00b7 ')) + '</div></div><span class="a">' + dwEsc(d.xero_amount_due != null ? C.money(d.xero_amount_due) : '') + '</span></li>';
+  });
+  var top = 'Xero says ' + C.money((xc.xero || {}).amount) + ' across ' + C.plural(C.num((xc.xero || {}).count), 'invoice', 'invoices') +
+    '; our copy says ' + C.money((xc.copy || {}).amount) + ' across ' + C.num((xc.copy || {}).count) + '. The next sync re-reads each one from Xero.';
+  dwModal({ title: 'Does not match Xero', size: 'sm', top: dwEsc(top),
+    body: li.length ? '<ul class="dw-mlist">' + li.join('') + '</ul>' : '<div class="dw-empty">Nothing to show.</div>' });
 }
 
 function dwListCardHtml(cur, s, today) {
@@ -1436,7 +1541,7 @@ function dwJobHtml() {
   var J = DW.job, row = J.row || {}, job = J.job || {}, today = dwToday();
   var cat = C.catByKey(row.category), tk = C.typeKey(row.lane || row.job_type ? row : { job_type: job.type });
   var paid = row.open === false; // Xero shows it paid: nothing to chase or change
-  var pill = paid ? '<span class="dw-pill paid">Paid</span>'
+  var pill = paid ? '<span class="dw-pill paid">Paid (Xero)</span>'
     : cat ? '<span class="dw-pill" style="background:' + cat.color + '">' + dwEsc(cat.name + (Number(row.day) > 0 ? ' · day ' + row.day : '')) + '</span>'
     : '<span class="dw-pill none">Not due yet</span>';
   if (!paid) pill += dwCatMenuHtml(row);
@@ -1493,7 +1598,7 @@ function dwLeftHtml(J) {
   if (st && st.jobValue != null) money += '<span class="lbl">Job value</span><b>' + dwEsc(C.money(st.jobValue)) + '</b>';
   mr.rows.forEach(function (r) { money += '<span class="lbl">' + dwEsc(r.label) + (r.paid ? ', paid' : '') + '</span><span class="' + (r.paid ? 'paid' : 'owe') + '">' + dwEsc(r.value) + '</span>'; });
   if (!mr.rows.length) money += '<span class="lbl">This invoice</span><span class="owe">' + dwEsc(C.money(row.amount_due)) + '</span>';
-  else money += '<span class="lbl tot">Owing on this job</span><span class="tot">' + dwEsc(C.money(mr.owing)) + '</span>';
+  else money += '<span class="lbl tot">Owed on this job</span><span class="tot">' + dwEsc(C.money(mr.owing)) + '</span>';
   money += '</div>';
   var docs = '';
   (J.invoices || []).forEach(function (i) {
@@ -2100,6 +2205,8 @@ function dwAct(a, k) {
     case 'approve-anyway': return dwApprove(k, true);
     case 'jan-remove': return dwJanRemove(k);
     case 'foot': return dwFootModal(k);
+    case 'owed': return dwOwedModal(k);
+    case 'xero-check': return dwXeroCheckModal();
     case 'reload': return dwLoadOverview(false);
     case 'back':
       DW.view = 'list'; DW.jobGen++; DW.job = null; DW.jobId = null;

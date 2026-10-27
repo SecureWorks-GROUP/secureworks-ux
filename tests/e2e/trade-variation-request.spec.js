@@ -70,7 +70,9 @@ async function openVariationForm(page, persona) {
 }
 
 function assertNoClientSendOrShare(calls) {
-  const touched = calls.map((c) => c.action).filter((a) => /send|share|sms|email|approve/i.test(String(a)));
+  // Opening Scope posts group_work_order_my_share. That is a read of this trade's
+  // own figure, not a client message, so the word "share" in the action is not a send.
+  const touched = calls.map((c) => c.action).filter((a) => a !== 'group_work_order_my_share' && /send|share|sms|email|approve/i.test(String(a)));
   expect(touched).toEqual([]);
 }
 

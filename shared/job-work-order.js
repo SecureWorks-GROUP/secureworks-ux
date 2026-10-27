@@ -8,10 +8,10 @@
 // the invoice). Both pages read a work order's lines through this file only,
 // so a task, its hours and a variation addendum read the same everywhere.
 //
-// Preview (captain's rule for new screens), Ops page only: off unless
-// ?wo=preview or localStorage sw_wo_preview = '1'. ?wo=live turns it off.
-// With it off, the Ops page behaves exactly as before. The Trade App screens
-// are live and read no switch (captain, 16 Oct 2026).
+// Office (Ops) screens are on for an office viewer, on every job type. The
+// old per-trade form that wrote kind='crew' is retired. ?wo=live does not
+// hide these screens and does not bring that form back. The Trade App does
+// not read this switch (captain, 16 Oct 2026): hours only, and no agreed labour.
 //
 // Money: the Ops renderer shows the agreed labour, each line's allocation and
 // the billed figures (office staff only). The trade renderer reads no money
@@ -64,27 +64,28 @@ var JobWorkOrderCore = (function () {
     });
   }
 
-  // ── Preview switch ──
-  // Returns {on, persist}: persist is '1' or '0' when the URL asked for a
-  // change the page should remember, else null.
-  function previewState(search, stored) {
-    var m = /[?&]wo=([^&#]*)/.exec(str(search));
-    if (m) {
-      var v = lower(m[1].replace(/%20|\+/g, ''));
-      if (v === 'preview') return { on: true, persist: '1' };
-      if (v === 'live') return { on: false, persist: '0' };
-    }
-    return { on: str(stored) === '1', persist: null };
-  }
-
   function eligibleType(type) { return ELIGIBLE_TYPES.indexOf(lower(type)) >= 0; }
 
-  // Which way "Create work order" goes for a job: 'job' (the one job work
-  // order, on the job page) for a fencing or patio job while the preview is on,
-  // else 'crew' (the old office form, unchanged: repairs, make-safe, builder
-  // crew work orders, and every job while the preview is off).
-  function createRoute(type, previewOn) {
-    return previewOn && eligibleType(type) ? 'job' : 'crew';
+  // Every job's "Create work order" goes to the one job work order on the
+  // job page. The old office form that wrote kind='crew' is retired for
+  // every type and every role. Arguments are ignored: ?wo=live does not
+  // bring that form back. eligibleType still says which jobs the Trade App
+  // treats as having a job work order today (fencing and patio).
+  function createRoute() {
+    return 'job';
+  }
+
+  // kind='crew' is the old per-trade order. The office still lists those rows,
+  // read-only, until the server retires them at go-live. The Trade App does
+  // not filter on kind: my_work_orders does not send it, and a client filter
+  // would empty trade invoicing the day the field appears. A row with no kind
+  // is not labelled as retiring.
+  var RETIRING_CREW_LABEL = 'Old crew work order (retiring)';
+  function isRetiredCrewWorkOrder(wo) {
+    return lower(wo && wo.kind) === 'crew';
+  }
+  function retiringCrewLabel(wo) {
+    return isRetiredCrewWorkOrder(wo) ? RETIRING_CREW_LABEL : '';
   }
 
   // ── Numbers and dates ──
@@ -348,7 +349,7 @@ var JobWorkOrderCore = (function () {
 
   // create_work_order {kind:'job'} (open the job's draft) refusals, in words.
   var OPEN_REFUSALS = {
-    job_type_not_eligible: 'Job work orders are for fencing and patio jobs.',
+    job_type_not_eligible: 'The draft could not be opened. This job type is not on the server yet.',
     work_order_sealed: 'This job\'s work order is already approved and sealed. A later change is a variation.',
     draft_not_created: 'The draft could not be opened. Try again.',
     draft_not_updated: 'The draft could not be opened. Try again.',
@@ -638,19 +639,6 @@ var JobWorkOrderCore = (function () {
     return 'Released: the line is back to prepared, so its Xero draft can be made again. Nothing was sent to Xero or the customer.';
   }
 
-  // The old office "New Work Order" form, when a fencing or patio job is picked
-  // while the preview is on: it makes no work order for that job and points to
-  // the job work order instead. job: {id, job_number, type}.
-  function crewFormNoticeHtml(job) {
-    var j = obj(job) || {};
-    var kind = lower(j.type) === 'patio' ? 'a patio job' : 'a fencing job';
-    return '<div class="jwo-redirect" data-wo-form-job-wo>' +
-      '<div>' + (j.job_number ? '<b>' + esc(j.job_number) + '</b> is ' : 'This is ') + kind +
-      '. Fencing and patio jobs have one work order, made from the accepted quote on the job page, so this form does not make one for it.</div>' +
-      '<button type="button" class="btn btn-primary btn-sm" data-wo-form-open-job-wo data-job-id="' + esc(j.id) + '" onclick="JobWorkOrderOps.openFromForm(this.getAttribute(\'data-job-id\'))">Open the job work order</button>' +
-      '</div>';
-  }
-
   // ── Ops panel (office staff) ──
   // block: job_detail.job_work_order. detail: the job_work_order read (null
   // while it loads), detailState: 'loading' | 'ready' | 'failed'.
@@ -685,11 +673,11 @@ var JobWorkOrderCore = (function () {
     }
     if (st.key === 'none') {
       if (opts.canOpen) {
-        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. Open its draft: it fills from the accepted quote, then Shaun approves it.</div>' +
+        h += '<div class="jwo-empty" data-job-wo-none>Work order not filled yet. Open its draft: it fills from the accepted quote, then Shaun approves it.</div>' +
           '<button type="button" class="btn btn-primary btn-sm" data-job-wo-open' + (opts.busy ? ' disabled' : '') +
           ' onclick="JobWorkOrderOps.openDraft()">' + (opts.busy ? 'Opening...' : 'Open the draft') + '</button></div>';
       } else {
-        h += '<div class="jwo-empty" data-job-wo-none>No work order on this job yet. One opens as a draft when the job is approved.</div></div>';
+        h += '<div class="jwo-empty" data-job-wo-none>Work order not filled yet.</div></div>';
       }
       return h;
     }
@@ -793,7 +781,7 @@ var JobWorkOrderCore = (function () {
         h += '<div class="jwo-fig" data-job-wo-agreed-total><div class="jwo-fig-k">Agreed total</div><div class="jwo-fig-v">' +
           esc(moneyWords(f.agreed_total_ex) || 'Not set') + '</div></div>';
       }
-      h += figureCell('Billed to date', moneyWords(f.billed_to_date_ex) || '$0.00');
+      h += figureCell('Billed to date', moneyWords(f.billed_to_date_ex) || 'Unknown');
       h += figureCell('Remaining', f.remaining_ex == null ? '' : moneyWords(f.remaining_ex), f.over_agreed ? 'jwo-fig-over' : '');
     } else {
       var agreed = num(wo && wo.agreed_labour_ex);
@@ -954,7 +942,7 @@ var JobWorkOrderCore = (function () {
       '<td class="r">' + esc(moneyWords(line.unit_price)) + '</td><td class="r">' + esc(line.account_code || '') + '</td></tr></tbody></table>';
     if (ref) h += '<div class="jwo-line-note">Reference ' + esc(ref) + '</div>';
     if (inv && inv.status === 'xero_draft_created') {
-      h += '<div class="jwo-line-note">In Xero as a draft' + (inv.invoice_number ? ' ' + esc(inv.invoice_number) : '') + '.</div>';
+      h += '<div class="jwo-line-note">Draft in Xero' + (inv.invoice_number ? ' ' + esc(inv.invoice_number) : '') + '.</div>';
     }
     h += '<div class="jwo-line-note" data-job-wo-cv-invoice-note>Preview only: nothing is sent to Xero from here. Hours, the trade allocation and rates stay off the customer\'s line.</div>';
     return h + '</div>';
@@ -1241,8 +1229,479 @@ var JobWorkOrderCore = (function () {
     return g.base.concat.apply(g.base, g.addenda.map(function (a) { return a.lines; }));
   }
 
+  // <job-wo-overview-fields>
+  // Overview card. Office only (showMoney). Reads the job_work_order block
+  // already on job_detail, plus the job_work_order read (figures, lines,
+  // labour_before_approval) and list_trade_invoice_lines, which is always
+  // read and merged by line id even when the work order already has lines.
+  //
+  // Assumed fields the parallel backend PR is adding. Each one is optional.
+  // Absent means the card leaves that fact blank. It never invents a number,
+  // a name, or a review state.
+  //   work_order.status                         draft | issued | sent | approved
+  //                                             (no work_order: Blank)
+  //   work_order.makesafe_labour_allowance_ex  make-safe labour allowance, ex GST
+  //   work_order.labour_allowance_ex            same figure, other spelling
+  //   figures.makesafe_labour_allowance_ex      same, on the figures object
+  //   figures.labour_allowance_ex               same, on the figures object
+  //   work_order.approved_by_name               who approved (a person)
+  //   work_order.approver_name                  same, other spelling
+  //   work_order.approved_by_email              email when no name
+  //   work_order.approved_by                    used only when it is a name or
+  //                                             an email, never a uuid
+  //   line.review_state                         held | approved | queried | rejected
+  //   line.work_order_id                        job work order this line bills
+  //   line.job_work_order_id                    same link, the column that
+  //                                             exists today
+  // Already read when the new field is absent:
+  //   acknowledgment_status  pending|submitted|held -> Held for review,
+  //                          acknowledged|approved -> Approved,
+  //                          queried -> Queried, rejected -> Rejected
+  //   agreed_labour_ex, figures.agreed_ex, figures.agreed_total_ex,
+  //   figures.billed_to_date_ex, figures.remaining_ex, figures.over_agreed,
+  //   labour_before_approval, approved_at, approved_via,
+  //   line.trade_name, description, line_type, cost_lane, override_amount,
+  //   line_total_ex, amount_ex, total_hours, work_date, week_label,
+  //   line.trade_invoices.status                 live list_trade_invoice_lines
+  //                                             shape: an object, or a one-element
+  //                                             array. There is no flat
+  //                                             invoice_status column.
+  //   invoice_status, trade_invoice_status, invoice.status, counted
+  // Billed labour uses counted when the server sends it. Otherwise a line
+  // counts only when its invoice status is a billed one AND the line is
+  // labour. Status on a live invoice line is trade_invoices.status. If neither
+  // fact is on the read, the total says "Not on this read"
+  // and each such line is marked. A line with no work order id is still listed
+  // (the read is this job) and the card says the id is not on the read yet.
+  // A line whose id is a different work order is left out.
+  // </job-wo-overview-fields>
+  var REVIEW_LABELS = { held: 'Held for review', approved: 'Approved', queried: 'Queried', rejected: 'Rejected' };
+  var ACK_TO_REVIEW = {
+    held: 'held', pending: 'held', submitted: 'held',
+    acknowledged: 'approved', approved: 'approved',
+    queried: 'queried', rejected: 'rejected'
+  };
+
+  function cardStatus(block) {
+    if (!block || !obj(block.work_order)) {
+      if (block && block.unreadable) return { key: 'unreadable', label: 'Could not be read' };
+      return { key: 'blank', label: 'Blank' };
+    }
+    var s = lower(block.work_order.status);
+    if (s === 'approved') return { key: 'approved', label: 'Approved' };
+    if (s === 'issued' || s === 'sent') return { key: 'issued', label: 'Issued' };
+    if (s === 'draft' || !s) return { key: 'draft', label: 'Draft' };
+    return { key: s, label: str(block.work_order.status) };
+  }
+
+  function isUuid(v) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str(v).trim());
+  }
+
+  function approverWords(wo) {
+    var w = obj(wo);
+    if (!w) return '';
+    var sealed = lower(w.status) === 'approved' || !!firstText(w.approved_at);
+    if (!sealed) return '';
+    var name = firstText(w.approved_by_name, w.approver_name);
+    if (!name && firstText(w.approved_by_email).indexOf('@') >= 0) name = firstText(w.approved_by_email);
+    if (!name && typeof w.approved_by === 'string' && !isUuid(w.approved_by)) {
+      var raw = w.approved_by.trim();
+      if (raw.indexOf('@') >= 0 || raw.indexOf(' ') >= 0) name = raw;
+    }
+    var when = dateWords(w.approved_at);
+    if (name) return 'Approved by ' + name + (when ? ' on ' + when : '');
+    if (lower(w.approved_via) === 'auto') return 'Approved automatically' + (when ? ' on ' + when : '');
+    return 'Approver not recorded' + (when ? '. Approved on ' + when : '');
+  }
+
+  function cardFigures(block, detail) {
+    return (detail && obj(detail.figures)) || (block && obj(block.figures)) || null;
+  }
+
+  function allowanceEx(wo, figures) {
+    var w = obj(wo) || {};
+    var f = obj(figures) || {};
+    return firstNum(w.makesafe_labour_allowance_ex, w.labour_allowance_ex, f.makesafe_labour_allowance_ex, f.labour_allowance_ex);
+  }
+
+  function agreedExOf(wo, figures) {
+    var f = obj(figures) || {};
+    var w = obj(wo) || {};
+    if (num(f.customer_variation_count) > 0 && isFinite(num(f.agreed_total_ex))) return num(f.agreed_total_ex);
+    if (isFinite(num(f.agreed_ex))) return num(f.agreed_ex);
+    if (isFinite(num(w.agreed_labour_ex))) return num(w.agreed_labour_ex);
+    return null;
+  }
+
+  // Office review before the Xero bill. Only office_review_status counts.
+  // review_state is the older acknowledgement chip and is not this.
+  // A missing or blank status is the flag off: no controls.
+  var OFFICE_REVIEW_LABELS = {
+    awaiting: 'Awaiting office review',
+    approved: 'Approved for the bill',
+    queried: 'Queried',
+    rejected: 'Rejected'
+  };
+  function idText(v) {
+    if (v == null || v === '') return '';
+    return String(v).trim();
+  }
+  function officeLineId(raw) {
+    var it = obj(raw) || {};
+    return idText(it.trade_invoice_line_id) || idText(it.id);
+  }
+  function officeReviewOf(raw) {
+    var it = obj(raw) || {};
+    var key = lower(it.office_review_status);
+    if (!OFFICE_REVIEW_LABELS[key]) return null;
+    var id = officeLineId(it);
+    if (!id) return null;
+    return { key: key, label: OFFICE_REVIEW_LABELS[key], lineId: id };
+  }
+
+  function reviewOf(raw) {
+    var it = obj(raw) || {};
+    var direct = lower(it.review_state);
+    if (REVIEW_LABELS[direct]) return { key: direct, label: REVIEW_LABELS[direct], source: 'review_state' };
+    var mapped = ACK_TO_REVIEW[lower(it.acknowledgment_status)];
+    if (mapped) return { key: mapped, label: REVIEW_LABELS[mapped], source: 'acknowledgment_status' };
+    return { key: 'none', label: 'Not reviewed yet', source: 'none' };
+  }
+
+  // Invoice statuses that have been billed. Anything else the read names
+  // (draft, failed, ops-reject, rejected, void, cancelled) is not labour billed.
+  var BILLED_INVOICE_STATUSES = {
+    pending_acknowledgment: 1, queried: 1, acknowledged: 1,
+    pending_ops_review: 1, approved: 1, pushed_to_xero: 1, paid: 1
+  };
+  var LABOUR_LINE_TYPES = {
+    labour: 1, work_order: 1, 'work order': 1, general_labour: 1, 'general labour': 1,
+    fencing: 1, patio: 1, makesafe: 1, make_safe: 1, 'make safe': 1
+  };
+
+  function tokenOf(v) {
+    return lower(v).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function statusKey(v) {
+    return lower(v).replace(/[\s-]+/g, '_');
+  }
+  function isLabourType(type) {
+    if (!type) return false;
+    return !!(LABOUR_LINE_TYPES[lower(type)] || LABOUR_LINE_TYPES[tokenOf(type)]);
+  }
+  function isBilledStatus(status) {
+    return !!(status && BILLED_INVOICE_STATUSES[statusKey(status)]);
+  }
+  // list_trade_invoice_lines nests the invoice as trade_invoices: an object,
+  // or a one-element array when the join comes back as a list. A flat
+  // invoice_status is only present when some other read adds it.
+  function tradeInvoiceStatus(raw) {
+    if (raw == null || raw === '') return '';
+    var row = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+    var inv = obj(row);
+    if (!inv) return '';
+    return lower(firstText(inv.status, inv.invoice_status));
+  }
+  function invoiceStatusOf(it) {
+    var row = obj(it) || {};
+    var direct = firstText(row.invoice_status, row.trade_invoice_status, row.invoiceStatus);
+    if (direct) return lower(direct);
+    var joined = tradeInvoiceStatus(row.trade_invoices);
+    if (joined) return joined;
+    var inv = obj(row.invoice);
+    if (inv) {
+      var nested = firstText(inv.status, inv.invoice_status);
+      if (nested) return lower(nested);
+    }
+    return '';
+  }
+  function countedFlag(it) {
+    var row = obj(it) || {};
+    if (row.counted === true) return true;
+    if (row.counted === false) return false;
+    return null;
+  }
+
+  // true counts, false does not, null means this read cannot decide.
+  // The server's counted flag wins. Otherwise a non-billed status or a
+  // non-labour type is enough to leave the line out. A billed status with no
+  // type, or a labour type with no status, is not decided here.
+  function countsAsBilledLabour(line) {
+    if (!line) return null;
+    var flag = countedFlag(line);
+    if (flag !== null) return flag;
+    var lane = lower(line.costLane != null ? line.costLane : line.cost_lane);
+    var type = lower(line.lineType != null ? line.lineType : firstText(line.line_type, line.lane));
+    var status = lower(line.invoiceStatus != null ? line.invoiceStatus : invoiceStatusOf(line));
+    var labour = lane === 'labour' || isLabourType(type);
+    var nonLabour = line.commission === true || (lane && lane !== 'labour') || (type && !isLabourType(type) && lane !== 'labour');
+    if (status && !isBilledStatus(status)) return false;
+    if (nonLabour) return false;
+    if (labour && status && isBilledStatus(status)) return true;
+    return null;
+  }
+
+  function uncountedStatusWord(status) {
+    var s = statusKey(status);
+    if (s === 'rejected' || s === 'ops_reject') return 'Rejected';
+    if (s === 'draft') return 'Draft';
+    if (s === 'failed') return 'Failed';
+    if (s === 'void' || s === 'voided') return 'Void';
+    if (s === 'cancelled' || s === 'canceled') return 'Cancelled';
+    return '';
+  }
+
+  function lineBlank(v) { return v == null || v === ''; }
+
+  // Work-order lines keep their own fields. Review, status, counted, type
+  // and amounts are copied from the matching trade invoice line when the
+  // work-order line does not already have them. Match is by
+  // trade_invoice_line_id, else id. Invoice lines with no match are kept.
+  // An empty work-order lines array is "none linked yet", so the invoice
+  // lines are the list.
+  function enrichCrewLine(wo, inv) {
+    var out = {};
+    Object.keys(wo).forEach(function (k) { out[k] = wo[k]; });
+    ['review_state', 'acknowledgment_status', 'invoice_status', 'trade_invoice_status', 'counted', 'line_type', 'cost_lane', 'override_amount', 'line_total_ex', 'amount_ex', 'trade_name', 'description', 'total_hours', 'hours', 'work_date', 'week_label', 'office_review_status', 'office_review_note'].forEach(function (k) {
+      if (lineBlank(out[k]) && !lineBlank(inv[k])) out[k] = inv[k];
+    });
+    if (!out.invoice && inv.invoice) out.invoice = inv.invoice;
+    if (lineBlank(out.trade_invoices) && !lineBlank(inv.trade_invoices)) out.trade_invoices = inv.trade_invoices;
+    if (lineBlank(out.trade_invoice_line_id) && !lineBlank(inv.id)) out.trade_invoice_line_id = inv.id;
+    return out;
+  }
+  function mergeCrewInvoiceLines(woLines, invoiceLines) {
+    var wo = arr(woLines);
+    var inv = arr(invoiceLines).filter(function (row) { return row; });
+    var shaped = wo.filter(function (row) { return crewInvoiceLine(row); });
+    if (!shaped.length) return inv.slice();
+    var byId = {};
+    inv.forEach(function (row) {
+      if (row.id != null && str(row.id) !== '') byId[String(row.id)] = row;
+    });
+    var used = {};
+    var out = shaped.map(function (row) {
+      var key = !lineBlank(row.trade_invoice_line_id) ? String(row.trade_invoice_line_id)
+        : (!lineBlank(row.id) ? String(row.id) : '');
+      var extra = key && byId[key];
+      if (!extra) return row;
+      used[key] = true;
+      return enrichCrewLine(row, extra);
+    });
+    inv.forEach(function (row) {
+      var id = row.id != null ? String(row.id) : '';
+      if (id && used[id]) return;
+      out.push(row);
+    });
+    return out;
+  }
+
+  // A crew invoice line, or null when the row is a scope task (no invoice
+  // fields). Amounts prefer override_amount, then line_total_ex, then amount_ex.
+  function crewInvoiceLine(raw) {
+    var it = obj(raw);
+    if (!it) return null;
+    var looks = it.trade_name != null || it.line_total_ex != null || it.override_amount != null
+      || it.acknowledgment_status != null || it.review_state != null || it.trade_invoice_id != null
+      || it.line_type != null || it.week_label != null || it.total_hours != null || it.amount_ex != null
+      || it.invoice_status != null || it.trade_invoices != null || it.counted != null || it.cost_lane != null;
+    if (!looks) return null;
+    var ids = [];
+    if (it.work_order_id != null && str(it.work_order_id) !== '') ids.push(String(it.work_order_id));
+    if (it.job_work_order_id != null && str(it.job_work_order_id) !== '') ids.push(String(it.job_work_order_id));
+    var type = lower(firstText(it.line_type, it.lane));
+    var line = {
+      trade: firstText(it.trade_name, it.user_name, it.worker_name) || 'Trade',
+      work: firstText(it.description, it.line_description) || 'Labour',
+      hours: firstNum(it.total_hours, it.hours),
+      workDate: firstText(it.work_date),
+      week: firstText(it.week_label),
+      amount: firstNum(it.override_amount, it.line_total_ex, it.amount_ex),
+      commission: type === 'commission',
+      lineType: type,
+      costLane: lower(it.cost_lane),
+      invoiceStatus: invoiceStatusOf(it),
+      counted: countedFlag(it),
+      review: reviewOf(it),
+      officeReview: officeReviewOf(it),
+      lineId: officeLineId(it),
+      woIds: ids
+    };
+    line.counts = countsAsBilledLabour(line);
+    return line;
+  }
+
+  function crewLinesFor(list, woId) {
+    var lines = [];
+    var unstamped = 0;
+    arr(list).forEach(function (raw) {
+      var line = crewInvoiceLine(raw);
+      if (!line) return;
+      if (woId && line.woIds.length && line.woIds.indexOf(String(woId)) < 0) return;
+      if (!line.woIds.length) unstamped++;
+      lines.push(line);
+    });
+    return { lines: lines, unstamped: unstamped };
+  }
+
+  // Null when there are no lines, or any line cannot be decided: the card
+  // then says the total is not on this read rather than a partial sum.
+  // Every line decided and none of them labour bills as 0.
+  function labourSumOf(lines) {
+    var total = 0;
+    var undecided = false;
+    var saw = false;
+    arr(lines).forEach(function (l) {
+      if (!l) return;
+      saw = true;
+      var c = l.counts;
+      if (c == null) c = countsAsBilledLabour(l);
+      if (c === null) { undecided = true; return; }
+      if (c && l.amount != null) total += l.amount;
+    });
+    if (!saw || undecided) return null;
+    return Math.round(total * 100) / 100;
+  }
+
+  function linesPayload(detail, opts) {
+    opts = opts || {};
+    if (opts.linesState) return { list: opts.lines !== undefined ? opts.lines : [], state: opts.linesState };
+    if (detail && Array.isArray(detail.crew_lines)) return { list: detail.crew_lines, state: 'ready' };
+    if (detail && Array.isArray(detail.lines)) return { list: detail.lines, state: 'ready' };
+    return { list: [], state: 'absent' };
+  }
+
+  function billedForCard(wo, figures, detail, labourSum) {
+    var f = obj(figures) || {};
+    var approved = lower(wo && wo.status) === 'approved';
+    if (approved && isFinite(num(f.billed_to_date_ex))) return { amount: num(f.billed_to_date_ex), source: 'figures' };
+    var before = detail && obj(detail.labour_before_approval);
+    if (!approved && before && isFinite(num(before.amount_ex))) return { amount: num(before.amount_ex), source: 'before' };
+    if (isFinite(num(f.billed_to_date_ex)) && (num(f.billed_to_date_ex) > 0 || labourSum == null)) {
+      return { amount: num(f.billed_to_date_ex), source: 'figures' };
+    }
+    if (labourSum != null) return { amount: labourSum, source: 'lines' };
+    return { amount: null, source: '' };
+  }
+
+  // The job Overview card (classic and the new Overview). showMoney is office
+  // only: a trade render carries no agreed labour and no dollar figure.
+  function renderOverviewCard(block, detail, opts) {
+    opts = opts || {};
+    var showMoney = opts.showMoney === true;
+    var st = cardStatus(block);
+    var wo = (detail && obj(detail.work_order)) || (block && obj(block.work_order)) || null;
+    var figures = cardFigures(block, detail);
+    var h = '<section class="jwo jwo-ov" data-job-wo-overview-card data-job-wo-card-status="' + esc(st.key) + '" aria-label="Work order">';
+    h += '<div class="jwo-head"><div class="jwo-title">Work order' + (wo && wo.wo_number ? ' <b>' + esc(wo.wo_number) + '</b>' : '') + '</div>';
+    h += '<span class="jwo-chip jwo-chip-' + esc(st.key) + '" data-job-wo-card-chip>' + esc(st.label) + '</span></div>';
+
+    if (st.key === 'unreadable') {
+      return h + '<div class="jwo-empty">The work order could not be read. Reopen the job to try again.</div></section>';
+    }
+    if (st.key === 'blank') {
+      h += '<div class="jwo-sub" data-job-wo-card-blank>Work order not filled yet.</div>';
+      if (opts.canOpen) {
+        h += '<button type="button" class="btn btn-primary btn-sm" data-job-wo-card-open' + (opts.busy ? ' disabled' : '') +
+          ' onclick="JobWorkOrderOps.openDraft()">' + (opts.busy ? 'Opening...' : 'Open the draft') + '</button>';
+      }
+    }
+    if (opts.message) {
+      h += '<div class="jwo-msg jwo-msg-' + esc(opts.messageLevel || 'info') + '" data-job-wo-message>' + esc(opts.message) + '</div>';
+    }
+    var who = approverWords(wo);
+    if (who) h += '<div class="jwo-sub" data-job-wo-approved-by>' + esc(who) + '</div>';
+
+    var agreed = showMoney ? agreedExOf(wo, figures) : null;
+    var allowance = showMoney ? allowanceEx(wo, figures) : null;
+    var payload = linesPayload(detail, opts);
+    var packed = crewLinesFor(payload.list, wo && wo.id);
+    var billed = showMoney ? billedForCard(wo, figures, detail, labourSumOf(packed.lines)) : { amount: null, source: '' };
+    var overBy = (agreed != null && billed.amount != null) ? Math.round((billed.amount - agreed) * 100) / 100 : null;
+    var over = showMoney && ((overBy != null && overBy > 0.009) || !!(figures && figures.over_agreed === true));
+
+    if (showMoney) {
+      h += '<div class="jwo-figs" data-job-wo-card-figures>';
+      h += figureCell('Agreed labour', agreed != null ? moneyWords(agreed) : 'Not set');
+      if (allowance != null) h += '<div class="jwo-fig" data-job-wo-allowance><div class="jwo-fig-k">Make-safe allowance</div><div class="jwo-fig-v">' + esc(moneyWords(allowance)) + '</div></div>';
+      h += figureCell('Billed labour', billed.amount != null ? moneyWords(billed.amount) : 'Not on this read', over ? 'jwo-fig-over' : '');
+      if (figures && isFinite(num(figures.remaining_ex))) {
+        h += figureCell('Remaining', moneyWords(figures.remaining_ex), over ? 'jwo-fig-over' : '');
+      }
+      h += '</div>';
+      if (over) {
+        h += '<div class="jwo-overrun" data-job-wo-overrun>' +
+          (overBy != null && overBy > 0.009 ? 'Over agreed by ' + esc(moneyWords(overBy)) : 'Over the agreed labour.') + '</div>';
+      }
+    }
+
+    h += '<div class="jwo-k">Crew lines</div>';
+    if (payload.state === 'loading') {
+      h += '<div class="jwo-empty" data-job-wo-crew-state="loading">Crew lines are loading.</div>';
+    } else if (payload.state === 'failed') {
+      h += '<div class="jwo-empty" data-job-wo-crew-state="failed">Crew lines could not be read.</div>';
+    } else if (payload.state === 'absent') {
+      h += '<div class="jwo-empty" data-job-wo-crew-state="absent">Crew lines are not on this read yet.</div>';
+    } else if (!packed.lines.length) {
+      var billedWaiting = showMoney && billed.amount != null && billed.amount > 0.009;
+      h += '<div class="jwo-empty" data-job-wo-crew-state="' + (billedWaiting ? 'absent' : 'empty') + '">' +
+        (billedWaiting ? 'Crew lines are not on this read yet.' : 'No crew invoice lines on this work order yet.') + '</div>';
+    } else {
+      h += '<table class="jwo-table" data-job-wo-crew-lines><thead><tr><th>Trade</th><th>Work</th>' +
+        (showMoney ? '<th class="r">Amount</th>' : '') + '<th>Review</th></tr></thead><tbody>';
+      packed.lines.forEach(function (l) {
+        var meta = [];
+        if (l.workDate) meta.push(dateWords(l.workDate) || l.workDate);
+        if (l.hours != null) meta.push(hoursWords(l.hours));
+        if (l.week) meta.push(l.week);
+        if (l.counts === false) {
+          meta.push('Not counted as labour');
+          var statusWord = uncountedStatusWord(l.invoiceStatus);
+          if (statusWord) meta.push(statusWord);
+        } else if (l.counts == null) {
+          meta.push('Not counted on this read');
+        }
+        h += '<tr>';
+        h += '<td>' + esc(l.trade) + '</td>';
+        h += '<td>' + esc(l.work) + (meta.length ? '<div class="jwo-line-note">' + esc(meta.join(DOT)) + '</div>' : '') + '</td>';
+        if (showMoney) h += '<td class="r">' + esc(l.amount != null ? moneyWords(l.amount) : '') + '</td>';
+        h += '<td><span class="jwo-chip jwo-chip-' + esc(l.review.key) + '" data-job-wo-review="' + esc(l.review.key) + '" data-review-source="' + esc(l.review.source) + '">' + esc(l.review.label) + '</span></td>';
+        h += '</tr>';
+        // Office approve / query / reject, one line at a time, before the
+        // Xero bill. Absent unless this card was asked and this line has a
+        // status. No send, and no agreed-labour figure in this block.
+        if (opts.officeReview && l.officeReview) {
+          h += '<tr data-office-line-review="' + esc(l.officeReview.lineId) + '" data-office-line-status="' + esc(l.officeReview.key) + '"><td colspan="' + (showMoney ? 4 : 3) + '">';
+          h += '<div class="jwo-office-review">';
+          h += '<div>' + esc(l.officeReview.label) + '</div>';
+          h += '<label class="jwo-line-note">Note <input data-office-line-note aria-label="Review note"></label>';
+          h += '<div class="jwo-office-review-actions">';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="approve">Approve</button>';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="query">Query</button>';
+          h += '<button type="button" class="btn btn-secondary btn-sm" data-office-line-decision="reject">Reject</button>';
+          h += '</div></div></td></tr>';
+        }
+      });
+      h += '</tbody></table>';
+      if (packed.unstamped === packed.lines.length) {
+        h += '<div class="jwo-line-note" data-job-wo-lines-unstamped>These lines are on the job. A work order id on each line is not in this read yet.</div>';
+      } else if (packed.unstamped > 0) {
+        h += '<div class="jwo-line-note" data-job-wo-lines-unstamped>' + packed.unstamped +
+          (packed.unstamped === 1 ? ' of these lines has' : ' of these lines have') +
+          ' no work order id on this read yet.</div>';
+      }
+    }
+
+    if (showMoney && (billed.amount != null || agreed != null)) {
+      var vs = 'Billed labour ' + (billed.amount != null ? moneyWords(billed.amount) : 'not on this read');
+      vs += ' against agreed labour ' + (agreed != null ? moneyWords(agreed) : 'not set');
+      h += '<div class="jwo-sub" data-job-wo-vs-agreed>' + esc(vs) + '</div>';
+    }
+    return h + '</section>';
+  }
+
   return {
-    previewState: previewState,
     addendaOf: addendaOf,
     customerVariationStatus: customerVariationStatus,
     customerVariationMissing: customerVariationMissing,
@@ -1262,6 +1721,13 @@ var JobWorkOrderCore = (function () {
     timeWords: timeWords,
     eligibleType: eligibleType,
     createRoute: createRoute,
+    isRetiredCrewWorkOrder: isRetiredCrewWorkOrder,
+    retiringCrewLabel: retiringCrewLabel,
+    mergeCrewInvoiceLines: mergeCrewInvoiceLines,
+    countsAsBilledLabour: countsAsBilledLabour,
+    labourSumOf: labourSumOf,
+    cardStatus: cardStatus,
+    renderOverviewCard: renderOverviewCard,
     lineOf: lineOf,
     groupLines: groupLines,
     hoursTotal: hoursTotal,
@@ -1281,7 +1747,6 @@ var JobWorkOrderCore = (function () {
     openRefusalWords: openRefusalWords,
     openRefusalNeedsReread: openRefusalNeedsReread,
     openedWords: openedWords,
-    crewFormNoticeHtml: crewFormNoticeHtml,
     renderOpsPanel: renderOpsPanel,
     pdfSections: pdfSections,
     renderTrade: renderTrade,

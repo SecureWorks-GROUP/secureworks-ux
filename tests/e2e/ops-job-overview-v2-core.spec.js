@@ -144,7 +144,7 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(current.meta).toBe('value not recorded \u00b7 sent 8 Oct 6:56am \u00b7 opened 15 times');
     expect(current.pill).toEqual({ cls: 'acc', words: 'Accepted 8 Oct' });
     expect(draft.name).toBe('Deposit invoice INV-9002');
-    expect(draft.pill).toEqual({ cls: 'warn', words: 'Draft, cannot be paid' });
+    expect(draft.pill).toEqual({ cls: 'warn', words: 'Draft in Xero, cannot be paid' });
     expect(scope.meta).toBe('Sam \u00b7 1 Sep \u00b7 22.9m Ridgeside \u00b7 asbestos removal');
     expect(att1.name).toBe('Quote_Avery_Lin_Rear_Fence.pdf');
     expect(att1.meta).toBe('emailed 2 Oct 9:44am \u00b7 2 versions \u00b7 6 pages');
@@ -344,7 +344,7 @@ test('unlinked name matches and unissued invoices never become this job\'s invoi
   expect(C.moneySummary(d, ov)).toMatchObject({ invoiced: 999, paid: 999, nameOnly: 0 });
   d.invoices = [{ id: 'pending', job_id: d.job.id, status: 'SUBMITTED', total: 500 }, { id: 'unknown', job_id: d.job.id, status: 'UNKNOWN', total: 600 }];
   expect(C.moneySummary(d, null)).toMatchObject({ invoiced: 0, paid: 0, draftTotal: 500 });
-  expect(C.files(d, null, NOW).find(f => f.key === 'inv:pending').pill.words).toBe('Awaiting approval, cannot be paid');
+  expect(C.files(d, null, NOW).find(f => f.key === 'inv:pending').pill.words).toBe('Awaiting approval in Xero, cannot be paid');
 });
 
 test('writer off, refusal and unrecognised outcomes are never successful rewrite requests', () => {

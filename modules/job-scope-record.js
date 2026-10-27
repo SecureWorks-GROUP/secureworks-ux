@@ -14,7 +14,7 @@
 
   var ENGINE_PATIO_URL = 'https://marninms98-dotcom.github.io/patio/scope-engine/';
   var OLD_PATIO_URL = 'https://marninms98-dotcom.github.io/patio/';
-  var FENCE_URL = 'https://marninms98-dotcom.github.io/fence-designer/';
+  var FENCE_URL = 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/';
 
   var SHAPES = {
     'skillion': 'Skillion', 'gable-square': 'Gable, end to the yard', 'gable-parallel': 'Gable, ridge along the house',
@@ -247,16 +247,22 @@
     return out;
   }
 
-  // The scoping tool a job opens in. A Scope Engine patio record opens the Scope Engine; everything
-  // else opens the tool it has always opened (the fence designer for fencing, the patio page otherwise).
+  // The scoping tool a job opens in. The older tools are retired (T43): every fence job opens the
+  // Scope Engine fence page, which reads the fence designer's saved shape, and every patio job opens the
+  // Scope Engine patio page. The one exception is a patio job already scoped in the older patio page:
+  // the Scope Engine never writes over a scope it did not make, so that job carries on where it started.
   function toolUrlFor(job, scope) {
     job = obj(job) || {};
+    if (str(job.type) === 'fencing') return FENCE_URL;
     var s = scope !== undefined ? obj(scope) : parse(job.scope_json);
-    if (kindOf(s) === 'engine-patio') return ENGINE_PATIO_URL;
-    // A job list row carries no scope_json, only the pricing's tool (ops-api pipeline pj_tool).
+    if (kindOf(s) === 'old-patio') return OLD_PATIO_URL;
+    if (s) return ENGINE_PATIO_URL;
+    // A job list row carries no scope_json, only the pricing's tool (ops-api pipeline pj_tool). Pricing
+    // from another tool means the older patio page scoped it.
     var pj = parse(job.pricing_json);
-    if (job.pj_tool === 'patio-scoper' || (pj && pj.tool === 'patio-scoper')) return ENGINE_PATIO_URL;
-    return str(job.type) === 'fencing' ? FENCE_URL : OLD_PATIO_URL;
+    var priced = job.pj_tool || (pj && Object.keys(pj).length);
+    if (priced && job.pj_tool !== 'patio-scoper' && !(pj && pj.tool === 'patio-scoper')) return OLD_PATIO_URL;
+    return ENGINE_PATIO_URL;
   }
   function openUrl(job) {
     job = obj(job) || {};

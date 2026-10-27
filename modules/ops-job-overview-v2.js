@@ -1380,7 +1380,7 @@ var JobOverviewV2 = (function () {
   function xeroUrl(id) { return 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + encodeURIComponent(id); }
   function scopeUrl(j) {
     var f = fn('scopeToolUrlFor');
-    var base = f ? f(j.type, j) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/');
+    var base = f ? f(j.type, j) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/' : 'https://marninms98-dotcom.github.io/patio/scope-engine/');
     return base + '?jobId=' + encodeURIComponent(j.id);
   }
   function quoteUrl(doc) {

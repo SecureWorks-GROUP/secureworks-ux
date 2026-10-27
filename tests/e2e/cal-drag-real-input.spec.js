@@ -121,6 +121,9 @@ async function bootCalendar(page, opts = {}) {
       if (opts.writeDelayMs) await new Promise((r) => setTimeout(r, opts.writeDelayMs));
       state.writesAnswered = (state.writesAnswered || 0) + 1;
       // { writeFails }: every booking write is refused, after its delay.
+      // { refuseUpdate }: assignment id -> the refusal ops-api answers for it.
+      const refusedUpdate = (opts.refuseUpdate || {})[body.assignmentId];
+      if (refusedUpdate) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: refusedUpdate }) });
       if (opts.writeFails) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"database unavailable"}' });
       const ev = state.events.find((e) => e.assignment_id === body.assignmentId);
       if (ev) {
@@ -1087,11 +1090,33 @@ test.describe('One booking, one crew member (Crew view)', () => {
     await page.locator('#calJobPopup .btn-overflow').click();
     await page.locator('#calJobPopup [data-remove="person"]').click();
     await page.locator('#confirmModalProceed').click();
-    await expect(page.getByText(/database unavailable/)).toBeVisible();
+    const tue = await page.evaluate((d) => fmtDate(d), D.TUE);
+    await expect(page.getByText('Not removed: Hugo from Jane Citizen SWF-101 on ' + tue + ' - database unavailable')).toBeVisible();
     await page.waitForTimeout(300);
     expect(writes.map((w) => w.action)).toEqual(['update_assignment']);
     await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-1')
       .map((e) => [e.scheduled_date, e.scheduled_end]))).toEqual([[D.MON, D.WED]]);
+  });
+
+  test('Clear a day across two longer bookings: one refused shorten never drops the other person\'s later days', async ({ page }) => {
+    const job = fixtureEvents()[0];
+    const events = [
+      { ...job, assignment_id: 'a-hugo', scheduled_date: D.MON, scheduled_end: D.FRI, duration_days: 5 },
+      { ...job, assignment_id: 'a-liam', user_id: 'u-liam', crew_name: 'Liam', assigned_to: 'Liam', scheduled_date: D.MON, scheduled_end: D.FRI, duration_days: 5 },
+    ];
+    const { writes } = await bootCalendar(page, { events, refuseUpdate: { 'a-liam': 'Booking is on an invoice and cannot be changed' } });
+    await page.locator('.cal-swim-cell[data-date="' + D.WED + '"][data-crew="Hugo"] .cal-job-block').click();
+    await page.locator('#calJobPopup .btn-overflow').click();
+    await page.locator('#calJobPopup [data-remove="day"]').click();
+    await page.locator('#confirmModalProceed').click();
+    const wed = await page.evaluate((d) => fmtDate(d), D.WED);
+    await expect(page.getByText('Removed Jane Citizen SWF-101 on ' + wed + ', except: Liam on ' + wed + ' (Booking is on an invoice and cannot be changed)')).toBeVisible();
+    await page.waitForTimeout(300);
+    // Hugo's Thu-Fri is booked back once his own shorten landed; Liam's booking stays whole
+    expect(writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId).sort()).toEqual(['a-hugo', 'a-liam']);
+    const creates = writes.filter((w) => w.action === 'create_assignment').map((w) => w.body);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ userId: 'u-hugo', scheduledDate: D.THU, scheduledEnd: D.FRI, suppress_notifications: true });
   });
 
   test('the reschedule step opens the moment the booking is dropped, before its save is answered', async ({ page }) => {

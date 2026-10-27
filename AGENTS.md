@@ -179,7 +179,9 @@ already: only Crew view had drag wiring). Schedule-view drops carry only a DAY
 `CalOpsCore.barRows` → `CalOpsCore.planJobMove`): the bar's live (not ghost,
 cancelled or completed) rows move by the same working days, the drop day their
 new first day, each keeping its own `user_id`; the job's other days, in view
-or not, never move with it and never block it (no "widen the view" refusal).
+or not, never move with it, and being out of view never refuses it (no "widen
+the view" refusal). Only the same person's booking of the job already on a
+target date refuses the drop, naming the person and day (Shaun, 27 Oct).
 The bar's edge handles sit on that bar's own first and last day for any crew
 count and stretch it for everyone on it (`stretchSchedJob` →
 `CalOpsCore.planJobStretch`): per-day crews gain `create_assignment` rows with

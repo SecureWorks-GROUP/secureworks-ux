@@ -506,14 +506,21 @@ test.describe('Bar move, stretch and remove planners', () => {
     expect(C.planDayRemoval(mjRows(), OCT28, 'u:u-henry').deletes).toEqual([]);
   });
 
-  test('a day removal writes the last booking leaving the day after the rest, and the split\'s new row only after that', () => {
-    const ids = (batches) => batches.map((b) => b.map((w) => w.kind + ':' + (w.kind === 'create' ? w.entry.date : w.entry.ev.assignment_id)));
+  test('a removal sends the last booking leaving a day after the rest, and a split\'s new row apart from the shortens', () => {
+    const ids = (ws) => ws.map((w) => w.kind + ':' + (w.kind === 'create' ? w.entry.date : w.entry.ev.assignment_id));
     // Clear 8 Sep: Isaac's delete, then Henry's on its own, so ops-api sees the day emptied once
-    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(mjRows(), SEP8, null)))).toEqual([['delete:i-sep'], ['delete:h-sep']]);
-    // Remove Wed from a Mon-Fri booking: shorten it first, the Thu-Fri row only once that has landed
+    let w = C.removalWrites(C.planDayRemoval(mjRows(), SEP8, null));
+    expect(w.leaving.map(ids)).toEqual([['delete:i-sep'], ['delete:h-sep']]);
+    expect(w.creates).toEqual([]);
+    // Remove Wed from a Mon-Fri booking: the shorten leaves the day, the Thu-Fri row waits apart, tied to its booking
     const rows = [booking('s', 'u-a', MON, FRI), booking('b', 'u-b', WED, WED)];
-    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(rows, WED, null)))).toEqual([['delete:b'], ['update:s'], ['create:' + THU]]);
-    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(rows, WED, 'u:u-a')))).toEqual([['update:s'], ['create:' + THU]]);
+    w = C.removalWrites(C.planDayRemoval(rows, WED, null));
+    expect(w.leaving.map(ids)).toEqual([['delete:b'], ['update:s']]);
+    expect(ids(w.creates)).toEqual(['create:' + THU]);
+    expect(w.creates[0].entry.template.assignment_id).toBe('s');
+    // a whole-job plan (no day) groups each booking by its own day
+    w = C.removalWrites({ day: null, deletes: mjRows().map((ev) => ({ ev })), updates: [], creates: [] });
+    expect(w.leaving.map(ids)).toEqual([['delete:i-sep', 'delete:h-sep'], ['delete:i-oct', 'delete:g-sep']]);
   });
 
   test('the next upcoming visit is the job\'s first live booking dated today or later', () => {

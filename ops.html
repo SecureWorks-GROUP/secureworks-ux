@@ -9664,14 +9664,15 @@ var CalOpsCore = (function () {
     list.forEach(function(w, i) { (w.fromDate && last[w.fromDate] === i ? then : first).push(w); });
     return [first, then].filter(function(b) { return b.length; });
   }
-  // The writes of a day removal as batches: every booking leaving the day,
-  // the last of them on its own after the rest, then the new rows for the
-  // days after a split, only once every shortened booking has landed.
-  function planDayRemovalBatches(plan) {
-    var leaving = (plan.deletes || []).map(function(d) { return { kind: 'delete', entry: d, fromDate: plan.day }; })
-      .concat((plan.updates || []).map(function(u) { return { kind: 'update', entry: u, fromDate: plan.day }; }));
+  // The writes of a removal plan: the bookings leaving their day (the plan's
+  // day, else each booking's own) as batches, the last leaving each day after
+  // the rest, and the new rows for the days after a split, each to be sent
+  // only once its own shortened booking has landed.
+  function removalWrites(plan) {
+    var leaving = (plan.deletes || []).map(function(d) { return { kind: 'delete', entry: d, fromDate: plan.day || d.ev.scheduled_date }; })
+      .concat((plan.updates || []).map(function(u) { return { kind: 'update', entry: u, fromDate: plan.day || u.ev.scheduled_date }; }));
     var creates = (plan.creates || []).map(function(c) { return { kind: 'create', entry: c, fromDate: null }; });
-    return lastLeavingLast(leaving).concat(creates.length ? [creates] : []);
+    return { leaving: lastLeavingLast(leaving), creates: creates };
   }
   // Whether a booking starting on `start` is the job's next upcoming visit:
   // dated `today` or later, with no other live booking of the job starting
@@ -9809,8 +9810,8 @@ var CalOpsCore = (function () {
     isLiveJobRow: isLiveJobRow, crewKey: crewKey, jobRowsForPlan: jobRowsForPlan, barRows: barRows, jobSpan: jobSpan,
     planJobMove: planJobMove, planJobStretch: planJobStretch,
     isStandIn: isStandIn, applyPlanToEvents: applyPlanToEvents, planKeyMoves: planKeyMoves,
-    planWriteBatches: planWriteBatches, lastLeavingLast: lastLeavingLast,
-    planDayRemovalBatches: planDayRemovalBatches, isNextUpcoming: isNextUpcoming,
+    planWriteBatches: planWriteBatches,
+    removalWrites: removalWrites, isNextUpcoming: isNextUpcoming,
     crewDays: crewDays, crewDayChanges: crewDayChanges,
     dayLabel: dayLabel, crewRescheduleText: crewRescheduleText,
     planDayRemoval: planDayRemoval,
@@ -12610,24 +12611,8 @@ function calRemoveDay(assignmentId, day, who) {
   }
   body += '<br><span id="calRemoveKeeps" style="font-size:12px;color:var(--sw-text-sec);">' + keeps + '</span>';
   showConfirmModal(who ? 'Remove from this day' : 'Clear this day', body, 'Remove', function() {
-    calRemoveDayPlan(jobId, plan, what);
+    calRemoveBookings(jobId, plan, what, 'Removed ' + what);
   }, { danger: true });
-}
-
-// A day removal that only deletes goes through calRemoveJobBookings, which
-// keeps and names an invoiced booking; one that shortens or splits a longer
-// booking is saved like a drag (CalOpsCore.planDayRemovalBatches).
-async function calRemoveDayPlan(jobId, plan, what) {
-  if (!plan.updates.length && !plan.creates.length) {
-    calRemoveJobBookings(jobId, plan.deletes.map(function(d) { return d.ev; }), what, 'Removed ' + what);
-    return;
-  }
-  closeCalJobPopup();
-  var snapshot = _calEvents.slice();
-  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
-  renderCalendar();
-  if (await calSaveJobPlan(jobId, CalOpsCore.planDayRemovalBatches(plan), snapshot)) showToast('Removed ' + what, 'success');
-  calRefreshUnschedSidebar();
 }
 
 // The explicitly chosen whole-job Remove: every booking of the job on every
@@ -12653,51 +12638,64 @@ async function removeJobFromCalendar(ev) {
   body += '<br><span id="calRemoveJobCrew" style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(sum.crew.join(', ')) + ', every day.</span>';
   body += '<br><span style="font-size:12px;color:var(--sw-text-sec);">Paid (invoiced) days stay. The job stays in the pipeline but will become unscheduled.</span>';
   showConfirmModal('Remove whole job from calendar', body, 'Remove whole job', function() {
-    calRemoveJobBookings(jobId, rows, title, 'Removed ' + title + ' from the calendar');
+    var plan = { day: null, deletes: rows.map(function(r) { return { ev: r }; }), updates: [], creates: [] };
+    calRemoveBookings(jobId, plan, title, 'Removed ' + title + ' from the calendar');
   }, { danger: true });
 }
 
-// Deletes `rows` behind a calendar that already shows them gone, the last
-// delete leaving each day after the rest (CalOpsCore.lastLeavingLast). `title`
-// names what was asked in a refusal, `done` is the toast when every delete
-// landed.
-async function calRemoveJobBookings(jobId, rows, title, done) {
+// Saves a removal plan behind a calendar that already shows it
+// (CalOpsCore.removalWrites): the bookings leaving their day go first, the
+// last leaving each day after the rest, and a refused one never stops the
+// others; then each split's new row for the days after it, only once that
+// split's own shortened booking has landed. Whatever the server keeps (an
+// invoiced, paid day) goes back on and is named by person and day. `title`
+// names what was asked when nothing landed, `done` is the toast when every
+// write landed.
+async function calRemoveBookings(jobId, plan, title, done) {
   closeCalJobPopup();
-  var ids = {};
-  rows.forEach(function(r) { ids[r.assignment_id] = true; });
   var snapshot = _calEvents.slice();
-  _calEvents = _calEvents.filter(function(e) { return !ids[e.assignment_id]; });
+  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
   renderCalendar();
   _calSavingJobs[jobId] = true;
   _calSavesInFlight++;
-  var kept = [];
+  var writes = CalOpsCore.removalWrites(plan);
+  var landed = { deletes: [], updates: [], creates: [] }, failed = [];
+  var send = async function(batch) {
+    var results = await Promise.allSettled(batch.map(function(w) {
+      if (w.kind === 'create') return opsPost('create_assignment', w.entry.create);
+      if (w.kind === 'delete') return opsPost('delete_assignment', { assignmentId: w.entry.ev.assignment_id });
+      return opsPost('update_assignment', w.entry.update);
+    }));
+    results.forEach(function(r, i) {
+      if (r.status === 'rejected') failed.push({ write: batch[i], error: r.reason });
+      else landed[batch[i].kind + 's'].push(batch[i].entry);
+    });
+  };
   try {
-    var batches = CalOpsCore.lastLeavingLast(rows.map(function(r) { return { ev: r, fromDate: r.scheduled_date }; }));
-    for (var bi = 0; bi < batches.length; bi++) {
-      var results = await Promise.allSettled(batches[bi].map(function(w) {
-        return opsPost('delete_assignment', { assignmentId: w.ev.assignment_id });
-      }));
-      results.forEach(function(r, i) { if (r.status === 'rejected') kept.push({ ev: batches[bi][i].ev, error: r.reason }); });
-    }
+    for (var bi = 0; bi < writes.leaving.length; bi++) await send(writes.leaving[bi]);
+    var shortened = {};
+    landed.updates.forEach(function(u) { shortened[u.ev.assignment_id] = true; });
+    var creates = writes.creates.filter(function(w) { return shortened[w.entry.template.assignment_id]; });
+    if (creates.length) await send(creates);
   } finally {
     _calSavesInFlight--;
     delete _calSavingJobs[jobId];
     calForgetJobRows(jobId);
   }
-  var reason = function(k) { return (k.error && k.error.message) || String(k.error || 'the delete failed'); };
-  if (kept.length === rows.length) {
-    if (_calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
-    showToast('Not removed: ' + title + ' - ' + reason(kept[0]) + '. The calendar shows what was saved.', 'warning');
-  } else if (kept.length) {
-    var keptIds = {};
-    kept.forEach(function(k) { keptIds[k.ev.assignment_id] = true; });
-    _calEvents = _calEvents.concat(snapshot.filter(function(e) { return keptIds[e.assignment_id]; }));
-    renderCalendar();
-    showToast(done + ', except: ' + kept.map(function(k) {
-      return crewDisplayName(k.ev) + ' on ' + fmtDate(k.ev.scheduled_date) + ' (' + reason(k) + ')';
-    }).join(', '), 'warning');
-  } else {
+  var reason = function(f) { return (f.error && f.error.message) || String(f.error || 'the save failed'); };
+  if (!failed.length) {
     showToast(done, 'success');
+  } else {
+    if (_calSavesInFlight === 0) { _calEvents = CalOpsCore.applyPlanToEvents(snapshot, landed); renderCalendar(); }
+    if (!landed.deletes.length && !landed.updates.length) {
+      showToast('Not removed: ' + title + ' - ' + reason(failed[0]) + '. The calendar shows what was saved.', 'warning');
+    } else {
+      showToast(done + ', except: ' + failed.map(function(f) {
+        var e = f.write.entry;
+        if (f.write.kind === 'create') return crewDisplayName(e.template) + ' from ' + fmtDate(e.date) + ' not booked back (' + reason(f) + ')';
+        return crewDisplayName(e.ev) + ' on ' + fmtDate(plan.day || e.ev.scheduled_date) + ' (' + reason(f) + ')';
+      }).join(', '), 'warning');
+    }
   }
   refreshCalendarQuietly();
   calRefreshUnschedSidebar();

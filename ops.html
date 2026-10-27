@@ -6948,13 +6948,13 @@ function fmtArtifactSize(bytes) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
 }
 
-// The scoping tool a job opens in. With the job, a Scope Engine record opens the Scope Engine
-// (modules/job-scope-record.js); without it, the tool the trade has always opened.
+// The scoping tool a job opens in (modules/job-scope-record.js). The older tools are retired (T43):
+// every job opens the Scope Engine, except a patio job already scoped in the older patio page.
 function scopeToolUrlFor(jobType, job) {
-  if (job && window.JobScopeRecord) return JobScopeRecord.toolUrlFor(Object.assign({}, job, { type: jobType || job.type }));
+  if (window.JobScopeRecord) return JobScopeRecord.toolUrlFor(Object.assign({}, job || {}, { type: jobType || (job && job.type) }));
   return jobType === 'fencing'
-    ? 'https://marninms98-dotcom.github.io/fence-designer/'
-    : 'https://marninms98-dotcom.github.io/patio/';
+    ? 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/'
+    : 'https://marninms98-dotcom.github.io/patio/scope-engine/';
 }
 
 async function toggleFrozenRevisions(jobId, jobType, anchor) {

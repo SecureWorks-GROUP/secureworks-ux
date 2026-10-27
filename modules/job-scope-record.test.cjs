@@ -47,8 +47,26 @@ test('engine patio: opens the Scope Engine, from the job or from a job list row'
   const j = engineJob();
   assert.equal(R.openUrl(j), R.ENGINE_PATIO_URL + '?jobId=' + j.id);
   assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-scoper' }), R.ENGINE_PATIO_URL);
-  assert.equal(R.toolUrlFor({ type: 'patio' }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio' }), R.ENGINE_PATIO_URL);
   assert.equal(R.toolUrlFor({ type: 'fencing' }), R.FENCE_URL);
+});
+
+test('old tools retired (T43): new jobs and fence jobs open the Scope Engine, older patio scopes stay put', () => {
+  assert.equal(R.FENCE_URL, 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/');
+  assert.equal(R.toolUrlFor({ type: 'patio' }), R.ENGINE_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', scope_json: '' }), R.ENGINE_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'fencing', scope_json: { job: { runs: [] } } }), R.FENCE_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', scope_json: { config: { length: 6 } } }), R.OLD_PATIO_URL);
+  assert.equal(R.openUrl({ id: 'j1', type: 'fencing' }), R.FENCE_URL + '?jobId=j1');
+  // a job list row: no scope_json, only the pricing's tool
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-scoper' }), R.ENGINE_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-configurator' }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pricing_json: { totalIncGST: 9000 } }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: null, pricing_json: null }), R.ENGINE_PATIO_URL);
+  // a Kanban card: the older patio page writes no tool key, only a total
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: null, pj_total_inc: 18500 }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_total: 0 }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-scoper', pj_total_inc: 18500 }), R.ENGINE_PATIO_URL);
 });
 
 test('money: unknown stays null, never 0; a partial cost says so', () => {

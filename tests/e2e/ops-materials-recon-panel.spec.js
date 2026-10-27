@@ -396,7 +396,9 @@ test('a bill whose lines name ten jobs: they are listed as evidence, and placing
   await pickSearched(page, 'q-ten', 'SWP-26050', 'job-empty'); // zero-expense project: one press without the bill check
   await expect(d.locator('[data-mrq-whole="named"]')).toHaveText('Placing whole puts all $5,083.40 on SWP-26050, but its lines name 10 other jobs ($4,758.00 of the lines). Nothing is split for you. Leave it on this list to keep it held until a person confirms where it belongs.');
   const place = d.locator('[data-mrq-act="place"]');
-  await expect(place).toHaveText('Place on SWP-26050');
+  // Its lines are on 306, so it is also an installer bill (PR 422): both warnings show.
+  await expect(d.locator('[data-mrq-installer]')).toHaveCount(1);
+  await expect(place).toHaveText('Confirm and place on SWP-26050');
   await place.click();
   await expect(place).toHaveText('Confirm: place all $5,083.40 on SWP-26050');
   expect(await posts(page)).toEqual([]);

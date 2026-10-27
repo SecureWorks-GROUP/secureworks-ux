@@ -260,7 +260,7 @@
     // A job list row carries no scope_json, only the pricing's tool (ops-api pipeline pj_tool). Pricing
     // from another tool means the older patio page scoped it.
     var pj = parse(job.pricing_json);
-    var priced = job.pj_tool || (pj && Object.keys(pj).length);
+    var priced = job.pj_tool || job.pj_total_inc != null || job.pj_total != null || (pj && Object.keys(pj).length);
     if (priced && job.pj_tool !== 'patio-scoper' && !(pj && pj.tool === 'patio-scoper')) return OLD_PATIO_URL;
     return ENGINE_PATIO_URL;
   }

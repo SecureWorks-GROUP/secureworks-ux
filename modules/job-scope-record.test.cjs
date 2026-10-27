@@ -63,6 +63,10 @@ test('old tools retired (T43): new jobs and fence jobs open the Scope Engine, ol
   assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-configurator' }), R.OLD_PATIO_URL);
   assert.equal(R.toolUrlFor({ type: 'patio', pricing_json: { totalIncGST: 9000 } }), R.OLD_PATIO_URL);
   assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: null, pricing_json: null }), R.ENGINE_PATIO_URL);
+  // a Kanban card: the older patio page writes no tool key, only a total
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: null, pj_total_inc: 18500 }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_total: 0 }), R.OLD_PATIO_URL);
+  assert.equal(R.toolUrlFor({ type: 'patio', pj_tool: 'patio-scoper', pj_total_inc: 18500 }), R.ENGINE_PATIO_URL);
 });
 
 test('money: unknown stays null, never 0; a partial cost says so', () => {

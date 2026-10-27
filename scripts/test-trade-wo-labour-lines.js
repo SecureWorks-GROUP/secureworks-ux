@@ -328,6 +328,102 @@ function hoursCard(overrides) {
     'WO deducts stay nested on the WO extra and are not also emitted as extra_items')
 }
 
+// ── Travel allowance: its own line, not a deduction, no times ────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+    travel_amount: 45,
+    travel_km: 42,
+    travel_note: '  tolls  ',
+  })])
+  assert(!built.error, 'WO with travel builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 2, 'travel is its own line beside the work order')
+  const wo = built.cardExtraItems[0]
+  const travel = JSON.parse(JSON.stringify(built.cardExtraItems[1]))
+  assert.strictEqual(wo.row_type, 'work_order')
+  assert.strictEqual(wo.rate, 400, 'travel does not reduce the work-order net')
+  assert.strictEqual(wo.wo_labour_deduction, 0)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(wo.wo_labour_lines)), [], 'travel is not reshaped into wo_labour_lines')
+  assert.strictEqual(travel.row_type, 'travel')
+  assert.strictEqual(travel.type, 'Travel')
+  assert.strictEqual(travel.quantity, 1)
+  assert.strictEqual(travel.unit, 'ea')
+  assert.strictEqual(travel.rate, 45)
+  assert.strictEqual(travel.job_number, 'SWF-26767')
+  assert.strictEqual(travel.job_id, 'j-26767')
+  assert.strictEqual(travel.description, 'Travel · SWF-26767 · 42 km · tolls')
+  assert.strictEqual(travel.work_order_id, undefined, 'travel is not a second work-order claim')
+  ;['work_date', 'start_time', 'finish_time', 'break_minutes'].forEach((k) => {
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(travel, k), false, 'travel must not carry ' + k)
+  })
+  assert.strictEqual(built.subtotal, 445, 'submitted total includes the work order and the travel')
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+  })])
+  assert(!built.error, 'WO without travel builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1, 'no travel line when the allowance is blank')
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'work_order')
+  assert.strictEqual(built.cardExtraItems[0].rate, 400)
+  assert.strictEqual(built.subtotal, 400)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+    travel_amount: 45,
+    job_number: '   ',
+  })])
+  assert(built.error, 'travel without a job number must block')
+  assert(built.error.indexOf('job number') !== -1, 'error asks for a job number: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+    travel_km: 12,
+    travel_note: 'bridge',
+  })])
+  assert(built.error, 'km and a note without an amount must block')
+  assert(built.error.indexOf('travel amount') !== -1, 'error asks for the amount: ' + built.error)
+}
+
+for (const badAmount of [-30, '-30', 'abc', 0, '0']) {
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 400,
+    wo_labour_lines: [],
+    travel_amount: badAmount,
+  })])
+  assert(built.error, 'a travel amount of ' + JSON.stringify(badAmount) + ' must block')
+  assert(built.error.indexOf('Travel amount must be more than $0') !== -1, 'keeps a typed bad amount as an error: ' + built.error)
+  assert.strictEqual(built.cardExtraItems, undefined, 'a bad travel amount is not dropped and then invoiced')
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_mode: false,
+    assignment_id: 'a-hours',
+    travel_amount: 45,
+    work_date: '2026-07-14',
+    start_time: '07:00',
+    finish_time: '15:00',
+    break_minutes: 0,
+    rate: 50,
+    description: 'Make safe attendance',
+  })])
+  assert(!built.error, 'hourly card ignores a leftover travel amount: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 0, 'hourly flow does not emit a travel line')
+  assert.strictEqual(built.manualAssignments.length, 1)
+  assert.strictEqual(built.manualAssignments[0].hours, 8)
+  assert.strictEqual(built.subtotal, 400)
+}
+
 {
   const deductStart = html.indexOf('function _hoursCardLumpFinalDeductions')
   const deductEnd = html.indexOf('function _syncInvLumpLinesFromDOM')

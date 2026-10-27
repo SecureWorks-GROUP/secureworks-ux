@@ -350,7 +350,7 @@ test('W2: the job screen shows the strip, ladder, story, conversation, notice, s
   await expect(page.locator('#dwLadder .dw-stp.done')).toHaveCount(4);
   await expect(page.locator('#dwLadder .dw-stp.due')).toContainText('ready now');
   await expect(page.locator('#dwStory')).toContainText('walkthrough done');
-  await expect(page.locator('#dwMoney')).toContainText('Owing on this job');
+  await expect(page.locator('#dwMoney')).toContainText('Owed on this job');
   // The chat bar: who we are texting, from 771, the invoice, amount and day; the payer chip on.
   await expect(page.locator('#dwChatWho')).toHaveText('Casey Morgan · 0400 000 003');
   await expect(page.locator('#dwChatSub')).toHaveText('Texts go from 771 · INV-9003 · $1,420.37 · day 12');
@@ -605,7 +605,7 @@ test('W2: Says paid offers Clear says paid; a paid invoice reads Paid with nothi
   await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body])).toEqual([['debt_ws_set_category', { xero_invoice_id: fixture.ids.jamie, category: 'clear' }]]);
   await page.locator('#dwBack').click();
   await openJob(page, 'Casey Morgan', 'Escalating');
-  await expect(page.locator('#dwStrip .dw-pill')).toHaveText('Paid');
+  await expect(page.locator('#dwStrip .dw-pill')).toHaveText('Paid (Xero)');
   await expect(page.locator('#dwStrip .dw-pill')).toHaveClass(/paid/);
   await expect(page.locator('#dwCatChange')).toHaveCount(0);
 });

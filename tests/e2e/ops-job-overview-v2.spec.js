@@ -179,7 +179,7 @@ test('job_overview not deployed: header, files and a plain record, "not switched
   await expect(page.locator('#ov2StoryState')).toContainText('The story is not switched on yet.');
   await expect(page.locator('#ov2Cust')).toContainText('Avery Lin');
   await expect(page.locator('#ov2Files')).toContainText('Quote Q-9003');
-  await expect(page.locator('#ov2Files')).toContainText('Draft, cannot be paid');
+  await expect(page.locator('#ov2Files')).toContainText('Draft in Xero, cannot be paid');
   await expect(page.locator('#ov2Timeline')).toContainText('from the job record');
   await expect(page.locator('#ov2ConvBody')).toContainText('latest from the job record');
   await expect(page.locator('#ov2Conv')).toContainText('Will do.');
@@ -208,12 +208,12 @@ test('data rules on screen: drafts, deleted invoices, view counts, no machine ro
   await expect(page.locator('#ov2Story .ov2-story-money>div').nth(1)).toContainText('$0.00');
   await expect(page.locator('#ov2Story .ov2-story-last')).toContainText('Customer said');
   await expect(page.locator('#ov2Story .ov2-story-unknown')).toContainText('Nothing listed in the story card.');
-  await expect(page.locator('#ov2Paid')).toHaveText('Invoiced $0.00 \u00b7 Paid $0.00 \u00b7 inc GST');
-  await expect(page.locator('#ov2Cust')).toContainText('Draft INV-9002 $3,571.43, not issued');
+  await expect(page.locator('#ov2Paid')).toHaveText('Invoiced $0.00 \u00b7 Paid (Xero) $0.00 \u00b7 inc GST');
+  await expect(page.locator('#ov2Cust')).toContainText('Draft INV-9002 $3,571.43, draft in Xero');
   const files = page.locator('#ov2Files .ov2-file');
   await expect(files).toHaveCount(9);
   await expect(files.first()).toContainText('opened 15 times');
-  await expect(files.nth(1)).toContainText('Draft, cannot be paid');
+  await expect(files.nth(1)).toContainText('Draft in Xero, cannot be paid');
   await expect(files.last()).toHaveClass(/faded/);
   await expect(files.last()).toContainText('Deleted in Xero');
   const conv = page.locator('#ov2Conv');
@@ -450,8 +450,8 @@ test('B1: held messages stay readable and explicitly uncertain, outside job fact
   await expect(heldBubble).toContainText('Job not certain: may belong to another job');
   await expect(page.locator('.ov2-story-last')).not.toContainText('other fencing project');
   const held = page.locator('#ov2Held');
-  await expect(held).toContainText('3 of 28 held messages shown');
-  await expect(held).toContainText('Held, job not certain');
+  await expect(held).toContainText('3 of 28 messages shown');
+  await expect(held).toContainText('Job not certain');
   await expect(held).toContainText('Please check the bank payment');
   await expect(held).toContainText('Sam promised to send the formal quote');
   await expect(held).toContainText('Other possible jobs: SWF-990303');
@@ -510,7 +510,7 @@ test('B3: conflicting prices are qualified beside the value; all six issued and 
       await expect(page.locator('#ov2ValueCheck')).toContainText('not a confirmed contract value');
       if (value === 6298.71 && process.env.OV2_PROOF_DIR) await page.locator('#ov2Cust').screenshot({ path: process.env.OV2_PROOF_DIR + '/price-conflict.png' });
     }
-    await expect(page.locator('#ov2Paid')).toHaveText(`Invoiced ${money(issued)} \u00b7 Paid ${money(paid)} \u00b7 inc GST`);
+    await expect(page.locator('#ov2Paid')).toHaveText(`Invoiced ${money(issued)} \u00b7 Paid (Xero) ${money(paid)} \u00b7 inc GST`);
     await expect(page.locator('.ov2-story-money > div').nth(1)).toContainText(money(issued));
     await expect(page.locator('.ov2-story-money > div').nth(2)).toContainText(money(paid));
   }

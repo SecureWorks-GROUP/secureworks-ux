@@ -103,7 +103,7 @@ test.describe('tick-box Show / Type row', () => {
   test('every option is a tick box and every one is ticked to start', async ({ page }) => {
     const s = await snapshot(page);
     expect(s.liveButtons).toBe(0);
-    expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+    expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Leave', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
     expect(s.ticks.every((t) => t.on && !t.mixed)).toBe(true);
     expect(s.jobs).toEqual(ALL_JOBS);
     expect(s.biz).toBe(1);
@@ -170,6 +170,7 @@ test.describe('tick-box Show / Type row', () => {
     expect(s.dels).toEqual(['po-1', 'po-2']);
 
     await tick(page, 'show', 'materials');
+    await tick(page, 'show', 'leave');
     await tick(page, 'show', 'holidays');
     s = await snapshot(page);
     expect(s.jobs).toEqual([]);

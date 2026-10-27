@@ -203,18 +203,28 @@ assert.deepStrictEqual(plain(out.missingIndices), [1])
 // Two office assignments on one job and day are the office's doing, not doubled-up typing.
 assert(!build([card(), card({ _idx: 1, assignment_id: 'a-9', start_time: '16:00', finish_time: '18:00', break_minutes: 0 })], WEEK).error)
 
-// Lines that are not time carry none of the fields.
+// Lines that are not time carry none of the fields. A work-order travel
+// allowance is one of those lines, and it does not relax the hours rule.
 out = build([
   card({ commission_mode: true, commission_amount: 200 }),
-  card({ _idx: 1, assignment_id: 'a-2', job_id: 'j-2', job_number: 'SWF-26002', wo_mode: true, wo_allocated: 500 }),
+  card({ _idx: 1, assignment_id: 'a-2', job_id: 'j-2', job_number: 'SWF-26002', wo_mode: true, wo_allocated: 500, travel_amount: 30, travel_km: 18, travel_note: 'return trip' }),
 ], WEEK)
 assert(!out.error, out.error)
 assert.strictEqual(out.manualAssignments.length, 0)
+assert.strictEqual(out.cardExtraItems.length, 3)
 out.cardExtraItems.forEach(function (item) {
   ;['work_date', 'start_time', 'finish_time', 'break_minutes'].forEach(function (k) {
     assert(!(k in item), item.type + ' must not carry ' + k)
   })
 })
+const travelLine = plain(out.cardExtraItems.find((item) => item.row_type === 'travel'))
+assert.deepStrictEqual(
+  [travelLine.type, travelLine.quantity, travelLine.rate, travelLine.job_number, travelLine.description],
+  ['Travel', 1, 30, 'SWF-26002', 'Travel · SWF-26002 · 18 km · return trip'])
+assert.strictEqual(travelLine.work_order_id, undefined)
+// The same travel figures on an hours card still owe a date, start and finish.
+out = build([card({ travel_amount: 30, start_time: '', finish_time: '', break_minutes: 0 })], WEEK)
+assert.match(out.error, /SWF-26001: add the date, start time and finish time you worked/)
 // A card that only carries an amount bills no time and owes no times.
 out = build([card({ start_time: '', finish_time: '', break_minutes: 0, wo_lump_lines: [{ description: 'Tip fees', amount: 40 }] })], WEEK)
 assert(!out.error, out.error)

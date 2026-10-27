@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Load supplier prices</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f7; color: #1d2a31; margin: 0; padding: 16px; }
+    main { max-width: 560px; margin: 24px auto; background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    h1 { font-size: 20px; margin: 0 0 8px; color: #293C46; }
+    p { line-height: 1.5; }
+    .note { color: #56656d; font-size: 14px; }
+    button { background: #293C46; color: #fff; border: 0; border-radius: 8px; padding: 12px 18px; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: .4; cursor: default; }
+    #status { margin-top: 16px; padding: 12px; border-radius: 8px; background: #eef2f4; white-space: pre-line; }
+    #status.bad { background: #fdecea; color: #8a1c12; }
+    #status.good { background: #e8f5ec; color: #1f5f33; }
+    input[type=file] { margin: 12px 0 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Load supplier prices</h1>
+  <p class="note">For an owner or admin. Choose the staff prices file from the private catalogue folder. Prices are added for the signed-in staff tools only. Prices already loaded are left exactly as they are, and nothing is deleted.</p>
+  <div id="who" class="note">Checking your sign-in...</div>
+  <input type="file" id="file" accept=".json,application/json" disabled>
+  <div><button id="load" disabled>Load prices</button></div>
+  <div id="status" hidden></div>
+</main>
+<script>
+(function () {
+  var URL_ = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
+  var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
+  var CHUNK = 1000;
+  var who = document.getElementById('who');
+  var fileInput = document.getElementById('file');
+  var loadBtn = document.getElementById('load');
+  var statusEl = document.getElementById('status');
+  var rows = null;
+
+  function say(text, kind) {
+    statusEl.hidden = false;
+    statusEl.className = kind || '';
+    statusEl.textContent = text;
+  }
+
+  if (!window.supabase || !window.supabase.createClient) {
+    who.textContent = 'This page could not start. Check the internet connection and reload.';
+    return;
+  }
+  var sb = window.supabase.createClient(URL_, ANON);
+
+  sb.auth.getSession().then(async function (res) {
+    var session = res && res.data && res.data.session;
+    if (!session) {
+      who.innerHTML = 'You are not signed in. <a href="../trade.html">Sign in to the Trade app</a> on this computer, then come back to this page.';
+      return;
+    }
+    var prof = await sb.from('users').select('role').eq('id', session.user.id).maybeSingle();
+    var role = prof && prof.data && String(prof.data.role || '').toLowerCase();
+    if (role !== 'admin' && role !== 'owner') {
+      who.textContent = 'Signed in as ' + session.user.email + '. Only an owner or admin can load prices.';
+      return;
+    }
+    who.textContent = 'Signed in as ' + session.user.email + '.';
+    fileInput.disabled = false;
+  });
+
+  fileInput.addEventListener('change', function () {
+    rows = null;
+    loadBtn.disabled = true;
+    var f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    f.text().then(function (text) {
+      var data;
+      try { data = JSON.parse(text); } catch (e) { say('That file is not a prices file.', 'bad'); return; }
+      if (!data || data.schemaVersion !== 'staff-prices/v1' || !Array.isArray(data.rows) || !data.rows.length) {
+        say('That file is not a staff prices file (staff-prices/v1).', 'bad');
+        return;
+      }
+      var missing = data.rows.filter(function (r) { return !r.approval_id || !r.approved_until; }).length;
+      if (missing) {
+        say(missing + ' of ' + data.rows.length + ' prices have no recorded approval, so this file cannot be loaded.', 'bad');
+        return;
+      }
+      rows = data.rows;
+      var suppliers = {};
+      rows.forEach(function (r) { suppliers[r.supplier_name || r.supplier_id] = true; });
+      say(rows.length + ' prices from ' + Object.keys(suppliers).length + ' suppliers, file dated ' + (data.asOf || 'unknown') + '. Ready to load.');
+      loadBtn.disabled = false;
+    });
+  });
+
+  loadBtn.addEventListener('click', async function () {
+    if (!rows) return;
+    loadBtn.disabled = true;
+    fileInput.disabled = true;
+    var inserted = 0, already = 0;
+    for (var i = 0; i < rows.length; i += CHUNK) {
+      say('Loading ' + Math.min(i + CHUNK, rows.length) + ' of ' + rows.length + '...');
+      var res = await sb.rpc('catalogue_prices_staff_load', { p_rows: rows.slice(i, i + CHUNK) });
+      if (res.error) {
+        say('Stopped after ' + inserted + ' new prices. The system said: ' + res.error.message, 'bad');
+        fileInput.disabled = false;
+        return;
+      }
+      inserted += res.data.inserted;
+      already += res.data.already_present;
+    }
+    var count = await sb.from('catalogue_prices').select('price_id', { count: 'exact', head: true });
+    var total = count && typeof count.count === 'number' ? count.count : 'unknown';
+    say('Done. ' + inserted + ' new prices added, ' + already + ' were already there and were left as they were. The staff tools now hold ' + total + ' prices.', 'good');
+  });
+})();
+</script>
+</body>
+</html>

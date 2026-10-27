@@ -9464,7 +9464,8 @@ var CalOpsCore = (function () {
   // The bookings behind one Schedule-view bar: the live rows painted on any of
   // the bar's days [from..to]. Each booking stands on its own (Captain
   // 2026-10-27): the job's other days, in view or not, are other bookings and
-  // never move with it or stop it moving. A row is never split by a drag, so
+  // never move with it; one stops it only when the same person is already
+  // booked on a target date (the unique key). A row is never split by a drag, so
   // one that runs past the bar (one row Fri to Mon) moves whole.
   function barRows(rows, from, to) {
     return (rows || []).filter(function(ev) {
@@ -11928,7 +11929,7 @@ async function submitScheduleFromModal(jobId) {
 // caller can never re-resolve crew by display NAME — a name lookup can land on
 // a different person (deactivated user, duplicate display names) and silently
 // turn a move into a reassign. No caller passes it today: the Schedule view
-// moves whole jobs through calApplyJobPlan. Crew-view callers omit opts and
+// moves its bars through calApplyJobPlan. Crew-view callers omit opts and
 // keep the name-resolution that powers cross-row reassignment.
 async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // Find the assignment in events

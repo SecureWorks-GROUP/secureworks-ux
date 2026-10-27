@@ -135,8 +135,10 @@ async function bootCalendar(page, opts = {}) {
       // { deleteDelayMs }: each delete is slow. { refuseDelete }: assignment
       // id -> the refusal ops-api answers for it (an invoiced booking).
       const body = route.request().postDataJSON();
-      writes.push({ action, body });
+      // `answeredBefore`: how many deletes the server had answered when this one arrived
+      writes.push({ action, body, answeredBefore: state.deletesAnswered || 0 });
       if (opts.deleteDelayMs) await new Promise((r) => setTimeout(r, opts.deleteDelayMs));
+      state.deletesAnswered = (state.deletesAnswered || 0) + 1;
       const refusal = (opts.refuseDelete || {})[body.assignmentId];
       if (refusal) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: refusal }) });
       state.events = state.events.filter((e) => e.assignment_id !== body.assignmentId);
@@ -144,7 +146,8 @@ async function bootCalendar(page, opts = {}) {
     }
     if (action === 'create_assignment' || action === 'send_client_update') {
       const body = route.request().postDataJSON();
-      writes.push({ action, body });
+      // `answeredBefore`: how many booking updates the server had answered when this arrived
+      writes.push({ action, body, answeredBefore: state.writesAnswered || 0 });
       if (action === 'create_assignment' && opts.keepCreates) {
         const like = state.events.find((e) => e.job_id === body.jobId) || {};
         state.events.push({ ...like, assignment_id: 'new-' + writes.length, user_id: body.userId, crew_name: body.crewName,
@@ -703,6 +706,8 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     await page.waitForTimeout(300);
     expect(writes.find((w) => w.action === 'update_assignment').body).toMatchObject({ assignmentId: 'mm-hugo-now', scheduled_date: D.THU, scheduled_end: D.THU });
     await expect(page.locator('body')).not.toContainText('runs past the calendar view');
+    // its old days are past, so this is the next visit and the client text starts ticked
+    await expect(page.locator('#calReschedClient')).toBeChecked();
     expect(datesOf(state, 'u-hugo')).toEqual([longAgo[0], longAgo[1], D.THU]);
     expect(datesOf(state, 'u-liam')).toEqual(longAgo);
   });
@@ -812,6 +817,8 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     expect(Date.now() - dropped, 'drop to reschedule step').toBeLessThan(1000);
     await expect(page.locator('#calConfirmModal')).toContainText('Send reschedule update?');
     expect(state.writesAnswered || 0, 'no booking write has been answered yet').toBe(0);
+    // the Friday bar is the job's next visit, so the client text for this later bar starts unticked
+    await expect(page.locator('#calReschedClient')).not.toBeChecked();
 
     // A press before the save lands waits for it and sends nothing yet.
     const send = page.locator('#confirmModalProceed');
@@ -821,10 +828,10 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
     expect(texts).toHaveLength(0);
 
-    // Once every write has landed, the texts go, about the saved days.
-    await expect.poll(() => writes.filter((w) => w.action === 'send_client_update').length, { timeout: 20000 }).toBe(1);
+    // Once every write has landed, the crew texts go, about the saved days.
+    await expect.poll(() => texts.length, { timeout: 20000 }).toBe(3);
     expect(state.writesAnswered).toBe(8);
-    await expect.poll(() => texts.length).toBe(3);
+    expect(writes.filter((w) => w.action === 'send_client_update')).toHaveLength(0);
     await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
     for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.FRI, D.TUE2, D.WED2, D.THU2]);
   });
@@ -946,7 +953,9 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     // the day comes off on the press, while the deletes are still answering
     await expect(bar(page, 'mm-hugo-1')).toHaveCount(0, { timeout: 500 });
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-mm"]')).toHaveCount(2);
-    await expect.poll(() => deletedIds(writes)).toEqual(['mm-hugo-1', 'mm-liam-1', 'mm-nina-1', 'mm-priya-1']);
+    await expect.poll(() => deletedIds(writes), { timeout: 5000 }).toEqual(['mm-hugo-1', 'mm-liam-1', 'mm-nina-1', 'mm-priya-1']);
+    // the last booking leaving the day goes once the others are answered, so ops-api sees the day emptied once
+    expect(writes.filter((w) => w.action === 'delete_assignment').map((w) => w.answeredBefore)).toEqual([0, 0, 0, 3]);
     await expect(page.getByText('Removed Milan Mall SWP-26595 on ' + wed)).toBeVisible({ timeout: 5000 });
     // the watcher rows are ops-api's to drop once nobody is on the day
     expect(writes.some((w) => w.action === 'delete_assignment' && w.body.assignmentId.startsWith('mm-ghost'))).toBe(false);
@@ -1063,11 +1072,26 @@ test.describe('One booking, one crew member (Crew view)', () => {
     await page.locator('#confirmModalProceed').click();
     await expect.poll(() => writes.length).toBe(2);
     expect(writes.find((w) => w.action === 'update_assignment').body).toMatchObject({ assignmentId: 'a-jane', scheduled_date: D.MON, scheduled_end: D.MON, duration_days: 1 });
+    // the rest is booked only once the shortened booking has landed
+    expect(writes.find((w) => w.action === 'create_assignment').answeredBefore).toBe(1);
     expect(writes.find((w) => w.action === 'create_assignment').body).toMatchObject({
       jobId: 'j-1', userId: 'u-hugo', scheduledDate: D.WED, scheduledEnd: D.WED, durationDays: 1, suppress_notifications: true,
     });
     expect(writes.some((w) => w.action === 'delete_assignment')).toBe(false);
     await expect(page.getByText('Removed Hugo from Jane Citizen SWF-101 on ' + tue)).toBeVisible();
+  });
+
+  test('a refused shorten books nothing more, so the person is never booked twice', async ({ page }) => {
+    const { writes } = await bootCalendar(page, { writeDelayMs: 300, writeFails: true });
+    await page.locator('.cal-swim-cell[data-date="' + D.TUE + '"][data-crew="Hugo"] .cal-job-block').click();
+    await page.locator('#calJobPopup .btn-overflow').click();
+    await page.locator('#calJobPopup [data-remove="person"]').click();
+    await page.locator('#confirmModalProceed').click();
+    await expect(page.getByText(/database unavailable/)).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(writes.map((w) => w.action)).toEqual(['update_assignment']);
+    await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'j-1')
+      .map((e) => [e.scheduled_date, e.scheduled_end]))).toEqual([[D.MON, D.WED]]);
   });
 
   test('the reschedule step opens the moment the booking is dropped, before its save is answered', async ({ page }) => {

@@ -505,4 +505,27 @@ test.describe('Bar move, stretch and remove planners', () => {
     // nobody booked that day: nothing to do
     expect(C.planDayRemoval(mjRows(), OCT28, 'u:u-henry').deletes).toEqual([]);
   });
+
+  test('a day removal writes the last booking leaving the day after the rest, and the split\'s new row only after that', () => {
+    const ids = (batches) => batches.map((b) => b.map((w) => w.kind + ':' + (w.kind === 'create' ? w.entry.date : w.entry.ev.assignment_id)));
+    // Clear 8 Sep: Isaac's delete, then Henry's on its own, so ops-api sees the day emptied once
+    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(mjRows(), SEP8, null)))).toEqual([['delete:i-sep'], ['delete:h-sep']]);
+    // Remove Wed from a Mon-Fri booking: shorten it first, the Thu-Fri row only once that has landed
+    const rows = [booking('s', 'u-a', MON, FRI), booking('b', 'u-b', WED, WED)];
+    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(rows, WED, null)))).toEqual([['delete:b'], ['update:s'], ['create:' + THU]]);
+    expect(ids(C.planDayRemovalBatches(C.planDayRemoval(rows, WED, 'u:u-a')))).toEqual([['update:s'], ['create:' + THU]]);
+  });
+
+  test('the next upcoming visit is the job\'s first live booking dated today or later', () => {
+    // Michael Johnson on 27 Oct: the unfinished September days are past, 28 Oct is next
+    expect(C.isNextUpcoming(mjRows(), OCT28, '2026-10-27')).toBe(true);
+    const later = mjRows().concat([booking('i-nov', 'u-isaac', '2026-11-04', '2026-11-04')]);
+    expect(C.isNextUpcoming(later, '2026-11-04', '2026-10-27')).toBe(false);
+    expect(C.isNextUpcoming(later, OCT28, '2026-10-27')).toBe(true);
+    // a past booking is not upcoming; a cancelled or watcher row never comes first
+    expect(C.isNextUpcoming(mjRows(), SEP8, '2026-10-27')).toBe(false);
+    const quiet = [booking('c', 'u-a', '2026-10-28', '2026-10-28', { status: 'cancelled' }),
+      booking('g', 'u-s', '2026-10-28', '2026-10-28', { role: 'observer', is_ghost: true }), booking('n', 'u-a', '2026-10-30', '2026-10-30')];
+    expect(C.isNextUpcoming(quiet, '2026-10-30', '2026-10-27')).toBe(true);
+  });
 });

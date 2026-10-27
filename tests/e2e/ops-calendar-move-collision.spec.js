@@ -39,6 +39,14 @@ function fmtDate(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// The refusal when the person is already booked on the job on a target day.
+function alreadyBooked(name, iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+  return `${name} is already booked on this job on ${day} ${d.getDate()} ${month} - nothing moved`;
+}
+
 const USERS = [
   { id: 'u-hugo', name: 'Hugo', email: 'hugo@secureworkswa.com.au', role: 'lead_installer' },
   { id: 'u-isaac', name: 'Isaac', email: 'isaac.b3lch3r@secureworkswa.com.au', role: 'installer' },
@@ -288,7 +296,7 @@ test('a bar dropped on the same person\'s other visit of the job is refused, and
   await expect(page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]')).toHaveCount(2);
   const sourceBar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
   await realDrag(page, sourceBar, page.locator(`.cal-schedule-cell[data-date="${D.WED}"]`));
-  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.getByText(alreadyBooked('Hugo', D.WED))).toBeVisible();
   await page.waitForTimeout(300);
   expect(writes).toHaveLength(0);
 
@@ -318,7 +326,7 @@ test('start-edge resize onto a same-person visit is skipped without changing eit
   await realDrag(page, source.locator('.cal-resize-handle.left'),
     page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Hugo"]`));
 
-  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.getByText(alreadyBooked('Hugo', D.MON))).toBeVisible();
   expect(writes).toHaveLength(0);
   expect(rows.find((row) => row.id === 'h-span').scheduled_date).toBe(D.WED);
   expect(rows.find((row) => row.id === 'h-span').scheduled_end).toBe(D.THU);
@@ -336,7 +344,7 @@ test('crew reassignment onto an existing job/person/date skips before delete-and
   const target = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Isaac"]`);
   await realDrag(page, source, target);
 
-  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.getByText(alreadyBooked('Isaac', D.MON))).toBeVisible();
   expect(writes).toHaveLength(0);
   expect(rows.filter((row) => !row.is_ghost).map((row) => row.id).sort())
     .toEqual(['h-source', 'i-existing']);
@@ -362,7 +370,7 @@ test('a visit of the job the calendar feed left out still holds its date: the ba
   const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
   await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
 
-  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.getByText(alreadyBooked('Hugo', D.FRI))).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
   await page.waitForTimeout(300);
   expect(writes).toHaveLength(0);
@@ -422,7 +430,7 @@ test('an ops user who is both crew and observer mirror on a job can be moved ont
 
   await expect(page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Shaun"] .cal-job-block`)).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
-  await expect(page.locator('body')).not.toContainText('Already scheduled there');
+  await expect(page.locator('body')).not.toContainText(/Already scheduled there|already booked/);
   expect(writes.map((w) => [w.action, w.body.assignmentId])).toEqual([['update_assignment', 's-crew']]);
   expect(rows.find((row) => row.id === 's-crew').scheduled_date).toBe(D.WED);
   expect(rows.some((row) => row.is_ghost && row.user_id === 'u-shaun' && row.scheduled_date === D.WED)).toBe(false);
@@ -440,7 +448,7 @@ test('a real visit sharing its key with the mirror still refuses the move withou
   const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Shaun"] .cal-job-block`);
   await realDrag(page, source, page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Shaun"]`));
 
-  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.getByText(alreadyBooked('Shaun', D.WED))).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
   expect(writes).toHaveLength(0);
   expect(rows.find((row) => row.id === 's-crew').scheduled_date).toBe(D.MON);

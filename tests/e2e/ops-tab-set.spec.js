@@ -59,11 +59,14 @@ test('the nav is Jobs, Calendar, Financials, Dispatch, Sales and Ops opens on Jo
   await bootOps(page);
   // The Debt tab (data-debt-nav) sits after Financials but stays hidden until it is
   // switched on (?debt=1, localStorage sw_debt_ws or the backend's tab_visible).
-  await expect(page.locator('.header-nav button:not([data-debt-nav])')).toHaveText(['Jobs', 'Calendar', 'Financials', 'Dispatch', 'Sales']);
+  // Matching (data-recon-nav) sits after Debt and stays hidden unless ?recon=1 or sw_recon.
+  await expect(page.locator('.header-nav button:not([data-debt-nav]):not([data-recon-nav])')).toHaveText(['Jobs', 'Calendar', 'Financials', 'Dispatch', 'Sales']);
   const mobileOrder = await page.locator('.mobile-nav button').evaluateAll((els) => els.map((el) => el.dataset.view));
-  expect(mobileOrder).toEqual(['jobs', 'calendar', 'financials', 'debt', 'dispatch', 'sales']);
+  expect(mobileOrder).toEqual(['jobs', 'calendar', 'financials', 'debt', 'recon', 'dispatch', 'sales']);
   await expect(page.locator('[data-debt-nav]')).toHaveCount(2);
   for (const debtNav of await page.locator('[data-debt-nav]').all()) await expect(debtNav).toBeHidden();
+  await expect(page.locator('[data-recon-nav]')).toHaveCount(2);
+  for (const reconNav of await page.locator('[data-recon-nav]').all()) await expect(reconNav).toBeHidden();
   await expect(page.locator('#viewJobs')).toHaveClass(/active/);
   for (const hidden of ['today', 'inbox', 'approvals', 'materials']) {
     await expect(page.locator(`[data-view="${hidden}"]`)).toHaveCount(0);

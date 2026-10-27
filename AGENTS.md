@@ -752,6 +752,17 @@ Keep the module free of long dashes and emojis. Guards: `npm run test:debt-works
 (in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
 This is the only debt screen: the old Clear Debt screens (Financials > Clear Debt) were removed in stage 6.
 
+## Matching: the Context reconciliation list (`modules/ops-recon.js`)
+
+Hidden tab (`data-recon-nav`), shown only with `?recon=1` or `localStorage.sw_recon === '1'`;
+the server decides who may use it (admin, owner, ops manager). It reads ops-api
+`recon_daily_list` and records one `recon_record_decision` per confirmed tap, sending back the
+`evidence_hash` and `cause` the card was shown with and never a person (the backend takes the
+signed-in user). A choice says which job something belongs to; it never moves money, sends
+anything or changes an invoice, so never add such a control here. Every rule lives in the pure
+`ReconCore` between `// <recon-core>` sentinels. Guards: `npm run test:recon` (in `test:e2e`,
+fails on a long dash or emoji) and `tests/e2e/ops-recon.spec.js`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card

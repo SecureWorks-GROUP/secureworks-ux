@@ -4200,12 +4200,27 @@
     if (sc) sc.hidden = !scoperLinkAllowed();
   }
 
-  // Staff open the scoper (Scope Engine T42). Off until the switch-on:
-  // set SCOPER_LINK_ENABLED to true. Shown to office staff only (admin, owner,
-  // ops_manager). The scoper page is on this same site, so the trade app's
-  // sign-in carries over and the page opens already signed in.
-  var SCOPER_LINK_ENABLED = false;
+  // Staff open the scoper (Scope Engine T42). Shown to office staff only (admin,
+  // owner, ops_manager). The menu's "Scope a job" opens the practice page on this
+  // same site, so the trade app's sign-in carries over. A job's own "Open in the
+  // Scope Engine" opens that job in the live patio or fence page (scoperJobUrl).
+  var SCOPER_LINK_ENABLED = true;
   var SCOPER_URL = 'scopers/practice/';
+  // The live Scope Engine page for one job, by ?jobId=. A patio job already scoped
+  // in the older patio page has no link: the Scope Engine never writes over it.
+  function scoperJobUrl(job) {
+    if (!job || !job.id) return '';
+    var type = String(job.type || '').toLowerCase();
+    var scope = job.scope_json;
+    if (typeof scope === 'string') { try { scope = JSON.parse(scope); } catch (e) { scope = null; } }
+    var base;
+    if (type === 'fencing') base = 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/';
+    else if (type === 'patio') {
+      if (scope && scope.tool !== 'patio-scoper' && (scope.config || scope.length != null || scope.projection != null || scope.roofStyle)) return '';
+      base = 'https://marninms98-dotcom.github.io/patio/scope-engine/';
+    } else return '';
+    return base + '?jobId=' + encodeURIComponent(job.id);
+  }
   function scoperLinkAllowed() {
     var role = String((_user && _user.role) || '').toLowerCase();
     return SCOPER_LINK_ENABLED && (role === 'admin' || role === 'owner' || role === 'ops_manager');
@@ -14269,6 +14284,16 @@
       h += '<div><div style="font-size:14px;font-weight:700;color:#fff">View 3D Model</div>';
       h += '<div style="font-size:11px;color:rgba(255,255,255,0.5)">Interactive model viewer</div></div>';
       h += '</div>';
+    }());
+
+    // Office staff: open this job in the Scope Engine (T42)
+    (function() {
+      var scoperUrl = scoperLinkAllowed() ? scoperJobUrl(job) : '';
+      if (!scoperUrl) return;
+      h += '<a href="' + esc(scoperUrl) + '" target="_blank" rel="noopener" style="margin:4px 0 12px;padding:14px;background:var(--sw-orange);border-radius:10px;display:flex;align-items:center;gap:12px;text-decoration:none">';
+      h += '<div><div style="font-size:14px;font-weight:700;color:#fff">Open in the Scope Engine</div>';
+      h += '<div style="font-size:11px;color:rgba(255,255,255,0.8)">Scope, seal and save this job</div></div>';
+      h += '</a>';
     }());
 
     // Work order lines (crew WO), then every job video

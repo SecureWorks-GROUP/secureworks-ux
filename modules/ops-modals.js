@@ -1181,6 +1181,15 @@ function buildSmartInvoiceDescription(prefix, job) {
   return scopeLine + '\n' + clientLine + '\n' + metaLine;
 }
 
+// A neighbour job has more than one paying party; a party's $0 share is a real
+// answer (null checks, never falsy), so a preset never falls back to the whole job.
+function _invPayingNeighbours() {
+  var contacts = (_invJobDetailCache && _invJobDetailCache.job_contacts) || [];
+  return contacts.filter(function(c) {
+    return c && c.is_primary !== true && c.status !== 'removed' && c.removed_at == null;
+  });
+}
+
 function addDepositPreset(pct) {
   if (!_invJobCache) return;
   var pricing = _invJobCache.pricing_json;
@@ -1191,10 +1200,14 @@ function addDepositPreset(pct) {
   var contactLabel = '';
   if (_invSelectedContactId && _invJobDetailCache && _invJobDetailCache.job_contacts) {
     var contact = _invJobDetailCache.job_contacts.find(function(c) { return c.id === _invSelectedContactId; });
-    if (contact && contact.quote_value_ex_gst > 0) {
-      totalIncGst = contact.quote_value_ex_gst * 1.1;
+    if (contact && contact.quote_value_ex_gst != null) {
+      if (Number(contact.quote_value_ex_gst) === 0) { alert('This party pays nothing on the quote, so there is no deposit to raise.'); return; }
+      totalIncGst = Number(contact.quote_value_ex_gst) * 1.1;
       contactLabel = contact.contact_label || '';
     }
+  } else if (_invPayingNeighbours().length > 0) {
+    alert('This job has more than one paying party. Pick the party first, then add the deposit.');
+    return;
   }
 
   if (totalIncGst <= 0) { alert('No pricing data on this job.'); return; }
@@ -1230,13 +1243,18 @@ function addBalancePreset() {
   if (_invSelectedContactId && _invJobDetailCache.job_contacts) {
     var contact = _invJobDetailCache.job_contacts.find(function(c) { return c.id === _invSelectedContactId; });
     if (contact) {
-      totalIncGst = contact.quote_value_ex_gst * 1.1;
+      if (contact.quote_value_ex_gst == null) { alert('No quoted share is recorded for this party.'); return; }
+      totalIncGst = Number(contact.quote_value_ex_gst) * 1.1;
       var contactInvoiced = (_invJobDetailCache.invoices || [])
         .filter(function(inv) { return inv.job_contact_id === _invSelectedContactId && ['VOIDED','DELETED'].indexOf(inv.status) < 0; })
         .reduce(function(s, inv) { return s + (parseFloat(inv.total) || 0); }, 0);
       remaining = Math.max(0, totalIncGst - contactInvoiced);
       contactLabel = contact.contact_label || '';
     }
+  }
+  if (remaining === undefined && _invPayingNeighbours().length > 0) {
+    alert('This job has more than one paying party. Pick the party first, then add the balance.');
+    return;
   }
   if (remaining === undefined) {
     var invSummary = _invJobDetailCache.invoice_summary;

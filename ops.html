@@ -20590,6 +20590,9 @@ async function loadMaterials() {
 //   assign-to-job        → materials_recon_assign { queue_id, job_id }
 //   mark-not-job-related → materials_recon_not_job_related { queue_id }
 // accept/assign land a high_manual materials fact; not-job-related writes none.
+// The bill agent's proposal (row.proposal, backend #1063) is shown as evidence:
+// a review lists the jobs it saw to pick from, and "Leave on the list" closes a
+// bill without writing anything (CFO-17: Confirm, Change job, Split, Overhead, Leave).
 // "Not job related", and Place on a job whose Xero Project is unconfirmed, take
 // two presses: the first arms, the second posts, and a press inside
 // MAT_RECON_ARM_GAP_MS of arming is ignored so a double-click cannot file.
@@ -20604,7 +20607,7 @@ var MAT_RECON_STATS_CAP = 1000;
 var MAT_RECON_PAGE = 100;
 var MAT_RECON_ARM_GAP_MS = 700;
 var MAT_RECON_UNCONFIRMED = 'Xero Projects not confirmed for this job: check Xero before placing';
-var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, errNext: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {}, split: {} };
+var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, errNext: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0, loaded: false, loadErr: null, notjobArmed: {}, split: {}, proposals: 'ok' };
 
 var MAT_RECON_REASON_LABELS = {
   no_ref_no_po:            'No reference, no matching PO',
@@ -20801,6 +20804,9 @@ async function loadMaterialsRecon() {
     rows.sort(function(a, b) { return _mrqEx(b) - _mrqEx(a) || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')); });
     _matRecon.rows = rows;
     _matRecon.stats = (data && data.stats) || null;
+    // The bill agent's proposals (JP-06, backend #1063). 'failed' means they could
+    // not be read, never "none"; a read without the field predates the agent.
+    _matRecon.proposals = data && data.proposals === 'failed' ? 'failed' : 'ok';
     _matRecon.listFull = all.length >= MAT_RECON_QUEUE_LIMIT;
     _matRecon.loaded = true;
     _matRecon.loadErr = null;
@@ -20907,7 +20913,7 @@ function renderMaterialsRecon() {
       + '<td data-label="Bill">' + escapeAttr(r.invoice_number || '—') + '</td>'
       + '<td class="num">' + fmt$(_mrqEx(r)) + '</td>'
       + '<td data-mrq-bu data-label="Business Unit">' + bu + '</td>'
-      + '<td data-label="Suggested job">' + (r.suggested_job_number ? escapeAttr(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
+      + '<td data-label="Suggested job">' + _mrqSuggestedCell(r) + '</td>'
       + '</tr>';
     if (isOpen) html += '<tr class="mrq-detail" data-mrq-detail="' + escapeAttr(r.id) + '"><td colspan="6">' + _mrqDetailHtml(r) + '</td></tr>';
   });
@@ -20960,6 +20966,7 @@ function _mrqDetailHtml(r) {
   h += '<div class="mrq-sec-title">Place it on a job</div>';
   // A held bill says why it is here even with no suggestion: it may already sit on a job in Xero.
   if (MAT_RECON_HELD_REASONS[r.suggestion_reason]) h += '<div class="mrq-muted" style="margin-bottom:6px;" data-mrq-held-reason>Why it is here: ' + escapeAttr(MAT_RECON_REASON_LABELS[r.suggestion_reason]) + '.</div>';
+  h += _mrqProposalHtml(r);
   if (r.suggested_job_id && !(p.job && p.job.id === r.suggested_job_id)) {
     h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + escapeAttr(r.suggested_job_number || 'a job') + '</b>'
       + (r.suggestion_reason ? ' <span class="mrq-muted">(' + escapeAttr(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
@@ -21020,6 +21027,7 @@ function _mrqDetailHtml(r) {
     + '<button class="btn btn-primary btn-sm" data-mrq-act="place" data-mrq-id="' + escapeAttr(id) + '"' + (_mrqCanPress(id) ? '' : ' disabled') + '>' + placeText + '</button>'
     + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + escapeAttr(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>'
     + (_matRecon.notjobArmed[id] ? 'Confirm: not job related' : 'Not job related') + '</button>'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="leave" data-mrq-id="' + escapeAttr(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + ' title="Close this bill without saving anything. It stays on the list for later.">Leave on the list</button>'
     + '</div>';
   if (_matRecon.notjobArmed[id] && !_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;" data-mrq-notjob-armed>Press again to file this bill as not job related. Bills to place will put no cost on any job. If Xero links this bill to a job, Job profit may still count it there until that rule is settled.</div>';
   if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
@@ -21027,6 +21035,57 @@ function _mrqDetailHtml(r) {
   if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + escapeAttr(_matRecon.err[id]) + '</div>'
     + (_matRecon.errNext[id] ? '<div class="mrq-muted" style="margin-top:4px;" data-mrq-err-next>' + escapeAttr(_matRecon.errNext[id]) + '</div>' : '');
   h += '</div></div>';
+  return h;
+}
+
+// The bill agent's proposal on an open bill (materials_recon_queue row.proposal,
+// backend #1063). Shown as evidence: the agent never presses for a person here.
+// A job proposal already fills Suggested + Use it (Confirm); a review lists the
+// jobs it saw so a person can pick one (Change job) or Split; a not-job-related
+// proposal points at the two-press Not job related.
+var MAT_RECON_PROPOSAL_RULES = {
+  job_number: 'job number on the bill', po_job_number: 'our purchase order on the bill',
+  split_bill: 'the bill names more than one job', job_disagrees: 'its signals disagree',
+  several_candidates: 'more than one job fits', po_already_matched: 'the purchase order is already matched to another bill',
+  job_number_not_live: 'the job it names is not live', duplicate_document: 'the same document is in Xero twice',
+  overhead_account: 'every line is on an overhead account', group_business_unit: 'every line is tagged SW - GROUP'
+};
+function _mrqSuggestedCell(r) {
+  var pr = r.proposal;
+  if (r.suggested_job_number) {
+    return escapeAttr(r.suggested_job_number) + (r.suggestion_source === 'agent_prematch' ? ' <span class="mrq-muted" data-mrq-by-agent>(agent)</span>' : '');
+  }
+  if (pr && pr.kind === 'review') return '<span class="mrq-muted" data-mrq-cell-review>For a person</span>';
+  if (pr && pr.kind === 'not_job_related') return '<span class="mrq-muted" data-mrq-cell-notjob>Not job related?</span>';
+  return '<span class="mrq-muted">None</span>';
+}
+function _mrqProposalHtml(r) {
+  var id = r.id, pr = r.proposal, h = '';
+  if (_matRecon.proposals === 'failed') {
+    return '<div class="mrq-proj warn" data-mrq-proposals-failed>The bill agent\'s suggestions could not be read, so this bill may have one that is not shown. Refresh to try again.</div>';
+  }
+  if (!pr || (pr.outcome && pr.outcome !== 'queued_for_review')) return '';
+  var why = pr.reason ? escapeAttr(pr.reason) : escapeAttr(MAT_RECON_PROPOSAL_RULES[pr.rule] || pr.rule || '');
+  if (pr.kind === 'job') {
+    h += '<div class="mrq-muted" style="margin-bottom:6px;" data-mrq-proposal="job">Bill agent suggests <b>' + escapeAttr(pr.job_number || 'a job') + '</b>'
+      + (pr.confidence === 'high' ? ' (strong)' : '') + ': ' + why + ' Use it places it as your press.</div>';
+  } else if (pr.kind === 'review') {
+    h += '<div class="mrq-proj warn" style="margin-bottom:6px;" data-mrq-proposal="review"><b>The bill agent did not pick a job</b>: ' + why + '</div>';
+    var cands = (pr.candidates || []).filter(function(c) { return c && c.job_id; });
+    if (cands.length) {
+      h += '<div class="mrq-results" style="margin-bottom:6px;" data-mrq-cands>';
+      cands.forEach(function(c) {
+        h += '<button class="mrq-pickbtn" data-mrq-act="pickcand" data-mrq-id="' + escapeAttr(id) + '" data-mrq-job="' + escapeAttr(c.job_id) + '" data-mrq-jobnum="' + escapeAttr(c.job_number || '') + '">'
+          + 'Pick <b>' + escapeAttr(c.job_number || 'this job') + '</b>'
+          + ((c.signals || []).length ? ' <span class="mrq-muted">' + escapeAttr(c.signals.map(function(s) { return String(s).replace(/_/g, ' '); }).join(', ')) + '</span>' : '')
+          + '</button>';
+      });
+      h += '</div>';
+      if (cands.length > 1) h += '<div class="mrq-muted" style="margin-bottom:6px;">If it covers more than one job, use Split across jobs below.</div>';
+    }
+  } else if (pr.kind === 'not_job_related') {
+    h += '<div class="mrq-muted" style="margin-bottom:6px;" data-mrq-proposal="not_job_related">Bill agent suggests <b>not job related</b>: ' + why + ' Press Not job related twice to file it, or place it on a job.</div>';
+  }
   return h;
 }
 
@@ -21299,6 +21358,15 @@ function _mrqSplitTyped(id) {
       } else if (act === 'usesuggest') {
         var r = _mrqRow(id);
         if (r && r.suggested_job_id) _mrqPick(id, r.suggested_job_id, { id: r.suggested_job_id, job_number: r.suggested_job_number });
+      } else if (act === 'pickcand') {
+        _mrqPick(id, el.getAttribute('data-mrq-job'), { id: el.getAttribute('data-mrq-job'), job_number: el.getAttribute('data-mrq-jobnum') || null });
+      } else if (act === 'leave') {
+        // Leave writes nothing: the bill stays open on the list.
+        delete _matRecon.notjobArmed[id];
+        if (_matRecon.pick[id]) _matRecon.pick[id].armed = 0;
+        if (_matRecon.split[id]) _matRecon.split[id].armed = 0;
+        if (_matRecon.openId === id) _matRecon.openId = null;
+        renderMaterialsRecon();
       } else if (act === 'unpick') {
         var q = _matRecon.pick[id] || {};
         _matRecon.pick[id] = { query: q.query, results: q.results };

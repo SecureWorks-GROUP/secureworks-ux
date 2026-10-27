@@ -5,8 +5,8 @@
 // What this guards:
 //  - the plain address shows it all; a stale ?calholidays value or the old
 //    localStorage.sw_cal_holidays_preview key cannot hide it
-//  - Holidays alone covers holidays and company days; Business keeps meetings,
-//    leave and reminders; Everything covers both
+//  - Holidays alone covers holidays and company days; Business keeps meetings
+//    and reminders; Leave keeps leave; Everything covers them all
 //  - colours: patios blue, fencing yellow, repairs green, make safes purple,
 //    holidays bright red, business grey
 //  - every tick box is an outlined button, coloured when ticked
@@ -110,7 +110,7 @@ test.describe('Holidays: live for everyone', () => {
       await open(page, query);
       await seedAndRender(page);
       let s = await snapshot(page);
-      expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+      expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Leave', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
       expect(s.squares.j1).toBe('rgb(37, 99, 235)');
       expect(s.holidays.map((h) => [h.label, h.hol])).toEqual([['Example Conference', true]]);
       await seedAndRender(page, { week: '2026-09-28', events: [], org: [] });
@@ -128,7 +128,7 @@ test.describe('Holidays', () => {
 
   test('Holidays sits beside Business, ticked to start, and Everything covers it', async ({ page }) => {
     let s = await snapshot(page);
-    expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+    expect(s.ticks.map((t) => t.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Leave', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
     expect(s.ticks.every((t) => t.on)).toBe(true);
 
     await tick(page, 'show', 'all');
@@ -142,8 +142,9 @@ test.describe('Holidays', () => {
     expect(s.holidays.map((h) => h.label)).toEqual(['Example Conference']);
   });
 
-  test('Holidays alone covers holidays and company days; Business keeps meetings and leave', async ({ page }) => {
+  test('Holidays alone covers holidays and company days; Business keeps meetings, Leave keeps leave', async ({ page }) => {
     await tick(page, 'show', 'business');
+    await tick(page, 'show', 'leave');
     let s = await snapshot(page);
     expect(s.meetings).toEqual([]);
     expect(s.leave).toBe(0);
@@ -151,6 +152,7 @@ test.describe('Holidays', () => {
     expect(s.holidayCells).toBe(2);
 
     await tick(page, 'show', 'business');
+    await tick(page, 'show', 'leave');
     await tick(page, 'show', 'holidays');
     s = await snapshot(page);
     expect(s.holidays).toEqual([]);

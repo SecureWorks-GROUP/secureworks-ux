@@ -430,8 +430,8 @@ test('the drawer offers a repair job no conflicting jobs.status buttons', async 
   for (const patioOnly of ['approvals', 'awaiting_deposit', 'deposit', 'get_review']) {
     expect(everyRepairOption).not.toContain(patioOnly);
   }
-  // CONTROL: every other type is untouched.
-  expect(offered.patio).toEqual(['approvals', 'processing']);
+  // CONTROL: patio keeps its ladder, plus Awaiting Deposit (Captain 2026-10-26).
+  expect(offered.patio).toEqual(['awaiting_deposit', 'approvals', 'processing']);
   expect(offered.makesafe).toEqual(['approvals', 'processing']);
 
   const stages = await page.evaluate(() => ({

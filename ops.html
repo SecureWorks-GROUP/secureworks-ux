@@ -34,6 +34,27 @@
     }
   };
   // </ops-asset-cache-bust>
+  // <dispatch-version> Which Dispatch screen this browser loads: v2 (the
+  // default, modules/ops-dispatch.*) or v1 kept as it was (modules/ops-dispatch-v1.*).
+  // The switch on the Dispatch tab, or ?dispatch_version=v1 / v2 in the address,
+  // picks one and this browser remembers it. Both run on the same back end.
+  window.__swDispatchVersion = (function () {
+    var KEY = 'sw_dispatch_version', pick = null;
+    try {
+      var m = /[?&]dispatch_version=(v1|v2)(?:&|$)/.exec(location.search);
+      if (m) { pick = m[1]; localStorage.setItem(KEY, pick); }
+    } catch (e) { /* private mode */ }
+    if (!pick) { try { pick = localStorage.getItem(KEY); } catch (e) { /* private mode */ } }
+    return pick === 'v1' ? 'v1' : 'v2';
+  })();
+  window.swSetDispatchVersion = function (v) {
+    try { localStorage.setItem('sw_dispatch_version', v === 'v1' ? 'v1' : 'v2'); } catch (e) { return false; }
+    // A ?dispatch_version= left in the address would win over the switch.
+    var url = location.href.replace(/([?&])dispatch_version=(?:v1|v2)(&|(?=#)|$)/, function (all, lead, tail) { return tail === '&' ? lead : ''; });
+    if (url === location.href) location.reload(); else location.replace(url);
+    return true;
+  };
+  // </dispatch-version>
   __swOpsStampAssets([
     {t:'js', u:'shared/cloud.js?v=auth-jwt-20260813'},
     {t:'js', u:'shared/auth-gate.js?v=auth-jwt-20260813'}
@@ -924,7 +945,11 @@
     #viewCalendar.cal-v3.cal-v3-hol .cal-swimlane-day-header.holiday-col .day-name { background: var(--v3hol); color: #fff; }
     #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.holiday-col { background: #FEF4F4; }
     #viewCalendar.cal-v3.cal-v3-hol .cal-holiday-badge { color: #fff; background: var(--v3hol); }
-    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: #374151; background: #E5E7EB; }
+    /* <calendar-leave> leave and unavailable marks in the business lines' grey */
+    #viewCalendar.cal-v3.cal-v3-hol .cal-schedule-grid.v3 .cal-schedule-leave-badge { color: var(--v3k); background: color-mix(in srgb, var(--v3biz) 12%, #fff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v3biz) 72%, #000); }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.avail-leave,
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell.avail-unavailable { background: color-mix(in srgb, var(--v3biz) 12%, #fff) !important; background-image: none !important; }
+    #viewCalendar.cal-v3.cal-v3-hol .cal-swim-cell .leave-badge { color: var(--v3k); background: color-mix(in srgb, var(--v3biz) 24%, #fff); }
     #viewCalendar.cal-v3.cal-v3-hol .cal-job-block.meeting-block { border-color: #6B7280; background: rgba(107,114,128,0.10); }
     #viewCalendar.cal-v3.cal-v3-hol .cal-reminder-pill { color: #374151; background: rgba(107,114,128,0.10); border-color: rgba(107,114,128,0.30); }
     .cal-focus-tick { user-select: none; }
@@ -946,6 +971,7 @@
     @media (max-width: 1380px) { #viewCalendar.cal-v3.cal-v3-hol .cal-focus-key { display: none; } #viewCalendar.cal-v3.cal-v3-hol .cal-v3-new { margin-left: auto; } }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="materials"] { --tk: #74747C; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="business"] { --tk: #6B7280; }
+    #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="leave"] { --tk: #6B7280; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-show="holidays"] { --tk: #E11D2E; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="patio"] { --tk: #2563EB; }
     #viewCalendar.cal-v3.cal-v3-hol [data-pick-type="fencing"] { --tk: #CA8A04; }
@@ -4624,7 +4650,8 @@
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
   {t:'css', u:'modules/ops-sales-booking.css?v=3'},
-  {t:'css', u:'modules/ops-dispatch.css?v=6'}
+  // <dispatch-version>
+  window.__swDispatchVersion === 'v1' ? {t:'css', u:'modules/ops-dispatch-v1.css?v=1'} : {t:'css', u:'modules/ops-dispatch.css?v=7'}
 ]);
 </script>
 </head>
@@ -5125,6 +5152,19 @@ __swOpsStampAssets([
          LIVE purchase order board that used to be the Materials view (Captain
          ruling); it reads and writes real POs through loadMaterials(). -->
     <div id="viewDispatch" class="view">
+      <!-- <dispatch-version> The v1 / v2 switch: this browser only, reloads the page. -->
+      <div id="dispatchVersionBar" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; font-size:11px; color:var(--sw-text-sec); margin-bottom:6px;"></div>
+      <script>
+      (function () {
+        var bar = document.getElementById('dispatchVersionBar');
+        var v1 = window.__swDispatchVersion === 'v1';
+        bar.innerHTML = '<span data-dispatch-version="' + (v1 ? 'v1' : 'v2') + '">' + (v1 ? 'Dispatch v1 (the old screen)' : 'Dispatch v2') + '</span>' +
+          '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-switch="' + (v1 ? 'v2' : 'v1') + '">' + (v1 ? 'Switch to v2' : 'Switch back to v1') + '</button>';
+        bar.querySelector('[data-dispatch-switch]').addEventListener('click', function () {
+          if (!window.swSetDispatchVersion(this.getAttribute('data-dispatch-switch'))) alert('This browser blocks saved settings, so the switch cannot be kept. Add ?dispatch_version=' + this.getAttribute('data-dispatch-switch') + ' to the address instead.');
+        });
+      })();
+      </script>
       <div id="dispatchRoot"></div>
 
       <div id="dispatchPurchaseOrders" style="margin-top:28px;">
@@ -5135,6 +5175,7 @@ __swOpsStampAssets([
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
       </div>
       <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Changes made here are real.</div>
+      <div id="matHiddenNote" style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px; display:none;"></div>
 
       <!-- Threshold alerts -->
       <div id="matAlerts" style="margin-bottom:8px;"></div>
@@ -6279,7 +6320,9 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
   {t:'js', u:'modules/ops-modals.js?v=4'},
-  {t:'js', u:'modules/ops-dispatch.js?v=6'}
+  {t:'js', u:'modules/job-scope-record.js?v=1'},
+  // <dispatch-version>
+  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=9'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
@@ -6299,6 +6342,10 @@ __swOpsStampAssets([
 <!-- Paid close-out tags and Get Review ladder (docs/job-closeout-screens.md): off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-closeout.js?v=1'}]);
+</script>
+<!-- Deposit flag on fencing and patio jobs, voided or unpaid after the move (modules/ops-job-deposit-flag.js). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-deposit-flag.js?v=1'}]);
 </script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
@@ -6414,7 +6461,7 @@ window.__SW_CAL_V3_ENABLED = (function () {
 })();
 // ── Calendar Holidays tick box and colours (live for everyone) ──
 // The v3 Show row has a Holidays tick box that alone covers holidays and company
-// days (Business keeps meetings, leave and reminders), and v3 colours are:
+// days (Business keeps meetings and reminders; Leave has its own box), and v3 colours are:
 // patios blue, fencing yellow, repairs green, make safes purple, holidays and
 // company days bright red, business grey. The old ?calholidays switch and its
 // localStorage.sw_cal_holidays_preview key are gone and ignored.
@@ -6841,7 +6888,10 @@ function fmtArtifactSize(bytes) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
 }
 
-function scopeToolUrlFor(jobType) {
+// The scoping tool a job opens in. With the job, a Scope Engine record opens the Scope Engine
+// (modules/job-scope-record.js); without it, the tool the trade has always opened.
+function scopeToolUrlFor(jobType, job) {
+  if (job && window.JobScopeRecord) return JobScopeRecord.toolUrlFor(Object.assign({}, job, { type: jobType || job.type }));
   return jobType === 'fencing'
     ? 'https://marninms98-dotcom.github.io/fence-designer/'
     : 'https://marninms98-dotcom.github.io/patio/';
@@ -6905,7 +6955,11 @@ function retryFrozenRevisions(jobId, jobType) {
 }
 
 function renderFrozenRevisionsPanel(jobId, jobType, revisions) {
-  var toolUrl = scopeToolUrlFor(jobType);
+  var liveJobForTool = (typeof _currentJobData !== 'undefined' && _currentJobData && _currentJobData.job && _currentJobData.job.id === jobId) ? _currentJobData.job : null;
+  var toolUrl = scopeToolUrlFor(jobType, liveJobForTool);
+  // A Scope Engine record names its own revision (Rev 3); the job system counts its frozen copies.
+  var engineRec = liveJobForTool && window.JobScopeRecord ? JobScopeRecord.read(liveJobForTool) : null;
+  var engineRev = engineRec && engineRec.kind === 'engine-patio' && engineRec.revision ? engineRec.revision.n : null;
   var html = '';
 
   // Revisions arrive revision_number DESC (newest first) from the endpoint.
@@ -6917,7 +6971,12 @@ function renderFrozenRevisionsPanel(jobId, jobType, revisions) {
 
     // Header: revision number + status badge + tool kind + open-in-tool link
     html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
-    html += '<span style="font-weight:700;color:var(--sw-dark);">&#128274; Revision ' + (r.revision_number != null ? escapeHtml(String(r.revision_number)) : '?') + '</span>';
+    if (engineRev != null && r.status === 'frozen') {
+      html += '<span style="font-weight:700;color:var(--sw-dark);">&#128274; Scope Engine Rev ' + escapeHtml(String(engineRev)) + '</span>';
+      if (r.revision_number != null) html += '<span style="font-size:10px;color:var(--sw-text-sec);">frozen copy ' + escapeHtml(String(r.revision_number)) + '</span>';
+    } else {
+      html += '<span style="font-weight:700;color:var(--sw-dark);">&#128274; ' + (r.revision_number != null ? 'Revision ' + escapeHtml(String(r.revision_number)) : 'Frozen copy') + '</span>';
+    }
     html += '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:' + st.bg + ';color:' + st.col + ';">' + escapeHtml(st.label) + '</span>';
     if (r.tool_kind) html += '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:var(--sw-light);color:var(--sw-dark);border:1px solid var(--sw-border);">' + escapeHtml(r.tool_kind) + '</span>';
     html += '<a href="' + openUrl + '" target="_blank" style="margin-left:auto;color:var(--sw-orange);font-weight:600;text-decoration:none;">Open in tool &#8599;</a>';
@@ -6931,7 +6990,7 @@ function renderFrozenRevisionsPanel(jobId, jobType, revisions) {
       html += 'Created ' + escapeHtml(fmtPerthDateTime(r.created_at)) + ' (not frozen yet)';
     }
     if (r.status === 'superseded' && r.superseded_at) html += ' &middot; superseded ' + escapeHtml(fmtPerthDateTime(r.superseded_at));
-    if (r.tool_version) html += ' &middot; tool v' + escapeHtml(String(r.tool_version));
+    if (r.tool_version) html += ' &middot; ' + (/^patio-scoper\//.test(String(r.tool_version)) ? 'Scope Engine patio ' + escapeHtml(String(r.tool_version).split('/')[1] || '') : 'tool v' + escapeHtml(String(r.tool_version)));
     html += '</div>';
 
     // Integrity hashes — truncated, full value in the tooltip
@@ -6966,7 +7025,13 @@ function renderFrozenRevisionsPanel(jobId, jobType, revisions) {
   // shows the live jobs.scope_json summary via the existing
   // renderScopeSummary as the content fallback.
   var liveJob = (typeof _currentJobData !== 'undefined' && _currentJobData && _currentJobData.job && _currentJobData.job.id === jobId) ? _currentJobData.job : null;
-  if (liveJob && liveJob.scope_json) {
+  if (liveJob && liveJob.scope_json && engineRev != null) {
+    // The Scope Engine saves the sealed record itself, so this is the frozen revision's content.
+    html += '<div style="border:1px solid var(--sw-border);border-radius:6px;padding:8px;margin-bottom:6px;background:var(--sw-card);">';
+    html += '<div style="font-weight:600;color:var(--sw-text-sec);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Scope content, Rev ' + escapeHtml(String(engineRev)) + ' as sealed</div>';
+    html += renderScopeSummary(liveJob.scope_json, jobType, jobId);
+    html += '</div>';
+  } else if (liveJob && liveJob.scope_json) {
     html += '<div style="border:1px dashed var(--sw-border);border-radius:6px;padding:8px;margin-bottom:6px;background:var(--sw-light);">';
     html += '<div style="font-weight:600;color:var(--sw-text-sec);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Scope content (live summary)</div>';
     html += '<div style="color:var(--sw-text-sec);font-style:italic;margin:2px 0 4px;">Frozen canonical content renders here once the scope viewer endpoint ships; this summary reflects the live scope.</div>';
@@ -7356,7 +7421,8 @@ async function loadCrewList() {
       // words stands in for it; when the backend adds full_name it wins here.
       var rawFull = String(u.name || '').trim();
       var fullName = u.full_name || (rawFull.split(/\s+/).length > 1 ? rawFull : '');
-      return { id: u.id, name: displayName, fullName: fullName, email: u.email, role: u.role || '', division: div };
+      // phone: the number a crew reschedule text goes to (<crew-reschedule-text>)
+      return { id: u.id, name: displayName, fullName: fullName, email: u.email, phone: u.phone || '', role: u.role || '', division: div };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
   } catch (e) {
     console.warn('Failed to load crew list:', e);
@@ -8377,9 +8443,13 @@ var _calEventFilters = (function() {
 // <calendar-holidays> Show has a fourth tick box,
 // Holidays (holidays and company days), which Everything covers too. A saved
 // pick from before it existed has no holidays key, so it loads ticked.
-var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business', 'holidays'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
+// <calendar-leave> Leave has its own tick box between Business and Holidays
+// (crew availability marked leave or unavailable); Business keeps meetings and
+// reminders. A saved pick from before it existed has no leave key, so it loads
+// ticked, as Holidays did.
+var CAL_PICK_KEYS = { show: ['labour', 'materials', 'business', 'leave', 'holidays'], type: ['patio', 'fencing', 'repair', 'makesafe'] };
 var _calPick = (function() {
-  var d = { show: { labour: true, materials: true, business: true, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
+  var d = { show: { labour: true, materials: true, business: true, leave: true, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } };
   try {
     var v = JSON.parse(localStorage.getItem('sw_cal_pick') || '{}');
     ['show', 'type'].forEach(function(k) {
@@ -8416,8 +8486,9 @@ function calShowMaterialsOnly() {
 function applyCalFocus() {
   if (!window.__SW_CAL_V3_ENABLED) return;
   var biz = calShowPicked('business');
-  // Holidays and company days follow their own Holidays tick box (<calendar-holidays>).
-  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: calShowPicked('holidays'), leave: biz, reminders: biz };
+  // Holidays and company days follow their own Holidays tick box (<calendar-holidays>),
+  // leave and unavailable marks their own Leave tick box (<calendar-leave>).
+  _calEventFilters = { jobs: calShowPicked('labour'), meetings: biz, holidays: calShowPicked('holidays'), leave: calShowPicked('leave'), reminders: biz };
 }
 applyCalFocus();
 // Whether the Show filters let a calendar row through, for both views. v3 off:
@@ -8854,6 +8925,9 @@ async function loadCalendar() {
   // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
   var bodyEl = document.getElementById('calendarBody');
   if (bodyEl) bodyEl.innerHTML = '<div class="cal-loading"><div class="spinner"></div><div>Loading calendar…</div></div>';
+  _calLoadSeq++; // a quiet refresh started before this load drops its answer
+  _calJobRowsCache = {}; // a write that reloads the calendar may have changed any job's bookings
+  _calJobRowsGen++;
 
   try {
     // ── Grid-critical fetch ── the grid only needs the calendar events; draw it as soon as they arrive.
@@ -8873,12 +8947,7 @@ async function loadCalendar() {
 
     // ── Enrichment fetches ── these don't gate the grid; patch in when they resolve.
     // Unscheduled sidebar (from pipeline)
-    opsFetch('pipeline').then(function(p) {
-      if (!p) return;
-      _unschedJobs = ((p.columns || {}).accepted || []);
-      if (typeof renderCalUnschedSidebar === 'function') renderCalUnschedSidebar();
-      if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
-    }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
+    calRefreshUnschedSidebar();
 
     // Delivery row top-up: the calendar feed only sends draft / submitted /
     // authorised orders, so the row reads the full order list too.
@@ -8909,8 +8978,9 @@ async function loadCalendar() {
           if (!name) return;
           _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
           // Schedule view has no crew rows, so leave is keyed by date there and
-          // painted as a named badge on the day cell.
-          if (a.status === 'leave') {
+          // painted as a named badge on the day cell. With v3 an unavailable
+          // mark is shown there too: both sit under the Leave tick box.
+          if (a.status === 'leave' || (window.__SW_CAL_V3_ENABLED && a.status === 'unavailable')) {
             (_calLeaveByDate[a.date] = _calLeaveByDate[a.date] || []).push(name);
           }
         });
@@ -8924,6 +8994,16 @@ async function loadCalendar() {
       { label: 'Retry', primary: true, onclick: 'loadCalendar()' }
     ]);
   }
+}
+
+// The calendar's Unscheduled list, read from the pipeline.
+function calRefreshUnschedSidebar() {
+  opsFetch('pipeline').then(function(p) {
+    if (!p) return;
+    _unschedJobs = ((p.columns || {}).accepted || []);
+    if (typeof renderCalUnschedSidebar === 'function') renderCalUnschedSidebar();
+    if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
+  }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
 }
 
 // <calendar-delivery-row>
@@ -9170,16 +9250,16 @@ var CalOpsCore = (function () {
   // mirror off (job,user,date) before it writes a real crew row there, so a
   // key held ONLY by a ghost is free here and a ghost is never a holder,
   // blocker or count. A real row on that same key still blocks as usual.
+  function isGhost(ev) {
+    var role = String((ev && ev.role) || '').toLowerCase();
+    var aType = String((ev && ev.assignment_type) || '').toLowerCase();
+    return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
+  }
+  function key(jobId, userId, date) {
+    if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
+    return String(jobId) + '|' + String(userId) + '|' + String(date);
+  }
   function stageCollisionSafeMoves(events, moves) {
-    function isGhost(ev) {
-      var role = String((ev && ev.role) || '').toLowerCase();
-      var aType = String((ev && ev.assignment_type) || '').toLowerCase();
-      return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
-    }
-    function key(jobId, userId, date) {
-      if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
-      return String(jobId) + '|' + String(userId) + '|' + String(date);
-    }
     var occupancy = {};
     (events || []).forEach(function(ev) {
       if (!ev || isGhost(ev)) return;
@@ -9265,7 +9345,11 @@ var CalOpsCore = (function () {
         status: a.status || null,
         role: a.role || null,
         assignment_type: a.assignment_type || null,
-        is_ghost: a.is_ghost === true
+        is_ghost: a.is_ghost === true,
+        duration_days: a.duration_days == null ? null : a.duration_days,
+        start_time: a.start_time || null,
+        end_time: a.end_time || null,
+        confirmation_status: a.confirmation_status || null
       };
     }).filter(Boolean);
   }
@@ -9280,6 +9364,310 @@ var CalOpsCore = (function () {
     });
     return merged;
   }
+  // ── Whole-job drag (Schedule view): move and stretch every booking of a job ──
+  // A job is often stored as one booking per person per day, so a bar is
+  // backed by many rows and its pieces (split at weekends and skipped days)
+  // are one job. A drag from any piece, or of either end, acts on the job's
+  // live bookings: never a ghost watcher (backend-owned), a cancelled row, a
+  // completed visit (history), or a meeting / reminder (its own line).
+  function rowStatus(ev) {
+    return String((ev && (ev.status || ev.assignment_status)) || '').toLowerCase();
+  }
+  function isLiveJobRow(ev) {
+    if (!ev || !ev.scheduled_date || isGhost(ev)) return false;
+    var t = String(ev.assignment_type || 'install').toLowerCase();
+    if (t === 'meeting' || t === 'reminder') return false;
+    var st = rowStatus(ev);
+    return st !== 'cancelled' && st !== 'complete' && st !== 'completed';
+  }
+  // The job's rows to plan with: the loaded window's copy (it carries the
+  // job's client, site and crew names) under the job-scoped read's dates and
+  // status, which are fresher and also cover rows outside the window.
+  function jobRowsForPlan(windowEvents, jobRows, jobId) {
+    var byId = {}, out = [];
+    (windowEvents || []).forEach(function(ev) {
+      if (ev && ev.job_id === jobId && ev.assignment_id) byId[ev.assignment_id] = ev;
+    });
+    (jobRows || []).forEach(function(row) {
+      if (!row || !row.assignment_id) return;
+      var merged = Object.assign({}, byId[row.assignment_id] || {});
+      Object.keys(row).forEach(function(k) {
+        if (row[k] != null || k === 'scheduled_end') merged[k] = row[k];
+      });
+      if (row.status) merged.assignment_status = row.status;
+      delete byId[row.assignment_id];
+      out.push(merged);
+    });
+    Object.keys(byId).forEach(function(id) { out.push(byId[id]); });
+    return out;
+  }
+  function jobSpan(rows) {
+    var span = null;
+    (rows || []).forEach(function(ev) {
+      var s = ev.scheduled_date, e = spanEnd(ev);
+      if (!span) { span = { start: s, end: e }; return; }
+      if (s < span.start) span.start = s;
+      if (e > span.end) span.end = e;
+    });
+    return span;
+  }
+  // Drop day = the job's new FIRST day. Every booking keeps its working-day
+  // offset from the job's first day and its own working-day length, so gaps
+  // between days and the weekend rule hold (Fri, Mon, Tue, Thu dropped one
+  // working day later is Mon, Tue, Wed, Fri). `crewNameOf` names the crew on
+  // the update, as the single-booking move does.
+  function planJobMove(rows, newStart, crewNameOf) {
+    var live = (rows || []).filter(isLiveJobRow);
+    var span = jobSpan(live);
+    var plan = { kind: 'move', from: span, to: null, updates: [], creates: [], deletes: [] };
+    if (!span || !newStart || newStart === span.start) return plan;
+    live.forEach(function(ev) {
+      var rowStart = layWorkingDays(newStart, workingSpanDays(span.start, ev.scheduled_date));
+      var built = buildMovePayloadV2(ev, crewNameOf ? crewNameOf(ev) : (ev.crew_name || null), ev.user_id || null, rowStart);
+      plan.updates.push({ ev: ev, update: built.update });
+    });
+    plan.to = jobSpan(applyPlanToEvents(live, plan).filter(isLiveJobRow));
+    return plan;
+  }
+  // Drag either END of the job: the other end holds and every crew member on
+  // the job gains or loses the same working days (a weekend day only as the
+  // chosen end), and nothing else: a person's own gaps stay gaps. A crew
+  // member whose own booking reaches the dragged end, booked as one row, has
+  // that row's start or end moved; anyone else gets a new row for each added
+  // day, or loses the rows past the new end. Rows the stretch adds are
+  // silent (suppress_notifications); the reschedule text covers them.
+  // `unbookable` lists crew with no user on record, who cannot be given a row.
+  function planJobStretch(rows, edge, target, crewNameOf) {
+    var live = (rows || []).filter(isLiveJobRow);
+    var span = jobSpan(live);
+    var plan = { kind: 'stretch', edge: edge, from: span, to: null, updates: [], creates: [], deletes: [], unbookable: [] };
+    if (!span || !target) return plan;
+    var newStart = span.start, newEnd = span.end;
+    if (edge === 'start') newStart = target > span.end ? span.end : target;
+    else newEnd = target < span.start ? span.start : target;
+    if (newStart === span.start && newEnd === span.end) return plan;
+    var added = [];
+    if (edge === 'start' && newStart < span.start) {
+      added = paintedSpanDates(newStart, span.start).filter(function(d) { return d !== span.start; });
+    } else if (edge !== 'start' && newEnd > span.end) {
+      added = paintedSpanDates(span.end, newEnd).filter(function(d) { return d !== span.end; });
+    }
+    var groups = {}, order = [];
+    live.forEach(function(ev) {
+      var g = ev.user_id ? 'u:' + ev.user_id : 'n:' + String(ev.crew_name || ev.assigned_to || '');
+      if (!groups[g]) { groups[g] = []; order.push(g); }
+      groups[g].push(ev);
+    });
+    order.forEach(function(g) {
+      var evs = groups[g];
+      if (added.length) {
+        var anchor = evs.reduce(function(best, ev) {
+          if (!best) return ev;
+          return edge === 'start' ? (ev.scheduled_date < best.scheduled_date ? ev : best) : (spanEnd(ev) > spanEnd(best) ? ev : best);
+        }, null);
+        var atEdge = edge === 'start' ? anchor.scheduled_date === span.start : spanEnd(anchor) === span.end;
+        if (atEdge && (evs.length === 1 || spanEnd(anchor) > anchor.scheduled_date)) {
+          plan.updates.push({ ev: anchor, update: buildResizePayload(anchor, edge === 'start' ? 'start' : 'end', edge === 'start' ? newStart : newEnd) });
+          return;
+        }
+        if (!anchor.user_id) { plan.unbookable.push(anchor); return; }
+        var confirmation = anchor.confirmation_status === 'placeholder' ? 'placeholder' : 'tentative';
+        added.forEach(function(d) {
+          plan.creates.push({ template: anchor, date: d, create: {
+            jobId: anchor.job_id, userId: anchor.user_id,
+            crewName: crewNameOf ? crewNameOf(anchor) : (anchor.crew_name || null),
+            scheduledDate: d, scheduledEnd: d, durationDays: 1,
+            startTime: anchor.start_time || null, endTime: anchor.end_time || null,
+            assignmentType: anchor.assignment_type || 'install',
+            role: anchor.role || 'lead_installer', jobType: anchor.job_type || null,
+            confirmationStatus: confirmation,
+            suppress_notifications: true
+          } });
+        });
+        return;
+      }
+      evs.forEach(function(ev) {
+        var s = ev.scheduled_date, e = spanEnd(ev);
+        if (edge === 'start') {
+          if (e < newStart) plan.deletes.push({ ev: ev });
+          else if (s < newStart) plan.updates.push({ ev: ev, update: buildResizePayload(ev, 'start', newStart) });
+        } else {
+          if (s > newEnd) plan.deletes.push({ ev: ev });
+          else if (e > newEnd) plan.updates.push({ ev: ev, update: buildResizePayload(ev, 'end', newEnd) });
+        }
+      });
+    });
+    plan.to = jobSpan(applyPlanToEvents(live, plan).filter(isLiveJobRow));
+    return plan;
+  }
+  // The rows as they will be once a plan is saved: updates moved, deletes
+  // gone, creates added under a stand-in id until the real row is read back.
+  // A stand-in's id is no booking's, so it is never planned or written.
+  var STAND_IN_PREFIX = 'pending-';
+  function isStandIn(ev) {
+    return String((ev && ev.assignment_id) || '').indexOf(STAND_IN_PREFIX) === 0;
+  }
+  function applyPlanToEvents(events, plan) {
+    var upd = {}, del = {};
+    (plan.updates || []).forEach(function(u) { upd[u.ev.assignment_id] = u.update; });
+    (plan.deletes || []).forEach(function(d) { del[d.ev.assignment_id] = true; });
+    var out = [];
+    (events || []).forEach(function(ev) {
+      if (!ev || del[ev.assignment_id]) return;
+      var u = upd[ev.assignment_id];
+      if (!u) { out.push(ev); return; }
+      var next = Object.assign({}, ev);
+      if (u.scheduled_date) next.scheduled_date = u.scheduled_date;
+      if (u.scheduled_end) next.scheduled_end = u.scheduled_end;
+      if (u.duration_days != null) next.duration_days = u.duration_days;
+      out.push(next);
+    });
+    (plan.creates || []).forEach(function(c, i) {
+      out.push(Object.assign({}, c.template, {
+        assignment_id: STAND_IN_PREFIX + i + '-' + c.date,
+        scheduled_date: c.date, scheduled_end: c.date, duration_days: 1,
+        assignment_status: 'scheduled', status: 'scheduled', confirmation_status: c.create.confirmationStatus
+      }));
+    });
+    return out;
+  }
+  // The unique-key moves a plan makes, for stageCollisionSafeMoves: every
+  // update that changes a row's start day, and every new row (no source key).
+  function planKeyMoves(plan) {
+    var moves = [];
+    (plan.updates || []).forEach(function(u) {
+      if (u.update.scheduled_date && u.update.scheduled_date !== u.ev.scheduled_date) {
+        moves.push({ assignmentId: u.ev.assignment_id, jobId: u.ev.job_id, userId: u.ev.user_id || null,
+                     fromDate: u.ev.scheduled_date, toDate: u.update.scheduled_date, entry: u });
+      }
+    });
+    (plan.creates || []).forEach(function(c, i) {
+      moves.push({ assignmentId: STAND_IN_PREFIX + i + '-' + c.date, jobId: c.create.jobId, userId: c.create.userId,
+                   fromDate: null, toDate: c.date, entry: c });
+    });
+    return moves;
+  }
+  // The writes of a plan as batches: every write in a batch is sent at once,
+  // a batch waits for the one before. A move whose target key is the source
+  // key of another move waits for that move (a one-day shift frees Wed before
+  // Tue and Tue before Mon); everything else goes together. Within a step,
+  // the LAST write leaving each day goes in its own later batch, so the
+  // server's watcher (ghost) mirror sees the day emptied once, by that write,
+  // and moves or drops the mirror instead of every write seeing the others
+  // still there and leaving the mirror behind.
+  function planWriteBatches(staged, plan) {
+    var ordered = (staged && staged.ordered) || [];
+    var keyOf = function(m, which) {
+      return which === 'source'
+        ? key(m.jobId, m.sourceUserId || m.userId, m.fromDate)
+        : key(m.jobId, m.targetUserId || m.userId, m.toDate);
+    };
+    var wave = [], waves = [];
+    ordered.forEach(function(m, i) {
+      var w = 0, target = keyOf(m, 'target');
+      for (var j = 0; j < i; j++) {
+        if (target && keyOf(ordered[j], 'source') === target) w = Math.max(w, wave[j] + 1);
+      }
+      wave.push(w);
+      (waves[w] = waves[w] || []).push({ kind: m.fromDate ? 'update' : 'create', entry: m.entry, fromDate: m.fromDate || null });
+    });
+    var keyed = {};
+    ordered.forEach(function(m) { if (m.entry && m.entry.ev) keyed[m.entry.ev.assignment_id] = true; });
+    var rest = [];
+    (plan.updates || []).forEach(function(u) { if (!keyed[u.ev.assignment_id]) rest.push({ kind: 'update', entry: u, fromDate: null }); });
+    (plan.deletes || []).forEach(function(d) { rest.push({ kind: 'delete', entry: d, fromDate: d.ev.scheduled_date }); });
+    if (rest.length) { if (waves.length) waves[0] = (waves[0] || []).concat(rest); else waves.push(rest); }
+    var batches = [];
+    waves.forEach(function(list) {
+      if (!list || !list.length) return;
+      var last = {};
+      list.forEach(function(w, i) { if (w.fromDate) last[w.fromDate] = i; });
+      var first = [], then = [];
+      list.forEach(function(w, i) { (w.fromDate && last[w.fromDate] === i ? then : first).push(w); });
+      if (first.length) batches.push(first);
+      if (then.length) batches.push(then);
+    });
+    return batches;
+  }
+  // Each crew member's worked days on a job, and who's changed between two
+  // sets of rows. `nameOf` names a crew member.
+  function crewDays(rows, nameOf) {
+    var out = {};
+    (rows || []).filter(isLiveJobRow).forEach(function(ev) {
+      var k = ev.user_id ? 'u:' + ev.user_id : 'n:' + String(ev.crew_name || ev.assigned_to || '');
+      if (!out[k]) out[k] = { userId: ev.user_id || null, name: nameOf ? nameOf(ev) : (ev.crew_name || ''), days: [] };
+      paintedSpanDates(ev.scheduled_date, spanEnd(ev)).forEach(function(d) {
+        if (out[k].days.indexOf(d) === -1) out[k].days.push(d);
+      });
+    });
+    Object.keys(out).forEach(function(k) { out[k].days.sort(); });
+    return out;
+  }
+  function crewDayChanges(beforeRows, afterRows, nameOf) {
+    var before = crewDays(beforeRows, nameOf), after = crewDays(afterRows, nameOf), out = [];
+    Object.keys(before).concat(Object.keys(after)).forEach(function(k) {
+      if (out.some(function(c) { return c.key === k; })) return;
+      var b = before[k] ? before[k].days : [], a = after[k] ? after[k].days : [];
+      if (b.join(',') === a.join(',')) return;
+      var who = after[k] || before[k];
+      out.push({ key: k, userId: who.userId, name: who.name, before: b, after: a });
+    });
+    return out.sort(function(x, y) { return String(x.name).localeCompare(String(y.name)); });
+  }
+  var DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function dayLabel(dateStr) {
+    var d = new Date(dateStr + 'T00:00:00');
+    return DAY_SHORT[d.getDay()] + ' ' + d.getDate() + ' ' + MONTH_SHORT[d.getMonth()];
+  }
+  // The text a crew member gets when their own days on a job change: the
+  // job, client, site, every day they are now booked, and the Trade App link,
+  // in the allocation text's shape.
+  function crewRescheduleText(job, days, jobId) {
+    var site = String((job && (job.site_address || job.site_suburb)) || '').trim();
+    return [
+      ('Job rescheduled: ' + ((job && job.job_number) || '') + ' - ' + ((job && job.client_name) || 'Client')).replace(/\s+/g, ' ').trim(),
+      site ? 'Site: ' + site : '',
+      (days && days.length) ? 'Your days: ' + days.map(dayLabel).join(', ') : 'Your days: none, you are no longer booked on this job',
+      'Open in Trade: https://secureworks-group.github.io/secureworks-ux/trade.html#job/' + jobId
+    ].filter(Boolean).join('\n');
+  }
+  // Every booking a job-level Remove takes off the calendar: each crew row
+  // and each office watcher (ghost) row on any day, but never a cancelled or
+  // completed visit (history) or a meeting / reminder (its own line).
+  function jobRemovalRows(rows) {
+    return (rows || []).filter(function(ev) {
+      if (!ev || !ev.assignment_id || !ev.scheduled_date || isStandIn(ev)) return false;
+      var t = String(ev.assignment_type || 'install').toLowerCase();
+      if (t === 'meeting' || t === 'reminder') return false;
+      var st = rowStatus(ev);
+      return st !== 'cancelled' && st !== 'complete' && st !== 'completed';
+    });
+  }
+  // Who and which days a removal takes off, for its one confirm: the crew by
+  // name and every day they are painted, in order. Watchers are not crew, and
+  // their dates go stale when the job is moved, so neither counts them.
+  function removalSummary(rows, nameOf) {
+    var crew = {}, days = {};
+    (rows || []).forEach(function(ev) {
+      if (isGhost(ev)) return;
+      crew[nameOf ? nameOf(ev) : (ev.crew_name || '')] = true;
+      paintedSpanDates(ev.scheduled_date, spanEnd(ev)).forEach(function(d) { days[d] = true; });
+    });
+    return { crew: Object.keys(crew).sort(), days: Object.keys(days).sort() };
+  }
+  // "23, 25, 26 Nov" — days run together inside a month; "30 Nov, 1 Dec" across.
+  function dayListLabel(dates) {
+    var groups = [];
+    (dates || []).forEach(function(ds) {
+      var d = new Date(ds + 'T00:00:00');
+      var month = MONTH_SHORT[d.getMonth()];
+      var last = groups[groups.length - 1];
+      if (last && last.month === month) last.days.push(d.getDate());
+      else groups.push({ month: month, days: [d.getDate()] });
+    });
+    return groups.map(function(g) { return g.days.join(', ') + ' ' + g.month; }).join(', ');
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
@@ -9291,7 +9679,14 @@ var CalOpsCore = (function () {
     buildResizePayload: buildResizePayload,
     stageCollisionSafeMoves: stageCollisionSafeMoves,
     assignmentRowsToEvents: assignmentRowsToEvents,
-    mergeOccupancyEvents: mergeOccupancyEvents
+    mergeOccupancyEvents: mergeOccupancyEvents,
+    isLiveJobRow: isLiveJobRow, jobRowsForPlan: jobRowsForPlan, jobSpan: jobSpan,
+    planJobMove: planJobMove, planJobStretch: planJobStretch,
+    isStandIn: isStandIn, applyPlanToEvents: applyPlanToEvents, planKeyMoves: planKeyMoves,
+    planWriteBatches: planWriteBatches,
+    crewDays: crewDays, crewDayChanges: crewDayChanges,
+    dayLabel: dayLabel, crewRescheduleText: crewRescheduleText,
+    jobRemovalRows: jobRemovalRows, removalSummary: removalSummary, dayListLabel: dayListLabel
   };
 })();
 // </calendar-ops-core>
@@ -10003,6 +10398,9 @@ function renderScheduleView(container, range) {
       }
     }
     segments.push({ start: segStart, end: segEnd });
+    // the job's own first and last day, for the stretch handles: from all of
+    // its bookings once they are read, never only the window's edge
+    var fullSpan = window.__SW_CAL_DRAGV2_ENABLED ? calJobSpanInHand(jid) : null;
     segments.forEach(function(seg, idx) {
       var copy = {};
       for (var k in j) copy[k] = j[k];
@@ -10010,6 +10408,8 @@ function renderScheduleView(container, range) {
       copy.end = seg.end;
       copy.id = segments.length > 1 ? jid + '_seg' + idx : jid;
       copy._jobId = jid;
+      copy.jobFirst = fullSpan ? fullSpan.start : j.start;
+      copy.jobLast = fullSpan ? fullSpan.end : j.end;
       jobs.push(copy);
     });
   });
@@ -10187,7 +10587,7 @@ function renderScheduleView(container, range) {
       // Crew on leave. Schedule view has no crew rows, so name them on the day.
       var leaveNames = (_calEventFilters.leave && _calLeaveByDate[ds]) || [];
       if (leaveNames.length) {
-        var leaveLabel = leaveNames.join(', ') + ' on leave';
+        var leaveLabel = leaveNames.join(', ') + (v3 ? ' away (leave or unavailable)' : ' on leave');
         html += '<span class="cal-schedule-leave-badge" title="' + escapeHtml(leaveLabel) + '">'
              + escapeHtml(leaveNames.join(', ')) + ' away</span>';
       }
@@ -10299,22 +10699,13 @@ function renderScheduleView(container, range) {
         }
         html += '>';
 
-        // CP1 (dragv2): edge-resize handles — only when the bar maps to exactly
-        // ONE assignment (a multi-crew bar has no single edge to resize) and
-        // only on TRUE endpoints (not week-clipped continuations).
+        // CP1 (dragv2): stretch handles on the job's own first and last day,
+        // whatever the crew count and however the job is stored; never on a
+        // piece clipped at a week edge. A drop moves that end of the job for
+        // every crew member (stretchSchedJob).
         if (window.__SW_CAL_DRAGV2_ENABLED && confClass !== 'confirmed') {
-          var barEvs = _calEvents.filter(function(e) {
-            if (e.job_id !== realJobId) return false;
-            var t = e.assignment_type || 'install';
-            if (t === 'meeting' || t === 'reminder') return false;
-            var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
-            return !(en < job.start || s > job.end);
-          });
-          if (barEvs.length === 1) {
-            var rsEv = barEvs[0];
-            if (barStart === rsEv.scheduled_date) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'start\')"></span>';
-            if (barEnd === (rsEv.scheduled_end || rsEv.scheduled_date)) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'end\')"></span>';
-          }
+          if (barStart === job.jobFirst) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleJobResizeDragStart(event,\'' + realJobId + '\',\'start\')"></span>';
+          if (barEnd === job.jobLast) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleJobResizeDragStart(event,\'' + realJobId + '\',\'end\')"></span>';
         }
 
         // Readiness dot (not on a v3 line: two states only; the tooltip and popup still say)
@@ -10386,6 +10777,8 @@ var CAL_V3_ICONS = {
   makesafe: '<path d="M8 1.8 15.2 14H.800z"/><path d="M8 6.4v3.5" stroke="var(--v3c,#0D9488)" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.9" r=".95" fill="var(--v3c,#0D9488)"/>',
   // clock (business)
   biz: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 4.9V8l2.1 1.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  // suitcase (crew leave, <calendar-leave>)
+  leave: '<path d="M5.5 3.5V2.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v.9H14c.6 0 1 .4 1 1V13c0 .6-.4 1-1 1H2c-.6 0-1-.4-1-1V4.5c0-.6.4-1 1-1zm1.4 0h2.2v-.6H6.9z"/>',
   // flag (holiday or company day, <calendar-holidays>)
   holiday: '<path d="M2.6 1.4h1.7v13.2H2.600z"/><path d="M4.3 2.2h9.6l-2.4 3.4 2.4 3.4H4.300z"/>',
   truck: '<path d="M1 3.8h8.2v7.4H1z"/><path d="M9.8 6h2.7l2.5 2.6v2.6H9.800z"/><circle cx="4.2" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/><circle cx="12" cy="12" r="1.7" stroke="#fff" stroke-width=".9"/>'
@@ -10514,6 +10907,7 @@ function syncCalV3Chrome() {
     + tick('show', 'all', 'Everything') + tick('show', 'labour', 'Labour')
     + tick('show', 'materials', '<span style="color:var(--v3g2);display:inline-flex;">' + calV3Icon('truck', 11) + '</span>Materials')
     + tick('show', 'business', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('biz', 11) + '</span>Business')
+    + tick('show', 'leave', '<span style="color:var(--v3biz);display:inline-flex;">' + calV3Icon('leave', 11) + '</span>Leave')
     + tick('show', 'holidays', '<span style="color:var(--v3hol);display:inline-flex;">' + calV3Icon('holiday', 11) + '</span>Holidays')
     + '<span class="cal-focus-sep"></span><span class="cal-focus-lbl">Type</span>'
     + tick('type', 'all', 'All') + tick('type', 'patio', sq('patio', ['patio']) + 'Patios')
@@ -10675,6 +11069,7 @@ var _calDragData = null;
 
 function handleBlockDragStart(event, assignmentId) {
   _calDragData = { type: 'assignment', assignmentId: assignmentId };
+  calPrefetchForAssignment(assignmentId);
   event.dataTransfer.effectAllowed = 'move';
   // Firefox refuses to start a drag with an empty dataTransfer; Chrome doesn't
   // care. The payload itself still travels via _calDragData.
@@ -10695,6 +11090,7 @@ function handleUnschedDragStart(event, jobId) {
 function handleResizeDragStart(event, assignmentId, edge) {
   event.stopPropagation();
   _calDragData = { type: 'resize', assignmentId: assignmentId, edge: edge };
+  calPrefetchForAssignment(assignmentId);
   event.dataTransfer.effectAllowed = 'move';
   try { event.dataTransfer.setData('text/plain', assignmentId); } catch (e) {}
 }
@@ -10704,10 +11100,27 @@ function handleResizeDragStart(event, assignmentId, edge) {
 function handleSchedBarDragStart(event, jobId, segStart, segEnd) {
   event.stopPropagation();
   _calDragData = { type: 'sched-job', jobId: jobId, segStart: segStart, segEnd: segEnd };
+  if (window.__SW_CAL_DRAGV2_ENABLED) calJobRows(jobId); // in hand by the drop
   event.dataTransfer.effectAllowed = 'move';
   try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
   event.target.classList.add('dragging');
   setTimeout(function() { event.target.classList.remove('dragging'); }, 0);
+}
+
+// CP1 (dragv2): a Schedule-view stretch handle drags one END of the whole job.
+function handleJobResizeDragStart(event, jobId, edge) {
+  event.stopPropagation();
+  _calDragData = { type: 'job-resize', jobId: jobId, edge: edge };
+  event.dataTransfer.effectAllowed = 'move';
+  try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
+  calJobRows(jobId);
+}
+
+// Starts the job-scoped read for a dragged Crew-view block (dragv2 only).
+function calPrefetchForAssignment(assignmentId) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
+  if (ev && ev.job_id) calJobRows(ev.job_id);
 }
 
 // CP1 (dragv2): Schedule-view drop resolver. Bars float on an overlay above
@@ -10733,6 +11146,8 @@ function handleSchedDrop(event) {
   } else if (dd.type === 'resize') {
     // Same rule as the Crew view: only the DAY matters, a resize never reassigns.
     resizeAssignment(dd.assignmentId, dd.edge, date);
+  } else if (dd.type === 'job-resize') {
+    stretchSchedJob(dd.jobId, dd.edge, date);
   } else if (dd.type === 'sched-job') {
     moveSchedSegment(dd.jobId, dd.segStart, dd.segEnd, date);
   }
@@ -10761,16 +11176,131 @@ function confirmIfCrewUnavailable(crew, dateStr, proceed) {
 // existing job_detail action and merged over the window. A failed read falls
 // back to the window snapshot rather than blocking the drag.
 async function calStagingOccupancy(jobId) {
-  var jobRows = [];
-  if (jobId) {
-    try {
-      var detail = await opsFetch('job_detail', { jobId: jobId });
-      jobRows = CalOpsCore.assignmentRowsToEvents(detail && detail.assignments, jobId);
-    } catch (e) {
-      console.warn('calendar staging: job_detail read failed, staging against the loaded window only:', e && e.message);
+  var jobRows = jobId ? await calJobRows(jobId) : [];
+  return CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows || []);
+}
+
+// The job-scoped read behind every drag (its rows outside the window, and the
+// cancelled / completed rows the feed hides). It starts when the drag starts,
+// so it is usually in hand by the drop, and is kept for a minute; every save
+// on the job, and every loadCalendar(), drops it. ops-api has no lighter read of one job's bookings than
+// job_detail today. A failed read answers null: a Crew-view booking stages
+// against the loaded window alone, as before, and a whole-job change refuses.
+var _calJobRowsCache = {};
+var CAL_JOB_ROWS_TTL_MS = 60000;
+function calJobRows(jobId) {
+  if (!jobId) return Promise.resolve(null);
+  var hit = _calJobRowsCache[jobId];
+  if (hit && Date.now() - hit.at < CAL_JOB_ROWS_TTL_MS) return hit.promise;
+  var entry = { at: Date.now(), promise: null };
+  entry.promise = opsFetch('job_detail', { jobId: jobId }).then(function(detail) {
+    entry.rows = CalOpsCore.assignmentRowsToEvents(detail && detail.assignments, jobId);
+    return entry.rows;
+  }).catch(function(e) {
+    console.warn('calendar staging: job_detail read failed, staging against the loaded window only:', e && e.message);
+    if (_calJobRowsCache[jobId] === entry) delete _calJobRowsCache[jobId];
+    return null;
+  });
+  _calJobRowsCache[jobId] = entry;
+  return entry.promise;
+}
+// Bumped whenever a job's kept read may be stale (a save on it, a reload),
+// so a read that started before then is never kept.
+var _calJobRowsGen = 0;
+function calForgetJobRows(jobId) { _calJobRowsGen++; delete _calJobRowsCache[jobId]; }
+// The job popup reads job_detail anyway; its answer is kept as the job's read
+// (so the popup's Remove plans at once) unless a save or a reload came after
+// the read started.
+function calKeepJobRowsFrom(jobId, detail, genAtStart) {
+  if (!jobId || !detail || genAtStart !== _calJobRowsGen || _calSavingJobs[jobId]) return;
+  var rows = CalOpsCore.assignmentRowsToEvents(detail.assignments, jobId);
+  _calJobRowsCache[jobId] = { at: Date.now(), rows: rows, promise: Promise.resolve(rows) };
+}
+// The job's own first and last day from its full set of bookings, once that
+// read is in hand; null before then (the loaded window may clip the job).
+function calJobSpanInHand(jobId) {
+  var hit = _calJobRowsCache[jobId];
+  if (!hit || !hit.rows || Date.now() - hit.at >= CAL_JOB_ROWS_TTL_MS) return null;
+  return CalOpsCore.jobSpan(CalOpsCore.jobRowsForPlan(_calEvents, hit.rows, jobId).filter(CalOpsCore.isLiveJobRow));
+}
+
+// After a save the grid refreshes in place: only the calendar feed is read
+// again (deliveries, crew availability and the unscheduled list do not change
+// with a booking's days), nothing is blanked, and an answer is dropped when a
+// newer load started or another save is still on its way.
+var _calLoadSeq = 0;
+var _calSavesInFlight = 0;
+function refreshCalendarQuietly() {
+  if (_calSavesInFlight > 0) return;
+  var seq = ++_calLoadSeq;
+  var range = getCalRange();
+  opsFetch('calendar', { from: range.from, to: range.to }).then(function(data) {
+    if (seq !== _calLoadSeq || _calSavesInFlight > 0) return;
+    var r = getCalRange();
+    if (r.from !== range.from || r.to !== range.to) return;
+    _calEvents = (data.events || []).filter(function(ev) {
+      if (ev.legacy === true) return false;
+      if (ev.job_id && ev.job_status === 'complete' && !ev.job_number) return false;
+      return true;
+    });
+    _calDeliveries = data.deliveries || [];
+    _calReadiness = data.readiness || {};
+    _calOrgEvents = data.orgEvents || [];
+    _calTruncated = data.truncated === true;
+    renderCalendar();
+  }).catch(function(e) {
+    console.error('calendar quiet refresh failed:', e);
+    // Without the read the added bookings' real ids are unknown, so their
+    // stand-ins come off the grid rather than stay there to be acted on.
+    if (seq !== _calLoadSeq || !_calEvents.some(CalOpsCore.isStandIn)) return;
+    _calEvents = _calEvents.filter(function(ev) { return !CalOpsCore.isStandIn(ev); });
+    renderCalendar();
+    showToast('Saved, but the calendar could not refresh. Reload it to see every booking.', 'warning');
+  });
+}
+
+// Saves a planned change to a job's bookings behind a calendar that already
+// shows it. Batches go one after another, the writes inside a batch together
+// (CalOpsCore.planWriteBatches). The first refusal stops the rest; the grid is
+// put back as it was and the refusal is said in words, then re-read so it
+// shows what the server holds. Answers true when every write landed.
+var _calSavingJobs = {};
+async function calSaveJobPlan(jobId, batches, snapshot) {
+  _calSavingJobs[jobId] = true;
+  _calSavesInFlight++;
+  var failure = null;
+  try {
+    for (var bi = 0; bi < batches.length && !failure; bi++) {
+      var results = await Promise.allSettled(batches[bi].map(function(w) {
+        if (w.kind === 'create') return opsPost('create_assignment', w.entry.create);
+        if (w.kind === 'delete') return opsPost('delete_assignment', { assignmentId: w.entry.ev.assignment_id });
+        return opsPost('update_assignment', w.entry.update);
+      }));
+      results.forEach(function(r, ri) {
+        if (r.status === 'rejected' && !failure) failure = { write: batches[bi][ri], error: r.reason };
+      });
     }
+  } finally {
+    _calSavesInFlight--;
+    delete _calSavingJobs[jobId];
+    calForgetJobRows(jobId);
   }
-  return CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
+  if (failure) {
+    if (snapshot && _calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
+    showToast(calDescribeSaveFailure(failure), 'warning');
+  }
+  refreshCalendarQuietly();
+  return !failure;
+}
+
+function calDescribeSaveFailure(failure) {
+  var msg = (failure.error && failure.error.message) || String(failure.error || 'the save failed');
+  var w = failure.write;
+  var ev = w.kind === 'create' ? w.entry.template : w.entry.ev;
+  var day = w.kind === 'create' ? w.entry.date : (ev && ev.scheduled_date);
+  var who = ev ? crewDisplayName(ev) + ' on ' + fmtDate(day) : 'a booking';
+  var what = w.kind === 'delete' ? 'Not removed' : w.kind === 'create' ? 'Not added' : 'Not moved';
+  return what + ': ' + who + ' - ' + msg + '. The calendar now shows what was saved.';
 }
 
 // One warning for a Schedule-bar drag that could not move as a whole. A
@@ -10808,85 +11338,135 @@ function describeBlockedSegmentMove(staged, crewCount) {
     ' kept: ' + names.join(', ');
 }
 
-// CP1 (dragv2): Schedule-view bar move. The drop day is the segment's new
-// START. A single-assignment segment routes through moveAssignment with its
-// OWN crew — identical guards to the Crew view (confirmed lock, availability
-// warning, reschedule-SMS offer). A multi-crew segment moves every assignment
-// under the bar, each keeping its working-day offset and duration, with one
-// SMS offer for the job.
+// CP1 (dragv2): Schedule-view job move. The drop day is the JOB's new first
+// day, whichever piece of the bar was grabbed: every live booking of the job
+// (in view or not) moves by the same working days and keeps its own length,
+// so a job stored one booking per person per day moves whole and its own
+// rows never count as clashes. Crew never changes from this view (each row
+// keeps its own user_id). The bar moves on screen at once and the save runs
+// behind it. A job-level drag is still all-or-nothing: a cancelled or
+// completed row of the job holding a target date moves nobody.
 async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
   if (!window.__SW_CAL_DRAGV2_ENABLED) return;
-  var evs = _calEvents.filter(function(e) {
-    if (e.job_id !== jobId) return false;
-    var t = e.assignment_type || 'install';
-    if (t === 'meeting' || t === 'reminder') return false;
-    var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
-    return !(en < segStart || s > segEnd);
+  if (!calJobDraggable(jobId)) return;
+  calApplyJobPlan(jobId, 'move', newDate);
+}
+
+// CP1 (dragv2): Schedule-view stretch. A handle sits on the job's first and
+// last day whatever the crew count; dropping it on a day moves that end of
+// the job for every crew member (CalOpsCore.planJobStretch), the other end
+// holding.
+async function stretchSchedJob(jobId, edge, targetDate) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  if (!calJobDraggable(jobId)) return;
+  calApplyJobPlan(jobId, 'stretch', targetDate, edge);
+}
+
+// A Schedule-view drag on a job goes ahead only when the job is in view, not
+// locked, not still saving, and holds no booking the page has not read back.
+function calJobDraggable(jobId) {
+  var shown = calJobBarRows(jobId);
+  if (!shown.length) return false;
+  if (shown.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
+    showToast('Confirmed — use Reschedule in the job popup', 'warning');
+    return false;
+  }
+  if (_calSavingJobs[jobId]) { showToast('Still saving the last change to this job', 'warning'); return false; }
+  if (shown.some(CalOpsCore.isStandIn)) { calRefuseStandIn(); return false; }
+  return true;
+}
+
+// A booking just added is painted under a stand-in id until the calendar is
+// read again; nothing is done to it until then.
+function calRefuseStandIn() {
+  showToast('Still saving that booking - try again in a moment', 'warning');
+  refreshCalendarQuietly();
+}
+
+// The rows behind a job's Schedule-view line: its crew work in the loaded
+// window (meetings and reminders on the job are their own lines).
+function calJobBarRows(jobId) {
+  return _calEvents.filter(function(e) { return e.job_id === jobId && CalOpsCore.isLiveJobRow(e); });
+}
+
+// Every leave / unavailable day a plan books a crew member onto.
+function calPlanClashes(plan) {
+  var clashes = [];
+  (plan.updates || []).forEach(function(u) {
+    var s = u.update.scheduled_date || u.ev.scheduled_date;
+    var e = u.update.scheduled_end || CalOpsCore.spanEnd(u.ev);
+    clashes = clashes.concat(collectSpanClashes(crewDisplayName(u.ev), s, e));
   });
-  if (!evs.length) return;
-  if (evs.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
+  (plan.creates || []).forEach(function(c) {
+    clashes = clashes.concat(collectSpanClashes(crewDisplayName(c.template), c.date, c.date));
+  });
+  return clashes;
+}
+
+// Plans the change over the job's full set of bookings (the job-scoped read,
+// started when the drag started), refuses it when the end the person dragged
+// is not the job's own end but only the edge of the calendar view, warns on
+// crew leave over every day it books, refuses it whole if a row it cannot
+// move holds a target date, paints it, then saves it behind the painted grid
+// and offers the reschedule texts at once (sent only once every write lands).
+async function calApplyJobPlan(jobId, kind, target, edge) {
+  _calSavingJobs[jobId] = true;
+  var jobRows = await calJobRows(jobId);
+  delete _calSavingJobs[jobId];
+  // Without the job's full set of bookings, the ones outside the loaded window
+  // would be left behind, so the change waits for a read that works.
+  if (!jobRows) {
+    showToast('Not changed - could not read this job\'s bookings. Try again.', 'warning');
+    return;
+  }
+  var live = CalOpsCore.jobRowsForPlan(_calEvents, jobRows, jobId).filter(CalOpsCore.isLiveJobRow);
+  if (!live.length) return;
+  if (live.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
   }
-  if (evs.length === 1) {
-    // Pin the event's own user_id so this path can NEVER resolve a different
-    // person by display name and turn the move into a reassign.
-    moveAssignment(evs[0].assignment_id, crewDisplayName(evs[0]), newDate, { pinnedUserId: evs[0].user_id || null });
+  var full = CalOpsCore.jobSpan(live), shown = CalOpsCore.jobSpan(calJobBarRows(jobId));
+  var dragged = kind === 'stretch' && edge === 'end' ? 'end' : 'start';
+  if (!shown || full[dragged] !== shown[dragged]) {
+    renderCalendar();
+    showToast('Not changed - this job runs past the calendar view; widen the view to change it', 'warning');
     return;
   }
-  evs.sort(function(a, b) { return a.scheduled_date.localeCompare(b.scheduled_date); });
-  var oldStart = evs[0].scheduled_date;
-  if (newDate === oldStart) return;
-  // Build every per-assignment plan up front so the availability check and the
-  // writes see the same spans.
-  var plans = [];
-  for (var i = 0; i < evs.length; i++) {
-    var ev = evs[i];
-    // Keep each assignment's working-day offset within the dragged bar.
-    var offset = CalOpsCore.workingSpanDays(oldStart, ev.scheduled_date);
-    var evStart = CalOpsCore.layWorkingDays(newDate, offset);
-    var plan = CalOpsCore.buildMovePayloadV2(ev, crewDisplayName(ev), ev.user_id || null, evStart);
-    if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
-    plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
+  var plan = kind === 'move'
+    ? CalOpsCore.planJobMove(live, target, crewDisplayName)
+    : CalOpsCore.planJobStretch(live, edge, target, crewDisplayName);
+  if (!plan.updates.length && !plan.creates.length && !plan.deletes.length) return;
+  if (plan.unbookable && plan.unbookable.length) {
+    showToast('Not changed - ' + plan.unbookable.map(crewDisplayName).join(', ') + ' has no crew member on record to book the added days to', 'warning');
+    return;
   }
-  var occupancy = await calStagingOccupancy(jobId);
-  var stagedMoves = CalOpsCore.stageCollisionSafeMoves(occupancy, plans.map(function(p) {
-    return {
-      assignmentId: p.ev.assignment_id,
-      jobId: p.ev.job_id,
-      userId: p.ev.user_id || null,
-      fromDate: p.ev.scheduled_date,
-      toDate: p.plan.update.scheduled_date,
-      entry: p
-    };
-  }));
-  // A job-level drag is all-or-nothing: one crew chain blocked by a genuine
-  // separate visit means nothing is written and every row stays put, so the
-  // job is never torn across crews on different days.
-  if (stagedMoves.skipped.length) {
+  confirmClashesOrProceed(calPlanClashes(plan), function() { calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows); });
+}
+
+async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows) {
+  var occupancy = CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
+  var staged = CalOpsCore.stageCollisionSafeMoves(occupancy, CalOpsCore.planKeyMoves(plan));
+  if (staged.skipped.length) {
     var crewIds = {};
-    evs.forEach(function(e) { crewIds[e.user_id || crewDisplayName(e)] = true; });
-    showToast(describeBlockedSegmentMove(stagedMoves, Object.keys(crewIds).length), 'warning');
+    live.forEach(function(e) { crewIds[e.user_id || crewDisplayName(e)] = true; });
+    showToast(describeBlockedSegmentMove(staged, Object.keys(crewIds).length), 'warning');
     return;
   }
-  async function applyMoves() {
-    try {
-      for (var pi = 0; pi < stagedMoves.ordered.length; pi++) {
-        await opsPost('update_assignment', stagedMoves.ordered[pi].entry.plan.update);
-      }
-      showToast('Rescheduled', 'success');
-      maybeOfferRescheduleSms(evs[0], newDate);
-      loadCalendar();
-    } catch (e) { showToast('Error: ' + e.message, 'warning'); loadCalendar(); }
-  }
-  // ONE combined availability check across all affected crew over their moved
-  // working-day spans — a single confirm, never one modal per crew member.
-  var clashes = [];
-  stagedMoves.ordered.forEach(function(move) {
-    var p = move.entry;
-    clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
+  var snapshot = _calEvents.slice();
+  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
+  renderCalendar();
+  var saving = calSaveJobPlan(jobId, CalOpsCore.planWriteBatches(staged, plan), snapshot);
+  var after = CalOpsCore.applyPlanToEvents(live, plan);
+  // The job's client and site come from a row the calendar feed carried.
+  var jobEv = snapshot.find(function(e) { return e.job_id === jobId && e.client_name !== undefined; }) || live[0];
+  // The reschedule step opens with the save still running: the new days are
+  // known here already. A text goes only once the save has landed.
+  maybeOfferRescheduleSms(jobEv, plan.to && plan.to.start, {
+    startChanged: !!(plan.from && plan.to && plan.from.start !== plan.to.start),
+    crewChanges: CalOpsCore.crewDayChanges(live, after, crewDisplayName),
+    saving: saving
   });
-  confirmClashesOrProceed(clashes, applyMoves);
+  if (await saving) showToast(kind === 'move' ? 'Rescheduled' : 'Duration updated', 'success');
 }
 
 function handleCalDrop(event, cell) {
@@ -10916,6 +11496,7 @@ function handleCalDrop(event, cell) {
 async function resizeAssignment(assignmentId, edge, targetDate) {
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
   if (ev.confirmation_status === 'confirmed') {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
@@ -10941,32 +11522,69 @@ async function doResizeAssignment(ev, edge, targetDate) {
     showToast(describeSkippedSingleMove(stagedResize), 'warning');
     return;
   }
-  try {
-    await opsPost('update_assignment', payload);
-    showToast('Duration updated', 'success');
-    // Only a changed START day is a reschedule the client would care about —
-    // an end-day extension doesn't move their arrival date.
-    if (payload.scheduled_date !== ev.scheduled_date) {
-      maybeOfferRescheduleSms(ev, payload.scheduled_date);
-    }
-    loadCalendar();
-  } catch (e) { showToast('Error: ' + e.message, 'warning'); }
+  await calSaveSingleUpdate(ev, payload, 'Duration updated');
+}
+
+// A Crew-view move or resize of one booking: painted at once, saved behind
+// the grid (calSaveJobPlan), with the reschedule step offered at once. Only a changed START
+// day offers the client a text — an end-day extension doesn't move their
+// arrival date; the crew member is offered one whenever their days changed.
+async function calSaveSingleUpdate(ev, update, doneText) {
+  var plan = { updates: [{ ev: ev, update: update }], creates: [], deletes: [] };
+  var jobRows = CalOpsCore.jobRowsForPlan(_calEvents, (ev.job_id && await calJobRows(ev.job_id)) || [], ev.job_id)
+    .filter(CalOpsCore.isLiveJobRow);
+  if (!jobRows.some(function(r) { return r.assignment_id === ev.assignment_id; })) jobRows.push(ev);
+  var snapshot = _calEvents.slice();
+  _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
+  renderCalendar();
+  var saving = calSaveJobPlan(ev.job_id, [[{ kind: 'update', entry: plan.updates[0], fromDate: ev.scheduled_date }]], snapshot);
+  maybeOfferRescheduleSms(ev, update.scheduled_date, {
+    startChanged: update.scheduled_date !== ev.scheduled_date,
+    crewChanges: CalOpsCore.crewDayChanges(jobRows, CalOpsCore.applyPlanToEvents(jobRows, plan), crewDisplayName),
+    saving: saving
+  });
+  if (await saving) showToast(doneText, 'success');
 }
 
 // CP1 (dragv2): after a drag/resize that changed the job's start day, ask
 // before texting the client. The install_rescheduled SMS fires ONLY from an
 // explicit Yes here — never automatically. Dedup server-side is per (job, new
 // date), so a double-tap is swallowed but a later re-reschedule still sends.
-function maybeOfferRescheduleSms(ev, newDate) {
+// The same step also offers the crew a text (ticked to start) when their own
+// days on the job changed: `opts.crewChanges` from CalOpsCore.crewDayChanges.
+// The client text is offered only when `opts.startChanged` (callers that pass
+// no opts mean the start day moved, as before). Nothing changed, no step.
+// `opts.saving` is the save still running behind the step (it answers true
+// once every write landed); see calHoldRescheduleStepForSave.
+function maybeOfferRescheduleSms(ev, newDate, opts) {
   if (!window.__SW_CAL_DRAGV2_ENABLED) return;
   if (!ev || !ev.job_id) return; // internal events have no client
+  opts = opts || { startChanged: true, crewChanges: [] };
+  var offerClient = !!opts.startChanged && !!newDate;
+  var crewChanges = opts.crewChanges || [];
+  if (!offerClient && !crewChanges.length) return;
   var clientName = (ev.client_name || '').trim() || 'the client';
-  showConfirmModal(
-    'Send reschedule update?',
-    'Do you want to send <strong>' + escapeHtml(clientName) + '</strong> a reschedule update?' +
-      '<br><span style="font-size:11px;color:var(--sw-text-sec);">SMS: install rescheduled to ' + fmtDate(newDate) + '</span>',
-    'Send SMS',
-    function() {
+  var phoned = crewChanges.filter(function(c) { return !!calCrewPhone(c.userId); });
+  var noPhone = crewChanges.filter(function(c) { return !calCrewPhone(c.userId); });
+  var tickRow = function(id, inner) {
+    return '<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0;cursor:pointer;"><input type="checkbox" id="' + id + '" checked style="margin-top:2px;"><span>' + inner + '</span></label>';
+  };
+  var body = '';
+  if (offerClient) {
+    body += tickRow('calReschedClient', 'Text <strong>' + escapeHtml(clientName) + '</strong> a reschedule update' +
+      '<br><span style="font-size:11px;color:var(--sw-text-sec);">SMS: install rescheduled to ' + fmtDate(newDate) + '</span>');
+  }
+  if (phoned.length) {
+    body += tickRow('calReschedCrew', 'Text the crew their new days: <strong>' + phoned.map(function(c) { return escapeHtml(c.name); }).join(', ') + '</strong>' +
+      '<br><span style="font-size:11px;color:var(--sw-text-sec);">One text each, with the Trade App link</span>');
+  }
+  if (noPhone.length) {
+    body += '<div id="calReschedNoPhone" style="font-size:11px;color:var(--sw-text-sec);margin-top:4px;">No phone on file, not texted: ' +
+      noPhone.map(function(c) { return escapeHtml(c.name); }).join(', ') + '</div>';
+  }
+  var sendable = offerClient || phoned.length;
+  var send = function(sendClient, sendCrew) {
+    if (sendClient) {
       opsPost('send_client_update', {
         job_id: ev.job_id,
         comms_trigger: 'install_rescheduled',
@@ -10976,8 +11594,100 @@ function maybeOfferRescheduleSms(ev, newDate) {
         else showToast('SMS not sent' + (r && r.reason ? ': ' + r.reason : ''), 'warning');
       }).catch(function(e) { showToast('SMS failed: ' + e.message, 'warning'); });
     }
+    if (sendCrew) sendCrewRescheduleTexts(ev, crewChanges);
+  };
+  showConfirmModal(
+    'Send reschedule update?',
+    body,
+    sendable ? 'Send SMS' : 'OK',
+    function() {
+      var clientBox = document.getElementById('calReschedClient');
+      var crewBox = document.getElementById('calReschedCrew');
+      send(offerClient && clientBox && clientBox.checked, phoned.length && crewBox && crewBox.checked);
+    }
   );
+  if (opts.saving) calHoldRescheduleStepForSave(opts.saving, send);
 }
+
+// The reschedule step opens while the move is still saving. Every text is
+// about the saved days, so a press before the save lands reads "Saving..."
+// and sends once it has; a save that fails turns the step into "the move did
+// not save, nothing was sent". Cancel, or a step replaced by another modal,
+// sends nothing.
+function calHoldRescheduleStepForSave(saving, send) {
+  var btn = document.getElementById('confirmModalProceed');
+  var backdrop = document.getElementById('calConfirmBackdrop');
+  if (!btn) return;
+  var stepOpen = function() { return btn.isConnected && backdrop.classList.contains('open'); };
+  var outcome = null;
+  saving.then(function(ok) {
+    outcome = ok ? 'saved' : 'failed';
+    if (!ok && stepOpen()) calShowRescheduleSaveFailed();
+  });
+  btn.onclick = function() {
+    var clientBox = document.getElementById('calReschedClient');
+    var crewBox = document.getElementById('calReschedCrew');
+    var sendClient = !!(clientBox && clientBox.checked), sendCrew = !!(crewBox && crewBox.checked);
+    if (outcome === 'failed' || (!sendClient && !sendCrew)) { closeConfirmModal(); return; }
+    if (outcome === 'saved') { closeConfirmModal(); send(sendClient, sendCrew); return; }
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    saving.then(function(ok) {
+      if (!stepOpen()) return;
+      if (!ok) return;
+      closeConfirmModal();
+      send(sendClient, sendCrew);
+    });
+  };
+}
+
+function calShowRescheduleSaveFailed() {
+  var modal = document.getElementById('calConfirmModal');
+  modal.innerHTML = '<h3>Move not saved</h3>' +
+    '<p id="calReschedSaveFailed">The move did not save, so no text was sent. The calendar shows what was saved.</p>' +
+    '<div class="modal-actions"><button class="btn-proceed" id="confirmModalProceed" onclick="closeConfirmModal()">OK</button></div>';
+}
+
+// <crew-reschedule-text> One text per crew member whose own days changed,
+// through ghl-proxy send_sms from +61489267771 as a text to crew about the job
+// (recipientRole crew, aboutJobId; never jobId, which would file it as a
+// message to the customer). Phones come from list_users. The result names who
+// was texted, who has no phone on file and whose text failed.
+var CREW_RESCHEDULE_SMS_FROM = '+61489267771';
+function calCrewPhone(userId) {
+  var u = userId && _crewList.find(function(c) { return c.id === userId; });
+  return (u && String(u.phone || '').trim()) || '';
+}
+function sendCrewRescheduleTexts(ev, crewChanges) {
+  var job = ev;
+  var sent = [], failed = [], noPhone = [];
+  var sends = (crewChanges || []).map(function(c) {
+    var phone = calCrewPhone(c.userId);
+    if (!phone) { noPhone.push(c.name); return Promise.resolve(); }
+    var message = CalOpsCore.crewRescheduleText(job, c.after, ev.job_id);
+    return Promise.resolve(opsAuthHeaders({ 'Content-Type': 'application/json' })).then(function(headers) {
+      return fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=send_sms', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ phone: phone, message: message, fromNumber: CREW_RESCHEDULE_SMS_FROM, recipientRole: 'crew', aboutJobId: ev.job_id })
+      });
+    }).then(function(resp) {
+      return resp.json().catch(function() { return null; }).then(function(data) {
+        if (!resp.ok || !data || data.success !== true) throw new Error((data && data.error) || 'Send failed');
+        sent.push(c.name);
+      });
+    }).catch(function(e) { failed.push(c.name + ' (' + ((e && e.message) || 'send failed') + ')'); });
+  });
+  return Promise.all(sends).then(function() {
+    var parts = [];
+    if (sent.length) parts.push('Crew texted: ' + sent.join(', '));
+    if (noPhone.length) parts.push('No phone on file, not texted: ' + noPhone.join(', '));
+    if (failed.length) parts.push('Text failed: ' + failed.join(', '));
+    if (parts.length) showToast(parts.join('. '), failed.length || noPhone.length ? 'warning' : 'success');
+    return { sent: sent, noPhone: noPhone, failed: failed };
+  });
+}
+// </crew-reschedule-text>
 
 function handleCellClick(date, crew, userId) {
   // Resolve userId — use passed value, or look up from crew list by name
@@ -11083,15 +11793,17 @@ async function submitScheduleFromModal(jobId) {
   }
 }
 
-// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so the
-// Schedule view can never re-resolve crew by display NAME — a name lookup can
-// land on a different person (deactivated user, duplicate display names) and
-// silently turn a move into a reassign. Crew-view callers omit opts and keep
-// the name-resolution that powers cross-row reassignment.
+// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so a
+// caller can never re-resolve crew by display NAME — a name lookup can land on
+// a different person (deactivated user, duplicate display names) and silently
+// turn a move into a reassign. No caller passes it today: the Schedule view
+// moves whole jobs through calApplyJobPlan. Crew-view callers omit opts and
+// keep the name-resolution that powers cross-row reassignment.
 async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // Find the assignment in events
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
 
   // Confirmed jobs cannot be dragged — must use Reschedule
   if (ev.confirmation_status === 'confirmed') {
@@ -11148,7 +11860,7 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   }
   var newUserId;
   if (opts && 'pinnedUserId' in opts) {
-    // CP1 (dragv2): Schedule-view moves pin the event's own user_id — never a
+    // CP1 (dragv2): a pinned move keeps the event's own user_id — never a
     // name lookup, so this path can never produce a reassign plan.
     newUserId = opts.pinnedUserId;
   } else {
@@ -11180,6 +11892,10 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
       return;
     }
   }
+  if (window.__SW_CAL_DRAGV2_ENABLED && plan.mode === 'move') {
+    await calSaveSingleUpdate(ev, plan.update, 'Assignment moved');
+    return;
+  }
   try {
     if (plan.mode === 'reassign') {
       // Crew change = an allocation act (G2): delete the old row and create the
@@ -11195,7 +11911,8 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
     // CP1 (dragv2): the drop moved the start day — offer the client
     // reschedule SMS (explicit Yes only; no-ops when the flag is off).
     if (newDate !== ev.scheduled_date) maybeOfferRescheduleSms(ev, newDate);
-    loadCalendar();
+    if (window.__SW_CAL_DRAGV2_ENABLED) { calForgetJobRows(ev.job_id); refreshCalendarQuietly(); }
+    else loadCalendar();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');
   }
@@ -11206,6 +11923,7 @@ function openCalJobPopup(event, assignmentId) {
   event.stopPropagation();
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
+  if (CalOpsCore.isStandIn(ev)) { calRefuseStandIn(); return; }
   _calPopupAssignment = ev;
 
   var popup = document.getElementById('calJobPopup');
@@ -11252,7 +11970,9 @@ function openCalJobPopup(event, assignmentId) {
   _positionCalPopup(popup, event);
 
   // Fetch job_detail and render full content
+  var rowsGen = _calJobRowsGen;
   opsFetch('job_detail', { jobId: ev.job_id }).then(function(data) {
+    if (window.__SW_CAL_DRAGV2_ENABLED) calKeepJobRowsFrom(ev.job_id, data, rowsGen);
     var area = document.getElementById('calPopupDetailArea');
     if (!area || !popup.classList.contains('open')) return;
     var j = data.job;
@@ -11548,7 +12268,7 @@ async function doConfirmAssignment(assignmentId, notify) {
     var siblingIds = [];
     if (ev) {
       _calEvents.forEach(function(e) {
-        if (e.job_id === ev.job_id && e.assignment_id !== assignmentId) {
+        if (e.job_id === ev.job_id && e.assignment_id !== assignmentId && !CalOpsCore.isStandIn(e)) {
           var cs = e.confirmation_status || 'tentative';
           if (cs !== 'confirmed') siblingIds.push(e.assignment_id);
         }
@@ -11631,6 +12351,11 @@ window.rescheduleLockedJob = function(assignmentId) {
 };
 
 function removeAssignment(assignmentId) {
+  var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
+  if (window.__SW_CAL_DRAGV2_ENABLED && ev && ev.job_id && CalOpsCore.isLiveJobRow(ev)) {
+    removeJobFromCalendar(ev);
+    return;
+  }
   showConfirmModal(
     'Remove Assignment',
     'This will remove the assignment from the schedule. The job stays in the pipeline but will become unscheduled.',
@@ -11648,6 +12373,72 @@ function removeAssignment(assignmentId) {
     { danger: true }
   );
 }
+
+// <calendar-job-remove> Remove on a job's booking, in either view, takes the
+// whole allocation off the calendar: every booking of the
+// job on every day, each crew member's and each office watcher (ghost) row,
+// read through the job-scoped read (CalOpsCore.jobRemovalRows), after one
+// confirm naming the job, its crew and its days. The line comes off at once
+// and the deletes run behind it; any booking the server keeps (an invoiced
+// one) goes back on and is named by person and day.
+async function removeJobFromCalendar(ev) {
+  var jobId = ev.job_id;
+  if (_calSavingJobs[jobId]) { showToast('Still saving the last change to this job', 'warning'); return; }
+  var jobRows = await calJobRows(jobId);
+  if (!jobRows) { showToast('Not removed - could not read this job\'s bookings. Try again.', 'warning'); return; }
+  var rows = CalOpsCore.jobRemovalRows(CalOpsCore.jobRowsForPlan(_calEvents, jobRows, jobId));
+  var sum = CalOpsCore.removalSummary(rows, crewDisplayName);
+  if (!sum.crew.length) { showToast('Nothing to remove - this job has no bookings left', 'warning'); return; }
+  var title = ((ev.client_name || '').trim() + ' ' + (ev.job_number || '')).trim() || 'this job';
+  var what = sum.crew.length + ' crew across ' + CalOpsCore.dayListLabel(sum.days);
+  var body = 'Remove <strong>' + escapeHtml(title) + '</strong> from the calendar: ' + escapeHtml(what) + '?';
+  body += '<br><span id="calRemoveJobCrew" style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(sum.crew.join(', ')) + ', every day.</span>';
+  body += '<br><span style="font-size:12px;color:var(--sw-text-sec);">The job stays in the pipeline but will become unscheduled.</span>';
+  showConfirmModal('Remove from calendar', body, 'Remove', function() {
+    calRemoveJobBookings(jobId, rows, title);
+  }, { danger: true });
+}
+
+async function calRemoveJobBookings(jobId, rows, title) {
+  closeCalJobPopup();
+  var ids = {};
+  rows.forEach(function(r) { ids[r.assignment_id] = true; });
+  var snapshot = _calEvents.slice();
+  _calEvents = _calEvents.filter(function(e) { return !ids[e.assignment_id]; });
+  renderCalendar();
+  _calSavingJobs[jobId] = true;
+  _calSavesInFlight++;
+  var results;
+  try {
+    results = await Promise.allSettled(rows.map(function(r) {
+      return opsPost('delete_assignment', { assignmentId: r.assignment_id });
+    }));
+  } finally {
+    _calSavesInFlight--;
+    delete _calSavingJobs[jobId];
+    calForgetJobRows(jobId);
+  }
+  var kept = [];
+  results.forEach(function(r, i) { if (r.status === 'rejected') kept.push({ ev: rows[i], error: r.reason }); });
+  var reason = function(k) { return (k.error && k.error.message) || String(k.error || 'the delete failed'); };
+  if (kept.length === rows.length) {
+    if (_calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
+    showToast('Not removed: ' + title + ' - ' + reason(kept[0]) + '. The calendar shows what was saved.', 'warning');
+  } else if (kept.length) {
+    var keptIds = {};
+    kept.forEach(function(k) { keptIds[k.ev.assignment_id] = true; });
+    _calEvents = _calEvents.concat(snapshot.filter(function(e) { return keptIds[e.assignment_id]; }));
+    renderCalendar();
+    showToast('Removed ' + title + ' from the calendar, except: ' + kept.map(function(k) {
+      return crewDisplayName(k.ev) + ' on ' + fmtDate(k.ev.scheduled_date) + ' (' + reason(k) + ')';
+    }).join(', '), 'warning');
+  } else {
+    showToast('Removed ' + title + ' from the calendar', 'success');
+  }
+  refreshCalendarQuietly();
+  calRefreshUnschedSidebar();
+}
+// </calendar-job-remove>
 
 function handleCalEventDelete(assignmentId) {
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
@@ -11670,7 +12461,7 @@ function handleCalEventDelete(assignmentId) {
 function openBulkConfirm() {
   var unlockedCount = _calEvents.filter(function(ev) {
     var cs = ev.confirmation_status || 'tentative';
-    return cs === 'tentative' || cs === 'placeholder';
+    return (cs === 'tentative' || cs === 'placeholder') && !CalOpsCore.isStandIn(ev);
   }).length;
   if (unlockedCount === 0) { showToast('No unconfirmed assignments', 'warning'); return; }
   document.getElementById('calBulkText').textContent = 'Confirm ' + unlockedCount + ' assignment' + (unlockedCount > 1 ? 's' : '') + '?';
@@ -11684,7 +12475,7 @@ function closeBulkBar() {
 async function executeBulkConfirm() {
   var unlocked = _calEvents.filter(function(ev) {
     var cs = ev.confirmation_status || 'tentative';
-    return cs === 'tentative' || cs === 'placeholder';
+    return (cs === 'tentative' || cs === 'placeholder') && !CalOpsCore.isStandIn(ev);
   });
   closeBulkBar();
 
@@ -12056,9 +12847,11 @@ function __renderedStagesFor(typeKey) {
   // 2026-05-04 fix: comment above (line 6818) listed processing+deposit as preserved
   // but the array was missing them. Caused per-type kanbans (fencing/patio tabs) to
   // silently drop jobs in those statuses even after the backend column-bucketing fix.
-  // Q2 (2026-05-03) shows 2 live `processing` jobs (1 fencing, 1 patio); 0 deposit
-  // jobs today but kept for forward-compatibility.
-  var preserve = ['schedule_install', 'rectification', 'final_payment', 'get_review', 'processing', 'deposit'];
+  // Q2 (2026-05-03) shows 2 live `processing` jobs (1 fencing, 1 patio).
+  // `deposit` is a legacy duplicate of Awaiting Deposit (Captain 2026-10-26: hide
+  // it). It is not a standing column: __stagesWithHeldDeposit adds it back only
+  // while a job still holds that status, so such a job never vanishes.
+  var preserve = ['schedule_install', 'rectification', 'final_payment', 'get_review', 'processing'];
   preserve.forEach(function (p) {
     if (canonical.indexOf(p) === -1) {
       // insert in stage_order position
@@ -12079,6 +12872,15 @@ function __renderedStagesFor(typeKey) {
 var FENCING_STAGES = __renderedStagesFor('fencing');
 var PATIO_STAGES = __renderedStagesFor('patio');
 var DECKING_STAGES = __renderedStagesFor('decking');
+// <deposit-column-hidden> The legacy Deposit column shows, right after Awaiting
+// Deposit, only when a job still has status `deposit`; otherwise it is hidden.
+function __stagesWithHeldDeposit(stages, columns) {
+  if (!columns || !(columns.deposit || []).length || stages.indexOf('deposit') !== -1) return stages;
+  var out = stages.slice();
+  var at = out.indexOf('awaiting_deposit');
+  if (at === -1) out.push('deposit'); else out.splice(at + 1, 0, 'deposit');
+  return out;
+}
 // Release 12 (Rescue SES): 'decision_required' is the Captain Decision column —
 // cards whose evidence contradicts itself (e.g. closed with no issued invoice and
 // no report). The engine refuses to guess their column; the captain resolves each
@@ -12134,7 +12936,7 @@ function renderJobs(data) {
 }
 
 function renderFencingKanban(container, columns) {
-  var parts = __partitionStages(FENCING_STAGES);
+  var parts = __partitionStages(__stagesWithHeldDeposit(FENCING_STAGES, columns));
   var html = '<div style="display:flex;gap:8px;height:100%;">';
   html += __renderSalesDrawer(columns, parts.sales);
   html += '<div class="kanban-container" style="flex:1;">';
@@ -12181,7 +12983,7 @@ function renderFencingKanban(container, columns) {
 }
 
 function renderPatioKanban(container, columns) {
-  var stages = _pipelineTab === 'decking' ? DECKING_STAGES : PATIO_STAGES;
+  var stages = __stagesWithHeldDeposit(_pipelineTab === 'decking' ? DECKING_STAGES : PATIO_STAGES, columns);
   var parts = __partitionStages(stages);
   var html = '<div style="display:flex;gap:8px;height:100%;">';
   html += __renderSalesDrawer(columns, parts.sales);
@@ -17188,9 +17990,7 @@ function renderKanbanCard(j, status) {
       + '</a>';
   }
   if (j.type && j.type !== 'miscellaneous') {
-    var scopeUrl = j.type === 'fencing'
-      ? 'https://marninms98-dotcom.github.io/fence-designer/?jobId=' + j.id
-      : 'https://marninms98-dotcom.github.io/patio/?jobId=' + j.id;
+    var scopeUrl = scopeToolUrlFor(j.type, j) + '?jobId=' + j.id;
     iconRow += '<a class="kanban-icon-btn" href="' + scopeUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open scope tool">'
       + '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
       + '</a>';
@@ -17222,6 +18022,8 @@ function renderKanbanCard(j, status) {
   // <job-closeout-tags> fencing and patio close-out tags (while ?closeout=preview is on)
   // and the live Review text switch
   if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
+  // <job-deposit-flag> deposit voided or unpaid after the move (modules/ops-job-deposit-flag.js)
+  if (window.DepositFlagOps) html += DepositFlagOps.cardHtml(j, status);
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
   // Repair cards only: say so when the persisted board stage and the job's own
@@ -17297,11 +18099,12 @@ function kanbanDragAllowed(fromStatus, toStatus) {
   if (_pipelineTab === 'fencing') {
     // Free movement: any fencing stage → any other fencing stage (incl. archived). No cancelled.
     var allFencing = FENCING_STAGES.concat(['archived']);
-    return allFencing.indexOf(fromStatus) !== -1 && allFencing.indexOf(toStatus) !== -1;
+    // A held legacy `deposit` job may be dragged out, never into it (<deposit-column-hidden>).
+    return (allFencing.indexOf(fromStatus) !== -1 || fromStatus === 'deposit') && allFencing.indexOf(toStatus) !== -1;
   }
   if (_pipelineTab === 'patio' || _pipelineTab === 'decking') {
     var allPatio = PATIO_STAGES.concat(['archived']);
-    return allPatio.indexOf(fromStatus) !== -1 && allPatio.indexOf(toStatus) !== -1;
+    return (allPatio.indexOf(fromStatus) !== -1 || fromStatus === 'deposit') && allPatio.indexOf(toStatus) !== -1;
   }
   if (_pipelineTab === 'makesafes') {
     return MAKESAFES_STAGES.indexOf(fromStatus) !== -1 && MAKESAFES_STAGES.indexOf(toStatus) !== -1;
@@ -18071,7 +18874,11 @@ function renderPOTable(pos) {
     html += '<td>' + fmtDate(po.delivery_date) + '</td>';
     html += '<td>' + poStatusBadge(po.status) + '</td>';
     html += '<td>';
-    if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
+    // Dispatch v2: an order made in the Dispatch tab is sent from there and
+    // never pushed to Xero from this board (the backend refuses it too).
+    if (isDispatchPO(po)) {
+      html += '<span style="font-size:11px; color:var(--sw-text-sec);">Made in Dispatch</span>';
+    } else if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
       html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Add to Xero for approval</button>';
     }
     if (po.job_id) {
@@ -19829,6 +20636,40 @@ function poStatusBadge(status) {
 }
 // </po-board-columns>
 
+// <po-board-active-jobs>
+// The Dispatch purchase order board shows only orders on jobs still being
+// worked (Shaun, 26 Oct 2026: a finished job's old draft, like SWF-26824,
+// has no place there). An order with no job, or on a finished job, is kept
+// off the board, its alerts and its filter lists. Nothing is deleted, and
+// Financials > Purchase Orders still lists every order. This board is the
+// only place for Delete PO, Invoice Rcvd and Mark Paid, so Show them puts the
+// hidden orders back until the page is reloaded. list_pos sends job_status
+// (backend #1170); until it does, every order with a job shows.
+var PO_FINISHED_JOB_STATUSES = ['complete', 'invoiced', 'final_payment', 'get_review', 'archived', 'cancelled', 'lost'];
+var _matShowFinished = false;
+function poOnActiveJob(po) {
+  return !!(po && po.job_id) && PO_FINISHED_JOB_STATUSES.indexOf(po.job_status) < 0;
+}
+function poBoardOrders() { return _matShowFinished ? _allPOs.slice() : _allPOs.filter(poOnActiveJob); }
+function renderMatHiddenNote() {
+  var el = document.getElementById('matHiddenNote');
+  if (!el) return;
+  var hidden = _allPOs.filter(function(po) { return poBoardColumnOf(po.status) !== '' && !poOnActiveJob(po); }).length;
+  el.style.display = hidden ? '' : 'none';
+  if (!hidden) { el.innerHTML = ''; return; }
+  var words = (hidden === 1 ? '1 order is' : hidden + ' orders are') + ' on a finished job or no job. ' +
+    (_matShowFinished ? 'They are shown below.' : 'They are not shown here. Financials > Purchase Orders lists every order.');
+  el.innerHTML = escapeHtml(words) + ' <button type="button" class="btn btn-secondary btn-sm" data-mat-show-finished style="font-size:11px; padding:2px 8px;" onclick="toggleMatShowFinished()">' +
+    (_matShowFinished ? 'Hide them' : 'Show them') + '</button>';
+}
+function toggleMatShowFinished() {
+  _matShowFinished = !_matShowFinished;
+  renderMaterialsKanban();
+  if (document.getElementById('matAdvFilters') && document.getElementById('matAdvFilters').style.display !== 'none') populateMatFilterDropdowns();
+  updateJarvisSummary();
+}
+// </po-board-active-jobs>
+
 // ── Materials Advanced Filter State ──
 var _matFilterJob = '';
 var _matFilterSupplier = '';
@@ -19860,7 +20701,8 @@ function populateMatFilterDropdowns() {
   // Job dropdown
   var jobSel = document.getElementById('matFilterJob');
   var jobs = {};
-  _allPOs.forEach(function(po) {
+  // See <po-board-active-jobs>.
+  poBoardOrders().forEach(function(po) {
     if (po.job_id && po.job_number) {
       jobs[po.job_id] = (po.job_number || '') + ' — ' + (po.client_name || '');
     }
@@ -19874,7 +20716,7 @@ function populateMatFilterDropdowns() {
   // Supplier dropdown
   var supSel = document.getElementById('matFilterSupplier');
   var suppliers = {};
-  _allPOs.forEach(function(po) { if (po.supplier_name) suppliers[po.supplier_name] = true; });
+  poBoardOrders().forEach(function(po) { if (po.supplier_name) suppliers[po.supplier_name] = true; });
   var supHtml = '<option value="">All Suppliers</option>';
   Object.keys(suppliers).sort().forEach(function(s) {
     supHtml += '<option value="' + escapeHtml(s) + '"' + (_matFilterSupplier === s ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
@@ -19920,7 +20762,8 @@ function renderMatAlerts() {
   var now = Date.now();
   var alerts = [];
 
-  _allPOs.forEach(function(po) {
+  // See <po-board-active-jobs>.
+  poBoardOrders().forEach(function(po) {
     if (['', 'draft', 'quote_requested'].indexOf(poBoardColumnOf(po.status)) >= 0) return;
     if (po.invoice_received_at || po.paid_at) return;
     var sinceDate = po.confirmed_at || po.ordered_at || po.created_at;
@@ -19953,13 +20796,14 @@ function renderMatAlerts() {
 function renderMaterialsKanban() {
   // Also render threshold alerts
   renderMatAlerts();
+  renderMatHiddenNote();
 
-  // See <po-board-columns>.
+  // See <po-board-columns> and <po-board-active-jobs>.
   var stages = PO_BOARD_COLUMNS.concat([PO_BOARD_OTHER_COLUMN]);
   var mainKeys = PO_BOARD_COLUMNS.map(function(c) { return c.key; });
 
   // Apply type filter
-  var filtered = _allPOs.filter(function(po) { return poBoardColumnOf(po.status) !== ''; });
+  var filtered = poBoardOrders().filter(function(po) { return poBoardColumnOf(po.status) !== ''; });
   if (_matTypeFilter !== 'all') {
     filtered = filtered.filter(function(po) { return po.job_type === _matTypeFilter; });
   }
@@ -20100,14 +20944,20 @@ function renderMaterialsKanban() {
 
       // FEATURE 7: Lifecycle action buttons + BUG 3: Open Job (fixed to use openJobQuickView)
       html += '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">';
-      // Log Email
-      html += '<button onclick="event.stopPropagation();openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993; Email</button>';
+      // Log Email. Not on an order made in the Dispatch tab: it is emailed
+      // from the job's Dispatch tab, and the backend refuses it here.
+      var fromDispatch = isDispatchPO(po);
+      if (fromDispatch) {
+        html += '<span class="po-dispatch-note" style="font-size:10px;padding:2px 0;color:var(--sw-text-sec);">Made in Dispatch. Send it from the job\'s Dispatch tab.</span>';
+      } else {
+        html += '<button onclick="event.stopPropagation();openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993; Email</button>';
+      }
       // Open Job (BUG 3 — fixed: opens job detail, not patio tool)
       if (po.job_id) {
         html += '<button onclick="event.stopPropagation();openJobQuickView(\'' + po.job_id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">Job</button>';
       }
       // Approve & Send button for draft POs
-      if (stage.key === 'draft') {
+      if (stage.key === 'draft' && !fromDispatch) {
         html += '<button onclick="event.stopPropagation();approveAndSendPO(\'' + po.id + '\',this)" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-green);border-radius:3px;background:var(--sw-green);cursor:pointer;color:#fff;font-weight:600;">Approve &amp; Send</button>';
       }
       // FEATURE 7: Lifecycle buttons
@@ -20178,7 +21028,7 @@ function renderJobPeek(data) {
     html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">View in GHL &#8599;</a>';
   }
   if (j.type !== 'miscellaneous') {
-    var scopeToolUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeToolUrl = scopeToolUrlFor(j.type, j);
     html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">Open Scope &#8599;</a>';
   }
   html += '<button class="btn btn-primary btn-sm" style="font-size:11px; padding:3px 8px;" onclick="closeSlidePanel(); openJobDetail(\'' + j.id + '\')">Open Record</button>';
@@ -20630,6 +21480,14 @@ function renderScopeSummary(scope_json, jobType, jobId) {
   var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
   if (!scope) return '<div style="font-size:12px; color:var(--sw-text-sec); padding:4px 0;">No scope data</div>';
 
+  // A Scope Engine record: its revision, then what was scoped (modules/job-scope-record.js).
+  var engineRec = window.JobScopeRecord ? JobScopeRecord.read({ id: jobId, type: jobType, scope_json: scope }) : null;
+  if (engineRec && engineRec.kind === 'engine-patio') {
+    return '<div style="font-size:12px;padding:6px 0;line-height:1.6;">' + JobScopeRecord.revisionStripHtml(engineRec) +
+      JobScopeRecord.groupedFactsHtml(engineRec) + JobScopeRecord.notesHtml(engineRec) +
+      (jobId ? '<div style="margin-top:6px;">' + JobScopeRecord.openLinkHtml(engineRec, jobId) + '</div>' : '') + '</div>';
+  }
+
   var config = scope.config || scope;
   var badgeStyle = 'display:inline-block;font-size:11px;font-weight:600;padding:3px 8px;margin:2px 3px 2px 0;background:var(--sw-light);color:var(--sw-dark);border-left:3px solid var(--sw-mid);';
   var html = '<div style="font-size:12px; padding:6px 0; line-height:1.6;">';
@@ -20691,7 +21549,7 @@ function renderScopeSummary(scope_json, jobType, jobId) {
   }
 
   // Scope tool link
-  var scopeToolUrl = jobType === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+  var scopeToolUrl = scopeToolUrlFor(jobType, { type: jobType, scope_json: scope });
   var linkId = jobId || scope.jobId || '';
   if (linkId) {
     html += '<div style="margin-top:6px;"><a href="' + scopeToolUrl + '?jobId=' + linkId + '" target="_blank" style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;">&#128279; Open in Scope Tool &#8599;</a></div>';
@@ -22670,6 +23528,29 @@ function renderMakesafeOpsDetail(data) {
   return html;
 }
 
+// <job-dispatch-stage> The job page's Dispatch card: accepted work only (ops-api
+// DISPATCH_LIST_STATUSES is every pipeline status except draft and quoted), read
+// through modules/ops-dispatch.js so it shows exactly what Dispatch would.
+function jobOnDispatchList(j) {
+  return !!(j && j.type !== 'makesafe' && j.job_number && ['draft', 'quoted', 'cancelled', 'lost'].indexOf(j.status) < 0 && window.OpsDispatch && OpsDispatch.stageForJob);
+}
+function paintJobDispatchStage(j) {
+  if (!jobOnDispatchList(j) || !document.getElementById('jdDispatchStage')) return;
+  OpsDispatch.stageForJob(j).then(function(result) {
+    var el = document.getElementById('jdDispatchStage');
+    if (!el || _currentJobId !== j.id) return;
+    el.innerHTML = OpsDispatch.stageCardHtml(result);
+    var link = el.querySelector('[data-open-dispatch]');
+    if (link) link.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      OpsDispatch.openJob(j.id);
+      if (typeof closeJobDetail === 'function') closeJobDetail(true);
+      showView('dispatch');
+    });
+  });
+}
+// </job-dispatch-stage>
+
 function renderOverviewView(data) {
   var j = data.job;
   if (j.type === 'makesafe') {
@@ -22712,7 +23593,10 @@ function renderOverviewView(data) {
   // Section 2: Job Summary
   html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
   var scopeDesc = typeBadgeLabel(j.type) + ' project';
-  if (j.scope_json) {
+  var scopeRec = window.JobScopeRecord ? JobScopeRecord.read(j) : null;
+  if (scopeRec && JobScopeRecord.summaryLine(scopeRec)) {
+    scopeDesc = JobScopeRecord.summaryLine(scopeRec);
+  } else if (j.scope_json) {
     var sc = j.scope_json.config || j.scope_json;
     var parts = [];
     if (sc.length && sc.projection) parts.push(sc.length + 'm x ' + sc.projection + 'm');
@@ -22729,16 +23613,23 @@ function renderOverviewView(data) {
   var marginPct = quoteVal > 0 ? (margin / quoteVal * 100).toFixed(0) : 0;
   var marginColor = marginPct >= 35 ? 'var(--sw-green)' : marginPct >= 25 ? 'var(--sw-yellow)' : 'var(--sw-red)';
   html += '<div style="display:flex;gap:16px;align-items:baseline;">';
-  html += '<span style="font-size:20px;font-weight:700;color:var(--sw-dark);font-family:var(--sw-font-num);">' + fmt$(quoteVal) + '</span>';
+  var quoteNotKnown = !quoteVal && scopeRec && scopeRec.kind === 'engine-patio' && scopeRec.money.saleIncGst == null;
+  html += '<span style="font-size:20px;font-weight:700;color:var(--sw-dark);font-family:var(--sw-font-num);">' + (quoteNotKnown ? 'Not priced yet' : fmt$(quoteVal)) + '</span>';
   if (quoteVal > 0 && poCosts > 0) html += '<span style="font-size:13px;font-weight:600;color:' + marginColor + ';">' + marginPct + '% margin (' + fmt$(margin) + ')</span>';
+  else if (scopeRec && JobScopeRecord.estimatedMargin(scopeRec)) html += '<span style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(JobScopeRecord.estimatedMargin(scopeRec).words) + '</span>';
   html += '</div>';
   html += '<div style="margin-top:8px;font-size:11px;display:flex;gap:12px;">';
   if (j.type !== 'miscellaneous') {
-    var scopeUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeUrl = scopeToolUrlFor(j.type, j);
     html += '<a href="' + scopeUrl + '?jobId=' + j.id + '" target="_blank" style="color:var(--sw-mid);">Open Scope &#8599;</a>';
   }
   if (j.ghl_opportunity_id) html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" style="color:var(--sw-mid);">View in GHL &#8599;</a>';
   html += '</div></div>';
+
+  // The Scope Engine's sealed scope and its documents (modules/job-scope-record.js).
+  if (scopeRec && scopeRec.kind === 'engine-patio') html += JobScopeRecord.scopeCardHtml(scopeRec, j.id);
+  // Where the job is on Dispatch's stage rail, filled in after the page paints (paintJobDispatchStage).
+  if (jobOnDispatchList(j)) html += '<div id="jdDispatchStage"></div>';
 
   // Fencing scoping tool notes (Site/Final/Removal/Supplier) — the Overview tab is
   // the drawer's default tab and does not go through renderScopeSummary, so this
@@ -22767,6 +23658,8 @@ function renderOverviewView(data) {
   // <job-closeout-tags> the same close-out tags (preview only) and live Review text
   // switch on the job page
   if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
+  // <job-deposit-flag> the same flag on the job page, with Mark dealt with
+  if (window.DepositFlagOps) html += DepositFlagOps.detailHtml(data);
   var nextStatuses = getNextStatuses(j.status, j.type);
   nextStatuses.forEach(function(s) {
     var color = s === 'cancelled' ? 'var(--sw-red)' : 'var(--sw-dark)';
@@ -22937,6 +23830,7 @@ function renderOverviewView(data) {
   if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
   if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
   if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
+  paintJobDispatchStage(j);
 
   // Load job actions async
   loadJobActions(j.id);
@@ -23324,6 +24218,7 @@ function toggleQuoteDetailExpand(docId) {
 
 function renderMoneyView(data) {
   var j = data.job;
+  var scopeRec = window.JobScopeRecord ? JobScopeRecord.read(j) : null;
   var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
   var costEstimate = j.pricing_json?.costEstimate || j.pricing_json?.totalCost || j.pricing_json?.cost || 0;
   var poCosts = (data.purchase_orders || []).reduce(function(s, po) { return s + (po.total || 0); }, 0);
@@ -23341,9 +24236,18 @@ function renderMoneyView(data) {
   // Revenue column
   html += '<div class="jd-money-col">';
   html += '<div class="jd-money-heading">Revenue</div>';
-  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + fmt$(quoteVal) + '</strong></div>';
-  // Quote breakdown — show what was actually quoted
-  if (j.scope_json) {
+  // An engine job with no price is not a $0 quote: say so, as the Overview does.
+  var quoteNotKnown = !quoteVal && scopeRec && scopeRec.kind === 'engine-patio' && scopeRec.money.saleIncGst == null;
+  html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Quote Value</span><strong>' + (quoteNotKnown ? 'Not priced yet' : fmt$(quoteVal)) + '</strong></div>';
+  // Quote breakdown — show what was actually quoted. A Scope Engine record: one line and its
+  // revision here; the whole sealed scope is under Frozen Revisions below.
+  if (scopeRec && scopeRec.kind === 'engine-patio') {
+    html += '<div style="font-size:12px;padding:6px 0 2px;border-top:1px solid var(--sw-border);margin-top:6px;color:var(--sw-text);line-height:1.6;">';
+    html += '<div>' + escapeHtml(JobScopeRecord.summaryLine(scopeRec)) + '</div>';
+    html += '<div style="color:var(--sw-text-sec);">' + escapeHtml(JobScopeRecord.revisionWords(scopeRec)) + '</div>';
+    html += '<div style="margin-top:4px;">' + JobScopeRecord.openLinkHtml(scopeRec, j.id) + '</div>';
+    html += '</div>';
+  } else if (j.scope_json) {
     html += '<div style="font-size:11px;padding:6px 0 2px;border-top:1px solid var(--sw-border);margin-top:6px;color:var(--sw-text-sec);">';
     html += renderScopeSummary(j.scope_json, j.type, j.id);
     html += '</div>';
@@ -23365,7 +24269,7 @@ function renderMoneyView(data) {
   var quoteDocs = (data.documents || []).filter(function(d) { return d.type === 'quote' || d.type === 'permit_quote'; });
   if (quoteDocs.length > 0) {
     // Scope tool URL for this job type
-    var scopeToolUrl = j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/';
+    var scopeToolUrl = scopeToolUrlFor(j.type, j);
     quoteDocs.forEach(function(doc) {
       var pdfUrl = doc.storage_url || doc.pdf_url || '';
       var quoteNum = doc.quote_number || ('v' + (doc.version || 1));
@@ -23498,6 +24402,8 @@ function renderMoneyView(data) {
   // Costs column
   html += '<div class="jd-money-col">';
   html += '<div class="jd-money-heading">Costs</div>';
+  // What the scope tool sealed: materials, labour, commission, deposit (unknown is said, never $0).
+  if (scopeRec && scopeRec.kind === 'engine-patio') html += JobScopeRecord.costsCardHtml(scopeRec);
   if (costEstimate > 0) {
     html += '<div class="jd-money-card"><div class="jd-money-card-head"><span>Est. Costs</span><strong style="color:var(--sw-text-sec)">' + fmt$(costEstimate) + '</strong></div></div>';
   }
@@ -23535,8 +24441,19 @@ function renderMoneyView(data) {
   }
   html += '</div></div>';
 
-  // Margin bar
-  if (quoteVal > 0) {
+  // Margin bar. With no purchase orders yet, the sealed estimate is the only cost on record: say
+  // that, never "Margin: 100%".
+  var estMargin = scopeRec && poCosts === 0 ? JobScopeRecord.estimatedMargin(scopeRec) : null;
+  if (quoteVal > 0 && estMargin) {
+    var estColor = estMargin.pct >= 25 ? 'var(--sw-green)' : estMargin.pct >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
+    html += '<div class="jd-margin-bar-wrap">';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;">Estimated cost vs quote (no purchase orders yet)</div>';
+    html += '<div class="jd-margin-bar"><div class="jd-margin-bar-cost" style="width:' + Math.max(0, Math.min(100, 100 - estMargin.pct)) + '%;background:var(--sw-mid-light)"></div>';
+    html += '<span class="jd-margin-bar-label" style="color:' + estColor + '">' + escapeHtml(estMargin.words) + '</span></div>';
+    html += '</div>';
+  } else if (quoteVal > 0 && poCosts === 0 && scopeRec && scopeRec.kind === 'engine-patio') {
+    html += '<div class="jd-margin-bar-wrap"><div style="font-size:12px;color:var(--sw-text-sec);">Margin not known yet: no purchase orders and no sealed costs.</div></div>';
+  } else if (quoteVal > 0) {
     var costBarPct = Math.min(100, poCosts / quoteVal * 100);
     html += '<div class="jd-margin-bar-wrap">';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;">Cost vs Quote</div>';
@@ -23579,8 +24496,25 @@ function renderBuildView(data) {
     return;
   }
 
+  // A Scope Engine job: the sealed scope and its material lines, read from the record. The engine
+  // page is not embedded (it opens the live job), so it opens in its own tab.
+  var buildRec = window.JobScopeRecord ? JobScopeRecord.read(j) : null;
+  if (buildRec && buildRec.kind === 'engine-patio') {
+    html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
+    html += '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><span style="font-size:14px;font-weight:700;flex:1;">Scope</span>' + JobScopeRecord.openLinkHtml(buildRec, j.id, 'Open in Scope Engine (3D, documents)') + '</div>';
+    html += JobScopeRecord.revisionStripHtml(buildRec) + JobScopeRecord.groupedFactsHtml(buildRec) + JobScopeRecord.notesHtml(buildRec);
+    html += '</div>';
+    if (buildRec.lines.length) {
+      html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
+      html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Material lines (' + buildRec.lines.length + ')</div>';
+      html += JobScopeRecord.linesHtml(buildRec);
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:6px;">From the sealed revision. Office supplied fixings stay off supplier orders.</div>';
+      html += '</div>';
+    }
+  }
+
   // Embedded scope tool preview (3D/2D render). A make-safe has no patio scope.
-  if (j.type !== 'miscellaneous' && j.type !== 'general' && j.type !== 'makesafe') {
+  if (j.type !== 'miscellaneous' && j.type !== 'general' && j.type !== 'makesafe' && !(buildRec && buildRec.kind === 'engine-patio')) {
     var scopeToolUrl = j.type === 'fencing'
       ? 'https://marninms98-dotcom.github.io/fence-designer/'
       : 'https://marninms98-dotcom.github.io/patio/';
@@ -23591,7 +24525,7 @@ function renderBuildView(data) {
   }
 
   // Scope summary
-  if (j.scope_json) {
+  if (j.scope_json && !(buildRec && buildRec.kind === 'engine-patio')) {
     html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Scope Summary</div>';
     html += renderScopeSummary(j.scope_json, j.type, j.id);
   }
@@ -24424,6 +25358,14 @@ function renderFilesView(data) {
     html += '</div>';
   }
 
+  // The Scope Engine's documents for the sealed revision. They are built from the record in the
+  // Scope Engine (no stored PDF until a quote is sent), so each opens the job there.
+  var filesRec = window.JobScopeRecord ? JobScopeRecord.read(j) : null;
+  if (filesRec && filesRec.kind === 'engine-patio' && filesRec.documents.length) {
+    html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Scope Engine documents' + (filesRec.revision && filesRec.revision.n != null ? ' (Rev ' + escapeHtml(String(filesRec.revision.n)) + ')' : '') + '</div>';
+    html += '<div style="margin-bottom:16px;">' + JobScopeRecord.documentsHtml(filesRec, j.id) + '</div>';
+  }
+
   // Photos
   var jobPhotos = (data.media || []).filter(function(m) {
     return m.phase !== 'receipt' && String(m.type || '').toLowerCase() !== 'video' && !isOpsVideoFile(m.label, '', m.storage_url);
@@ -24665,7 +25607,8 @@ function renderFilesView(data) {
     html += '</tbody></table></div></div>';
   }
 
-  if (!readiness && jobPhotos.length === 0 && receiptPhotos.length === 0 && (data.documents || []).length === 0 && workOrders.length === 0) {
+  var hasEngineDocs = !!(filesRec && filesRec.kind === 'engine-patio' && filesRec.documents.length);
+  if (!readiness && !hasEngineDocs && jobPhotos.length === 0 && receiptPhotos.length === 0 && (data.documents || []).length === 0 && workOrders.length === 0) {
     html = '<div class="empty-state"><div class="empty-state-icon">&#128247;</div><div class="empty-state-text">No files yet</div></div>';
   }
 
@@ -25829,6 +26772,22 @@ function getNextStatuses(current, jobType) {
     };
     return ft[current] || [];
   }
+  if (jobType === 'patio') {
+    // Patio can wait on its deposit like fencing (Captain 2026-10-26), then
+    // carries on through approvals / processing as before.
+    var pt = {
+      'quoted': ['accepted', 'cancelled'],
+      'accepted': ['awaiting_deposit', 'approvals', 'processing'],
+      'awaiting_deposit': ['approvals', 'processing'],
+      'approvals': ['processing'],
+      'processing': ['in_progress'],
+      'scheduled': ['in_progress', 'cancelled'],
+      'in_progress': ['complete', 'cancelled'],
+      'complete': ['invoiced'],
+      'invoiced': [],
+    };
+    return pt[current] || [];
+  }
   var transitions = {
     'quoted': ['accepted', 'cancelled'],
     'accepted': ['approvals', 'processing'],
@@ -26558,7 +27517,7 @@ async function submitAssignment() {
       // Sync dates to sibling assignments (other crew on same job)
       if (editEv && editEv.job_id) {
         var siblings = _calEvents.filter(function(e) {
-          return e.job_id === editEv.job_id && e.assignment_id !== _editAssignmentId;
+          return e.job_id === editEv.job_id && e.assignment_id !== _editAssignmentId && !CalOpsCore.isStandIn(e);
         });
         for (var s = 0; s < siblings.length; s++) {
           try {
@@ -27026,6 +27985,20 @@ function scanSupplierQuote(poId) {
   input.click();
 }
 
+// Dispatch v2: a purchase order made in the Dispatch tab (source 'dispatch').
+// The old PO board hides its Push to Xero, Email and Approve & Send for it.
+function isDispatchPO(po) { return !!po && po.source === 'dispatch'; }
+
+var DISPATCH_PO_WORDS = 'This order was made in the Dispatch tab. Send it from the job\'s Dispatch tab instead.';
+
+// The backend's own words when it refuses a Dispatch order on an old path
+// (409 {error, code: 'dispatch_po_refused', action, po_id}); null otherwise.
+function dispatchPORefusedText(err) {
+  if (!err || err.code !== 'dispatch_po_refused') return null;
+  var b = err.body || {};
+  return (typeof b.error === 'string' && b.error) || DISPATCH_PO_WORDS;
+}
+
 async function pushPOToXero(poId) {
   if (!confirm('Add this PO to Xero for approval?')) return;
   try {
@@ -27033,6 +28006,8 @@ async function pushPOToXero(poId) {
     showToast('PO awaiting approval in Xero', 'success');
     loadPOs();
   } catch (e) {
+    var refused = dispatchPORefusedText(e);
+    if (refused) { showToast(refused, 'warning'); loadPOs(); return; }
     alert('Failed to push PO: ' + e.message);
   }
 }
@@ -27462,7 +28437,8 @@ function updateJarvisSummary() {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
     }
   } else if (view === 'dispatch') {
-    var poCount = _allPOs ? _allPOs.length : 0;
+    // The orders on the Dispatch board (see <po-board-active-jobs>).
+    var poCount = poBoardOrders().filter(function(po) { return poBoardColumnOf(po.status) !== ''; }).length;
     if (!_allPOsLoaded) text = 'Purchase orders loading...';
     else text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
   } else if (view === 'inbox') {
@@ -28650,6 +29626,8 @@ async function approveAndSendPO(poId, btnEl) {
     showToast('PO approved and sent to supplier', 'success');
     loadMaterials();
   } catch(e) {
+    var refused = dispatchPORefusedText(e);
+    if (refused) { showToast(refused, 'warning'); loadMaterials(); return; }
     showToast('Error: ' + e.message, 'warning');
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Approve & Send'; }
   }
@@ -29447,6 +30425,7 @@ function openPOEmailCompose(poId) {
 
   var po = _allPOs.find(function(p) { return p.id === poId; });
   if (!po) { showToast('PO not found', 'warning'); return; }
+  if (isDispatchPO(po)) { showToast(DISPATCH_PO_WORDS, 'warning'); return; }
 
   // Find supplier email
   var supplierEmail = '';
@@ -29547,6 +30526,11 @@ async function sendPOEmail() {
     }
   }
 
+  // Dispatch v2: never for an order made in the Dispatch tab. Checked before
+  // the supplier email save below, so nothing is written for it.
+  var composePo = _allPOs.find(function(p) { return p.id === poId; });
+  if (isDispatchPO(composePo)) { showToast(DISPATCH_PO_WORDS, 'warning'); return; }
+
   // Try to save supplier email if it was manually entered
   if (supplierName && to) {
     var existingSup = _suppliers.find(function(s) { return s.name === supplierName; });
@@ -29574,6 +30558,12 @@ async function sendPOEmail() {
         attach_pdf: attachPDF
       })
     });
+    if (resp.status === 409) {
+      // The backend refused a Dispatch order: say so, and log nothing.
+      var refusal = await resp.json().catch(function() { return {}; });
+      var refusedText = dispatchPORefusedText({ code: refusal.code, body: refusal });
+      if (refusedText) { showToast(refusedText, 'warning'); return; }
+    }
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var result = await resp.json();
     if (result.error) throw new Error(result.error);

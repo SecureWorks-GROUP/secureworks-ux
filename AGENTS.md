@@ -174,15 +174,22 @@ per-assignment blocks) and Schedule (`renderScheduleView`, job-grouped bars;
 the active view persists in `localStorage.sw_cal_view_mode`, so one click on
 the toggle silently sticks forever — this is how "drag is broken" shipped once
 already: only Crew view had drag wiring). Schedule-view drops carry only a DAY
-(no crew rows — a drop there never reassigns) and move the WHOLE JOB
-(`moveSchedSegment` → `CalOpsCore.planJobMove`): the drop day is the job's new
-first day, whichever piece was grabbed, and every live (not ghost, cancelled or
-completed) row of the job moves by the same working days, keeping its own
-`user_id`. The bar's edge handles sit on the job's first and last day for any
-crew count and stretch it for everyone (`stretchSchedJob` →
+(no crew rows — a drop there never reassigns) and move ONLY THE GRABBED BAR
+(Captain 2026-10-27, each booking stands on its own; `moveSchedSegment` →
+`CalOpsCore.barRows` → `CalOpsCore.planJobMove`): the bar's live (not ghost,
+cancelled or completed) rows move by the same working days, the drop day their
+new first day, each keeping its own `user_id`; the job's other days, in view
+or not, never move with it, and being out of view never refuses it (no "widen
+the view" refusal). Only the same person's booking of the job already on a
+target date refuses the drop, naming the person and day (Shaun, 27 Oct).
+The bar's edge handles sit on that bar's own first and last day for any crew
+count and stretch it for everyone on it (`stretchSchedJob` →
 `CalOpsCore.planJobStretch`): per-day crews gain `create_assignment` rows with
 `suppress_notifications: true` or lose deleted rows (an invoiced row's refusal
-is shown in words), spanning rows move their own end. Crew-view callers keep
+is shown in words), spanning rows move their own end. The popup's Remove
+(`// <calendar-job-remove>`) takes one person off one day, or clears one day
+(`CalOpsCore.planDayRemoval`); every booking comes off only from the explicit
+"Remove whole job from calendar", which keeps invoiced days. Crew-view callers keep
 name resolution because it powers cross-row reassignment. Every move shows ONE
 combined "Crew Unavailable" confirm across every affected crew
 (Captain ruling — never one modal per crew). With dragv2 ON a Crew-view
@@ -212,9 +219,9 @@ safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
 window PLUS the dragged job's full assignment set from the existing
 `job_detail` read (`calJobRows`, started at drag start and cached a minute;
 no lighter ops-api read exists) — because the window alone is blind past its edge and when
-the feed is truncated. The job's own rows move together, so they never block it. A job-level Schedule-bar drag is all-or-nothing: if any
-crew chain would collide with a row that stays put (a cancelled or completed
-one), nothing is written,
+the feed is truncated. The bar's own rows move together, so they never block it. A Schedule-bar drag is all-or-nothing: if any
+crew chain would collide with a row that stays put (another booking of the job,
+or a cancelled or completed one), nothing is written,
 every row stays where it is, and one warning toast names the blocking existing
 visits counted as real holders (`staged.blockers`), never cascaded candidates.
 A single-row move/resize onto a held date is skipped with both visits kept,

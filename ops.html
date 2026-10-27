@@ -6543,6 +6543,14 @@ function fmtDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// A money field as read: a number, or null when it is missing, so fmt$ shows
+// Unknown instead of a $0 filled in here (INT-35). A true 0 stays 0.
+function moneyOrNull(v) {
+  if (v == null || v === '') return null;
+  var n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
 function fmtTime(t) {
   if (!t) return '';
   return t.slice(0, 5);
@@ -7825,8 +7833,8 @@ function renderTodayStats(stats, kpis) {
 
   el('valJobsWeek').textContent = stats.jobs_this_week;
   el('valMaterials').textContent = stats.awaiting_materials;
-  el('valOverdue').textContent = stats.overdue_invoices.count;
-  el('subOverdue').textContent = fmt$(stats.overdue_invoices.total) + ' total';
+  el('valOverdue').textContent = stats.overdue_invoices ? stats.overdue_invoices.count : 'Unknown';
+  el('subOverdue').textContent = fmt$(stats.overdue_invoices && stats.overdue_invoices.total) + ' total';
   el('valQuotes').textContent = stats.quotes_pending;
   el('valCompleted').textContent = kpis.jobs_completed_month;
   el('subCompleted').textContent = 'Target: ' + kpis.jobs_target;
@@ -18563,17 +18571,30 @@ async function loadInvoices() {
     renderInvoiceTable(_allInvoices);
   } catch (e) {
     console.error('loadInvoices error:', e);
+    _invoiceSummaryCache = null;
+    renderInvoiceStats(null, 'invoices could not be read');
     showToast('Failed to load invoices', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadInvoices()' }
     ]);
   }
 }
 
-function renderInvoiceStats(summary) {
+// A failed or missing summary reads Unknown with its reason, never $0.00
+// (INT-35). summary_error is ops-api's reason code when it could not total the
+// open invoices (backend docs/invoice-read-truth.md); the page says it in words.
+var INVOICE_SUMMARY_ERROR_WORDS = {
+  open_invoice_read_failed: 'open invoices could not be read',
+  open_invoice_amount_due_missing: 'an open invoice has no amount due',
+  open_invoice_read_incomplete: 'not every open invoice was read'
+};
+function renderInvoiceStats(summary, failedReason) {
   var container = document.getElementById('invoiceStats');
+  var code = summary && summary.summary_error;
+  var why = failedReason || (code ? (INVOICE_SUMMARY_ERROR_WORDS[code] || 'open invoices not totalled') : '') || (summary ? '' : 'summary not read');
+  summary = summary || {};
   container.innerHTML =
-    '<div class="stat-card"><div class="stat-body"><div class="stat-label">Owed</div><div class="stat-value">' + fmt$(summary.outstanding) + '</div></div></div>' +
-    '<div class="stat-card ' + (summary.overdue > 0 ? 'rag-red' : 'rag-green') + '"><div class="stat-body"><div class="stat-label">Owed · past due</div><div class="stat-value">' + fmt$(summary.overdue) + '</div></div></div>' +
+    '<div class="stat-card"><div class="stat-body"><div class="stat-label">Owed</div><div class="stat-value">' + fmt$(summary.outstanding, why) + '</div></div></div>' +
+    '<div class="stat-card ' + (summary.overdue > 0 ? 'rag-red' : moneyOrNull(summary.overdue) === 0 ? 'rag-green' : '') + '"><div class="stat-body"><div class="stat-label">Owed · past due</div><div class="stat-value">' + fmt$(summary.overdue, why) + '</div></div></div>' +
     '<div class="stat-card"><div class="stat-body"><div class="stat-label">Total Records</div><div class="stat-value">' + (summary.total || '-') + '</div></div></div>';
 }
 
@@ -18711,9 +18732,9 @@ function showGlobalInvoicePreview(inv) {
   }
 
   // Totals
-  var subTotal = parseFloat(inv.sub_total) || 0;
-  var totalTax = parseFloat(inv.total_tax) || 0;
-  var total = parseFloat(inv.total) || 0;
+  var subTotal = moneyOrNull(inv.sub_total);
+  var totalTax = moneyOrNull(inv.total_tax);
+  var total = moneyOrNull(inv.total);
   html += '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><div style="min-width:220px;">';
   html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;"><span>Subtotal:</span><span style="font-family:var(--sw-font-num);">' + fmt$(subTotal) + '</span></div>';
   html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;"><span>GST:</span><span style="font-family:var(--sw-font-num);">' + fmt$(totalTax) + '</span></div>';
@@ -18724,9 +18745,9 @@ function showGlobalInvoicePreview(inv) {
 
   // Status timeline
   html += '<div style="display:flex;align-items:center;gap:4px;padding:8px 0;font-size:11px;border-top:1px solid var(--sw-border);flex-wrap:wrap;">';
-  [{l:'Created',d:true},{l:inv.status==='SUBMITTED'?'Awaiting approval in Xero':'Approved in Xero',d:['AUTHORISED','SENT','PAID'].indexOf(inv.status)>=0},{l:'Sent',d:inv.status==='SENT'},{l:'Paid (Xero)',d:isPaid}].forEach(function(s,i){
+  [{l:'Created',d:true},{l:inv.status==='SUBMITTED'?'Awaiting approval in Xero':'Approved in Xero',d:['AUTHORISED','SENT','PAID'].indexOf(inv.status)>=0},{l:inv.sent_to_contact==null?'Sent: not known':'Sent',d:inv.sent_to_contact===true,unknown:inv.sent_to_contact==null},{l:'Paid (Xero)',d:isPaid}].forEach(function(s,i){
     if(i>0) html+='<span style="color:var(--sw-text-sec);font-size:9px;">&rarr;</span>';
-    html+='<span style="color:'+(s.d?'var(--sw-green)':'var(--sw-text-sec)')+';font-weight:'+(s.d?'600':'400')+';">'+(s.d?'&#10003; ':'')+s.l+'</span>';
+    html+='<span'+(s.unknown?' data-inv-sent-unknown':'')+' style="color:'+(s.d?'var(--sw-green)':'var(--sw-text-sec)')+';font-weight:'+(s.d?'600':'400')+';'+(s.unknown?'font-style:italic;':'')+'">'+(s.d?'&#10003; ':'')+s.l+'</span>';
   });
   html += '</div>';
 
@@ -23436,7 +23457,7 @@ function renderMakesafeOpsDetail(data) {
   if (invoices.length) {
     var inv = invoices[0];
     html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">' + escapeHtml(inv.invoice_number || inv.status || 'Invoice created') + '</div>';
-    html += '<div style="font-size:12px;color:var(--sw-text);">' + fmt$(inv.total || 0) + (inv.status ? ' · ' + escapeHtml(inv.status) : '') + '</div>';
+    html += '<div style="font-size:12px;color:var(--sw-text);">' + fmt$(inv.total) + (inv.status ? ' · ' + escapeHtml(xeroInvoiceWord(inv)) : '') + '</div>';
     if (inv.amount_due > 0) html += '<div style="font-size:12px;color:var(--sw-red);font-weight:800;margin-top:4px;">Due: ' + fmt$(inv.amount_due) + '</div>';
     // View PDF: prefer an attached invoice document's public URL; fall back to
     // fetching the PDF from Xero via get_invoice_pdf.
@@ -24376,8 +24397,8 @@ function renderMoneyView(data) {
       }
       // Totals
       html += '<div style="display:flex;justify-content:flex-end;margin-bottom:6px;"><div style="min-width:200px;">';
-      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>Subtotal:</span><span style="font-family:var(--sw-font-num);">' + fmt$(inv.sub_total || 0) + '</span></div>';
-      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>GST:</span><span style="font-family:var(--sw-font-num);">' + fmt$(inv.total_tax || 0) + '</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>Subtotal:</span><span style="font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(inv.sub_total)) + '</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>GST:</span><span style="font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(inv.total_tax)) + '</span></div>';
       html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-weight:700;border-top:1px solid var(--sw-dark);"><span>Total:</span><span style="font-family:var(--sw-font-num);">' + fmt$(inv.total) + '</span></div>';
       if (amountPaid > 0) html += '<div style="display:flex;justify-content:space-between;padding:2px 0;color:var(--sw-green);"><span>Paid:</span><span style="font-family:var(--sw-font-num);">' + fmt$(amountPaid) + '</span></div>';
       if (amountDue > 0) html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-weight:600;color:' + (isOverdue ? 'var(--sw-red)' : 'var(--sw-dark)') + ';"><span>Due:</span><span style="font-family:var(--sw-font-num);">' + fmt$(amountDue) + '</span></div>';
@@ -25129,8 +25150,8 @@ async function loadLabourReconciliation(jobId) {
       trades.forEach(function(t) {
         html += '<tr><td>' + escapeHtml(t.name || '') + '</td>';
         html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (t.hours || 0).toFixed(1) + '</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(t.rate || 0) + '/h</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(t.cost || 0) + '</td></tr>';
+        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.rate)) + '/h</td>';
+        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.cost)) + '</td></tr>';
       });
       html += '</tbody></table>';
     } else if (budget === 0 && hoursLogged === 0) {
@@ -28430,6 +28451,7 @@ function updateJarvisSummary() {
     if (_invoiceSummaryCache) {
       var s = _invoiceSummaryCache;
       var parts = [];
+      if (s.summary_error) parts.push('Owed unknown');
       if (s.outstanding) parts.push(fmt$(s.outstanding) + ' owed');
       if (s.overdue) parts.push(fmt$(s.overdue) + ' owed · past due');
       text = parts.length > 0 ? parts.join(' · ') : (_allInvoices.length + ' invoices loaded');
@@ -28844,7 +28866,7 @@ async function cascadeCompleteAndInvoice() {
       alert('Error: ' + result.error);
       return;
     }
-    showToast('Invoice ' + (result.invoice_number || '') + ' created — ' + fmt$(result.total || 0), 'success');
+    showToast('Invoice ' + (result.invoice_number || '') + ' created — ' + fmt$(moneyOrNull(result.total)), 'success');
     openJobPeek(_cascadeJobId);
     refreshActiveView();
   } catch (e) {
@@ -29199,7 +29221,7 @@ async function submitGeneralInvoice() {
     // Success
     document.getElementById('invoiceSuccess').style.display = 'block';
     document.getElementById('invoiceSuccessDetail').innerHTML =
-      '<strong>' + (res.invoice_number || '') + '</strong> — ' + fmt$(res.total || 0) + '<br>' +
+      '<strong>' + (res.invoice_number || '') + '</strong> — ' + fmt$(moneyOrNull(res.total)) + '<br>' +
       '<span style="font-size:11px;">Created as DRAFT in Xero. Review and send from Xero.</span>';
     document.getElementById('invoiceActions').style.display = 'none';
     showToast('Draft invoice created: ' + (res.invoice_number || ''), 'success');

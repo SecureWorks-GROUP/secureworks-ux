@@ -144,7 +144,7 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(current.meta).toBe('value not recorded \u00b7 sent 8 Oct 6:56am \u00b7 opened 15 times');
     expect(current.pill).toEqual({ cls: 'acc', words: 'Accepted 8 Oct' });
     expect(draft.name).toBe('Deposit invoice INV-9002');
-    expect(draft.pill).toEqual({ cls: 'warn', words: 'Draft, cannot be paid' });
+    expect(draft.pill).toEqual({ cls: 'warn', words: 'Draft in Xero, cannot be paid' });
     expect(scope.meta).toBe('Sam \u00b7 1 Sep \u00b7 22.9m Ridgeside \u00b7 asbestos removal');
     expect(att1.name).toBe('Quote_Avery_Lin_Rear_Fence.pdf');
     expect(att1.meta).toBe('emailed 2 Oct 9:44am \u00b7 2 versions \u00b7 6 pages');
@@ -344,7 +344,7 @@ test('unlinked name matches and unissued invoices never become this job\'s invoi
   expect(C.moneySummary(d, ov)).toMatchObject({ invoiced: 999, paid: 999, nameOnly: 0 });
   d.invoices = [{ id: 'pending', job_id: d.job.id, status: 'SUBMITTED', total: 500 }, { id: 'unknown', job_id: d.job.id, status: 'UNKNOWN', total: 600 }];
   expect(C.moneySummary(d, null)).toMatchObject({ invoiced: 0, paid: 0, draftTotal: 500 });
-  expect(C.files(d, null, NOW).find(f => f.key === 'inv:pending').pill.words).toBe('Awaiting approval, cannot be paid');
+  expect(C.files(d, null, NOW).find(f => f.key === 'inv:pending').pill.words).toBe('Awaiting approval in Xero, cannot be paid');
 });
 
 test('writer off, refusal and unrecognised outcomes are never successful rewrite requests', () => {
@@ -401,4 +401,36 @@ test('the live uploaded attachment is not described as an email', () => {
   const file = C.files(detail(), ov, NOW).find(f => f.kind === 'attachment');
   expect(file.meta).toBe('uploaded 12 Oct 1:47pm');
   expect(file.pill.words).toBe('Uploaded document');
+});
+
+test('CTX-T22 core: standing not-seen lines, the Matching count and placed-by words', () => {
+  expect(C.notSeen(null)).toEqual(['Material orders and deliveries are not recorded here.', 'Crew tasks and GHL notes are not captured.']);
+  expect(C.notSeen({})).toEqual(C.notSeen(null));
+  // A source the overview no longer lists has been captured: its line goes.
+  expect(C.notSeen({ not_seen: [{ key: 'material_orders', text: 'Material orders and deliveries are not recorded here.' }] }))
+    .toEqual(['Material orders and deliveries are not recorded here.']);
+  expect(C.matchingWait(null)).toBe(null);
+  expect(C.matchingWait({ matching: null, sources: { matching: { ok: false, state: 'failed' } } }).state).toBe('failed');
+  expect(C.matchingWait({ matching: { waiting: 'x' }, sources: {} }).state).toBe('failed');
+  expect(C.matchingWait({ sources: { matching: { ok: false, state: 'not_deployed' } } }).state).toBe('not_deployed');
+  expect(C.matchingWait({ matching: { waiting: 0 }, sources: { matching: { ok: true, state: 'ok' } } }).words).toBe('No messages wait in Matching for this job.');
+  expect(C.matchingWait({ matching: { waiting: 1, left_off_daily_list: 1 } }).words)
+    .toBe('1 message waits in Matching for a person to say which job it belongs to. It is not on the daily list; Find by job shows it.');
+  expect(C.matchingWait({ matching: { waiting: 50, more: true, left_off_daily_list: 2 } }).words)
+    .toBe('At least 50 messages wait in Matching for a person to say which job they belong to. 2 of them are not on the daily list; Find by job shows them.');
+  expect(C.placedBy(null, NOW)).toBe(null);
+  const p = C.placedBy({ action: 'correct', decided_at: '2026-10-09T01:22:00Z', decided_by_name: 'Sam', evidence_hash: 'h1' }, NOW);
+  expect(p.words).toBe('Moved to this job by Sam in Matching, Fri 9 Oct, 9:22am.');
+  expect(p.evidence).toBe('h1');
+  expect(C.placedBy({ action: 'confirm' }, NOW).words).toBe('Confirmed for this job by a person in Matching.');
+  expect(C.decisionsUnread({ sources: { messages: { decisions: 'unread' } } })).toBe(true);
+  expect(C.decisionsUnread({ sources: { messages: { ok: true } } })).toBe(false);
+  // A merged copy keeps the placement.
+  const conv = C.conversation([
+    { id: 'a', at: '2026-10-09T01:00:00Z', channel: 'sms', direction: 'inbound', text: 'Same words' },
+    { id: 'b', at: '2026-10-09T01:00:00Z', channel: 'sms', direction: 'inbound', text: 'Same words', placed_by_person: { action: 'split' } },
+  ], 'all', NOW, null);
+  const msgs = conv.items.filter((x) => x.type === 'msg');
+  expect(msgs).toHaveLength(1);
+  expect(msgs[0].m.placed).toEqual({ action: 'split' });
 });

@@ -1,0 +1,106 @@
+diff --git a/supabase/functions/ops-api/index.ts b/supabase/functions/ops-api/index.ts
+index b6acbc8..160d04c 100644
+--- a/supabase/functions/ops-api/index.ts
++++ b/supabase/functions/ops-api/index.ts
+@@ -1,4 +1,5 @@
+ import { applyBookingApprovals, bookingApprovalStore, salesBookingApprovalWriteRoute } from './sales_booking_confirmation.ts'
++import { RunningDraftError, getRunningInvoiceDraft, runningInvoiceDraftEnabled, saveRunningInvoiceDraft } from './trade_invoice_running_draft.ts'
+ import { insertCapturedEvidence } from "../_shared/evidence/capture_guard.ts";
+ import { sourceTime } from "../_shared/source_time.ts";
+ import { automationLaneEnabled, contextActionLane } from '../_shared/automation_switch.ts'
+@@ -1904,6 +1905,18 @@ export class ApiError extends Error {
+   }
+ }
+ 
++function runningDraftApiError(error: unknown): never {
++  if (error instanceof RunningDraftError) {
++    throw new ApiError(error.message, error.status, {
++      ok: false,
++      code: error.code,
++      error: error.message,
++      userMessage: error.message,
++    })
++  }
++  throw error
++}
++
+ function tradeInvoiceMoneyApiError(error: unknown): never {
+   if (error instanceof TradeInvoiceMoneyError) {
+     throw new ApiError(error.message, 422, {
+@@ -4900,6 +4913,9 @@ const OPS_API_PROFILE_SCOPED_JWT_ACTIONS = new Set([
+   'my_trade_invoices',
+   'get_trade_invoice',
+   'save_trade_invoice_draft',
++  'save_running_invoice_draft',
++  'get_running_invoice_draft',
++  'sync_running_invoice_draft',
+   'set_trade_rate',
+   'update_trade_profile',
+   'attach_invoice_pdf',
+@@ -11406,6 +11422,26 @@ export async function _opsApiRequestHandlerForTest(req: Request): Promise<Respon
+         return json({ success: true, status: aarNewStatus })
+       }
+ 
++      // Agent draft only. A crew JWT is refused by the staff-role gate before
++      // this case. Nothing here submits, pays, or calls Xero.
++      case 'agent_save_running_invoice_draft': {
++        const agentOk = authMode === 'api_key'
++        const staffOk = authMode === 'jwt' && _opsApiCallerIsStaffOperator(authMode, authUser)
++        if (!agentOk && !staffOk) {
++          throw new ApiError('Only an agent or an office admin can draft an invoice for someone else.', 403, {
++            ok: false,
++            code: 'agent_draft_only',
++            error: 'Only an agent or an office admin can draft an invoice for someone else.',
++            userMessage: 'Only an agent or an office admin can draft an invoice for someone else.',
++          })
++        }
++        try {
++          return json(await saveRunningInvoiceDraft(client, String(body?.user_id || ''), body, 'agent'))
++        } catch (error) {
++          runningDraftApiError(error)
++        }
++      }
++
+       // ── Trade (mobile) — JWT auth required ──
+       case 'trade_calendar':
+         return await handleTradeCalendarAction(req, client)
+@@ -11445,6 +11481,9 @@ export async function _opsApiRequestHandlerForTest(req: Request): Promise<Respon
+       // (Deno check: unreachable get_trade_invoice / save_trade_invoice_draft).
+       case 'get_trade_invoice':
+       case 'save_trade_invoice_draft':
++      case 'save_running_invoice_draft':
++      case 'get_running_invoice_draft':
++      case 'sync_running_invoice_draft':
+       case 'set_trade_rate':
+       case 'update_trade_profile':
+       case 'attach_invoice_pdf':
+@@ -11608,6 +11647,21 @@ export async function _opsApiRequestHandlerForTest(req: Request): Promise<Respon
+           case 'my_money': return json(await myMoney(client, tradeUser, url.searchParams))
+           case 'unlock_makesafe_report': return json(await unlockMakesafeReport(client, body, tradeUser, tradeJobAccess, isDispatcher))
+           case 'my_hours': return json(await myHours(client, tradeUser.id, url.searchParams))
++          case 'get_running_invoice_draft': {
++            try {
++              return json(await getRunningInvoiceDraft(client, tradeUser.id, url.searchParams.get('week_start') || body?.week_start || null))
++            } catch (error) { runningDraftApiError(error) }
++          }
++          case 'save_running_invoice_draft': {
++            try {
++              return json(await saveRunningInvoiceDraft(client, tradeUser.id, body, 'staff'))
++            } catch (error) { runningDraftApiError(error) }
++          }
++          case 'sync_running_invoice_draft': {
++            try {
++              return json(await saveRunningInvoiceDraft(client, tradeUser.id, body, 'auto'))
++            } catch (error) { runningDraftApiError(error) }
++          }
+           case 'submit_trade_invoice': return json(await submitTradeInvoice(client, tradeUser.id, body))
+           case 'my_trade_invoices': return json(await myTradeInvoices(client, tradeUser.id))
+           case 'get_trade_invoice': {
+@@ -54763,6 +54817,7 @@ export async function myHours(client: any, userId: string, params: URLSearchPara
+     gst,
+     total: previewMoney.total_inc,
+     already_submitted: !!existingInvoice,
++    running_invoice_draft: runningInvoiceDraftEnabled(userRow?.trade_details),
+     xero_bill_number: existingInvoice?.xero_bill_number || null,
+     pending_verification: pendingVerification,
+     all_verified: allVerified,

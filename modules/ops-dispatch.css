@@ -337,6 +337,8 @@
 .dpc-card-foot { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 2px 12px 12px; }
 .dpc .dpc-addline { border: 0; background: none; padding: 4px 0; font: 500 12px var(--mono); color: var(--signal-deep); }
 .dpc-card-msg { font-size: 13px; color: var(--mute); padding: 0 12px 6px; }
+.dpc-msg-notes { margin: 4px 0 0; padding-left: 18px; color: var(--ink); }
+.dpc-msg-notes li { margin: 2px 0; }
 .dpc-mat-save { font-size: 13px; color: var(--mute); margin-top: 8px; min-height: 0; }
 .dpc-mat-save:empty { margin-top: 0; }
 .dpc-orders { margin-top: 16px; }
@@ -399,7 +401,8 @@
 .dpc-mail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
 .dpc-mail-head strong { overflow-wrap: anywhere; }
 .dpc-field { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--galv); padding: 3px 0; }
-.dpc-field > span, .dpc-field > label { flex: 0 0 58px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+/* The label column only; the value beside it (.dpc-field-val) keeps body text. */
+.dpc-field > span:not(.dpc-field-val), .dpc-field > label { flex: 0 0 58px; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
 .dpc-field input { flex: 1; min-width: 0; border: 0; padding: 6px 0; font-size: 13px; outline: none; background: transparent; }
 .dpc-field input:focus { box-shadow: inset 0 -2px 0 var(--signal); }
 .dpc-field-val { flex: 1; min-width: 0; font-size: 13px; padding: 6px 0; overflow-wrap: anywhere; }
@@ -474,12 +477,292 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
   .dpc .dpc-deliv-btn, .dpc .dpc-portal button, .dpc-deliv-edit button { min-height: 44px; }
 }
 
-/* ---------- Schedule: the install row (slice 7) ---------- */
+/* ---------- Schedule: the install row (slice 7; v2: Install and Trade booked only) ---------- */
 .dpc-install { margin-top: 8px; }
-.dpc-install-row { grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr)); }
+.dpc-install-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr); }
 .dpc-install .dpc-dstate em { color: var(--ink); }
 .dpc-install .dpc-deliv-item > .dpc-empty { padding: 10px 12px; }
 .dpc-install + .dpc-deliv-msg + .dpc-portal, .dpc-install + .dpc-portal { margin-top: 12px; }
 @media (max-width: 768px) {
   .dpc-install-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------- Dispatch v2: the list (Active / Archive, stage sections, flags) ---------- */
+.dpc-vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dpc-grp { margin: 2px 0 6px; }
+.dpc .dpc-grp-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 4px 8px; border: 0; border-radius: 6px; background: transparent; color: #C9D6DD; text-align: left; }
+.dpc .dpc-grp-head:hover:not(:disabled) { background: rgba(255,255,255,.05); }
+.dpc-grp-name { font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .12em; color: #E7EEF2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dpc-grp-count { font: 600 10.5px var(--mono); padding: 1px 7px; border-radius: 100px; background: rgba(255,255,255,.08); color: #8FA4B2; }
+.dpc-grp-rule { height: 1px; background: rgba(255,255,255,.12); }
+.dpc-grp-chev { display: flex; color: #8FA4B2; }
+.dpc-grp-chev svg { transition: transform .2s ease; }
+.dpc .dpc-grp-head[aria-expanded="false"] .dpc-grp-chev svg { transform: rotate(-90deg); }
+.dpc-grp-empty { cursor: default; opacity: .7; }
+.dpc-grp-sub { display: block; margin: -4px 4px 8px; font-size: 11.5px; color: #8FA4B2; }
+.dpc-flags { display: flex !important; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.dpc-flag { display: inline-block; font-size: 11px; font-weight: 600; line-height: 1.3; padding: 2px 8px; border-radius: 100px; }
+.dpc-flag-red { background: rgba(239,68,68,.12); color: #C81E1E; }
+.dpc-flag-amber { background: #FFF1D6; color: #8A5A00; }
+.dpc-flag-grey { background: var(--galv-2); color: var(--mute); }
+.dpc-pills .dpc-flag { font-size: 12px; padding: 3px 10px; }
+.dpc .dpc-job-archived { background: #E6ECEF; }
+.dpc .dpc-job-archived strong { color: var(--steel-2); }
+.dpc-queue .dpc-job .dpc-muted { display: block; margin-top: 2px; }
+
+/* the card's thin Arrival line: the install line at 80%, a dot per order */
+.dpc-arrthin { display: block !important; position: relative; height: 10px; margin: 8px 2px 0; }
+.dpc-arrthin-rail { position: absolute; left: 0; right: 20%; top: 4px; height: 2px; border-radius: 1px; background: #CFD9DE; }
+.dpc-arrthin-inst { position: absolute; left: 80%; top: 0; height: 10px; border-left: 2px solid var(--steel); }
+.dpc-arrthin-dot { position: absolute; top: 1px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; font-style: normal; box-sizing: border-box; }
+.dpc-arrthin-dot.ok { background: #2f7d4f; }
+.dpc-arrthin-dot.wait { background: #fff; border: 2px solid #9a6200; }
+.dpc-arrthin-dot.late { background: #fbeae8; border: 2px solid #b3261e; }
+.dpc-arrthin-dot.draft { background: #fff; border: 2px solid #9DB0BC; }
+
+/* ---------- v2 slice 7: the full Arrival line in the job (approved .arr) ---------- */
+.dpc-arrival { margin-top: 16px; padding: 14px 18px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.dpc-arr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.dpc-arr-title { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--mute); }
+.dpc-arr-q { font-size: 13px; color: var(--steel-2); flex: 1; min-width: 0; }
+.dpc-arr-count { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 100px; background: #fdf3e1; color: #9a6200; }
+.dpc-arr-count.ok { background: #e6f3ea; color: #2f7d4f; }
+.dpc-arr-count.late { background: #fbeae8; color: #b3261e; }
+.dpc-arr-wrap { container-type: inline-size; }
+.dpc-arr { position: relative; height: 78px; margin: 22px 4px 4px; }
+.dpc-arr-two { height: 104px; }
+.dpc-arr-rail { position: absolute; left: 0; right: 20%; top: 30px; height: 4px; border-radius: 2px; background: #CFD9DE; }
+.dpc-arr-inst { position: absolute; left: 80%; top: 12px; height: 42px; border-left: 3px solid var(--steel); }
+.dpc-arr-inst span { position: absolute; right: 6px; top: -18px; font-size: 11.5px; font-weight: 700; white-space: nowrap; color: var(--steel); }
+.dpc-arr-noinst { position: absolute; right: 0; top: -6px; font-size: 11.5px; font-weight: 700; color: #9a6200; white-space: nowrap; }
+.dpc-arr-tod { position: absolute; left: 0; top: 8px; font-size: 11px; color: var(--mute); white-space: nowrap; }
+.dpc-arr-mk { position: absolute; top: 22px; transform: translateX(-50%); text-align: center; font-size: 11px; line-height: 1.25; white-space: nowrap; }
+.dpc-arr-mk.dpc-arr-edge { transform: none; text-align: left; }
+.dpc-arr-mk.dpc-arr-edge i { margin-left: 0; }
+.dpc-arr-mk i { display: block; width: 20px; height: 20px; margin: 0 auto 3px; border-radius: 50%; font-style: normal; box-sizing: border-box; }
+.dpc-arr-mk b { display: block; font-weight: 600; color: var(--ink); }
+.dpc-arr-mk small { display: block; font-size: 10.5px; color: var(--mute); }
+.dpc-arr-mk.dpc-arr-r1 b { margin-top: 26px; }
+.dpc-arr-mk.ok i { background: #2f7d4f; }
+.dpc-arr-mk.wait i { background: #fff; border: 3px solid #9a6200; }
+.dpc-arr-mk.late i { background: #fbeae8; border: 3px solid #b3261e; }
+.dpc-arr-mk.draft i { background: #fff; border: 3px solid #9DB0BC; }
+.dpc-arr-mk.late small { color: #b3261e; font-weight: 600; }
+.dpc-arr-out { left: auto; right: 0; transform: none; text-align: right; }
+.dpc-arr-out i { margin: 0 0 3px auto; }
+.dpc-arr-list { display: none; list-style: none; padding: 0; margin: 6px 0 0; font-size: 12.5px; }
+.dpc-arr-list li { display: flex; align-items: center; gap: 8px; padding: 3px 0; overflow-wrap: anywhere; }
+.dpc-arr-list b { font-weight: 600; }
+.dpc-arr-list-outs { display: block; }
+.dpc-arr-list-outs li.on { display: none; }
+.dpc-arr-dot { flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box; font-style: normal; }
+.dpc-arr-dot.ok { background: #2f7d4f; }
+.dpc-arr-dot.wait { background: #fff; border: 2px solid #9a6200; }
+.dpc-arr-dot.late { background: #fbeae8; border: 2px solid #b3261e; }
+.dpc-arr-dot.draft { background: #fff; border: 2px solid #9DB0BC; }
+.dpc-arr-legend { margin-top: 8px; font-size: 11.5px; color: var(--mute); }
+.dpc-arr-legend .ok { color: #2f7d4f; }
+.dpc-arr-legend .wait { color: #9a6200; }
+.dpc-arr-legend .late { color: #b3261e; }
+/* A narrow line keeps the dots and the two day labels, and lists the orders under it. */
+@container (max-width: 459px) {
+  .dpc-arr, .dpc-arr-two { height: 50px; }
+  .dpc-arr-mk b, .dpc-arr-mk small { display: none; }
+  .dpc-arr-list, .dpc-arr-list-outs { display: block; }
+  .dpc-arr-list li.on { display: flex; }
+}
+.dpc-sugnote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 12px; border: 1px solid #c3d8ea; border-radius: 9px; background: #e7f0f7; color: #2c5d86; font-size: 13px; }
+.dpc .dpc-sugnote button { padding: 5px 10px; font-size: 12.5px; }
+
+/* ---------- v2 slice 8: Supplier replies, suggestions and the tray ---------- */
+.dpc-rep-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.dpc-rep { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fbfcfc; min-width: 0; }
+.dpc-rep-guess { border-color: #e9c98a; background: #fffaf0; }
+.dpc-rep-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.dpc-rep-top strong { font-size: 14px; overflow-wrap: anywhere; }
+.dpc-rep-top .dpc-muted { font-size: 11.5px; }
+.dpc-rung { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 4px; background: #e6f3ea; color: #2f7d4f; white-space: nowrap; }
+.dpc-rung-guess { background: #fdf3e1; color: #9a6200; }
+.dpc-rep-subj { margin-top: 4px; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-rep-snip { margin-top: 2px; font-size: 13px; color: var(--steel-2); overflow-wrap: anywhere; }
+.dpc-rep-why { margin-top: 3px; font-size: 11.5px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc-rep-off { margin-bottom: 10px; }
+/* A reply open in the Emails panel's view: the view is its card. */
+.dpc-mail-view .dpc-rep { border: 0; padding: 0; background: transparent; }
+.dpc-mail-view .dpc-rep-guess .dpc-rep-ask { background: #fffaf0; border: 1px solid #e9c98a; border-radius: 8px; padding: 8px 10px; }
+.dpc-mail-item .dpc-mail-tags { flex-wrap: wrap; }
+.dpc-rep-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
+.dpc-rep-msg { margin-top: 6px; font-size: 12.5px; color: var(--sage); }
+.dpc-rep-msg.dpc-mat-fail { color: #b3261e; }
+.dpc-sug { margin-top: 8px; padding: 9px 12px; border: 1px solid #c3d8ea; border-radius: 9px; background: #e7f0f7; font-size: 13.5px; }
+.dpc-sug-done { background: var(--galv-2); border-color: var(--line); }
+.dpc-sug-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.dpc-sug-eyebrow { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: #2c5d86; }
+.dpc-sug-top strong { color: #1d4466; overflow-wrap: anywhere; }
+.dpc-sug-quote { margin-top: 4px; font-size: 12.5px; color: var(--steel-2); font-style: italic; overflow-wrap: anywhere; }
+.dpc-sug-hints { margin: 6px 0 0 18px; padding: 0; font-size: 12px; color: #9a6200; }
+.dpc-sug-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
+.dpc-sug-pick select, .dpc-tray-pick select { min-width: 0; max-width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-sug .dpc-actions { margin-top: 8px; }
+.dpc-sug-foot, .dpc-sug-state { margin-top: 6px; font-size: 11.5px; color: var(--mute); }
+
+.dpc-header > .dpc-row { width: 100%; align-items: flex-end; flex-wrap: wrap; }
+.dpc .dpc-tray-btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.dpc-tray-n { font: 600 11px var(--mono); padding: 1px 7px; border-radius: 100px; background: var(--galv); color: var(--steel-2); }
+.dpc-tray-n.on { background: var(--signal); color: #fff; }
+.dpc-tray-n-fail { background: #fbeae8; color: #b3261e; }
+.dpc-tray { background: #fff; padding: 16px 18px; margin-bottom: 18px; box-shadow: 0 1px 0 rgba(26,39,46,.04), 0 10px 30px -18px rgba(26,39,46,.35); }
+.dpc-tray h3 { font: 700 20px/1.05 var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); }
+.dpc-tray > .dpc-row { flex-wrap: wrap; }
+/* The title keeps room for itself; on a phone the tick drops to its own line. */
+.dpc-tray > .dpc-row > h3 { flex: 1 1 240px; }
+.dpc-tray > .dpc-empty-tight { margin: 4px 0 10px; }
+.dpc-tray-other { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--steel-2); }
+.dpc-tray-cands { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
+.dpc .dpc-tray-cands button { padding: 5px 10px; font-size: 12.5px; }
+.dpc-tray-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.dpc-tray-pick select { flex: 1 1 200px; }
+
+/* the client text's confirm line */
+.dpc-sms-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--galv-2); font-size: 13px; }
+.dpc-reply[readonly] { background: var(--galv-2); }
+
+@media (max-width: 768px) {
+  .dpc-arrival { padding: 12px; }
+  .dpc-tray { padding: 14px 12px; }
+  .dpc .dpc-rep-ask button, .dpc .dpc-sug .dpc-actions button, .dpc .dpc-tray-pick button, .dpc .dpc-sms-ask button { min-height: 44px; }
+  .dpc .dpc-grp-head { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .dpc-grp-chev svg { transition: none; } }
+
+/* ---------- v2 slices 5 and 6: Materials (Draft list, supplier boxes, order emails) ---------- */
+/* A line: grip | item | qty | unit | status | move to | cross. */
+.dpc-v2-line { display: grid; grid-template-columns: 16px minmax(0, 2.2fr) 56px 64px 112px minmax(0, 1fr) 28px; gap: 6px; align-items: center; padding: 1px 6px; border-radius: 6px; }
+.dpc-v2-line:hover { background: var(--galv-2); }
+.dpc-v2-line input, .dpc-v2-line select, .dpc-v2-extra input { width: 100%; min-width: 0; font-size: 13px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.dpc-v2-line input[data-dpc-v2-cell="quantity"], .dpc-v2-line input[data-dpc-v2-cell="unit"] { font-family: var(--mono); font-size: 12.5px; }
+.dpc-v2-line input:hover, .dpc-v2-line select:hover, .dpc-v2-extra input:hover { border-color: var(--line); }
+.dpc-v2-line input:focus, .dpc-v2-line select:focus, .dpc-v2-extra input:focus { border-color: var(--signal); background: #fff; outline: none; }
+.dpc-v2-line input[aria-invalid="true"] { border-color: var(--signal-deep); }
+.dpc .dpc-v2-line select.dpc-status-pick { width: auto; max-width: 100%; justify-self: start; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 7px; border: 0; border-radius: 4px; cursor: pointer; }
+.dpc .dpc-v2-line select.dpc-tone-muted { background: var(--galv); color: var(--mute); }
+.dpc .dpc-v2-line select.dpc-tone-warn { background: #FCE7DE; color: #A83C16; }
+.dpc .dpc-v2-line select.dpc-tone-ok { background: #E4EFE6; color: var(--sage); }
+.dpc .dpc-v2-line select.dpc-v2-move { font-size: 12px; color: var(--steel-2); border-color: var(--line); background: #fff; }
+/* The grip: a block of dots, held to drag the line to another box. */
+.dpc-v2-grip { width: 12px; height: 26px; justify-self: center; cursor: grab; border-radius: 3px; background: radial-gradient(circle, #9DB0BC 1.4px, transparent 1.6px) 0 0 / 6px 6px; }
+.dpc-v2-grip:active { cursor: grabbing; }
+.dpc-v2-grip-off { cursor: default; background: none; }
+.dpc-v2-ro { grid-template-columns: 16px minmax(0, 1fr) auto; min-height: 36px; }
+.dpc-v2-rotext { font-size: 13px; padding: 7px 8px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-v2-rotext small { display: block; font-size: 11.5px; color: var(--mute); }
+.dpc-v2-standing .dpc-v2-rotext { color: var(--steel-2); font-style: italic; }
+.dpc-v2-extra { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 6px; padding: 0 40px 6px 28px; }
+.dpc .dpc-v2-morebtn { margin: -2px 0 4px 26px; }
+/* Photos under the lines of a box. */
+.dpc-v2-photos { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px 2px; }
+.dpc-v2-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 6px; border-radius: 6px; background: var(--galv-2); font-size: 12.5px; }
+.dpc .dpc-v2-photoname { flex: 1 1 160px; min-width: 0; text-align: left; font-size: 12.5px; color: var(--steel-2); overflow-wrap: anywhere; }
+.dpc-v2-photoname small { color: var(--mute); }
+.dpc-v2-photo select.dpc-v2-move { max-width: 180px; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-v2-photo .dpc-line-msg { flex: 1 1 100%; padding: 0; }
+/* The boxes. */
+.dpc-v2-draft { border-color: #C9D6DD; }
+.dpc-v2-draft .dpc-suphead { background: #FBF8F5; }
+.dpc-v2-isblocked { border-color: #E9C98A; }
+.dpc-v2-blocked { margin: 10px 12px 0; padding: 9px 12px; border-radius: 8px; background: #FDF3E1; color: #7A4D00; font-size: 13px; }
+.dpc-v2-main { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--steel-2); cursor: pointer; white-space: nowrap; }
+.dpc-v2-main small { font-weight: 400; color: var(--mute); }
+.dpc-v2-main input { width: 16px; height: 16px; accent-color: var(--signal); }
+/* `.dpc p { margin: 0 }` would win over a one-class margin, so these name .dpc too. */
+.dpc .dpc-v2-hint { margin: 6px 12px; font-size: 12.5px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc .dpc-v2-warn { margin: 6px 12px; padding: 8px 10px; border-radius: 8px; background: #FCE7DE; color: #8C3413; font-size: 12.5px; overflow-wrap: anywhere; }
+.dpc-v2-nobox { margin-top: 12px; }
+/* The order part of a box: Make email, the held email, a send that may have gone. */
+.dpc-v2-order { border-top: 1px solid var(--galv); padding: 10px 12px 12px; }
+.dpc-v2-order .dpc-v2-hint, .dpc-v2-order .dpc-v2-warn, .dpc-v2-mail .dpc-v2-hint, .dpc-v2-mail .dpc-v2-warn { margin: 6px 0; }
+.dpc-v2-order > .dpc-card-msg { padding: 0 0 6px; }
+.dpc-v2-make { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.dpc-v2-date { display: flex; flex-direction: column; gap: 3px; }
+.dpc-v2-date span { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-v2-date input { font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-v2-date input:focus { border-color: var(--signal); outline: none; }
+.dpc-v2-callout { padding: 10px 12px; border: 1px solid #C3D8EA; border-radius: 8px; background: #E7F0F7; color: #2C5D86; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-v2-callout.dpc-v2-bad { border-color: #F0C2BD; background: #FBEAE8; color: #8C1D16; }
+.dpc-v2-callout .dpc-actions { margin-top: 8px; }
+/* The held email. */
+.dpc-v2-mail { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; min-width: 0; }
+.dpc-v2-mailhead { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }
+.dpc-v2-body { min-height: 230px; font-size: 13px; line-height: 1.5; background: #fff; resize: vertical; margin-top: 6px; }
+.dpc-v2-attach { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 12.5px; margin-top: 4px; }
+.dpc-v2-attach label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.dpc-v2-attach small { color: var(--mute); }
+.dpc-v2-attlabel { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-v2-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--galv-2); font-size: 13px; }
+.dpc-v2-sendrow { margin-top: 8px; }
+/* A test send is marked plainly, so nobody mistakes it for the real one. */
+.dpc .dpc-v2-testbtn { border: 1px dashed #C99A3B; background: #FFF8EA; color: #6E4700; }
+.dpc-v2-testtag { display: inline-block; font: 700 9.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; margin-right: 4px; border-radius: 4px; background: #F2B33D; color: #3E2A00; vertical-align: 1px; }
+.dpc-v2-testtag-big { font-size: 12px; padding: 4px 10px; margin: 0 0 10px; }
+/* Sent emails, folded. */
+.dpc-v2-sent { padding: 10px 12px 12px; border-top: 1px solid var(--galv); }
+.dpc-v2-sentitem { border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; background: #fff; }
+.dpc-v2-sentitem summary { cursor: pointer; padding: 8px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.dpc-v2-sentitem summary small { color: var(--mute); }
+.dpc-v2-sentitem .dpc-v2-hint { margin: 0 10px 6px; }
+.dpc-v2-pre { margin: 0 10px 10px; padding: 10px; border-radius: 6px; background: var(--galv-2); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+/* Add supplier search. */
+.dpc-v2-find { margin: 0 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--galv-2); }
+.dpc-v2-find > .dpc-row { display: flex; gap: 8px; }
+.dpc-v2-find .dpc-v2-hint { margin: 6px 0 8px; }
+.dpc-v2-q { flex: 1; min-width: 0; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.dpc-v2-q:focus { border-color: var(--signal); outline: none; }
+.dpc-v2-findres { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow: auto; }
+.dpc-v2-findres .dpc-mat-h4 { margin: 8px 0 2px; }
+.dpc-v2-findres .dpc-mat-h4:first-child { margin-top: 0; }
+.dpc .dpc-v2-res { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px; background: #fff; }
+.dpc-v2-res strong { display: block; font-size: 13.5px; overflow-wrap: anywhere; }
+.dpc-v2-res small { display: block; font-size: 12px; color: var(--mute); overflow-wrap: anywhere; }
+.dpc .dpc-v2-res-noemail { border-style: dashed; background: #FCFCFB; }
+.dpc-v2-res .dpc-v2-resnote { color: #8A5A00; }
+.dpc .dpc-v2-res:disabled { opacity: .6; }
+/* Dragging a line: every box shows it can take it; the one under the pointer lights up. */
+.dpc-v2-dragging [data-dpc-v2-box] { border-style: dashed; }
+.dpc-v2-dragging .dpc-v2-lines { min-height: 40px; }
+.dpc [data-dpc-v2-box].dpc-v2-over { border-color: var(--signal); background: #FFF6F2; }
+/* The confirm before a send, over the page. */
+.dpc-v2-back { position: fixed; inset: 0; z-index: 600; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(26,39,46,.55); }
+.dpc-v2-modal { width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; border-radius: 12px; background: #fff; box-shadow: 0 20px 60px -20px rgba(26,39,46,.6); }
+.dpc-v2-modal-test { border-top: 6px solid #F2B33D; }
+.dpc-v2-modal h3 { font: 700 22px/1.1 var(--display); text-transform: uppercase; letter-spacing: .02em; color: var(--steel); overflow-wrap: anywhere; }
+.dpc-v2-mfields { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 12px; margin: 14px 0 10px; font-size: 13px; }
+.dpc-v2-mfields > span:nth-child(odd) { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); padding-top: 2px; }
+.dpc-v2-mfields > span:nth-child(even) { overflow-wrap: anywhere; }
+.dpc-v2-modal .dpc-v2-hint, .dpc-v2-modal .dpc-v2-warn { margin: 8px 0; }
+.dpc-v2-modal .dpc-actions { margin-top: 14px; }
+@media (max-width: 768px) {
+  /* Item and the cross on top; Qty, Unit and the status; then Move to. */
+  .dpc-v2-line { grid-template-columns: 16px 56px 64px minmax(0, 1fr) 36px; gap: 4px 6px; padding: 6px 4px; border-radius: 0; }
+  .dpc-v2-line > .dpc-v2-grip { grid-column: 1; grid-row: 1 / span 3; align-self: start; margin-top: 8px; }
+  .dpc-v2-line > [data-dpc-v2-cell="description"] { grid-column: 2 / 5; grid-row: 1; }
+  .dpc-v2-line > [data-dpc-v2-cell="quantity"] { grid-column: 2; grid-row: 2; }
+  .dpc-v2-line > [data-dpc-v2-cell="unit"] { grid-column: 3; grid-row: 2; }
+  .dpc-v2-line > [data-dpc-v2-status] { grid-column: 4 / 6; grid-row: 2; align-self: center; }
+  .dpc-v2-line > [data-dpc-v2-move] { grid-column: 2 / 6; grid-row: 3; }
+  .dpc-v2-line > .dpc-x { grid-column: 5; grid-row: 1; }
+  .dpc-v2-ro { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .dpc-v2-extra { grid-template-columns: 1fr 1fr; padding: 0 4px 6px 26px; }
+  .dpc-v2-extra > [data-dpc-v2-cell="detail"] { grid-column: 1 / -1; }
+  .dpc .dpc-v2-line input, .dpc .dpc-v2-line select.dpc-v2-move, .dpc .dpc-v2-extra input, .dpc .dpc-v2-line .dpc-x { min-height: 44px; }
+  .dpc .dpc-v2-line select.dpc-status-pick { min-height: 32px; }
+  .dpc .dpc-v2-photo select.dpc-v2-move { flex: 1 1 auto; max-width: none; min-height: 44px; }
+  .dpc .dpc-v2-photo .dpc-x { min-width: 44px; min-height: 44px; }
+  .dpc-v2-make > * { flex: 1 1 100%; }
+  .dpc-v2-date input { min-height: 44px; }
+  .dpc .dpc-v2-order button, .dpc .dpc-v2-mail button, .dpc .dpc-v2-modal button, .dpc .dpc-v2-find button, .dpc .dpc-v2-box .dpc-suphead .dpc-x, .dpc .dpc-card-foot .dpc-addline { min-height: 44px; }
+  .dpc-v2-sendrow > button { flex: 1 1 100%; }
+  .dpc-v2-main { min-height: 44px; }
+  .dpc-v2-modal { padding: 16px; }
+  .dpc-v2-modal h3 { font-size: 19px; }
+  .dpc-v2-modal .dpc-actions > button { flex: 1 1 100%; }
 }

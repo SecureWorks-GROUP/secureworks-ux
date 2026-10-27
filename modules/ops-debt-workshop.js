@@ -1541,7 +1541,7 @@ function dwJobHtml() {
   var J = DW.job, row = J.row || {}, job = J.job || {}, today = dwToday();
   var cat = C.catByKey(row.category), tk = C.typeKey(row.lane || row.job_type ? row : { job_type: job.type });
   var paid = row.open === false; // Xero shows it paid: nothing to chase or change
-  var pill = paid ? '<span class="dw-pill paid">Paid</span>'
+  var pill = paid ? '<span class="dw-pill paid">Paid (Xero)</span>'
     : cat ? '<span class="dw-pill" style="background:' + cat.color + '">' + dwEsc(cat.name + (Number(row.day) > 0 ? ' · day ' + row.day : '')) + '</span>'
     : '<span class="dw-pill none">Not due yet</span>';
   if (!paid) pill += dwCatMenuHtml(row);
@@ -1598,7 +1598,7 @@ function dwLeftHtml(J) {
   if (st && st.jobValue != null) money += '<span class="lbl">Job value</span><b>' + dwEsc(C.money(st.jobValue)) + '</b>';
   mr.rows.forEach(function (r) { money += '<span class="lbl">' + dwEsc(r.label) + (r.paid ? ', paid' : '') + '</span><span class="' + (r.paid ? 'paid' : 'owe') + '">' + dwEsc(r.value) + '</span>'; });
   if (!mr.rows.length) money += '<span class="lbl">This invoice</span><span class="owe">' + dwEsc(C.money(row.amount_due)) + '</span>';
-  else money += '<span class="lbl tot">Owing on this job</span><span class="tot">' + dwEsc(C.money(mr.owing)) + '</span>';
+  else money += '<span class="lbl tot">Owed on this job</span><span class="tot">' + dwEsc(C.money(mr.owing)) + '</span>';
   money += '</div>';
   var docs = '';
   (J.invoices || []).forEach(function (i) {

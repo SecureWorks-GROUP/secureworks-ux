@@ -10,6 +10,7 @@
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
+const { V2_ANSWER, V2_EMPTY_READS } = require('../helpers/dispatch-v2-board');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 const PERTH_YEAR = new Date(Date.now() + 8 * 3600 * 1000).getUTCFullYear();
@@ -110,12 +111,8 @@ async function boot(page, { ops = {}, ghl = {}, viewport = null } = {}) {
     get_job_conversation: () => EMAILS,
     get_invoice_pdf: () => ({ success: true, pdf_base64: Buffer.from('%PDF-1.4 e2e').toString('base64'), content_type: 'application/pdf' }),
     list_pos: () => ({ purchase_orders: [] }),
-    // Slices 4 and 5: no materials and no order email on these jobs.
-    dispatch_materials: (url) => ({
-      job_id: url.searchParams.get('job_id'), suppliers: [], lines: [], counts: { total: 0, ready: 0 }, can_suggest: false,
-      workings: { working_out: null, working_out_updated_at: null, sketch_png: null, sketch_updated_at: null }, orders: [], orders_status: 'ok',
-    }),
-    dispatch_order_emails: (url) => ({ job_id: url.searchParams.get('job_id'), drafts: [], threads: [], orders_for_link: [], threads_status: 'ok' }),
+    // Dispatch v2: no materials, Arrival line, supplier reply or tray email.
+    ...V2_EMPTY_READS,
   }, ops);
   const ghlHandlers = Object.assign({
     get_conversation: () => CHAT(3),
@@ -139,9 +136,15 @@ async function boot(page, { ops = {}, ghl = {}, viewport = null } = {}) {
     if (!handlers || !action) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     const body = request.method() === 'POST' ? JSON.parse(request.postData() || '{}') : null;
     calls.push({ fn, action, method: request.method(), url, body });
-    const out = handlers[action] ? await handlers[action](url, body) : {};
+    const view = url.searchParams.get('view') || 'active';
+    // Dispatch v2: the Archive read is empty here.
+    const archiveRead = fn === 'ops-api' && action === 'pipeline' && view === 'archive' && !url.searchParams.get('search');
+    const out = archiveRead ? { columns: {}, total: 0 } : handlers[action] ? await handlers[action](url, body) : {};
     const wrapped = out && typeof out === 'object' && typeof out.status === 'number' && 'body' in out;
-    return route.fulfill({ status: wrapped ? out.status : 200, contentType: 'application/json', body: JSON.stringify(wrapped ? out.body : out) });
+    let reply = wrapped ? out.body : out;
+    // The v1-shaped list answers become the v2 board answer.
+    if (fn === 'ops-api' && action === 'pipeline' && (!wrapped || out.status < 300)) reply = V2_ANSWER(reply, view);
+    return route.fulfill({ status: wrapped ? out.status : 200, contentType: 'application/json', body: JSON.stringify(reply) });
   });
   await page.goto(OPS_FILE + '#dispatch');
   await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
@@ -256,8 +259,9 @@ test('Dispatch panel: under 1200 it drops under the middle; at 390 it follows th
 test('Dispatch panel Sources: quotes sent to the client, and this job\'s client invoices only', async ({ page }) => {
   const { root, panel, of } = await boot(page);
   const groups = panel.locator('.dpc-h4');
-  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices', 'Purchase orders']);
-  await expect(panel).toContainText('No purchase order yet.');
+  // Dispatch v2 has no purchase orders, so Sources lists none.
+  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices']);
+  await expect(panel).not.toContainText(/purchase order/i);
 
   // Newest first; never the unsent quote or a work order.
   const quotes = panel.locator('.dpc-h4:has-text("Quotes") ~ .dpc-doc').filter({ hasText: 'Quote' });
@@ -271,7 +275,7 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   // Supplier bill, voided and deleted invoices are not listed.
   const invoices = panel.locator('[data-dpc-invoice]');
   await expect(invoices.locator('strong')).toHaveText(['INV-1004', 'INV-1003', 'INV-1002', 'Deposit invoice INV-1001']);
-  await expect(invoices.locator('small')).toHaveText(['Awaiting approval', 'Draft, not issued', 'Sent, not paid yet', 'Paid']);
+  await expect(invoices.locator('small')).toHaveText(['Awaiting approval in Xero', 'Draft in Xero', 'Owed · Approved in Xero', 'Paid (Xero)']);
   await expect(panel).not.toContainText(/INV-VOID|INV-DEL|BILL-1/);
 
   // Pressing an invoice reads that one PDF from Xero, once.
@@ -280,7 +284,7 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   await expect.poll(() => of('get_invoice_pdf').length).toBe(1);
   expect(of('get_invoice_pdf')[0].url.searchParams.get('xero_invoice_id')).toBe('xero-dep');
   await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
-  await expect(invoices.last().locator('small')).toHaveText('Paid');
+  await expect(invoices.last().locator('small')).toHaveText('Paid (Xero)');
 });
 
 test('Dispatch panel Sources: a second press while the invoice PDF loads makes no second read', async ({ page }) => {
@@ -295,20 +299,20 @@ test('Dispatch panel Sources: a second press while the invoice PDF loads makes n
     },
   });
   const invoice = panel.locator('[data-dpc-invoice]').last();
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
   await invoice.click();
   await expect(invoice.locator('small')).toHaveText('Loading...');
   await invoice.click();
   await expect.poll(() => of('get_invoice_pdf').length).toBe(1);
   release();
   await expect.poll(() => page.evaluate(() => window.__opened.length)).toBe(1);
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
   await page.waitForTimeout(300);
   expect(of('get_invoice_pdf').length).toBe(1);
   // Once it has loaded, a fresh press reads it again.
   await invoice.click();
   await expect.poll(() => of('get_invoice_pdf').length).toBe(2);
-  await expect(invoice.locator('small')).toHaveText('Paid');
+  await expect(invoice.locator('small')).toHaveText('Paid (Xero)');
 });
 
 test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', async ({ page }) => {
@@ -325,7 +329,7 @@ test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', a
   await expect(page.locator('#viewDispatch a[href*="send-quote"], #viewDispatch a[href*="tok-e2e"]')).toHaveCount(0);
 
   await openJob(root, 'SWR-900503');
-  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.', 'No purchase order yet.']);
+  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.']);
 });
 
 test('Dispatch panel Sources: a failed job read is an error in both groups, never an empty one', async ({ page }) => {
@@ -503,7 +507,17 @@ test('Dispatch panel chat: Send texts once from +61489267771, then clears and re
   expect(of('send_sms')).toEqual([]);
 
   await panel.locator('[data-dpc-reply]').fill('See you Tuesday.');
+  // v2 slice 4: Send only asks. Cancel sends nothing and keeps the text.
   await send.click();
+  const ask = panel.locator('.dpc-sms-ask');
+  await expect(ask).toContainText('Text this to the client? It sends from the admin line.');
+  await expect(panel.locator('[data-dpc-reply]')).toHaveAttribute('readonly', '');
+  await ask.locator('[data-dpc-send-no]').click();
+  await expect(ask).toHaveCount(0);
+  await expect(panel.locator('[data-dpc-reply]')).toHaveValue('See you Tuesday.');
+  expect(of('send_sms')).toEqual([]);
+  await send.click();
+  await ask.locator('[data-dpc-send-go]').click();
   await expect(send).toHaveText('Sending...');
   await expect(send).toBeDisabled();
   await send.click({ force: true });
@@ -528,12 +542,15 @@ test('Dispatch panel chat: a failed send keeps the text and is never retried on 
   await tab(root, 'messages');
   await expect(panel.locator('.dpc-bubble')).toHaveCount(3);
   await panel.locator('[data-dpc-reply]').fill('Running late.');
+  // Send asks first (v2 slice 4); Send text sends.
   await panel.locator('[data-dpc-send]').click();
+  await panel.locator('[data-dpc-send-go]').click();
   await expect(panel.locator('.dpc-note-msg')).toHaveText('Message not sent. Your text is still here.');
   await expect(panel.locator('[data-dpc-reply]')).toHaveValue('Running late.');
   await page.waitForTimeout(500);
   expect(of('send_sms').length).toBe(1);
   await panel.locator('[data-dpc-send]').click();
+  await panel.locator('[data-dpc-send-go]').click();
   await expect(panel.locator('.dpc-note-msg')).toHaveText('Message not sent. Your text is still here.');
   await expect(panel.locator('[data-dpc-reply]')).toHaveValue('Running late.');
   expect(of('send_sms').length).toBe(2);
@@ -623,8 +640,8 @@ test('Dispatch panel: every call it makes is one of job_story, get_conversation,
   const since = calls.slice(mark).map((c) => c.fn + ':' + c.action);
   expect([...new Set(since)].sort()).toEqual(['ghl-proxy:get_conversation', 'ops-api:get_invoice_pdf', 'ops-api:get_job_conversation', 'ops-api:job_story']);
   expect(since.length).toBe(4);
-  // The panel draws no supplier card or email item (slices 3 to 7 are guarded in tests/e2e/ops-tab-set.spec.js).
-  await expect(root.locator('.dpc-supcard, .dpc-mail')).toHaveCount(0);
+  // The panel draws no supplier card or email item (Materials is guarded in tests/e2e/ops-dispatch-v2-materials.spec.js).
+  await expect(panel.locator('.dpc-supcard, .dpc-mail, .dpc-v2-mail')).toHaveCount(0);
   const panelText = await root.locator('.dpc-context').innerText();
   expect(panelText).not.toMatch(/—|template|attach|recording|transcript/i);
 });

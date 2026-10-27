@@ -88,6 +88,26 @@
   // ── Init Supabase Client ──
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  // ── Lend the signed-in session to an embedded scope preview ──
+  // The patio and fence tools open with noAuth=true inside Ops Dash and the
+  // trade app, and ask for this page's session by postMessage so they can read
+  // the job without a shared key. Answer only a frame inside this page, only on
+  // the tools' own origins, and only with the session we already hold.
+  var _PREVIEW_ORIGINS = ['https://marninms98-dotcom.github.io', 'https://secureworks-group.github.io'];
+  window.addEventListener('message', function(ev) {
+    if (!ev.data || ev.data.type !== 'sw:session-request') return;
+    if (_PREVIEW_ORIGINS.indexOf(ev.origin) === -1 || !ev.source) return;
+    var frames = document.getElementsByTagName('iframe');
+    var ours = false;
+    for (var i = 0; i < frames.length; i++) { if (frames[i].contentWindow === ev.source) { ours = true; break; } }
+    if (!ours) return;
+    var source = ev.source, origin = ev.origin;
+    sb.auth.getSession().then(function(r) {
+      var token = r && r.data && r.data.session && r.data.session.access_token;
+      if (token) source.postMessage({ type: 'sw:session', access_token: token }, origin);
+    }).catch(function() {});
+  });
+
   // ── State ──
   var _user = null;
   var _userProfile = null;
@@ -212,7 +232,11 @@
     isLoggedIn() { return !!_user; },
 
     // Get current user role
-    getRole() { return _userProfile?.role || null; }
+    getRole() { return _userProfile?.role || null; },
+
+    // True after a reset link established a session and before the new password is saved.
+    recoveryPending() { return _recoveryPending; },
+    clearRecovery() { _recoveryPending = false; }
   };
 
   // Load user profile via edge function (bypasses RLS)
@@ -236,14 +260,27 @@
     }
   }
 
+  // A password-reset link signs the browser in only long enough to choose a
+  // new password. That is a different event from a normal sign-in, so other
+  // apps keep their current login behaviour: they do not listen for auth:recovery.
+  var _recoveryPending = false;
+
   // Listen for auth state changes
   sb.auth.onAuthStateChange(async function(event, session) {
+    if (event === 'PASSWORD_RECOVERY' && session?.user) {
+      _recoveryPending = true;
+      _user = session.user;
+      await _loadUserProfile();
+      emit('auth:recovery', _userProfile);
+      return;
+    }
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
       _user = session.user;
       await _loadUserProfile();
       emit('auth:login', _userProfile);
       _flushQueue();
     } else if (event === 'SIGNED_OUT') {
+      _recoveryPending = false;
       _user = null;
       _userProfile = null;
       _orgId = null;

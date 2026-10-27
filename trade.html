@@ -21,13 +21,21 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
+    // Show the set-password panel before the body paints when a reset link lands here.
+    if (/type=recovery/.test(location.hash) || /type=recovery/.test(location.search) || /(?:#|&)error=/.test(location.hash)) {
+      document.documentElement.classList.add('sw-recovery');
+    }
   </script>
   <script src="shared/brand.js"></script>
   <!-- Trade keeps its own login screen. Do NOT load ops auth-gate.js here:
        it hides the trade login UI and confuses crew sign-in after the ops JWT cutover. -->
-  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
+  <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
-  <script src="shared/job-work-order.js?v=3"></script>
+  <script src="shared/job-work-order.js?v=4"></script>
+  <script src="shared/group-work-order.js?v=2"></script>
+  <script src="modules/trade-group-work-order.js?v=2"></script>
+  <script src="modules/trade-invoice-running-draft.js?v=20261024"></script>
+  <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -265,7 +273,43 @@
       color: var(--sw-green);
       font-size: 14px;
       font-weight: 600;
+      line-height: 1.45;
+      text-align: left;
     }
+    .login-text-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 44px;
+      margin-top: 4px;
+      padding: 8px;
+      background: none;
+      border: none;
+      color: var(--sw-orange);
+      font-family: var(--sw-font);
+      font-size: 15px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .login-hint {
+      font-size: 13px;
+      color: var(--sw-text-sec);
+      margin: 0 0 12px;
+      text-align: left;
+      line-height: 1.4;
+    }
+    .login-box .login-lead {
+      font-size: 14px;
+      color: var(--sw-text-sec);
+      display: block;
+      margin-bottom: 12px;
+      text-align: left;
+      line-height: 1.4;
+    }
+    /* Recovery links paint this before the app script runs. JS removes the class once it owns the panels. */
+    html.sw-recovery #loginSignIn { display: none; }
+    html.sw-recovery #loginNewPassword[hidden] { display: block; }
 
     /* ══════════════════════════════════════════════════
        BUTTONS
@@ -1563,12 +1607,29 @@
       margin-top: 10px; padding: 8px 14px; border: none; border-radius: 8px;
       background: var(--sw-dark); color: #fff; font: 600 13px var(--sw-font); cursor: pointer;
     }
+    .hours-nudge {
+      margin: 10px 12px 0; padding: 12px 14px; background: var(--sw-card);
+      border: 1px solid var(--sw-border); border-radius: 12px; box-shadow: var(--sw-shadow);
+      font-family: var(--sw-font);
+    }
+    .hours-nudge-title { font-size: 15px; font-weight: 700; color: var(--sw-dark); }
+    .hours-nudge-detail { font-size: 13px; line-height: 1.4; color: var(--sw-text-sec); margin-top: 4px; }
+    .hours-nudge-go, .hours-nudge-dismiss {
+      display: block; width: 100%; min-height: 44px; margin-top: 10px; border-radius: 8px;
+      font: 600 15px var(--sw-font); cursor: pointer;
+    }
+    .hours-nudge-go { border: none; background: var(--sw-dark); color: #fff; }
+    .hours-nudge-dismiss {
+      margin-top: 6px; border: none; background: transparent; color: var(--sw-mid);
+    }
+    #dailyHoursNudgePay .hours-nudge { margin: 0 0 12px; }
     .header-user:not(:empty)::after { content: ' \25BE'; }
     .user-menu-access { padding: 12px 16px; border-bottom: 1px solid var(--sw-border); max-width: 260px; }
     .user-menu-btn {
       display: block; width: 100%; padding: 14px 16px; border: none; background: none; text-align: left;
       font-size: 14px; font-family: var(--sw-font); color: var(--sw-text); cursor: pointer;
     }
+    .user-menu-btn[hidden] { display: none; }
 
     /* ══════════════════════════════════════════════════
        TIMER CARD
@@ -3530,6 +3591,7 @@
 <div id="userMenu" style="display:none;position:fixed;top:56px;right:8px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:200;min-width:140px;overflow:hidden">
   <div class="user-menu-access" id="userMenuAccess"></div>
   <button class="user-menu-btn" id="userMenuActivity" onclick="openActivityFromMenu()">Activity</button>
+  <button class="user-menu-btn" id="userMenuScoper" onclick="openScoperFromMenu()" hidden>Scope a job</button>
   <button class="user-menu-btn" onclick="doLogout()">Sign out</button>
 </div>
 
@@ -3538,12 +3600,39 @@
      ══════════════════════════════════════════════════ -->
 <div id="viewLogin" class="view active">
   <div class="login-box">
-    <h2>Trade Login</h2>
-    <label for="loginEmail" style="font-size:14px;color:var(--sw-text-sec);display:block;margin-bottom:8px">Sign in with your email and password</label>
-    <input type="email" id="loginEmail" placeholder="you@email.com" autocomplete="email">
-    <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" style="margin-bottom:12px">
-    <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Log In</button>
-    <div id="loginError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+    <div id="loginSignIn">
+      <h2>Trade Login</h2>
+      <label for="loginEmail" style="font-size:14px;color:var(--sw-text-sec);display:block;margin-bottom:8px">Sign in with your email and password</label>
+      <input type="email" id="loginEmail" placeholder="you@email.com" autocomplete="email">
+      <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" style="margin-bottom:12px">
+      <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Log In</button>
+      <button type="button" class="login-text-btn" id="btnForgotPassword" onclick="showForgotPassword()">Forgot password?</button>
+      <div id="loginError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+    </div>
+    <div id="loginForgot" hidden>
+      <h2>Forgot password?</h2>
+      <label class="login-lead" id="forgotLead" for="forgotEmail">Enter the email on your account and we will send a link to set a new password.</label>
+      <input type="email" id="forgotEmail" placeholder="you@email.com" autocomplete="email" inputmode="email">
+      <button class="btn btn-primary" id="btnSendReset" onclick="sendPasswordReset()">Send reset link</button>
+      <button type="button" class="login-text-btn" id="btnForgotBack" onclick="showLoginForm()">Back to log in</button>
+      <div id="forgotError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+      <div id="forgotSent" class="login-sent" hidden>If that email has an account, we've sent a reset link.</div>
+    </div>
+    <div id="loginNewPassword" hidden>
+      <h2>Set a new password</h2>
+      <p class="login-lead" id="newPasswordLead">Checking your reset link...</p>
+      <div id="newPasswordForm" hidden>
+        <label class="login-lead" for="newPassword">Choose a password for this trade account.</label>
+        <input type="password" id="newPassword" placeholder="New password" autocomplete="new-password">
+        <input type="password" id="confirmPassword" placeholder="Confirm password" autocomplete="new-password">
+        <p class="login-hint">At least 8 characters.</p>
+        <button class="btn btn-primary" id="btnSetPassword" onclick="submitNewPassword()">Save password</button>
+      </div>
+      <div id="newPasswordError" style="display:none;padding:12px;background:#fdeaea;border-radius:8px;color:var(--sw-red);font-size:14px;font-weight:600;margin-top:12px"></div>
+      <div id="newPasswordExpired" hidden>
+        <button type="button" class="btn btn-primary" id="btnRequestNewReset" onclick="showForgotPassword()">Request a new link</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3653,6 +3742,7 @@
   <!-- First-run access card: who you are signed in as and what Everyone covers
        (renderAccessIntro, dismissed once per account + access title). -->
   <div class="access-intro" id="accessIntro" hidden></div>
+  <div id="dailyHoursNudge" data-hours-nudge-host="calendar" data-hours-nudge-state="waiting" hidden></div>
   <!-- ══════════════════════════════════════════════════
        M2 CALENDAR SYSTEM (U2 renderers + U3 filters/strip).
        The only calendar. Legacy .container below stays in DOM but is
@@ -4106,7 +4196,27 @@
   function syncUserMenuAccess() {
     var el = document.getElementById('userMenuAccess');
     if (el) el.innerHTML = _user ? tradeAccessBlockHTML('menu') : '';
+    var sc = document.getElementById('userMenuScoper');
+    if (sc) sc.hidden = !scoperLinkAllowed();
   }
+
+  // Staff open the scoper (Scope Engine T42). Off until the switch-on:
+  // set SCOPER_LINK_ENABLED to true. Shown to office staff only (admin, owner,
+  // ops_manager). The scoper page is on this same site, so the trade app's
+  // sign-in carries over and the page opens already signed in.
+  var SCOPER_LINK_ENABLED = false;
+  var SCOPER_URL = 'scopers/practice/';
+  function scoperLinkAllowed() {
+    var role = String((_user && _user.role) || '').toLowerCase();
+    return SCOPER_LINK_ENABLED && (role === 'admin' || role === 'owner' || role === 'ops_manager');
+  }
+
+  window.openScoperFromMenu = function () {
+    var menu = document.getElementById('userMenu');
+    if (menu) menu.style.display = 'none';
+    if (!scoperLinkAllowed()) return;
+    window.open(SCOPER_URL, '_blank', 'noopener');
+  };
 
   window.openActivityFromMenu = function () {
     var menu = document.getElementById('userMenu');
@@ -6944,6 +7054,223 @@
     if (el) el.style.display = 'none';
   }
 
+  // <trade-password-reset>
+  // Self-serve reset. The live redirect that must be on the Supabase allow-list
+  // is https://secureworks-group.github.io/secureworks-ux/trade.html. A page
+  // served as trade.html uses its own address so a local check comes back here.
+  var TRADE_PASSWORD_MIN = 8;
+  var TRADE_RESET_REDIRECT = 'https://secureworks-group.github.io/secureworks-ux/trade.html';
+  var _tradeHoldForRecovery = tradeUrlIsRecovery() || tradeUrlAuthError();
+  var _tradeRecoveryProfile = null;
+  var _tradeRecoveryReady = false;
+
+  function tradeUrlIsRecovery() {
+    var hash = window.location.hash || '';
+    var search = window.location.search || '';
+    return /type=recovery/.test(hash) || /type=recovery/.test(search);
+  }
+  function tradeUrlAuthError() {
+    return /(?:#|&)error=/.test(window.location.hash || '') || /(?:#|&)error_code=/.test(window.location.hash || '');
+  }
+  function tradeResetRedirectUrl() {
+    var url = String(window.location.href || '').split('#')[0].split('?')[0];
+    if (/^https?:\/\//.test(url) && /\/trade\.html$/.test(url)) return url;
+    return TRADE_RESET_REDIRECT;
+  }
+  function tradePasswordProblem(pw, confirm) {
+    if (!pw || pw.length < TRADE_PASSWORD_MIN) return 'Use at least 8 characters.';
+    if (pw !== confirm) return "Those passwords don't match.";
+    return '';
+  }
+  function tradePasswordErrorText(err) {
+    var msg = String((err && (err.message || err.msg)) || err || '');
+    if (/at least|weak|short|should be/i.test(msg)) return 'Use at least 8 characters.';
+    if (/session/i.test(msg)) return 'This reset link is no longer valid. Request a new one.';
+    if (/rate|too many/i.test(msg)) return 'Too many attempts. Wait a few minutes and try again.';
+    return 'Could not update the password. Please try again.';
+  }
+  function showLoginMessage(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function showLoginPanel(which) {
+    document.documentElement.classList.remove('sw-recovery');
+    document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
+    var login = document.getElementById('viewLogin');
+    if (login) login.classList.add('active');
+    var nav = document.getElementById('bottomNav');
+    if (nav) nav.style.display = 'none';
+    ['loginSignIn', 'loginForgot', 'loginNewPassword'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = id !== which;
+    });
+  }
+  function showSetPasswordScreen(mode) {
+    showLoginPanel('loginNewPassword');
+    var lead = document.getElementById('newPasswordLead');
+    var form = document.getElementById('newPasswordForm');
+    var expired = document.getElementById('newPasswordExpired');
+    showLoginMessage('newPasswordError', '');
+    if (mode === 'expired') {
+      _tradeRecoveryReady = false;
+      if (lead) lead.textContent = 'This reset link has expired or is not valid.';
+      if (form) form.hidden = true;
+      if (expired) expired.hidden = false;
+      return;
+    }
+    if (mode === 'checking') {
+      _tradeRecoveryReady = false;
+      if (lead) lead.textContent = 'Checking your reset link...';
+      if (form) form.hidden = true;
+      if (expired) expired.hidden = true;
+      return;
+    }
+    _tradeRecoveryReady = true;
+    if (lead) lead.textContent = 'Choose a new password for your trade account.';
+    if (form) form.hidden = false;
+    if (expired) expired.hidden = true;
+    var field = document.getElementById('newPassword');
+    if (field) field.focus();
+  }
+  function beginPasswordRecovery(profile) {
+    _tradeHoldForRecovery = true;
+    if (profile) _tradeRecoveryProfile = profile;
+    showSetPasswordScreen('ready');
+  }
+  function stripAuthFromUrl() {
+    if (!window.history || !history.replaceState) return;
+    var params = new URLSearchParams(window.location.search || '');
+    ['token', 'type', 'code', 'error', 'error_code', 'error_description'].forEach(function(key) {
+      params.delete(key);
+    });
+    var qs = params.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+  }
+  window.showForgotPassword = function() {
+    var from = document.getElementById('loginEmail');
+    var email = document.getElementById('forgotEmail');
+    if (email && from && !email.value) email.value = from.value || '';
+    var lead = document.getElementById('forgotLead');
+    if (lead) lead.hidden = false;
+    showLoginMessage('forgotError', '');
+    var sent = document.getElementById('forgotSent');
+    if (sent) sent.hidden = true;
+    var sendBtn = document.getElementById('btnSendReset');
+    if (sendBtn) { sendBtn.hidden = false; sendBtn.disabled = false; sendBtn.textContent = 'Send reset link'; }
+    if (email) email.hidden = false;
+    showLoginPanel('loginForgot');
+    if (email) email.focus();
+  };
+  window.showLoginForm = function() {
+    _tradeHoldForRecovery = false;
+    if (cloud && cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
+    hideLoginError();
+    showLoginPanel('loginSignIn');
+  };
+  window.sendPasswordReset = function() {
+    var emailEl = document.getElementById('forgotEmail');
+    var email = emailEl ? emailEl.value.trim() : '';
+    var sent = document.getElementById('forgotSent');
+    var btn = document.getElementById('btnSendReset');
+    showLoginMessage('forgotError', '');
+    if (sent) sent.hidden = true;
+    if (!email || email.indexOf('@') < 1) {
+      showLoginMessage('forgotError', 'Enter the email on your account.');
+      return;
+    }
+    if (!cloud || !cloud.supabase) {
+      showLoginMessage('forgotError', 'Still loading. Wait a moment and try again.');
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+    cloud.supabase.auth.resetPasswordForEmail(email, { redirectTo: tradeResetRedirectUrl() }).then(function(result) {
+      var error = result && result.error;
+      var code = String((error && (error.code || error.error_code)) || '').toLowerCase();
+      var msg = String((error && (error.message || error.msg)) || '').toLowerCase();
+      var hidden = !error || code.indexOf('user_not_found') !== -1 || msg.indexOf('user not found') !== -1;
+      if (!hidden) {
+        var friendly = /rate|too many/i.test(msg) ? 'Too many reset emails. Wait a few minutes and try again.' : 'We could not send the reset link. Please try again, or contact the office.';
+        showLoginMessage('forgotError', friendly);
+        if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
+        return;
+      }
+      if (sent) sent.hidden = false;
+      if (emailEl) emailEl.hidden = true;
+      if (btn) btn.hidden = true;
+      var lead = document.getElementById('forgotLead');
+      if (lead) lead.hidden = true;
+    }).catch(function() {
+      showLoginMessage('forgotError', 'We could not send the reset link. Please try again, or contact the office.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
+    });
+  };
+  window.submitNewPassword = function() {
+    var pwEl = document.getElementById('newPassword');
+    var confirmEl = document.getElementById('confirmPassword');
+    var pw = pwEl ? pwEl.value : '';
+    var confirm = confirmEl ? confirmEl.value : '';
+    var btn = document.getElementById('btnSetPassword');
+    var problem = tradePasswordProblem(pw, confirm);
+    if (problem) { showLoginMessage('newPasswordError', problem); return; }
+    if (!_tradeRecoveryReady || !cloud || !cloud.supabase) {
+      showLoginMessage('newPasswordError', 'This reset link is no longer valid. Request a new one.');
+      return;
+    }
+    showLoginMessage('newPasswordError', '');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    cloud.supabase.auth.updateUser({ password: pw }).then(function(result) {
+      if (result && result.error) {
+        showLoginMessage('newPasswordError', tradePasswordErrorText(result.error));
+        if (btn) { btn.disabled = false; btn.textContent = 'Save password'; }
+        return;
+      }
+      _tradeHoldForRecovery = false;
+      if (cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
+      stripAuthFromUrl();
+      var profile = _tradeRecoveryProfile || (cloud.auth && cloud.auth.getUser && cloud.auth.getUser());
+      if (profile) onLogin(profile);
+      else showLoginMessage('newPasswordError', 'Password saved. Sign in with your new password.');
+    }).catch(function(err) {
+      showLoginMessage('newPasswordError', tradePasswordErrorText(err));
+      if (btn) { btn.disabled = false; btn.textContent = 'Save password'; }
+    });
+  };
+  window.changeProfilePassword = function() {
+    var pwEl = document.getElementById('profileNewPassword');
+    var confirmEl = document.getElementById('profileConfirmPassword');
+    var status = document.getElementById('profilePasswordStatus');
+    var btn = document.getElementById('btnProfilePassword');
+    var pw = pwEl ? pwEl.value : '';
+    var confirm = confirmEl ? confirmEl.value : '';
+    function say(text, bad) {
+      if (!status) return;
+      status.textContent = text;
+      status.style.color = bad ? 'var(--sw-red)' : 'var(--sw-green)';
+    }
+    var problem = tradePasswordProblem(pw, confirm);
+    if (problem) { say(problem, true); return; }
+    if (!cloud || !cloud.supabase) { say('Still loading. Wait a moment and try again.', true); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    cloud.supabase.auth.updateUser({ password: pw }).then(function(result) {
+      if (result && result.error) {
+        say(tradePasswordErrorText(result.error), true);
+        if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+        return;
+      }
+      if (pwEl) pwEl.value = '';
+      if (confirmEl) confirmEl.value = '';
+      say('Password updated. Use it next time you sign in.', false);
+      if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+    }).catch(function(err) {
+      say(tradePasswordErrorText(err), true);
+      if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
+    });
+  };
+  // </trade-password-reset>
+
   // Enter key on login fields
   document.getElementById('loginEmail').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { document.getElementById('loginPassword').focus(); }
@@ -6951,8 +7278,21 @@
   document.getElementById('loginPassword').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doLogin();
   });
+  document.getElementById('forgotEmail').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') sendPasswordReset();
+  });
+  document.getElementById('confirmPassword').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') submitNewPassword();
+  });
+  document.getElementById('newPassword').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('confirmPassword').focus();
+  });
 
   function onLogin(profile) {
+    if (_tradeHoldForRecovery) {
+      beginPasswordRecovery(profile);
+      return;
+    }
     var prevOwner = _invDraftOwnerId();
     _user = profile;
     if (!_user) { console.error('[trade] onLogin: profile is null!'); return; }
@@ -7136,6 +7476,7 @@
     if (view === 'board') renderBoardView();
     if (view === 'schedule') { var _ap = document.getElementById('scheduleAvailPanel'); if (_ap) _ap.style.display = 'none'; renderNewCalendar(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
     if (view === 'hours') loadHoursView();
+    if (view === 'schedule' || view === 'hours') refreshDailyHoursNudge();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
       if (_currentJobLoaded !== _currentJobId) loadJobDetail(_currentJobId);
@@ -7530,6 +7871,12 @@
   function resetInvoiceSession() {
     _invoiceAuthGen++;
     _hoursData = null;
+    _runningInvoiceDraftServer = null;
+    _dailyHoursWeekSubmitted = false;
+    _dailyHoursDecision = null;
+    _dailyHoursSeq++;
+    _scrollInvoiceToToday = false;
+    _hoursNudgeOpen = false;
     _invoiceDeductionWeekAnswer = null;
     _tradeRate = null;
     _invWeekCollision = null;
@@ -7538,6 +7885,7 @@
     _invoicedWeeksSeq++;
     _clearInvDraft();
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
+    _paintDailyHoursNudge(null);
   }
 
   function _invoiceApiContext() {
@@ -13248,6 +13596,7 @@
     var h = '';
 
     h += renderTradeJobWorkOrder(data);
+    h += renderGroupWorkOrderSlot(data);
     h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
@@ -13798,6 +14147,13 @@
     return JobWorkOrderCore.renderTrade(read, read ? 'ready' : (e && e.state === 'failed' ? 'failed' : 'loading'));
   }
 
+  function renderGroupWorkOrderSlot(data) {
+    if (!window.GroupWorkOrderTrade || !data || !data.job || isForeignCrewJob(data)) return '';
+    if (!GroupWorkOrderTrade.arm(data)) return '';
+    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); });
+    return GroupWorkOrderTrade.slotHtml(data.job.id);
+  }
+
   // The Work Order and Scope tabs: the job's work order scope, on an
   // allocated fencing or patio job.
   function renderTradeJobWorkOrder(data) {
@@ -13891,6 +14247,7 @@
     // lines → videos → materials. Quote-pack / compact WO rates stay office-only.
     h += renderTradeInstructions(data);
     h += renderTradeJobWorkOrder(data);
+    h += renderGroupWorkOrderSlot(data);
     h += renderQuotePacks(data);
 
     // 1. Build spec (dimensions, colours, attachment)
@@ -20461,6 +20818,15 @@
 
   function loadHoursView() {
     _leaveWeeklyWorkOrderInvoice();
+    if (_hoursNudgeOpen) {
+      _hoursNudgeOpen = false;
+      _scrollInvoiceToToday = true;
+      _invoiceBuilderOpen = false;
+      _hoursWeekEnd = getWeekEndSunday(0);
+      _hoursWeekStart = getWeekStartMonday(0);
+      loadAndOpenInvoice();
+      return;
+    }
     // If invoice builder was open (or saved in sessionStorage), restore it instead of reloading hours
     if (_invoiceBuilderOpen) { renderInvoiceBuilder(); return; }
     try {
@@ -20485,6 +20851,7 @@
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
+      _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       _invGst = _invoiceGstDefault(data);
       renderHoursView(data);
@@ -20515,6 +20882,7 @@
     var iconStyle = 'flex:0 0 44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px';
     var html = '';
 
+    html += '<div id="dailyHoursNudgePay" data-hours-nudge-host="pay" data-hours-nudge-state="waiting" hidden></div>';
     html += '<div data-financial-hub style="padding:8px 0 16px;text-align:center">';
     html += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark)">Pay</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec)">Invoices, expenses & reimbursements</div>';
@@ -20574,6 +20942,7 @@
     }
 
     container.innerHTML = html;
+    _paintDailyHoursNudge(_dailyHoursDecision);
 
     // Load crew review data after DOM ready
     if (_userTier >= 2) loadCrewReview();
@@ -20680,6 +21049,7 @@
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
+      _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       openInvoiceBuilder();
     }).catch(function(err) {
@@ -20876,6 +21246,7 @@
       api('my_hours', { week_ending: toEnd }).then(function(data) {
         if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx) || !_invoiceBuilderOpen) return;
         _hoursData = data;
+        _noteRunningInvoiceDraftFlag(data);
         _tradeRate = data.rate;
         buildJobCards();
         carried.forEach(function(c) {
@@ -21916,6 +22287,19 @@
   var _invExtraLines = []; // extra line items (travel, materials, etc.)
   var _invNotes = ''; // preserved across re-renders
   var _draftInvoiceId = null; // existing draft being edited
+  var _invDismissedKeys = []; // source keys the person removed from this week's draft
+  var _invCreatedByAgent = false;
+  var _invRunningSavedHash = '';
+  var _invRunningHydrating = false;
+  var _invRunningLoadSeq = 0;
+  var _invRunningSaveTimer = null;
+  var _invRunningSaveWarned = false;
+  var _runningInvoiceDraftServer = null;
+  var _dailyHoursWeekSubmitted = false;
+  var _dailyHoursDecision = null;
+  var _dailyHoursSeq = 0;
+  var _scrollInvoiceToToday = false;
+  var _hoursNudgeOpen = false;
   var _draftSaveUnresolved = false;
   var _invoiceBuilderMode = 'weekly'; // 'weekly' or 'expense'
 
@@ -21950,6 +22334,9 @@
     _invExtraLines = []; // legacy compat
     _invNotes = '';
     _draftInvoiceId = null;
+    _invDismissedKeys = [];
+    _invCreatedByAgent = false;
+    _invRunningSavedHash = '';
     _pmDraftIsPerMetre = false;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
     _invGst = _invoiceGstDefault(_hoursData);
@@ -21967,8 +22354,10 @@
         _pmWoHydrateState = 'pending';
         _pmWoHydrateError = '';
       }
+      if (runningInvoiceDraftOn()) _invRunningHydrating = true;
       renderInvoiceBuilder();
       _hydratePerMetreWorkOrderCards();
+      _loadRunningInvoiceDraft();
       return;
     }
 
@@ -22124,6 +22513,9 @@
         html += '<div class="inv-line-amount">$' + Number(l.line_total_ex || 0).toFixed(2) + '</div>';
         html += '</div>';
         if (l.quantity && l.unit_rate) html += '<div class="inv-line-detail">' + l.quantity + ' × $' + Number(l.unit_rate).toFixed(2) + '</div>';
+        if (typeCls === 'travel' && l.job_number && String(l.description || '').indexOf(String(l.job_number)) === -1) {
+          html += '<div class="inv-line-detail">' + esc(l.job_number) + '</div>';
+        }
         html += _invoiceLineWhenHtml(l);
         html += '<span class="inv-line-type ' + typeCls + '">' + (l.line_type || 'other') + '</span></div>';
       });
@@ -22146,7 +22538,7 @@
 
     // Xero ref
     if (inv.xero_bill_id) {
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--sw-text-sec)">Synced to Xero</div>';
+      html += '<div style="margin-top:8px;font-size:12px;color:var(--sw-text-sec)">In Xero as a bill</div>';
     }
 
     // Delete button (not for paid invoices)
@@ -22303,17 +22695,19 @@
     // part paid is checked before "approved"; and a bill deleted or voided in
     // Xero outranks our own row status (a `pushed_to_xero` / `approved` row
     // whose bill was DELETED used to read as still in progress).
+    // A trade invoice's 'paid' status is set by xero-sync when Xero says PAID
+    // (trade_bill_status.ts), so every paid row reads Paid (Xero).
     function statusOf(row) {
       row = row || {};
       var bill = String(row.xero_bill_status || '').toUpperCase();
       var ours = String(row.status || '');
-      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
+      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid (Xero)' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
       if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
       if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
       if (ours === 'ops-reject' || ours === 'failed' || ours === 'rejected') return { label: 'Not accepted', cls: 'void' };
       if (ours === 'pending_ops_review' || ours === 'queried') return { label: 'Under review', cls: 'review' };
       if (Number(row.amount_paid || 0) > 0) return { label: 'Part paid', cls: 'owed' };
-      if (bill === 'AUTHORISED') return { label: 'Approved, awaiting payment', cls: 'owed' };
+      if (bill === 'AUTHORISED') return { label: 'Approved in Xero', cls: 'owed' };
       return { label: 'Waiting on office', cls: 'sent' };
     }
     function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
@@ -22409,7 +22803,7 @@
       h += '<div class="mm-stats">';
       h += statHTML('Earned', money(t.gross_earned), 'earned');
       h += statHTML('Paid to you', money(t.paid_total), 'paid');
-      h += statHTML('Still owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
+      h += statHTML('Owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
       h += '</div>';
       var split = resolveSuperSplit(t);
       h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.worker_withhold) + ' from you &middot; company covers ' + money(split.company_contribution);
@@ -22419,8 +22813,8 @@
       // gross_earned, so Earned and Super leave them out while Paid and Still
       // owed count them. Say exactly that rather than let Paid look bigger
       // than Earned for no reason.
-      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and still owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
-      // The server's Paid to you and Still owed are already reduced by a
+      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
+      // The server's Paid to you and Owed are already reduced by a
       // weekly deduction; only "You get", worked out here from the super
       // split, is not. So a period whose invoices carry one names what came
       // off them. [trade-recurring-deduction]
@@ -23165,6 +23559,38 @@
     return html;
   }
 
+  // Optional travel on a work-order card. Amount is the line; km and note are
+  // optional and ride in that line's description. It is not a deduction.
+  function _renderWoTravelHtml(c) {
+    var i = c._idx;
+    var travel = _woTravelState(c);
+    var amt = (c.travel_amount != null && c.travel_amount !== '') ? c.travel_amount : '';
+    var km = (c.travel_km != null && c.travel_km !== '') ? c.travel_km : '';
+    var h = '<div data-cardtravel="' + i + '" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--sw-border)">';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:6px">Travel allowance</div>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+    h += '<label style="font-size:12px;color:var(--sw-text-sec)">Amount $</label>';
+    h += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardtravelamt="' + i + '" value="' + esc(String(amt)) + '" placeholder="0.00" aria-label="Travel allowance amount" '
+      + 'onchange="setJobCardTravel(' + i + ',\'amount\',this.value)" '
+      + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+    h += '<label style="font-size:12px;color:var(--sw-text-sec)">km</label>';
+    h += '<input type="number" min="0" step="0.1" inputmode="decimal" data-cardtravelkm="' + i + '" value="' + esc(String(km)) + '" placeholder="optional" aria-label="Travel kilometres" '
+      + 'onchange="setJobCardTravel(' + i + ',\'km\',this.value)" '
+      + 'style="width:90px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+    h += '</div>';
+    h += '<input type="text" data-cardtravelnote="' + i + '" value="' + esc(c.travel_note || '') + '" placeholder="Note (optional)" aria-label="Travel note" '
+      + 'onchange="setJobCardTravel(' + i + ',\'note\',this.value)" '
+      + 'style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
+    h += '<div data-cardtravelline="' + i + '" style="display:' + (travel.amount > 0 ? 'flex' : 'none') + ';justify-content:space-between;align-items:baseline;margin-top:8px">';
+    h += '<span style="font-size:12px;color:var(--sw-text-sec)">Travel allowance' + (c.job_number ? ' · ' + esc(c.job_number) : '') + '</span>';
+    h += '<span data-cardtravelpay="' + i + '" style="font-size:16px;font-weight:800;color:var(--sw-dark)">$' + travel.amount.toFixed(2) + '</span>';
+    h += '</div>';
+    h += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">Optional. Its own line on this invoice, on this job. No date or times.</div>';
+    h += '<div data-cardtravelwarn="' + i + '" style="display:' + (travel.error ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">' + esc(travel.error) + '</div>';
+    h += '</div>';
+    return h;
+  }
+
   function _restoreJobCardsDraft(cards) {
     return (cards || []).map(function(raw) {
       var fields = Object.assign({}, raw || {});
@@ -23212,6 +23638,7 @@
     api('my_hours', { week_ending: weekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
+      _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       if (data && (String(data.invoice_type || '') === 'per_metre' || data.is_per_metre === true)) {
         _pmDraftIsPerMetre = true;
@@ -23295,6 +23722,15 @@
     _invLumpLines = [];
     _invRows = [];
     _draftSaveUnresolved = false;
+    _invDismissedKeys = [];
+    _invCreatedByAgent = false;
+    _invRunningSavedHash = '';
+    _invRunningHydrating = false;
+    _invRunningLoadSeq++;
+    if (_invRunningSaveTimer) {
+      clearTimeout(_invRunningSaveTimer);
+      _invRunningSaveTimer = null;
+    }
     try {
       var key = _invDraftStorageKey();
       if (key) sessionStorage.removeItem(key);
@@ -23302,10 +23738,376 @@
     } catch(e) {}
   }
   window._clearInvDraft = _clearInvDraft;
-  window.leaveInvoiceBuilder = function() {
-    _clearInvDraft();
-    loadHoursView();
+
+  // Running weekly draft. Off unless this person's account flag is on, or this
+  // browser is in the trial (?invdraft=1 / localStorage sw_inv_running_draft).
+  // ?invdraft=0 turns the screen off. Save posts save_running_invoice_draft and
+  // never calls generate_trade_invoice. [trade-invoice-running-draft]
+  function _captureInvDraftFlag() {
+    try {
+      var q = new URLSearchParams(location.search).get('invdraft');
+      if (q === '1') localStorage.setItem('sw_inv_running_draft', '1');
+      if (q === '0') localStorage.setItem('sw_inv_running_draft', '0');
+    } catch (e) {}
+  }
+  _captureInvDraftFlag();
+
+  function runningInvoiceDraftOn() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core) return false;
+    var query = null;
+    var stored = null;
+    try { query = new URLSearchParams(location.search).get('invdraft'); } catch (e) {}
+    try { stored = localStorage.getItem('sw_inv_running_draft'); } catch (e2) {}
+    return core.flagOn({
+      server: _runningInvoiceDraftServer === true || !!(_hoursData && _hoursData.running_invoice_draft === true),
+      query: query,
+      stored: stored
+    });
+  }
+
+  function _noteRunningInvoiceDraftFlag(data) {
+    if (!data || !Object.prototype.hasOwnProperty.call(data, 'running_invoice_draft')) return;
+    _runningInvoiceDraftServer = data.running_invoice_draft === true;
+    var answered = String(data.week_ending || data.week_end || '').slice(0, 10);
+    if (!answered || answered === getWeekEndSunday(0)) {
+      if (data.already_submitted === true || data.already_submitted === false) {
+        _dailyHoursWeekSubmitted = data.already_submitted === true;
+      }
+    }
+  }
+
+  // <daily-hours-nudge>
+  // A card on Calendar and Pay when today's jobs have no start and finish on
+  // the weekly draft. Same switch as Save. One tap opens today's lines. It
+  // never calls generate_trade_invoice. A failed read stays hidden.
+  function _hoursNudgeDismissedOn() {
+    try {
+      var raw = localStorage.getItem('sw_hours_nudge_off') || '';
+      var id = (_user && _user.id) || '';
+      var prefix = id + ':';
+      if (raw.indexOf(prefix) === 0) return raw.slice(prefix.length);
+    } catch (e) {}
+    return '';
+  }
+
+  function _invoiceWeekHasToday() {
+    var today = clockPerthDay(new Date());
+    return !!(_hoursWeekStart && _hoursWeekEnd && today >= _hoursWeekStart && today <= _hoursWeekEnd);
+  }
+
+  function _dailyHoursDecisionFrom(res) {
+    var core = window.TradeDailyHoursNudge;
+    if (!core) return { show: false, reason: 'off', open: [] };
+    var week = getWeekStartMonday(0);
+    var live = _invoiceBuilderOpen && _hoursWeekStart === week;
+    var builder = res && res.draft_builder;
+    var cards = live ? _serializeJobCardsDraft(_jobCards) : ((builder && builder.jobCards) || []);
+    var dismissed = live ? (_invDismissedKeys || []) : (
+      (res && res.dismissed_source_keys) || (builder && builder.dismissedKeys) || []
+    );
+    return core.decide({
+      flag: true,
+      today: clockPerthDay(new Date()),
+      dismissedOn: _hoursNudgeDismissedOn(),
+      weekSubmitted: !!_dailyHoursWeekSubmitted,
+      suggested: (res && res.suggested) || [],
+      cards: cards,
+      claimed: (res && res.claimed) || [],
+      dismissed: dismissed
+    });
+  }
+
+  function _dailyHoursNudgeHtml(decision) {
+    return '<div class="hours-nudge" data-hours-nudge data-hours-nudge-count="' + (decision.open ? decision.open.length : 0) + '">'
+      + '<div class="hours-nudge-title">' + esc(decision.title) + '</div>'
+      + '<p class="hours-nudge-detail">' + esc(decision.detail) + '</p>'
+      + '<button type="button" class="hours-nudge-go" data-hours-nudge-go onclick="openDailyHoursFromNudge()">' + esc(decision.title) + '</button>'
+      + '<button type="button" class="hours-nudge-dismiss" data-hours-nudge-dismiss onclick="dismissDailyHoursNudge()">Not today</button>'
+      + '</div>';
+  }
+
+  function _paintDailyHoursNudge(decision) {
+    var state = decision && decision.show ? 'open' : ((decision && decision.reason) || 'off');
+    ['dailyHoursNudge', 'dailyHoursNudgePay'].forEach(function(id) {
+      var host = document.getElementById(id);
+      if (!host) return;
+      host.setAttribute('data-hours-nudge-state', state);
+      if (!decision || !decision.show) {
+        host.hidden = true;
+        host.innerHTML = '';
+        return;
+      }
+      host.hidden = false;
+      host.innerHTML = _dailyHoursNudgeHtml(decision);
+    });
+  }
+
+  function _runningDraftFlagKilled() {
+    var query = null;
+    var stored = null;
+    try { query = new URLSearchParams(location.search).get('invdraft'); } catch (e) {}
+    try { stored = localStorage.getItem('sw_inv_running_draft'); } catch (e2) {}
+    return query === '0' || stored === '0';
+  }
+
+  function _ensureRunningInvoiceDraftFlag() {
+    if (!window.TradeDailyHoursNudge || _runningDraftFlagKilled()) return Promise.resolve(false);
+    if (runningInvoiceDraftOn()) return Promise.resolve(true);
+    if (_runningInvoiceDraftServer === false) return Promise.resolve(false);
+    var weekEnd = getWeekEndSunday(0);
+    return api('my_hours', { week_ending: weekEnd }).then(function(data) {
+      _noteRunningInvoiceDraftFlag(data);
+      if (!data || !Object.prototype.hasOwnProperty.call(data, 'running_invoice_draft')) {
+        _runningInvoiceDraftServer = false;
+      }
+      return runningInvoiceDraftOn();
+    });
+  }
+
+  function refreshDailyHoursNudge() {
+    if (!_user) {
+      _paintDailyHoursNudge(null);
+      return;
+    }
+    var seq = ++_dailyHoursSeq;
+    var userId = _user.id;
+    _ensureRunningInvoiceDraftFlag().then(function(on) {
+      if (seq !== _dailyHoursSeq || !_user || _user.id !== userId) return;
+      if (!on) {
+        _dailyHoursDecision = { show: false, reason: 'off' };
+        _paintDailyHoursNudge(_dailyHoursDecision);
+        return;
+      }
+      return api('get_running_invoice_draft', { week_start: getWeekStartMonday(0) }).then(function(res) {
+        if (seq !== _dailyHoursSeq || !_user || _user.id !== userId) return;
+        _dailyHoursDecision = _dailyHoursDecisionFrom(res);
+        _paintDailyHoursNudge(_dailyHoursDecision);
+      });
+    }).catch(function() {
+      if (seq !== _dailyHoursSeq) return;
+      _dailyHoursDecision = { show: false, reason: 'unread' };
+      _paintDailyHoursNudge(_dailyHoursDecision);
+    });
+  }
+
+  function _focusTodayHours() {
+    if (!_scrollInvoiceToToday || !_invoiceWeekHasToday()) return;
+    var root = document.getElementById('hoursContent');
+    if (!root) return;
+    var today = clockPerthDay(new Date());
+    var day = root.querySelector('[data-invoice-day="' + today + '"]');
+    var active = document.activeElement;
+    var typing = active && root.contains(active) && active.matches && active.matches('input, textarea, select');
+    if (!typing && day && day.scrollIntoView) day.scrollIntoView({ block: 'start' });
+    if (!typing && day) {
+      var start = day.querySelector('[data-cardstart]');
+      if (start && start.focus) {
+        try { start.focus({ preventScroll: true }); } catch (e) { start.focus(); }
+      }
+    }
+  }
+
+  window.openDailyHoursFromNudge = function() {
+    _hoursNudgeOpen = true;
+    showView('hours');
   };
+
+  window.dismissDailyHoursNudge = function() {
+    var today = clockPerthDay(new Date());
+    var id = (_user && _user.id) || '';
+    try { localStorage.setItem('sw_hours_nudge_off', id + ':' + today); } catch (e) {}
+    _dailyHoursDecision = { show: false, reason: 'dismissed' };
+    _paintDailyHoursNudge(_dailyHoursDecision);
+  };
+
+  window.checkDailyHoursDraft = function() {
+    var el = document.getElementById('invSaveBtn') || document.getElementById('invMoneySummary');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  };
+  // </daily-hours-nudge>
+
+  function _runningInvoiceSnapshot() {
+    var core = window.TradeInvoiceRunningDraft;
+    return core.snapshot({
+      jobCards: _serializeJobCardsDraft(_jobCards),
+      invRows: _invRows,
+      invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
+      dismissedKeys: _invDismissedKeys || [],
+      notes: _invNotes || '',
+      gst_on: !!_invGst,
+      weekStart: _hoursWeekStart || '',
+      weekEnd: _hoursWeekEnd || ''
+    });
+  }
+
+  function _runningInvoiceDirty() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core || !runningInvoiceDraftOn() || !_invoiceBuilderOpen || _invRunningHydrating) return false;
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+    return core.hashSnapshot(_runningInvoiceSnapshot()) !== _invRunningSavedHash;
+  }
+
+  function _paintRunningSaveState(text) {
+    var el = document.getElementById('invSaveState');
+    if (el) el.textContent = text || '';
+  }
+
+  function _runningInvoiceActionsHtml() {
+    if (!runningInvoiceDraftOn()) return '';
+    var html = '';
+    if (_invCreatedByAgent) {
+      html += '<div data-invoice-agent-banner style="margin-top:16px;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">An assistant drafted lines on this invoice. Only you can send it.</div>';
+    }
+    html += '<button type="button" class="hours-submit-btn" id="invSaveBtn" data-invoice-save onclick="saveRunningInvoiceDraft()" style="margin-top:16px;background:var(--sw-mid)">Save</button>';
+    html += '<div id="invSaveState" data-invoice-save-state style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px"></div>';
+    html += '<div data-invoice-save-note style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:4px">Save keeps this draft on your account. It does not send it. Submit sends it to SecureWorks.</div>';
+    html += '<div data-invoice-pay-note style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:2px">GST, super and any weekly deduction are worked out when you submit. Saving does not change them.</div>';
+    return html;
+  }
+
+  function _loadRunningInvoiceDraft() {
+    if (!runningInvoiceDraftOn() || !_invoiceBuilderOpen) {
+      _invRunningHydrating = false;
+      return;
+    }
+    var week = _hoursWeekStart;
+    var seq = ++_invRunningLoadSeq;
+    api('get_running_invoice_draft', { week_start: week }).then(function(res) {
+      if (seq !== _invRunningLoadSeq || !_invoiceBuilderOpen || _hoursWeekStart !== week) return;
+      var core = window.TradeInvoiceRunningDraft;
+      if (!core) { _invRunningHydrating = false; return; }
+      var builder = res && res.draft_builder;
+      if (builder && Array.isArray(builder.jobCards)) {
+        _jobCards = _restoreJobCardsDraft(builder.jobCards);
+        _invRows = Array.isArray(builder.invRows) ? builder.invRows : [];
+        _invLumpLines = Array.isArray(builder.invLumpLines) ? builder.invLumpLines.slice() : [];
+        _invNotes = builder.notes || '';
+        if (typeof builder.gst_on === 'boolean') _invGst = builder.gst_on;
+        _invDismissedKeys = Array.isArray(builder.dismissedKeys) ? builder.dismissedKeys.slice() : [];
+      }
+      if (res && res.draft_id) _draftInvoiceId = res.draft_id;
+      _invCreatedByAgent = !!(res && res.created_by_agent);
+      var merged = core.mergeApproved({
+        cards: _serializeJobCardsDraft(_jobCards),
+        dismissed: _invDismissedKeys,
+        claimed: (res && res.claimed) || [],
+        suggested: (res && res.suggested) || []
+      });
+      _jobCards = _restoreJobCardsDraft(merged.cards);
+      _invDismissedKeys = merged.dismissed;
+      _invRunningHydrating = false;
+      if (merged.added.length) _invRunningSavedHash = '';
+      else _invRunningSavedHash = core.hashSnapshot(_runningInvoiceSnapshot());
+      renderInvoiceBuilder();
+      if (merged.added.length) _scheduleRunningInvoiceAutosave();
+    }).catch(function() {
+      if (seq !== _invRunningLoadSeq) return;
+      _invRunningHydrating = false;
+    });
+  }
+
+  function _runningDraftSaveFailedMessage(err) {
+    var status = err && Number(err.status);
+    var code = String((err && err.code) || '');
+    var msg = String((err && err.message) || '');
+    if (status === 404 || code === 'running_draft_off' || /unknown action|not switched on/i.test(msg)) {
+      return 'Saving is not switched on for this account yet. What you typed is still on this phone only.';
+    }
+    return msg || 'Could not save this invoice.';
+  }
+
+  window.saveRunningInvoiceDraft = function(opts) {
+    opts = opts || {};
+    if (!runningInvoiceDraftOn()) return Promise.resolve(false);
+    if (_invRunningHydrating && opts.quiet) return Promise.resolve(false);
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core) return Promise.resolve(false);
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+    var snap = _runningInvoiceSnapshot();
+    if (opts.quiet && core.hashSnapshot(snap) === _invRunningSavedHash) return Promise.resolve(true);
+    var body = core.saveBody(snap, { draft_id: _draftInvoiceId });
+    var check = core.assertDraftOnly(body);
+    if (!check.ok) {
+      toast('Save does not send an invoice.', true);
+      return Promise.resolve(false);
+    }
+    if (!opts.quiet) _paintRunningSaveState('Saving...');
+    return api('save_running_invoice_draft', null, body).then(function(res) {
+      if (res && res.draft_id) _draftInvoiceId = res.draft_id;
+      if (res && res.created_by_agent) _invCreatedByAgent = true;
+      _invRunningSavedHash = core.hashSnapshot(snap);
+      _invRunningSaveWarned = false;
+      _saveInvDraft();
+      _paintRunningSaveState('Saved. Not sent.');
+      if (!opts.quiet) toast('Saved. This invoice has not been sent.');
+      return true;
+    }).catch(function(err) {
+      var text = _runningDraftSaveFailedMessage(err);
+      if (opts.quiet && _invRunningSaveWarned) return false;
+      _invRunningSaveWarned = true;
+      toast(text, true);
+      _paintRunningSaveState('Not saved.');
+      return false;
+    });
+  };
+
+  function _scheduleRunningInvoiceAutosave() {
+    if (!runningInvoiceDraftOn() || !_invoiceBuilderOpen || _invRunningHydrating) return;
+    if (_invRunningSaveTimer) clearTimeout(_invRunningSaveTimer);
+    _invRunningSaveTimer = setTimeout(function() {
+      _invRunningSaveTimer = null;
+      if (!_invoiceBuilderOpen || _invRunningHydrating) return;
+      saveRunningInvoiceDraft({ quiet: true });
+    }, 2500);
+  }
+
+  function _bindRunningInvoiceAutosave() {
+    if (!runningInvoiceDraftOn()) return;
+    var root = document.getElementById('hoursContent');
+    if (!root || root._invDraftBound) return;
+    root._invDraftBound = true;
+    var onEdit = function() { _scheduleRunningInvoiceAutosave(); };
+    root.addEventListener('input', onEdit);
+    root.addEventListener('change', onEdit);
+  }
+
+  window.leaveInvoiceBuilder = function() {
+    if (!runningInvoiceDraftOn() || !_runningInvoiceDirty()) {
+      _clearInvDraft();
+      loadHoursView();
+      return;
+    }
+    var cancelBtn = document.getElementById('confirmCancel');
+    var prev = cancelBtn ? cancelBtn.textContent : 'Cancel';
+    if (cancelBtn) cancelBtn.textContent = 'Leave without saving';
+    showConfirm(
+      'Save this invoice?',
+      'You have changes that are not saved yet. Save keeps them and does not send the invoice.',
+      'Save'
+    ).then(function(ok) {
+      if (cancelBtn) cancelBtn.textContent = prev;
+      if (!ok) {
+        _clearInvDraft();
+        loadHoursView();
+        return;
+      }
+      saveRunningInvoiceDraft().then(function(saved) {
+        if (!saved) return;
+        _clearInvDraft();
+        loadHoursView();
+      });
+    });
+  };
+  window.addEventListener('beforeunload', function(e) {
+    if (!_runningInvoiceDirty()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
 
   function _syncRowsFromDOM() {
     _invRows.forEach(function(row, i) {
@@ -23782,6 +24584,11 @@
       wo_block_reason: '',
       wo_hours_ack: false,
       commission_mode: false,
+      // Optional travel allowance on a work-order line. Its own invoice line.
+      // Null means the trade has not entered one. Never a date or a time.
+      travel_amount: null,
+      travel_km: null,
+      travel_note: '',
       hours_user_edited: false,
       hours_mode_locked: false,
       // When the time was worked. hours is always derived from these.
@@ -24690,7 +25497,7 @@
 
       if (!dayCards.length) {
         // Empty day — compact line with "+ Add job" only. [Q15]
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--sw-border)">';
+        html += '<div data-invoice-day="' + esc(dk) + '" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--sw-border)">';
         html += '<span style="font-size:12px;font-weight:600;color:var(--sw-mid)">' + label + '</span>';
         html += '<button type="button" onclick="jcOpenJobSearch(' + di + ')" style="background:none;border:none;color:var(--sw-orange);font-size:12px;font-weight:700;cursor:pointer;padding:4px 0">+ Add job</button>';
         html += '</div>';
@@ -24698,7 +25505,7 @@
         return;
       }
 
-      html += '<div style="margin-top:12px">';
+      html += '<div data-invoice-day="' + esc(dk) + '" style="margin-top:12px">';
       html += '<div class="hours-day-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">';
       html += '<span>' + label + '</span>';
       // No day-level "set all": each job has its own start and finish, and one
@@ -24826,6 +25633,7 @@
           html += '<span data-cardamt="' + c._idx + '" style="font-size:20px;font-weight:800;color:' + ((c.included && net < 0) ? 'var(--sw-red)' : 'var(--sw-dark)') + '">$' + (c.included ? net : 0).toFixed(2) + '</span>';
           html += '</div>';
           html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
+          html += _renderWoTravelHtml(c);
           html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
             + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
@@ -24869,6 +25677,8 @@
       } else if (c.wo_mode) {
         var n = _woNet(c);
         if (n > 0) sub += n;
+        var travelPay = _woTravelState(c).amount;
+        if (travelPay > 0) sub += travelPay;
       } else if (c.hours != null || _woLumpSum(c) > 0) {
         sub += _hoursCardNet(c, Number(c.rate || rate || 0));
       }
@@ -25050,6 +25860,18 @@
             }
           }
         }
+        var travelAmtEl = document.querySelector('[data-cardtravelamt="' + idx + '"]');
+        if (travelAmtEl) c.travel_amount = _woTravelAmountStored(travelAmtEl);
+        var travelKmEl = document.querySelector('[data-cardtravelkm="' + idx + '"]');
+        if (travelKmEl) {
+          if (travelKmEl.value === '') c.travel_km = null;
+          else {
+            var travelKm = parseFloat(travelKmEl.value);
+            c.travel_km = (isNaN(travelKm) || travelKm < 0) ? null : travelKm;
+          }
+        }
+        var travelNoteEl = document.querySelector('[data-cardtravelnote="' + idx + '"]');
+        if (travelNoteEl) c.travel_note = travelNoteEl.value || '';
       } else {
         if (!skipTime) _readJobCardTimeFromDOM(c, idx);
         var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
@@ -25213,6 +26035,9 @@
     var c = _jobCards[idx];
     if (!c || !c.manually_added) return;
     _syncJobCardsFromDOM();
+    var core = window.TradeInvoiceRunningDraft;
+    var key = core ? core.sourceKey(c) : '';
+    if (key) _invDismissedKeys = core.dismissKey(_invDismissedKeys, key);
     _jobCards.splice(idx, 1);
     renderInvoiceBuilder();
   };
@@ -25276,6 +26101,34 @@
     var c = _jobCards[idx]; if (!c) return;
     var n = parseFloat(val);
     c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
+    _refreshJobCardLine(idx);
+  };
+  // Travel allowance on a work-order card. Empty means none.
+  // A typed amount that is not more than $0 is kept as typed. Submit blocks
+  // on it. It is never turned into "no travel" while the field still shows it.
+  function _woTravelAmountStored(source) {
+    var el = source && source.value != null && source.tagName ? source : null;
+    var raw = el ? el.value : source;
+    if (el && el.validity && el.validity.badInput && String(raw || '') === '') return 'invalid';
+    if (raw == null || String(raw).trim() === '') return null;
+    var n = Number(String(raw).trim());
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100) / 100;
+    return String(raw);
+  }
+  window.setJobCardTravel = function(idx, field, val) {
+    var c = _jobCards[idx]; if (!c) return;
+    if (field === 'note') {
+      c.travel_note = val || '';
+    } else if (field === 'km') {
+      if (val === '' || val == null) c.travel_km = null;
+      else {
+        var km = parseFloat(val);
+        c.travel_km = (isNaN(km) || km < 0) ? null : km;
+      }
+    } else {
+      var amountEl = document.querySelector('[data-cardtravelamt="' + idx + '"]');
+      c.travel_amount = _woTravelAmountStored(amountEl || val);
+    }
     _refreshJobCardLine(idx);
   };
   // ── WO labour line mutations (Q17) ────────────────────────────────────────
@@ -25432,6 +26285,16 @@
       }
       var warn = document.querySelector('[data-cardnetwarn="' + idx + '"]');
       if (warn) warn.style.display = net < 0 ? 'block' : 'none';
+      var travel = _woTravelState(c);
+      var travelLine = document.querySelector('[data-cardtravelline="' + idx + '"]');
+      if (travelLine) travelLine.style.display = travel.amount > 0 ? 'flex' : 'none';
+      var travelPay = document.querySelector('[data-cardtravelpay="' + idx + '"]');
+      if (travelPay) travelPay.textContent = '$' + travel.amount.toFixed(2);
+      var travelWarn = document.querySelector('[data-cardtravelwarn="' + idx + '"]');
+      if (travelWarn) {
+        travelWarn.textContent = travel.error || '';
+        travelWarn.style.display = travel.error ? 'block' : 'none';
+      }
       var brk = document.querySelector('[data-cardwobreak="' + idx + '"]');
       if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.'
         + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '');
@@ -25515,7 +26378,8 @@
   // time line without the fields (code time_entry_required). One line is one
   // job on one day: a second day is a second line, and a shift that runs past
   // midnight is entered as two lines. Lines that are not time (work order,
-  // commission, deductions) carry none of this. Pure and DOM-free:
+  // a work-order travel allowance, commission, deductions) carry none of
+  // this. Pure and DOM-free:
   // scripts/test-trade-time-entry.js runs this block as shipped.
   var TradeTimeEntryCore = (function() {
     var REFUSAL_CODE = 'time_entry_required';
@@ -25778,6 +26642,43 @@
     if (other.length) parts.push('other [' + other.join('; ') + ']');
     return 'WO $' + a + ' − ' + parts.join(' − ') + '=net $' + net;
   }
+  // Travel allowance on a work-order card. Optional. A blank card has none.
+  // An amount is this crew's pay, so it is its own extra line (quantity 1,
+  // rate = the amount), the same shape materials and commission already use.
+  // It is not a pass-through or a lump: those reduce the work-order net.
+  // Super is not worked out here. The amount joins the submitted total, and
+  // the one existing super split runs on that total.
+  function _woTravelState(c) {
+    c = c || {};
+    var amountBlank = c.travel_amount == null || String(c.travel_amount).trim() === '';
+    var amountNum = amountBlank ? null : Number(String(c.travel_amount).trim());
+    var amountOk = amountNum != null && Number.isFinite(amountNum) && amountNum > 0;
+    var amount = amountOk ? Math.round(amountNum * 100) / 100 : 0;
+    var kmBlank = c.travel_km == null || c.travel_km === '';
+    var kmNum = kmBlank ? null : Number(c.travel_km);
+    var kmOk = kmNum != null && Number.isFinite(kmNum) && kmNum >= 0;
+    var km = kmOk ? Math.round(kmNum * 10) / 10 : null;
+    var note = String(c.travel_note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    var started = !amountBlank || (!kmBlank && kmNum !== 0) || note.length > 0;
+    var error = '';
+    if (started) {
+      if (!amountBlank && !amountOk) error = 'Travel amount must be more than $0';
+      else if (!amountOk) error = 'Enter the travel amount.';
+      else if (!kmBlank && !kmOk) error = 'Kilometres cannot be negative.';
+      else if (!String(c.job_number || '').replace(/\s+/g, ' ').trim()) {
+        error = 'This travel line needs a job number so the cost stays on the job.';
+      }
+    }
+    return { started: started, amount: amount, km: (kmOk && km > 0) ? km : null, note: note, error: error };
+  }
+  function _woTravelDescription(c, travel) {
+    var parts = ['Travel'];
+    var job = String((c && c.job_number) || '').replace(/\s+/g, ' ').trim();
+    if (job) parts.push(job);
+    if (travel && travel.km > 0) parts.push(travel.km + ' km');
+    if (travel && travel.note) parts.push(travel.note);
+    return parts.join(' · ');
+  }
   function _buildJobCentricPayload(cards, opts) {
     opts = opts || {};
     var included = (cards || []).filter(function(c) { return c.included; });
@@ -25838,6 +26739,19 @@
       var _woShown = woBadLine.slice(0, 3).map(function(b) { return b.msg; });
       if (woBadLine.length > 3) _woShown.push('...and ' + (woBadLine.length - 3) + ' more');
       return { error: _woShown.join(' · '), missingIndices: woBadLine.map(function(b){ return b.idx; }) };
+    }
+    var travelBad = [];
+    included.forEach(function(c) {
+      if (!_jobCardEmitsWorkOrder(c)) return;
+      var travel = _woTravelState(c);
+      if (!travel.error) return;
+      var jobLbl = c.job_number || c.client_name || c.site_suburb || 'A job';
+      travelBad.push({ idx: c._idx, msg: jobLbl + ': ' + travel.error });
+    });
+    if (travelBad.length > 0) {
+      var _travelShown = travelBad.slice(0, 3).map(function(b) { return b.msg; });
+      if (travelBad.length > 3) _travelShown.push('...and ' + (travelBad.length - 3) + ' more');
+      return { error: _travelShown.join(' · '), missingIndices: travelBad.map(function(b) { return b.idx; }) };
     }
     // Description is required for manually-added (searched) hourly rows so ops know
     // what was done, but optional for auto-assigned cards (job/client already identifies
@@ -25998,6 +26912,30 @@
           rate_source: 'client_entered',
           client_rate_entered: true
         });
+        // Travel is its own line. It does not reduce the work-order net, and
+        // it carries no work_order_id so a work-order claim fence cannot
+        // treat it as a second claim on that order. No date or times.
+        var travel = _woTravelState(c);
+        if (travel.amount > 0) {
+          subtotal += travel.amount;
+          cardExtraItems.push({
+            type: 'Travel',
+            row_type: 'travel',
+            description: _woTravelDescription(c, travel),
+            quantity: 1,
+            unit: 'ea',
+            rate: travel.amount,
+            date: c.scheduled_date || null,
+            job_id: c.job_id || null,
+            job_number: String(c.job_number || '').replace(/\s+/g, ' ').trim(),
+            division: c.job_type || '',
+            client_name: c.client_name || '',
+            manually_added: !!c.manually_added,
+            source: c.manually_added ? 'manual_job_search' : 'assigned_card',
+            rate_source: 'client_entered',
+            client_rate_entered: true
+          });
+        }
       } else if (!c.assignment_id) {
         // Searched-in job: no assignment row exists, so it cannot ride
         // manual_assignments (ops-api 422s without assignment_id).
@@ -26460,7 +27398,11 @@
         successHtml += '</div>';
         successHtml += '</div>';
         container.innerHTML = successHtml;
+        var runningDraftId = _draftInvoiceId;
         _jobCards = []; _invRows = []; _clearInvDraft();
+        if (runningDraftId && runningInvoiceDraftOn()) {
+          api('delete_trade_invoice', null, { invoice_id: runningDraftId }).catch(function() {});
+        }
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
@@ -26536,6 +27478,14 @@
     html += '<h2 style="font-size:18px;font-weight:700;color:var(--sw-dark);margin:0">' + (isExpense ? 'Expense Invoice' : 'Invoice') + '</h2>';
     html += '<button class="btn btn-secondary btn-small" onclick="leaveInvoiceBuilder()">Back</button>';
     html += '</div>';
+
+    if (_scrollInvoiceToToday && !isExpense && _invoiceWeekHasToday()) {
+      html += '<div data-hours-today-strip style="margin:0 0 12px;padding:12px 14px;border:1px solid var(--sw-border);border-radius:12px;background:var(--sw-card)">';
+      html += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark)">Add the times you worked today</div>';
+      html += '<div style="font-size:13px;line-height:1.4;color:var(--sw-text-sec);margin-top:4px">This is your draft for the week. Nothing is sent until you press Submit.</div>';
+      html += '<button type="button" data-hours-check-draft onclick="checkDailyHoursDraft()" style="display:block;width:100%;min-height:44px;margin-top:10px;border:none;border-radius:8px;background:var(--sw-mid);color:#fff;font:600 15px var(--sw-font);cursor:pointer">Check your draft</button>';
+      html += '</div>';
+    }
 
     if (_draftInvoiceId) {
       html += '<div style="font-size:11px;color:var(--sw-mid);padding:0 0 8px;display:flex;align-items:center;gap:4px"><span class="inv-status draft">Draft</span> Editing saved draft</div>';
@@ -26673,6 +27623,7 @@
       var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
       var woAuthBlocked = _jobCentricHasBlockedWorkOrder();
       var jcHasLumps = _invFinalDeductions().length > 0;
+      html += _runningInvoiceActionsHtml();
       if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
         html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
@@ -26710,12 +27661,15 @@
 
     if (!_invoiceBuilderOpen || renderSeq !== _invoiceRenderSeq) return;
     container.innerHTML = html;
+    _focusTodayHours();
     // In job-centric mode _calcInvTotals() only covers extras/misc rows, not
     // job-card hours — _updateInvTotals() applies the correct _grandInvTotal()
     // so the footer "Total" and submit-button amount are always consistent after
     // a full re-render (including the error re-paint on failed submit). [FIX-TOTAL-RECOMPUTE]
     _updateInvTotals();
     _saveInvDraft(); // persist draft to sessionStorage
+    _bindRunningInvoiceAutosave();
+    _scheduleRunningInvoiceAutosave();
 
     loadInvoiceJobOptions('');
 
@@ -26960,11 +27914,11 @@
         if (xeroWarn) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.xero_bill_number) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Draft bill in Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero as draft bill</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Draft bill in Xero</div>';
         } else {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not add it to Xero. The office will add it.</div>';
         }
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
@@ -29057,6 +30011,16 @@
     // General expense
     html += '<button class="btn btn-secondary" style="margin-top:16px;width:100%" onclick="openGeneralExpense()">&#128247; Add General Expense (no job)</button>';
 
+    // Change password (signed-in). Same 8-character rule as the reset link.
+    html += '<div id="profilePasswordCard" style="margin-top:16px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';
+    html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Password</div>';
+    html += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:12px">Set a new password for this account. At least 8 characters.</div>';
+    html += '  <input type="password" id="profileNewPassword" placeholder="New password" autocomplete="new-password" style="width:100%;padding:12px 14px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);margin-bottom:10px" />';
+    html += '  <input type="password" id="profileConfirmPassword" placeholder="Confirm password" autocomplete="new-password" style="width:100%;padding:12px 14px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);margin-bottom:12px" />';
+    html += '  <button type="button" class="btn btn-secondary" id="btnProfilePassword" onclick="changeProfilePassword()">Update password</button>';
+    html += '  <div id="profilePasswordStatus" style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;text-align:center"></div>';
+    html += '</div>';
+
     // Sign out
     html += '<button class="btn btn-danger" style="margin-top:24px" onclick="doLogout()">Sign Out</button>';
 
@@ -29152,6 +30116,9 @@
 
   // The Work Order hub lens: same tenant, and for a managed-vertical lead the
   // verticals he manages whenever the server says which vertical an order is.
+  // Do not filter on kind. my_work_orders does not send it, and a client filter
+  // would empty this hub, the weekly invoice and offline replay the day the
+  // field appears. The server retires old crew rows at go-live.
   function workOrdersForViewer(orders) {
     var managed = managedTradeVerticals(_user);
     return (orders || []).filter(function (order) {
@@ -33389,20 +34356,34 @@
     cloud.on('auth:login', function(profile) {
       onLogin(profile);
     });
+    cloud.on('auth:recovery', function(profile) {
+      beginPasswordRecovery(profile);
+    });
 
     cloud.on('auth:logout', function() {
+      _tradeHoldForRecovery = false;
+      _tradeRecoveryReady = false;
+      _tradeRecoveryProfile = null;
       resetJobListSession();
       _user = null;
       _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
       _currentJobLoaded = null;
-      document.getElementById('bottomNav').style.display = 'none';
-      document.getElementById('viewLogin').classList.add('active');
+      showLoginPanel('loginSignIn');
     });
 
-    // Check if already logged in (guard against profile not yet loaded)
-    if (cloud.auth.isLoggedIn() && cloud.auth.getUser()) {
+    // A reset link holds the app on "Set a new password" until the new one is saved.
+    if (_tradeHoldForRecovery) {
+      if (tradeUrlAuthError() && !tradeUrlIsRecovery()) showSetPasswordScreen('expired');
+      else showSetPasswordScreen('checking');
+      if (cloud.auth.recoveryPending && cloud.auth.recoveryPending() && cloud.auth.getUser()) {
+        beginPasswordRecovery(cloud.auth.getUser());
+      }
+      setTimeout(function() {
+        if (_tradeHoldForRecovery && !_tradeRecoveryReady) showSetPasswordScreen('expired');
+      }, 8000);
+    } else if (cloud.auth.isLoggedIn() && cloud.auth.getUser()) {
       onLogin(cloud.auth.getUser());
     }
     // Otherwise wait for auth:login event or stay on login screen

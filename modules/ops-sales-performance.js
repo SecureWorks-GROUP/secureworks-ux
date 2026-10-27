@@ -174,7 +174,7 @@
     if(m.scoped.includes('fencing')) {
       h+=rowHTML('Quotes sent, no decision',fmt(v('followup.count')),money(v('followup.value_sum_crm'))+' · median age '+fmt(v('followup.median_days'))+' days'+delta(v('followup.count'),p('followup_count')));
       h+=rowHTML('Stale fencing leads',fmt(v('stale')),delta(v('stale'),p('stale')));
-      h+=rowHTML('Overdue fencing invoices',fmt(v('overdue.count')),money(v('overdue.total'))+delta(v('overdue.total'),p('overdue_total'),money));
+      h+=rowHTML('Fencing invoices owed · past due',fmt(v('overdue.count')),money(v('overdue.total'))+delta(v('overdue.total'),p('overdue_total'),money));
       h+=rowHTML('Promises missed in texts',fmt(v('promises.missed_in_thread')),'of '+fmt(v('promises.detected'))+' detected'+delta(v('promises.missed_in_thread'),p('promises_missed')));
       h+=rowHTML('Stratco leads not in the CRM',fmt(v('stratco_not_in_crm_28d')),'Last 28 days');
       const deposits=all?list(f,'deposit_unpaid'):null;

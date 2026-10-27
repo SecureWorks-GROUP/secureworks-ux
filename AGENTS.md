@@ -47,43 +47,83 @@ profit sub-tab (`// <job-profit>`). Bill Reconciliation (the `materials_recon_*`
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
-section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slices 1
-to 7 of the approved design: job list with To do beside All jobs, job header
-with the six-stop stage rail, Scope and notes, the right panel of Sources,
-Context story and Messages, Materials by supplier, Emails, and Deliveries and
-install, the last three never drawn on a make-safe). It reads
-`pipeline&dispatch=1`, `job_detail` (once per job open; the panel reuses it, never
-a second call) and `job_notes`; the panel reads `job_story`, ghl-proxy
-`get_conversation` and `get_job_conversation` only when their tab is first shown.
-Materials by supplier reads `dispatch_materials` once per job open and
-`list_suppliers` once a session.
-Its writes are `add_note` (always `visibility: 'internal_only'`), a pressed
-`send_sms` from `+61489267771`, the rail's `set_dispatch_stage` (after a
-confirm line) and `set_dispatch_next_step`, and the six `dispatch_materials_*`
-writes on a person's edit or press, which touch only Dispatch's own tables (no
-order, message or job status). Slice 5 (back-end contract
-`docs/dispatch-slice-5-contract.md` in secureworks-backend): Create PO and email
-makes one `purchase_orders` row (`source 'dispatch'`, no price), its PDF in the
-private `dispatch-order-pdfs` bucket (opened only through `dispatch_order_pdf`)
-and a held `job_order_emails` draft, read with `dispatch_order_emails` once per
-job open and after each slice 5 write. A supplier email goes only from a Send
-now press (or Try the send again after an unconfirmed send), with the draft's
-hash; never on create, open or reply, never to a typed address, never via
-`create_po`, `email_po`, `push_po_to_xero` or `send-po-email`. Sources lists the
-job's orders from the same `dispatch_materials` read. Slices 6 and 7 add only
-`dispatch_delivery_set_expected`, `_set_confirmed` and `_mark_sighted` (one
-order row each, never its status) and `set_dispatch_install_confirmed`
-(Dispatch's own install mark, never a booking write). The rail's stage is Dispatch's own
-record (`job_dispatch_state`), never the job status: it never calls
-`update_job_status`. A stage read that failed fails To do and the rail, never an
-empty To do; a `todo_total` that does not match the To do rows fails To do only,
-and All jobs keeps listing. A quote with no stored PDF is never opened
-through `send-quote/view`, which records a client view. A failed read never
-renders as empty, and a later slice is not drawn until it is real. Below
-it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
-Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
-Rcvd and Mark Paid), loaded when Dispatch opens. Guards:
-`tests/e2e/ops-tab-set.spec.js`, `tests/e2e/ops-dispatch-panel.spec.js`.
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, rebuilt
+as Dispatch v2 in Oct 2026: job list with Active beside Archive in folding
+pipeline-stage sections, job header with the real pipeline (or Repairs) stage
+rail and the Arrival line, Scope and notes with the v1 Working out and sketch
+pad, Materials (the Draft list, supplier boxes and held order emails), one
+Emails panel (the v2 order emails read only, and the supplier replies) with the
+Unmatched supplier emails tray, Deliveries and install (the v1 Deliveries table
+for purchase orders, the email-ordered boxes read only, then the install row),
+and the right panel of Sources, Context story and Messages; none of the job
+sections below Scope and notes is drawn on a make-safe). It reads
+`pipeline&dispatch=1&board=v2` (Active and Archive), `dispatch_arrival`,
+`dispatch_v2_replies`, `dispatch_v2_materials` and the v1 `dispatch_materials`
+(kept for the pad, Deliveries and old purchase orders) once per job open, `dispatch_v2_replies_unmatched` for the tray,
+`dispatch_v2_supplier_search` as a person types in Add supplier,
+`dispatch_v2_photo_url` when a photo is opened, `dispatch_order_pdf` when an
+old order's PDF is opened, `job_detail` (once per job
+open; the panel reuses it, never a second call) and `job_notes`; the panel
+reads `job_story`, ghl-proxy `get_conversation` and `get_job_conversation` only
+when their tab is first shown.
+The classic job page Overview shows that job's Dispatch stage (`// <job-dispatch-stage>`,
+`OpsDispatch.stageForJob` / `stageCardHtml` / `openJob`): accepted work only, one
+`pipeline&dispatch=1&board=v2&view=active&search=<job number>` read per job open
+(then `view=archive` only when Active does not list it; cached a minute, through
+the same `rowsFromBoard` checks), drawing the real pipeline (or Repairs) stage
+as the header rail does, and a failed read says so. Its writes are `add_note` (always
+`visibility: 'internal_only'`), a pressed `send_sms` from `+61489267771` (after
+"Text this to the client?"), the rail's `update_job_status` (compare-and-set
+on `expected_statuses`, `source 'dispatch'`) or `update_repair_stage` (each
+after a confirm line; never `set_dispatch_stage` or
+`set_dispatch_install_confirmed`), `set_dispatch_next_step`, the six
+`dispatch_v2_replies_*` / `dispatch_v2_suggestion_*` presses, and the Materials
+writes in secureworks-backend's supplier order emails contract, each on a
+person's edit or press and compare-and-set on `expected_updated_at`:
+`dispatch_v2_save_line`, `_move_line`, `_delete_line`, `_suggest_draft`,
+`_add_supplier`, `_remove_supplier`, `_set_main_supplier`, `_upload_photo`,
+`_move_photo`, `_delete_photo`, `_make_email`, `_save_email`, `_discard_email`
+and `_send_email`, plus the kept v1 writes `dispatch_materials_save_workings`
+(the pad) and `dispatch_delivery_set_expected`, `_set_confirmed` and
+`_mark_sighted` (the Deliveries table). A supplier order email goes only from
+the "Send this order to <Supplier>?" confirm in Materials, from
+admin@secureworkswa.com.au; a TEST copy to admin@ (marked TEST ONLY, its own
+confirm) is optional and Send now is open without one (Shaun's ruling, 23 Oct);
+the Emails panel only shows order emails and has no send button; a send
+whose outcome is unknown is offered again only with `confirm_resend`, and one
+the back end says was not recorded is never offered again in that session. A
+supplier with no approved order email is shown but cannot be sent to. Sent
+lines are locked. One box holds one open email. The screen never writes a
+supplier email into `suppliers.email`, never writes to Xero and never calls
+`create_po`, `email_po`, `push_po_to_xero`, `send-po-email`, the v1 line,
+supplier and order writes (`dispatch_materials_*` other than save_workings,
+`dispatch_order_*` other than the PDF read) or `dispatch_order_emails`. Sources
+lists quotes and invoices, then (read only, only on a job that has some) the
+old purchase orders. A quote with no stored PDF is never
+opened through `send-quote/view`, which records a client view. A failed read
+never renders as empty. Below it, `#dispatchPurchaseOrders` is the LIVE
+purchase order board that was the Materials view (`loadMaterials`, the only
+front end for Delete PO, Invoice Rcvd and Mark Paid), loaded when Dispatch
+opens; an order made in Dispatch has no Email, Approve & Send or Push to Xero
+there. Guards: `tests/e2e/ops-tab-set.spec.js`,
+`tests/e2e/ops-dispatch-panel.spec.js`, `tests/e2e/ops-dispatch-v2.spec.js`,
+`tests/e2e/ops-dispatch-v2-materials.spec.js`,
+`tests/e2e/ops-dispatch-v2-restored.spec.js`.
+The v1 / v2 switch (`<dispatch-version>` in ops.html, Shaun 26 Oct 2026): v2 is the
+default; "Switch back to v1" on the Dispatch tab, or `?dispatch_version=v1`, loads
+the kept v1 screen (`modules/ops-dispatch-v1.js` and `.css`, frozen copies of main
+at d0b6419) instead, remembered per browser in localStorage `sw_dispatch_version`.
+Only one of the two files is ever loaded. Never build on the v1 copy; new work
+goes in `modules/ops-dispatch.js`. Guard: `tests/e2e/ops-dispatch-switch.spec.js`.
+
+ONLY ORDERS ON ACTIVE JOBS ARE ON THE BOARD (Shaun 2026-10-26). An order with
+no job, or on a finished job (complete, invoiced, final_payment, get_review,
+archived, cancelled, lost, read from list_pos `job_status`), is kept off the
+board, its alerts, its filter lists and the Jarvis count by `poBoardOrders`
+(`// <po-board-active-jobs>`). A line says how many are hidden, with Show them,
+because this board is the only front end for Delete PO and Mark Paid.
+Financials > Purchase Orders still lists every order. Guard:
+`tests/e2e/ops-po-all-statuses.spec.js`.
 
 EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
 an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
@@ -121,7 +161,10 @@ Duration precedence: the rendered `scheduled_date..scheduled_end` span wins over
 `duration_days` (legacy rows all carry the unused default 1 — a drag must never
 collapse a visible multi-day bar). The reschedule SMS (`send_client_update`,
 trigger `install_rescheduled`) fires ONLY from an explicit Yes in the confirm
-modal, and only when the START day changed. The Schedule modal's real-crew
+modal, and only when the START day changed. The same modal offers the crew
+text (ticked; `// <crew-reschedule-text>`): one ghl-proxy `send_sms` per person
+whose own days changed, from `+61489267771`, `recipientRole: 'crew'` +
+`aboutJobId` (never `jobId`), naming anyone with no phone as not texted. The Schedule modal's real-crew
 requirement is deliberately UNFLAGGED: `create_assignment` takes camelCase keys
 and a required `userId` — name-only rows are invisible to the Trade App's
 my-jobs filter and the backend rejects them.
@@ -131,22 +174,26 @@ per-assignment blocks) and Schedule (`renderScheduleView`, job-grouped bars;
 the active view persists in `localStorage.sw_cal_view_mode`, so one click on
 the toggle silently sticks forever — this is how "drag is broken" shipped once
 already: only Crew view had drag wiring). Schedule-view drops carry only a DAY
-(no crew rows — a drop there never reassigns): a single-assignment move pins
-the event's own `user_id` (`opts.pinnedUserId` on `moveAssignment`), never a
-display-name lookup that could land on a deactivated or duplicate-named user —
-Crew-view callers deliberately keep name resolution because it powers
-cross-row reassignment; a multi-assignment move builds all plans first, then
-shows ONE combined "Crew Unavailable" confirm across every affected crew
-(Captain ruling — never one modal per crew). With dragv2 ON a single-assignment
-move (either view, shared `moveAssignment`) runs the SAME span-depth check —
+(no crew rows — a drop there never reassigns) and move the WHOLE JOB
+(`moveSchedSegment` → `CalOpsCore.planJobMove`): the drop day is the job's new
+first day, whichever piece was grabbed, and every live (not ghost, cancelled or
+completed) row of the job moves by the same working days, keeping its own
+`user_id`. The bar's edge handles sit on the job's first and last day for any
+crew count and stretch it for everyone (`stretchSchedJob` →
+`CalOpsCore.planJobStretch`): per-day crews gain `create_assignment` rows with
+`suppress_notifications: true` or lose deleted rows (an invoiced row's refusal
+is shown in words), spanning rows move their own end. Crew-view callers keep
+name resolution because it powers cross-row reassignment. Every move shows ONE
+combined "Crew Unavailable" confirm across every affected crew
+(Captain ruling — never one modal per crew). With dragv2 ON a Crew-view
+single-assignment move runs the SAME span-depth check —
 every painted day of the moved span (`CalOpsCore.movedSpanV2`, the only
 derivation of a moved span, shared by warning and write) through the shared
 `collectSpanClashes`/`confirmClashesOrProceed` helpers, one combined confirm,
 identical wording (ruling cp1-askuser-2); flag off keeps the drop-day-only
 check. With dragv2 ON the Schedule view lays active dates via
 `CalOpsCore.paintedSpanDates`, so weekend-crossing jobs render as broken
-segments like the Crew view and dragging EITHER segment reschedules the whole
-job; flag OFF keeps the every-calendar-day loop byte-identical. Bars float
+segments like the Crew view; flag OFF keeps the every-calendar-day loop byte-identical. Bars float
 on a `pointer-events:none` overlay above the day
 cells, so bars themselves must accept `dragover`/`drop` and fall through to
 the cell under the pointer.
@@ -154,14 +201,20 @@ Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
 ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
-Schedule bars may be backed by several same-person day rows; every V2
+A V2 save paints at once and writes behind it (`calSaveJobPlan`: batches from
+`CalOpsCore.planWriteBatches` sent concurrently, the last write leaving each
+date in a later batch so ghost reconcile stays right; a failure puts the
+calendar back and names the row), then re-reads only the feed without blanking
+the grid (`refreshCalendarQuietly`). Schedule bars may be backed by several same-person day rows; every V2
 move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
 writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
 safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
 window PLUS the dragged job's full assignment set from the existing
-`job_detail` read — because the window alone is blind past its edge and when
-the feed is truncated. A job-level Schedule-bar drag is all-or-nothing: if any
-crew chain would collide with a genuine separate visit, nothing is written,
+`job_detail` read (`calJobRows`, started at drag start and cached a minute;
+no lighter ops-api read exists) — because the window alone is blind past its edge and when
+the feed is truncated. The job's own rows move together, so they never block it. A job-level Schedule-bar drag is all-or-nothing: if any
+crew chain would collide with a row that stays put (a cancelled or completed
+one), nothing is written,
 every row stays where it is, and one warning toast names the blocking existing
 visits counted as real holders (`staged.blockers`), never cascaded candidates.
 A single-row move/resize onto a held date is skipped with both visits kept,
@@ -245,8 +298,9 @@ read off `_calPick` by
 `calV3TypeShown`, which DROPS other jobs in the Crew view too (no crew-row dim
 with v3 on) and never filters a business line. Neither writes the sidebar's
 storage keys or `_calDivFilters`, so "Insurance" is a VIEW filter only: Repair
-stays its own division (ruling 2026-09-16). Leave and reminders show under Everything and
-Business; holidays and company days under Everything and Holidays. Deliveries are read-only and come from
+stays its own division (ruling 2026-09-16). Reminders show under Everything and
+Business; leave and unavailable marks under Everything and Leave (its own box,
+in the business grey; `// <calendar-leave>`); holidays and company days under Everything and Holidays. Deliveries are read-only and come from
 `calV3Deliveries`, which is `calDeliveryList` / `calDeliveryDay` (every live
 order, see `// <calendar-delivery-row>`) passed through the Show and Type
 focus; both views use it, and Materials with none in view says "No deliveries
@@ -698,6 +752,17 @@ Keep the module free of long dashes and emojis. Guards: `npm run test:debt-works
 (in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
 This is the only debt screen: the old Clear Debt screens (Financials > Clear Debt) were removed in stage 6.
 
+## Matching: the Context reconciliation list (`modules/ops-recon.js`)
+
+Hidden tab (`data-recon-nav`), shown only with `?recon=1` or `localStorage.sw_recon === '1'`;
+the server decides who may use it (admin, owner, ops manager). It reads ops-api
+`recon_daily_list` and records one `recon_record_decision` per confirmed tap, sending back the
+`evidence_hash` and `cause` the card was shown with and never a person (the backend takes the
+signed-in user). A choice says which job something belongs to; it never moves money, sends
+anything or changes an invoice, so never add such a control here. Every rule lives in the pure
+`ReconCore` between `// <recon-core>` sentinels. Guards: `npm run test:recon` (in `test:e2e`,
+fails on a long dash or emoji) and `tests/e2e/ops-recon.spec.js`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card
@@ -751,6 +816,15 @@ The middle Job Story card reads the live card's `now`, timeline, money and loops
 the Quoted band uses only a recorded current-quote value. Backend `notes` is an
 object with `items[]`, and its invoice rows need the matching `job_detail` row
 for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
+
+## Scope reader (`modules/job-scope-record.js`)
+
+Every job view reads `scope_json` / `pricing_json` through `JobScopeRecord.read(job)`:
+the Scope Engine patio record (`tool: 'patio-scoper'`), the fence designer / Scope
+Engine fence shape and the older patio page. Teach a new tool there, never in a caller.
+Money is a number or null; null is "Not known yet", never `$0`. `scopeToolUrlFor(type, job)`
+sends a Scope Engine record to the Scope Engine. Contract: `docs/job-scope-record.md`.
+Guards: `modules/job-scope-record.test.cjs`, `tests/e2e/ops-job-page-scope-engine.spec.js`.
 
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 
@@ -831,6 +905,23 @@ stays disabled until `#confirmAck` is ticked, so specs must
 `_moveToWeekAfter` moves the Pay hub and picker on to the next week. Do not add a
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
+
+A running draft for that same week is off unless `my_hours.running_invoice_draft`
+is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
+one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
+GST, super and the weekly deduction are still worked out only on submit.
+Search `modules/trade-invoice-running-draft.js`. Guards:
+`scripts/test-trade-invoice-running-draft.js`,
+`tests/e2e/trade-invoice-running-draft.spec.js`.
+
+A daily hours nudge uses that same flag (`// <daily-hours-nudge>`,
+`modules/trade-daily-hours-nudge.js`). Calendar and Pay show "Add today's
+hours" when a job today has no start and finish on the draft. One tap opens
+this week's invoice on that day. "Not today" hides it until tomorrow. It reads
+`get_running_invoice_draft` and never calls `generate_trade_invoice`. A failed
+read stays hidden. Guards: `scripts/test-trade-daily-hours-nudge.js`,
+`tests/e2e/trade-daily-hours-nudge.spec.js`.
 
 ## Trade variation request: trade requests, office approves (`trade.html`)
 

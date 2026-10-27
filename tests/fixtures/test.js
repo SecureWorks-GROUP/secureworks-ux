@@ -170,6 +170,38 @@ const test = base.extend({
       total_hours: 8,
       already_submitted: false
     };
+    // Running weekly draft (Hugo, 2026-10-24). One in-memory draft. Save stores
+    // the screen snapshot and does not submit. A claimed work order must not
+    // be offered again. Submit stays off the allow-list for this scenario.
+    const runningDraftStore = { id: null, draft_builder: null, created_by_agent: true };
+    const runningDraftSuggested = [
+      {
+        source_key: 'wo:e2e-approved-wo',
+        work_order_id: 'e2e-approved-wo',
+        job_id: 'e2e-approved-wo-job',
+        job_number: 'SWMS-261400',
+        client_name: 'Approved Work',
+        site_suburb: 'Midland',
+        job_type: 'makesafe',
+        scheduled_date: addIsoDays(weekStart, 2),
+        description: 'Approved make-safe',
+        included: true,
+        auto: true
+      },
+      {
+        source_key: 'wo:e2e-claimed-last-week',
+        work_order_id: 'e2e-claimed-last-week',
+        job_id: 'e2e-claimed-job',
+        job_number: 'SWF-CLAIMED',
+        client_name: 'Already invoiced',
+        site_suburb: 'Perth',
+        scheduled_date: addIsoDays(weekStart, 3),
+        description: 'Already on last week',
+        included: true,
+        auto: true
+      }
+    ];
+    const runningDraftClaimed = ['wo:e2e-claimed-last-week'];
     // Weekly deduction (Captain, 2026-10-13): a trade who hires a ute from us
     // has an amount taken off what he is paid. Shapes follow
     // secureworks-backend docs/trade-recurring-deductions-2026-10-13.md:
@@ -886,7 +918,8 @@ const test = base.extend({
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead'],
       'henry-job-centric-submit': ['generate_trade_invoice'],
-      'henry-wo-hydrate-fail': ['generate_trade_invoice']
+      'henry-wo-hydrate-fail': ['generate_trade_invoice'],
+      'trade-invoice-running-draft': ['save_running_invoice_draft']
     };
 
     const feed = await installFeedStubs(page, {
@@ -1144,7 +1177,9 @@ const test = base.extend({
         },
         crew_charges_on_my_jobs: { charges: [] },
         my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
-        my_hours: deductionDraftScenario
+        my_hours: feedScenario === 'trade-invoice-running-draft'
+          ? { ...labourExplainerHours, running_invoice_draft: true }
+          : deductionDraftScenario
           ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
           : withTradeRateCapability(feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
           'trade-invoice-per-metre-gst',
@@ -1877,6 +1912,42 @@ const test = base.extend({
             });
           }
           return response;
+        },
+        get_running_invoice_draft: () => {
+          if (feedScenario !== 'trade-invoice-running-draft') {
+            return { status: 404, body: { error: 'No E2E fixture registered for get_running_invoice_draft' } };
+          }
+          return {
+            ok: true,
+            draft_id: runningDraftStore.id,
+            status: 'draft',
+            created_by_agent: !!runningDraftStore.created_by_agent,
+            draft_origin: runningDraftStore.created_by_agent ? 'agent' : 'staff',
+            xero: false,
+            draft_builder: runningDraftStore.draft_builder,
+            suggested: runningDraftSuggested,
+            claimed: runningDraftClaimed,
+            dismissed_source_keys: (runningDraftStore.draft_builder && runningDraftStore.draft_builder.dismissedKeys) || []
+          };
+        },
+        save_running_invoice_draft: ({ request }) => {
+          if (feedScenario !== 'trade-invoice-running-draft') {
+            return { status: 409, body: { error: 'Save is not enabled for this fixture' } };
+          }
+          const body = request.postDataJSON();
+          if (body.submit || body.send || body.authorise || body.authorize || body.pay || body.xero || (body.status && body.status !== 'draft')) {
+            return { status: 403, body: { error: 'Save does not send an invoice', code: 'agent_draft_only' } };
+          }
+          runningDraftStore.id = runningDraftStore.id || 'draft-running-e2e';
+          runningDraftStore.draft_builder = body.draft_builder || null;
+          return {
+            ok: true,
+            draft_id: runningDraftStore.id,
+            status: 'draft',
+            created_by_agent: !!runningDraftStore.created_by_agent,
+            xero: false,
+            pay_rules: 'unchanged_until_submit'
+          };
         },
         attach_invoice_pdf: ({ request }) => {
           const expectedBill = DEDUCTION_SCENARIOS.includes(feedScenario)

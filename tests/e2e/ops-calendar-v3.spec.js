@@ -168,7 +168,7 @@ test('v3 is on by default: new chrome, sidebar hidden, focus row drawn', async (
   expect(s.v3).toBe(true);
   expect(s.sidebar).toBe('none');
   expect(s.grid).toContain('v3');
-  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
+  expect(s.focus.map((f) => f.text)).toEqual(['Everything', 'Labour', 'Materials', 'Business', 'Leave', 'Holidays', 'All', 'Patios', 'Fencing', 'Insurance', 'Repairs', 'Make Safes']);
   expect(s.focus.every((f) => f.on)).toBe(true);
 });
 
@@ -253,8 +253,8 @@ test('Show focuses on labour, business or materials, and Everything brings it ba
   expect(jobBars(s)).toHaveLength(0);
   // the company day follows its own Holidays tick box, so Business alone keeps the meetings
   expect(bizBars(s)).toHaveLength(2);
-  // leave stays visible with business (nothing today's page shows is removed)
-  expect(s.cells.find((c) => c.date === '2026-08-05').leave).toContain('Ivy');
+  // leave has its own Leave tick box now, so Business alone does not show it
+  expect(s.cells.some((c) => c.leave)).toBe(false);
 
   await pick(page, 'show', 'materials');
   s = await snapshot(page);
@@ -268,6 +268,65 @@ test('Show focuses on labour, business or materials, and Everything brings it ba
   expect(bizBars(s)).toHaveLength(3);
   expect(s.cells.flatMap((c) => c.dels)).toHaveLength(2);
   expect(s.focus.every((f) => f.on)).toBe(true);
+});
+
+// <calendar-leave>: Leave is its own Show tick box, ticked to start, between
+// Business and Holidays. It covers leave and unavailable marks in both views,
+// drawn in the business lines' grey.
+test('Leave has its own tick box: ticked to start, in the business grey, covering leave and unavailable in both views', async ({ page }) => {
+  let s = await snapshot(page);
+  expect(s.focus.find((f) => f.text === 'Leave').on).toBe(true);
+  expect(s.cells.find((c) => c.date === '2026-08-05').leave).toContain('Ivy');
+  const colours = await page.evaluate(() => {
+    const btn = (k) => getComputedStyle(document.querySelector('#calFocus [data-pick-show="' + k + '"]')).borderColor;
+    const badge = getComputedStyle(document.querySelector('#calendarBody .cal-schedule-leave-badge'));
+    return { leave: btn('leave'), business: btn('business'), badgeRing: badge.boxShadow };
+  });
+  expect(colours.leave).toBe(colours.business);
+  expect(colours.leave).toBe('rgb(107, 114, 128)');
+  expect(colours.badgeRing).toMatch(/inset/);
+
+  // Leave alone: the leave mark stays, jobs and business lines go
+  await pick(page, 'show', 'leave');
+  s = await snapshot(page);
+  expect(s.bars).toHaveLength(0);
+  expect(s.cells.find((c) => c.date === '2026-08-05').leave).toContain('Ivy');
+  expect(s.empty).toBe('');
+
+  // everything but Leave: the mark goes
+  await pick(page, 'show', 'everything');
+  await page.evaluate(() => window.setCalPick('show', 'leave', false));
+  s = await snapshot(page);
+  expect(s.cells.some((c) => c.leave)).toBe(false);
+  expect(bizBars(s).length).toBeGreaterThan(0);
+
+  // the Crew view: leave and unavailable cells follow the same box, in the same grey
+  await page.evaluate(() => window.setCalPick('show', 'leave', true));
+  await seedAndRender(page, { view: 'crew' });
+  await page.evaluate(() => {
+    window._calAvailability = { 'Ivy_2026-08-05': { status: 'leave', note: '' }, 'Sam_2026-08-06': { status: 'unavailable', note: '' } };
+    window.renderCalendar();
+  });
+  const crew = () => page.evaluate(() => ({
+    leave: document.querySelectorAll('#calendarBody .cal-swim-cell.avail-leave').length,
+    unavailable: document.querySelectorAll('#calendarBody .cal-swim-cell.avail-unavailable').length,
+    bg: [...document.querySelectorAll('#calendarBody .cal-swim-cell.avail-leave, #calendarBody .cal-swim-cell.avail-unavailable')].map((c) => getComputedStyle(c).backgroundColor),
+  }));
+  let c = await crew();
+  expect(c).toMatchObject({ leave: 1, unavailable: 1 });
+  expect(new Set(c.bg).size).toBe(1);
+  await page.evaluate(() => window.setCalPick('show', 'leave', false));
+  c = await crew();
+  expect(c).toMatchObject({ leave: 0, unavailable: 0 });
+});
+
+test('a pick saved before the Leave tick box loads with Leave ticked and the rest as saved', async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem('sw_cal_pick', JSON.stringify({ show: { labour: true, materials: true, business: false, holidays: true }, type: { patio: true, fencing: true, repair: true, makesafe: true } })));
+  await page.reload();
+  await page.waitForFunction(() => typeof window.renderScheduleView === 'function' && typeof window.setCalPick === 'function');
+  await revealOpsStaticFixture(page);
+  const picked = await page.evaluate(() => JSON.parse(JSON.stringify(window._calPick.show)));
+  expect(picked).toEqual({ labour: true, materials: true, business: false, leave: true, holidays: true });
 });
 
 test('Materials with nothing booked says so instead of showing an empty grid', async ({ page }) => {
@@ -511,7 +570,7 @@ test('the new chrome is in place before the calendar feed answers, and stays whe
     await expect(page.locator('#viewCalendar')).toHaveClass(/cal-v3/);
     // the old sidebar and its live tick boxes are never on screen with v3 on
     await expect(page.locator('#viewCalendar .cal-sidebar').first()).toBeHidden();
-    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(11);
+    await expect(page.locator('#calFocus .cal-focus-btn')).toHaveCount(12);
   };
   await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
   await expect.poll(() => calendarReads, { message: 'the calendar feed was never read' }).toBeGreaterThan(0);

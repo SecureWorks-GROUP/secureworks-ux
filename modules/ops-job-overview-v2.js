@@ -658,6 +658,12 @@ var JobOverviewV2Core = (function () {
       if (rem && rem.removalRequired && lower(rem.existingFenceType) === 'asbestos') parts.push('asbestos removal');
       return parts.filter(Boolean).join(DOT);
     }
+    // A Scope Engine record: its revision and what was scoped (modules/job-scope-record.js).
+    var R = typeof JobScopeRecord !== 'undefined' ? JobScopeRecord : null;
+    var rec = R ? R.read({ type: job.type, scope_json: sj }) : null;
+    if (rec && rec.kind === 'engine-patio') {
+      return [rec.revision && rec.revision.n != null ? 'Rev ' + rec.revision.n + ' ' + shortDate(rec.revision.sealedAt, now) : '', R.summaryLine(rec)].filter(Boolean).join(DOT);
+    }
     var sc = obj(sj.config) || sj;
     var p = [];
     if (sc.length && sc.projection) p.push(sc.length + 'm x ' + sc.projection + 'm');
@@ -741,17 +747,17 @@ var JobOverviewV2Core = (function () {
       var d = i.invoiceDate || i.createdAt;
       if (d) meta.push(shortDate(d, now));
       var pill;
-      if (i.status === 'SUBMITTED') pill = { cls: 'warn', words: 'Awaiting approval, cannot be paid' };
-      else if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft, cannot be paid' };
+      if (i.status === 'SUBMITTED') pill = { cls: 'warn', words: 'Awaiting approval in Xero, cannot be paid' };
+      else if (i.status === 'DRAFT') pill = { cls: 'warn', words: 'Draft in Xero, cannot be paid' };
       else if (i.status === 'DELETED') pill = { cls: 'sup', words: 'Deleted in Xero' };
       else if (i.status === 'VOIDED') pill = { cls: 'sup', words: 'Voided in Xero' };
-      else if (i.status === 'PAID') pill = { cls: 'acc', words: 'Paid' + (i.paidOn ? ' ' + shortDate(i.paidOn, now) : '') };
+      else if (i.status === 'PAID') pill = { cls: 'acc', words: 'Paid (Xero)' + (i.paidOn ? ' ' + shortDate(i.paidOn, now) : '') };
       else {
         var owing = i.due != null ? i.due : Math.max(0, i.total - i.paid);
         var overdue = owing > 0 && i.dueDate && perthDayKey(i.dueDate) && perthDayKey(i.dueDate) < today;
         if (i.paid > 0 && owing > 0) meta.push('paid ' + money(i.paid));
         if (i.dueDate && owing > 0) meta.push('due ' + shortDate(i.dueDate, now));
-        pill = overdue ? { cls: 'warn', words: 'Overdue ' + money(owing) } : (owing > 0 ? { cls: 'info', words: 'Owing ' + money(owing) } : { cls: 'info', words: 'Issued' });
+        pill = overdue ? { cls: 'warn', words: 'Owed · past due ' + money(owing) } : (owing > 0 ? { cls: 'info', words: 'Owed ' + money(owing) } : { cls: 'info', words: 'Approved in Xero' });
       }
       if (i.byName) meta.push('matched by name only');
       (dead ? faded : live).push({
@@ -806,18 +812,18 @@ var JobOverviewV2Core = (function () {
   var QUOTE_APP_RE = /^App recorded quote\s+(?:(Q-[\w-]+)\s+)?v(\d+)\s+sent/i;
   var STATUS_INTO_RE = /status set to ([a-z _]+?)(?:\s*\(from\b|\.|$)/i;
   var MILESTONE_STATUS = ['accepted', 'scheduled', 'in progress', 'in_progress', 'complete', 'completed'];
-  var STATE_WORDS = { draft: 'Draft, not issued (a draft cannot be paid)', voided: 'Voided or deleted in Xero', deleted: 'Deleted in Xero',
-    paid: 'Paid', delivered: 'Delivered', failed: 'Did not send', accepted: 'Accepted', superseded: 'Replaced by a later version' };
+  var STATE_WORDS = { draft: 'Draft in Xero (a draft cannot be paid)', voided: 'Voided or deleted in Xero', deleted: 'Deleted in Xero',
+    paid: 'Paid (Xero)', delivered: 'Delivered', failed: 'Did not send', accepted: 'Accepted', superseded: 'Replaced by a later version' };
 
-  // "Draft invoice INV-9002 · $3,571.43, not issued" from the story's longer sentence.
+  // "Draft invoice INV-9002 · $3,571.43, draft in Xero" from the story's longer sentence.
   function invoiceTitle(r) {
     var m = /\b(INV-[\w-]+)/.exec(r.what);
     var name = m ? m[1] : 'invoice';
     var amt = isFinite(r.amount) ? DOT + money(r.amount) : '';
-    if (r.state === 'draft') return 'Draft invoice ' + name + amt + ', not issued';
+    if (r.state === 'draft') return 'Draft invoice ' + name + amt + ', draft in Xero';
     if (r.state === 'voided' || r.state === 'deleted') return 'Invoice ' + name + (/deleted/i.test(r.what) ? ' deleted' : ' voided') + ' in Xero';
-    if (r.state === 'paid') return 'Invoice ' + name + ' paid' + amt;
-    if (r.state) return 'Invoice ' + name + ' issued' + amt;
+    if (r.state === 'paid') return 'Invoice ' + name + ' paid (Xero)' + amt;
+    if (r.state) return 'Invoice ' + name + ' approved in Xero' + amt;
     return cut(r.what, 84);
   }
   function quoteLabel(num0, ver) { return 'Quote ' + (num0 ? num0 + ' ' : '') + 'v' + ver; }
@@ -983,7 +989,7 @@ var JobOverviewV2Core = (function () {
       if (i.byName) return;
       var when0 = i.invoiceDate || i.createdAt;
       var name = 'Invoice ' + (i.number || '(no number)');
-      if (i.status === 'DRAFT') add(when0, 'Draft invoice ' + (i.number || '') + ', ' + money(i.total) + ', not issued', 'wn', 'Xero', ['A draft cannot be paid.']);
+      if (i.status === 'DRAFT') add(when0, 'Draft invoice ' + (i.number || '') + ', ' + money(i.total) + ', draft in Xero', 'wn', 'Xero', ['A draft cannot be paid.']);
       else if (i.status === 'VOIDED' || i.status === 'DELETED') add(when0, name + ' ' + (i.status === 'DELETED' ? 'deleted' : 'voided') + ' in Xero', 'mu', 'Xero');
       else {
         add(when0, name + ' issued, ' + money(i.total), 'ms', 'Xero');
@@ -1030,6 +1036,7 @@ var JobOverviewV2Core = (function () {
       kind: kind, eventType: et, secs: secs,
       transcript: kind === 'transcript' || /transcript/.test(et),
       held: heldFlag(m),
+      placed: obj(m.placed_by_person) || null,
       pending: m.pending === true
     };
   }
@@ -1110,6 +1117,7 @@ var JobOverviewV2Core = (function () {
           if (!t.id) t.id = n.id;
           if (n.id) t.otherIds.push(n.id);
           if (n.held) t.held = true;
+          if (!t.placed && n.placed) t.placed = n.placed;
           return;
         }
       }
@@ -1123,6 +1131,7 @@ var JobOverviewV2Core = (function () {
             if (!c.id) c.id = n.id;
             if (n.id) c.otherIds.push(n.id);
             if (n.held) c.held = true;
+            if (!c.placed && n.placed) c.placed = n.placed;
             c.merged = true;
             return;
           }
@@ -1232,6 +1241,60 @@ var JobOverviewV2Core = (function () {
     }).filter(Boolean);
   }
 
+  // ── What Context cannot see, and what waits in Matching (AC-J2, AC-J3) ──
+
+  // The standing lines: every source Context cannot see for any job. The
+  // overview sends them (not_seen) and drops one only when that source is
+  // captured; a card with no overview answer still shows them, so a quiet card
+  // never reads as complete.
+  var NOT_SEEN_STANDING = [
+    { key: 'material_orders', text: 'Material orders and deliveries are not recorded here.' },
+    { key: 'crew_tasks_and_crm_notes', text: 'Crew tasks and GHL notes are not captured.' }
+  ];
+  function notSeen(overview) {
+    var list = overview && Array.isArray(overview.not_seen) ? overview.not_seen : NOT_SEEN_STANDING;
+    return list.map(function (x) { return clean(typeof x === 'string' ? x : (x && (x.text || x.line))); }).filter(Boolean);
+  }
+  // How many messages wait on a person in Matching for this job. A failed or
+  // missing read says so in its own words and never reads as nothing waiting.
+  function matchingWait(overview) {
+    if (!obj(overview)) return null;
+    var st = obj(obj(overview.sources) && overview.sources.matching) || {};
+    var mt = obj(overview.matching);
+    if (st.state === 'not_deployed') return { state: 'not_deployed', words: 'The Matching count is not available yet.' };
+    if (!mt || st.ok === false || st.state === 'failed') {
+      return { state: 'failed', words: 'Could not read how many messages wait in Matching for this job.' };
+    }
+    var n = num(mt.waiting);
+    if (!isFinite(n) || n < 0) return { state: 'failed', words: 'Could not read how many messages wait in Matching for this job.' };
+    if (n === 0) return { state: 'none', waiting: 0, words: 'No messages wait in Matching for this job.' };
+    var more = mt.more === true;
+    var left = n0(mt.left_off_daily_list);
+    var words = (more ? 'At least ' + n : String(n)) + (n === 1 && !more ? ' message waits' : ' messages wait') +
+      ' in Matching for a person to say which job ' + (n === 1 && !more ? 'it belongs' : 'they belong') + ' to.';
+    if (left) words += ' ' + (left === n && !more ? (n === 1 ? 'It is' : 'They are') : left + ' of them ' + (left === 1 ? 'is' : 'are')) +
+      ' not on the daily list; Find by job shows ' + (left === 1 ? 'it' : 'them') + '.';
+    return { state: 'waiting', waiting: n, more: more, leftOff: left, words: words };
+  }
+  // A message a person's Matching decision put on this job: who, when, and the
+  // other jobs a split also put it on.
+  var PLACED_VERB = { confirm: 'Confirmed for this job', correct: 'Moved to this job', split: 'Split onto this job' };
+  function placedBy(p, nowMs) {
+    p = obj(p);
+    if (!p) return null;
+    var action = lower(p.action);
+    var by = clean(p.decided_by_name);
+    var at = clean(p.decided_at_perth) || (p.decided_at ? stamp(p.decided_at, nowMs) : '');
+    var others = arr(p.other_job_numbers).map(clean).filter(Boolean);
+    var words = (PLACED_VERB[action] || 'Placed on this job') + ' by ' + (by || 'a person') + ' in Matching' + (at ? ', ' + at : '') + '.';
+    if (others.length) words += ' Also on ' + others.join(', ') + '.';
+    return { action: action, by: by, at: at, others: others, evidence: str(p.evidence_hash || ''), decision: str(p.decision_id || ''), words: words };
+  }
+  function decisionsUnread(overview) {
+    var st = obj(obj(overview && overview.sources) && overview.sources.messages);
+    return !!(st && st.decisions === 'unread');
+  }
+
   return {
     DOT: DOT, PHASE_WORDS: PHASE_WORDS, MACHINE_TYPES: MACHINE_TYPES,
     str: str, lower: lower, num: num, arr: arr, obj: obj, plural: plural, times: times, hash: hash,
@@ -1243,7 +1306,8 @@ var JobOverviewV2Core = (function () {
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
     invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation, heldList: heldList,
-    callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange
+    callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange,
+    NOT_SEEN_STANDING: NOT_SEEN_STANDING, notSeen: notSeen, matchingWait: matchingWait, placedBy: placedBy, decisionsUnread: decisionsUnread
   };
 })();
 // </job-overview-v2-core>
@@ -1316,7 +1380,7 @@ var JobOverviewV2 = (function () {
   function xeroUrl(id) { return 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + encodeURIComponent(id); }
   function scopeUrl(j) {
     var f = fn('scopeToolUrlFor');
-    var base = f ? f(j.type) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/');
+    var base = f ? f(j.type, j) : (j.type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/' : 'https://marninms98-dotcom.github.io/patio/');
     return base + '?jobId=' + encodeURIComponent(j.id);
   }
   function quoteUrl(doc) {
@@ -1399,7 +1463,7 @@ var JobOverviewV2 = (function () {
   function pageHtml(m) {
     return '<div class="ov2" id="ov2Root" data-job="' + esc(m.k) + '">' +
       (api.isStaffViewer() ? '<div class="ov2-switch"><button type="button" class="ov2-linkbtn" id="ov2Toggle" data-ov2-act="classic">Back to classic</button></div>' : '') +
-      readNoticeHtml(m) + custHtml(m) + filesHtml(m) +
+      readNoticeHtml(m) + custHtml(m) + filesHtml(m) + workOrderMountHtml() +
       '<div class="ov2-cols">' + timelineHtml(m) + storyHtml(m) +
       '<section class="ov2-card ov2-col ov2-convcol" id="ov2ConvCol" aria-label="Conversation"><div id="ov2ConvBody">' + convBodyHtml(m) + '</div>' + composeHtml(m) + '</section>' +
       '</div></div>';
@@ -1458,15 +1522,21 @@ var JobOverviewV2 = (function () {
       h += '<div class="ov2-value-check" id="ov2ValueCheck"><p>' + esc((s.value != null ? 'Recorded value ' + C.money(s.value) + '. ' : '') + 'Source: ' + authority.basis + '. ' + (authority.recordOnly ? 'The story card has not checked this contract value.' : 'This is not a confirmed contract value.')) + '</p>' +
         authority.checks.map(function (s) { return '<p>' + esc(s) + '</p>'; }).join('') + '</div>';
     }
-    h += '<div class="ov2-mrow" id="ov2Paid">Invoiced ' + esc(C.money(s.invoiced)) + DOT + 'Paid ' + esc(C.money(s.paid)) + DOT + 'inc GST</div>';
-    if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', not issued</div>';
-    else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', not issued') + '</div>';
+    h += '<div class="ov2-mrow" id="ov2Paid">Invoiced ' + esc(C.money(s.invoiced)) + DOT + 'Paid (Xero) ' + esc(C.money(s.paid)) + DOT + 'inc GST</div>';
+    if (s.drafts.length === 1) h += '<div class="ov2-mrow ov2-warnt">Draft ' + esc((s.drafts[0].number ? s.drafts[0].number + ' ' : '') + C.money(s.drafts[0].total)) + ', draft in Xero</div>';
+    else if (s.drafts.length > 1) h += '<div class="ov2-mrow ov2-warnt">' + esc(s.drafts.length + ' drafts, ' + C.money(s.draftTotal) + ', draft in Xero') + '</div>';
     if (s.nameOnly) h += '<div class="ov2-mrow">' + esc(C.plural(s.nameOnly, 'Xero invoice') + ' matched by name only, not counted') + '</div>';
     if (s.splitWarning) h += '<div class="ov2-mrow ov2-warnt" id="ov2SplitWarning">' + esc(s.splitWarning) + '</div>';
     var chips = s.splits.map(function (sp) { return '<span class="ov2-chip">' + esc(sp.who + ' ' + C.money(sp.amount)) + '</span>'; }).join('');
     if (m.wm) chips += '<span class="ov2-chip' + (m.wm.key === 'us' ? ' us' : '') + '" id="ov2Whose">' + esc(m.wm.words) + '</span>';
     if (chips) h += '<div class="ov2-who">' + chips + '</div>';
     return h + '</div>';
+  }
+
+  // Office work order card. Outside the regions repaint() swaps, so a later
+  // job_overview answer leaves it in place. JobWorkOrderOps.paintOverview fills it.
+  function workOrderMountHtml() {
+    return '<div data-job-wo-overview></div>';
   }
 
   function filesHtml(m) {
@@ -1555,7 +1625,7 @@ var JobOverviewV2 = (function () {
     }).join('') + '</ol></div>';
   }
   function storyMoneyHtml(m) {
-    var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid', m.money.paid]];
+    var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid (Xero)', m.money.paid]];
     var h = '<div class="ov2-story-money" aria-label="Job money">' + cells.map(function (c) {
       return '<div><span>' + c[0] + '</span><strong>' + esc(c[1] == null ? 'Not recorded' : C.money(c[1])) + '</strong></div>';
     }).join('') + '</div>';
@@ -1580,11 +1650,11 @@ var JobOverviewV2 = (function () {
     if (!held) return '';
     var list = C.heldList(held);
     var items = list.items, count = list.count;
-    var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Held messages, job not certain"><h3>Held messages, job not certain</h3>' +
+    var h = '<section class="ov2-story-block ov2-held" id="ov2Held" aria-label="Messages, job not certain"><h3>Messages, job not certain</h3>' +
       '<p>These messages may belong to this job or another job. They are not settled facts or open items for this job.</p>' +
-      '<p>' + esc(items.length + ' of ' + count + ' held messages shown.') + '</p>';
+      '<p>' + esc(items.length + ' of ' + count + ' messages shown.') + '</p>';
     if (held.why) h += '<p>' + esc(C.clean(held.why)) + '</p>';
-    if (!items.length) h += '<p>Held message content is unavailable in this read.</p>';
+    if (!items.length) h += '<p>Message content is unavailable in this read.</p>';
     items.forEach(function (r) {
       var x = r.x, call = r.call;
       // Held calls obey the same no-transcript rule as the conversation. A safe
@@ -1593,7 +1663,7 @@ var JobOverviewV2 = (function () {
       var meta = [x.at ? C.stamp(x.at, m.now) : 'Date not recorded', call ? 'Call' : C.clean(x.channel),
         call && r.secs != null ? C.callWords(r.secs) : '',
         C.clean(x.from), x.ours ? 'From us' : C.clean(x.from_role)].filter(Boolean).join(DOT);
-      h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Held, job not certain</strong>' +
+      h += '<article class="ov2-held-item" data-ov2-held="' + esc(x.id || '') + '"><strong>Job not certain</strong>' +
         '<div class="ov2-im">' + esc(meta) + '</div>' +
         (x.subject ? '<p>' + esc(C.clean(x.subject)) + '</p>' : '') +
         '<p class="ov2-held-words">' + esc(words || (call ? 'Call summary unavailable. Transcript words are not shown; commitments in this call may still need review.' : 'Message words unavailable.')) + '</p>' +
@@ -1607,8 +1677,25 @@ var JobOverviewV2 = (function () {
     var gaps = C.arr(m.story && m.story.not_known).map(function (x) {
       return C.clean(typeof x === 'string' ? x : (x && (x.what || x.line || x.text)));
     }).filter(Boolean);
-    return '<div class="ov2-story-block ov2-story-unknown"><h3>What we don\'t know</h3>' +
-      (gaps.length ? '<ul>' + gaps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '<p>Nothing listed in the story card.</p>') + '</div>';
+    var seen = {};
+    gaps = gaps.filter(function (x) { var k = C.lower(x); if (seen[k]) return false; seen[k] = true; return true; });
+    // The standing lines (AC-J2): sources Context cannot see, on every card until captured.
+    var standing = C.notSeen(m.ov).filter(function (x) { return !seen[C.lower(x)]; });
+    var h = '<div class="ov2-story-block ov2-story-unknown" id="ov2Unknown"><h3>What we don\'t know</h3>';
+    var lines = gaps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') +
+      standing.map(function (x) { return '<li data-ov2-not-seen="1">' + esc(x) + '</li>'; }).join('');
+    if (lines) h += '<ul>' + lines + '</ul>';
+    h += matchingHtml(m);
+    return h + '</div>';
+  }
+  // The Matching count (AC-J3): messages waiting on a person for this job, and the way there.
+  function matchingHtml(m) {
+    var w = C.matchingWait(m.ov);
+    if (!w) return '';
+    var num = m.job && m.job.job_number ? String(m.job.job_number) : '';
+    var go = w.state === 'waiting' && num ? ' <button type="button" class="ov2-linkbtn" data-ov2-act="matching">Open in Matching</button>' : '';
+    return '<p class="ov2-matching" id="ov2Matching" data-ov2-matching="' + esc(w.state) + '"' +
+      (w.state === 'waiting' ? ' data-ov2-waiting="' + esc(String(w.waiting)) + '"' : '') + '>' + esc(w.words) + go + '</p>';
   }
   function stateHtml(m) {
     var e = m.entry || {};
@@ -1716,7 +1803,9 @@ var JobOverviewV2 = (function () {
     var h = '<div class="ov2-ch"><span class="ov2-lbl">Conversation</span><span class="ov2-hint">' + esc(hint) + '</span></div>' +
       '<div class="ov2-seg" role="group" aria-label="Show">' + [['all', 'All'], ['sms', 'Texts'], ['call', 'Calls'], ['email', 'Email']].map(function (p) {
         return '<button type="button" data-ov2-act="filter" data-ov2-f="' + p[0] + '" aria-pressed="' + (f === p[0]) + '"' + (f === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
-      }).join('') + '</div><div class="ov2-conv" id="ov2Conv">';
+      }).join('') + '</div>' + (C.decisionsUnread(m.ov) ? '<div class="ov2-state" id="ov2DecisionsUnread" role="status">' +
+        esc('Matching decisions could not be read. Messages a person placed on this job may be missing here, and a message a person moved off it may still show.') + '</div>' : '') +
+      '<div class="ov2-conv" id="ov2Conv">';
     if (!c.items.length) {
       h += '<div class="ov2-empty">' + esc(c.total ? 'Nothing here for this filter.' : (m.failures.indexOf('conversation') >= 0 ? 'Conversation could not be read. Try again.' : (m.state === 'loading' ? 'Loading the conversation.' : 'No texts, calls or emails on record yet.'))) + '</div>';
     }
@@ -1730,12 +1819,20 @@ var JobOverviewV2 = (function () {
     if (w === 'staff' || w === 'us' || w === 'ours' || w === 'team' || w === 'office') return 'Us';
     return C.firstName(n.who) || fallback;
   }
+  // A row a person's Matching decision put here says who, when, and any other job a split named.
+  function placedTagHtml(m, n) {
+    var p = C.placedBy(n.placed, m.now);
+    if (!p) return '';
+    return '<span class="ov2-bplaced" data-ov2-placed="' + esc(p.action || 'placed') + '"' +
+      (p.evidence ? ' data-ov2-evidence="' + esc(p.evidence) + '"' : '') +
+      (p.decision ? ' data-ov2-decision="' + esc(p.decision) + '"' : '') + '>' + esc(p.words) + '</span>';
+  }
   // A held row keeps its place in the thread with its own mark: it may belong to another job.
   var HELD_TAG = '<span class="ov2-btag">Job not certain: may belong to another job</span>';
   function bubbleHtml(m, n) {
     var idAttr = (n.id ? ' data-ov2-msg="' + esc(n.id) + '"' : '') + (n.held ? ' data-ov2-held-msg="1"' : '');
     var held = n.held ? ' held' : '';
-    var tag = n.held ? HELD_TAG : '';
+    var tag = (n.held ? HELD_TAG : '') + placedTagHtml(m, n);
     var t = C.timeWords(n.at);
     if (n.channel === 'call') {
       var who = n.direction === 'inbound' ? 'Call from ' + whoName(n, m.first, m) : 'Call to ' + m.first;
@@ -1999,6 +2096,9 @@ var JobOverviewV2 = (function () {
         if (!f || !f.open) return;
         if (f.open.type === 'photos') { var sv2 = fn('showJobSubView'); if (sv2) sv2('files'); }
         if (f.open.type === 'invoice') { var pv = fn('showGlobalInvoicePreview'); if (pv) pv(f.previewRow); }
+      } else if (act === 'matching') {
+        var openRecon = fn('reconOpenJob');
+        if (openRecon && job.job_number) openRecon(String(job.job_number));
       } else if (act === 'retry' || act === 'refresh') {
         if (cache[k] && !cache[k].data) delete cache[k];
         load(k, true);
@@ -2056,6 +2156,9 @@ var JobOverviewV2 = (function () {
       if (prev && prev.getAttribute('data-job') === m.k) captureScroll(m.u);
       else { m.u.convAtBottom = true; m.u.tlAtBottom = true; }
       el.innerHTML = pageHtml(m);
+      try {
+        if (window.JobWorkOrderOps && JobWorkOrderOps.paintOverview) JobWorkOrderOps.paintOverview(data);
+      } catch (woErr) { logErr('work order card', woErr); }
       afterPaint(m);
       setTimeout(function () { load(m.k, false); }, 0);
       return true;
@@ -2253,6 +2356,8 @@ var JobOverviewV2 = (function () {
     '.ov2-b.held{border:1px dashed #B9770E;background:#FFF8EC;color:var(--sw-dark,#293C46)}',
     '.ov2-b.sys.held{padding:4px 8px}',
     '.ov2-btag{display:block;font-size:10.5px;font-weight:600;color:#8A5A0B;margin-bottom:2px;white-space:normal}',
+    '.ov2-bplaced{display:block;font-size:10.5px;font-weight:600;color:#1F5F8B;margin-bottom:2px;white-space:normal}',
+    '.ov2-matching{margin:8px 0 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere}',
     '.ov2-compose{margin-top:10px;border-top:1px solid var(--sw-light,#EDF1F4);padding-top:10px}',
     '.ov2-compose textarea{display:block;width:100%;min-height:58px;border:1px solid var(--sw-border,#D4DEE4);border-radius:var(--sw-radius-sm,3px);padding:7px 9px;font-size:12.5px;line-height:1.45;background:#fff;resize:vertical}',
     '.ov2-compose textarea:focus{outline:none;border-color:var(--sw-orange,#F15A29)}',

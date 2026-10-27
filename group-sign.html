@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign the job</title>
+  <script src="shared/group-work-order.js?v=2"></script>
+  <style>
+    body { margin: 0; font-family: Helvetica, Arial, sans-serif; background: #f4f6f8; color: #293C46; }
+    #groupSign { max-width: 420px; margin: 0 auto; padding: 24px 16px 48px; }
+    [data-group-sign] h1 { font-size: 22px; margin: 0 0 8px; }
+    [data-group-sign] p { font-size: 14px; line-height: 1.4; }
+    [data-group-sign-notice] { background: #fff; border: 1px solid #d4dee4; padding: 10px 12px; }
+    label { display: block; font-size: 13px; font-weight: 700; margin-top: 14px; }
+    input, textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; font: inherit; }
+    canvas { display: block; margin-top: 12px; background: #fff; border: 1px solid #293C46; touch-action: none; }
+    button { margin-top: 12px; padding: 10px 14px; font-weight: 700; }
+    fieldset { border: 1px solid #d4dee4; margin: 12px 0; }
+    fieldset label { font-weight: 500; display: inline-block; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <div id="groupSign"></div>
+  <script>
+  (function () {
+    var URL_BASE = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
+    var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
+    var token = '';
+    var drew = false;
+
+    function params() {
+      var q = new URLSearchParams(location.search);
+      return q.get('token') || q.get('share_token') || '';
+    }
+
+    function ops(action, query, body) {
+      var url = URL_BASE + '/functions/v1/ops-api?action=' + encodeURIComponent(action);
+      if (query) Object.keys(query).forEach(function (k) {
+        if (query[k] != null) url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(query[k]);
+      });
+      return fetch(url, {
+        method: body ? 'POST' : 'GET',
+        headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (payload) {
+          if (!r.ok) {
+            var e = new Error((payload && (payload.error || payload.message)) || 'Request failed');
+            e.code = payload && payload.code;
+            e.status = r.status;
+            e.body = payload;
+            throw e;
+          }
+          return payload || {};
+        });
+      });
+    }
+
+    function msg(text) {
+      var el = document.querySelector('[data-group-sign-msg]');
+      if (!el) return;
+      el.hidden = !text;
+      el.textContent = text || '';
+    }
+
+    function bindPad() {
+      var pad = document.querySelector('[data-group-sign-pad]');
+      if (!pad) return;
+      var ctx = pad.getContext('2d');
+      ctx.strokeStyle = '#293C46';
+      ctx.lineWidth = 2;
+      var drawing = false;
+      function point(ev) {
+        var rect = pad.getBoundingClientRect();
+        return { x: (ev.clientX - rect.left) * (pad.width / rect.width), y: (ev.clientY - rect.top) * (pad.height / rect.height) };
+      }
+      pad.addEventListener('pointerdown', function (ev) {
+        drawing = true;
+        drew = true;
+        var p = point(ev);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        pad.setPointerCapture(ev.pointerId);
+      });
+      pad.addEventListener('pointermove', function (ev) {
+        if (!drawing) return;
+        var p = point(ev);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+      });
+      pad.addEventListener('pointerup', function () { drawing = false; });
+      var clear = document.querySelector('[data-group-sign-clear]');
+      if (clear) clear.addEventListener('click', function () {
+        ctx.clearRect(0, 0, pad.width, pad.height);
+        drew = false;
+      });
+    }
+
+    function paint(read) {
+      var core = window.GroupWorkOrderCore;
+      var host = document.getElementById('groupSign');
+      if (!core || !host) return;
+      if (!read || core.isOff(read)) { host.innerHTML = ''; return; }
+      drew = false;
+      host.innerHTML = core.publicHtml(read);
+      bindPad();
+    }
+
+    function load() {
+      var core = window.GroupWorkOrderCore;
+      var host = document.getElementById('groupSign');
+      token = params();
+      if (!core || !host || !token) return;
+      ops('group_work_order_public', { token: token }).then(paint).catch(function (e) {
+        if (core.isOff(null, e)) { host.innerHTML = ''; return; }
+        host.innerHTML = '';
+      });
+    }
+
+    document.getElementById('groupSign').addEventListener('click', function (ev) {
+      var core = window.GroupWorkOrderCore;
+      if (!core) return;
+      if (ev.target.closest('[data-group-sign-submit]')) {
+        var name = (document.querySelector('[data-group-sign-name]') || {}).value || '';
+        name = String(name).trim();
+        if (!name) { msg('Enter your name with your signature.'); return; }
+        var pad = document.querySelector('[data-group-sign-pad]');
+        var body = { share_token: token, signer_name: name, signed_via: 'share_link' };
+        if (drew && pad) body.signature_png = pad.toDataURL('image/png');
+        ops('group_work_order_client_sign', null, body).then(function () { load(); }).catch(function (e) {
+          if (core.isOff(null, e)) { document.getElementById('groupSign').innerHTML = ''; return; }
+          msg((e && e.message) || 'That signature could not be saved.');
+        });
+        return;
+      }
+      if (ev.target.closest('[data-group-sign-save]')) {
+        var fields = { free_text: (document.querySelector('[data-group-sign-free]') || {}).value || '' };
+        var missing = false;
+        ['sales_process', 'communication', 'cleanliness', 'punctuality', 'crew'].forEach(function (key) {
+          var picked = document.querySelector('input[data-group-sign-rating="' + key + '"]:checked');
+          var comment = document.querySelector('[data-group-sign-comment="' + key + '"]');
+          if (!picked) missing = true;
+          else fields[key] = Number(picked.value);
+          fields[key + '_comment'] = comment ? comment.value : '';
+        });
+        if (missing) { msg('Rate each one from 1 to 5.'); return; }
+        ops('group_work_order_submit_feedback', null, core.feedbackBody(token, fields)).then(function (res) {
+          if (core.isOff(res)) { document.getElementById('groupSign').innerHTML = ''; return; }
+          var note = (res && res.office_only_notice) || core.NOTICE;
+          var html = '<section data-group-sign><p data-group-sign-notice>' + core.esc(note) + '</p><p data-group-sign-done>The office has your ratings.</p>';
+          var url = res && res.prompt_google_review && res.google_review_url;
+          if (url && /^https?:\/\//i.test(String(url))) {
+            html += '<p><a href="' + core.esc(url) + '" rel="noopener">Leave a Google review</a></p>';
+          }
+          html += '</section>';
+          document.getElementById('groupSign').innerHTML = html;
+        }).catch(function (e) {
+          if (core.isOff(null, e)) { document.getElementById('groupSign').innerHTML = ''; return; }
+          msg((e && e.message) || 'Those ratings could not be saved.');
+        });
+      }
+    });
+
+    load();
+  })();
+  </script>
+</body>
+</html>

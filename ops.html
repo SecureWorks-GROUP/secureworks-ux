@@ -11759,7 +11759,7 @@ function calDescribeRescheduleFailure(error, kind, jobRows) {
     return id && (rows.find(function(r) { return r.assignment_id === id; }) || _calEvents.find(function(e) { return e.assignment_id === id; }));
   };
   if (code === 'booking_date_taken' && body.scheduled_date) {
-    var who = crewDisplayName({ user_id: body.user_id || null });
+    var who = crewDisplayName(rowOf(body.assignment_id) || { user_id: body.user_id || null });
     var text = 'Not moved: ' + who + ' already has a booking on this job on ' + fmtDate(body.scheduled_date);
     if (body.held_by && !String(body.held_by).startsWith('planned-')) {
       var holder = rowOf(body.held_by);

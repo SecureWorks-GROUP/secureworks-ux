@@ -148,6 +148,7 @@ async function bootCalendar(page, opts = {}) {
           id: e.assignment_id, job_id: e.job_id, user_id: e.user_id, role: 'installer',
           status: e.assignment_status, assignment_type: e.assignment_type,
           scheduled_date: e.scheduled_date, scheduled_end: e.scheduled_end,
+          users: e.user_id ? { id: e.user_id, name: e.crew_name } : null,
         })).concat((opts.extraJobRows || []).filter((a) => a.job_id === jobId)),
       });
     }
@@ -968,6 +969,23 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     await page.waitForTimeout(300);
     expect(writes.map((w) => w.action)).toEqual(['reschedule_job_bookings']);
     expect(texts).toHaveLength(0);
+  });
+
+  test('a taken date names the person from their booking even when the crew list does not carry them', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4.slice(0, 1),
+      refuseReschedule: { status: 409, body: {
+        error: 'Not changed: that crew member already has a booking on this job on ' + D.THU, code: 'booking_date_taken',
+        user_id: 'u-liam', scheduled_date: D.THU, assignment_id: 'mm-liam-1', held_by: 'mm-liam-elsewhere',
+        constraint: 'job_assignments_job_user_date_key',
+      } },
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.getByText('Not moved: Liam already has a booking on this job on ' + fmtDate(D.THU) +
+      '. The calendar now shows what was saved.')).toBeVisible();
+    expect(writes.map((w) => w.action)).toEqual(['reschedule_job_bookings']);
   });
 
   test('a stretch on a job ops-api no longer knows (JB404) puts the bar back and says so', async ({ page }) => {

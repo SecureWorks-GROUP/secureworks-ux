@@ -184,8 +184,8 @@ the view" refusal). Only the same person's booking of the job already on a
 target date refuses the drop, naming the person and day (Shaun, 27 Oct).
 The bar's edge handles sit on that bar's own first and last day for any crew
 count and stretch it for everyone on it (`stretchSchedJob` →
-`CalOpsCore.planJobStretch`): per-day crews gain `create_assignment` rows with
-`suppress_notifications: true` or lose deleted rows (an invoiced row's refusal
+`CalOpsCore.planJobStretch`): per-day crews gain rows (`create_assignment` with
+`suppress_notifications: true`, or inside the one whole-job call) or lose deleted rows (an invoiced row's refusal
 is shown in words), spanning rows move their own end. The popup's Remove
 (`// <calendar-job-remove>`) takes one person off one day, or clears one day
 (`CalOpsCore.planDayRemoval`); every booking comes off only from the explicit
@@ -208,7 +208,11 @@ Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
 ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
-A V2 save paints at once and writes behind it (`calSaveJobPlan`: batches from
+A V2 save paints at once and writes behind it (a Schedule bar that is the whole
+of a job of several bookings, confirmed by an uncached ops-api `job_bookings`
+read taken as the save starts (`calSaveBarOrWholeJob`): ONE all-or-nothing
+`reschedule_job_bookings` call, `calSaveJobReschedule`; anything else, or that
+read failing or showing any other booking, `calSaveJobPlan`: batches from
 `CalOpsCore.planWriteBatches` sent concurrently, the last write leaving each
 date in a later batch so ghost reconcile stays right; a failure puts the
 calendar back and names the row), then re-reads only the feed without blanking
@@ -218,7 +222,8 @@ writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
 safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
 window PLUS the dragged job's full assignment set from the existing
 `job_detail` read (`calJobRows`, started at drag start and cached a minute;
-no lighter ops-api read exists) — because the window alone is blind past its edge and when
+`job_bookings` carries no cancelled rows and no booking type, so it is not
+used here) — because the window alone is blind past its edge and when
 the feed is truncated. The bar's own rows move together, so they never block it. A Schedule-bar drag is all-or-nothing: if any
 crew chain would collide with a row that stays put (another booking of the job,
 or a cancelled or completed one), nothing is written,

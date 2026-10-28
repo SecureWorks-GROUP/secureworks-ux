@@ -11376,8 +11376,10 @@ async function calStagingOccupancy(jobId) {
 // The job-scoped read behind every drag (its rows outside the window, and the
 // cancelled / completed rows the feed hides). It starts when the drag starts,
 // so it is usually in hand by the drop, and is kept for a minute; every save
-// on the job, and every loadCalendar(), drops it. ops-api has no lighter read of one job's bookings than
-// job_detail today. A failed read answers null: a Crew-view booking stages
+// on the job, and every loadCalendar(), drops it. It stays on job_detail:
+// ops-api job_bookings carries no cancelled rows and no booking type, so it
+// is used only for the fresh whole-job check as a save starts
+// (calSaveBarOrWholeJob). A failed read answers null: a Crew-view booking stages
 // against the loaded window alone, as before, and a Schedule-bar change refuses.
 var _calJobRowsCache = {};
 var CAL_JOB_ROWS_TTL_MS = 60000;
@@ -11629,12 +11631,13 @@ async function calApplyJobPlan(jobId, seg, kind, target, edge) {
     showToast('Not changed - ' + plan.unbookable.map(crewDisplayName).join(', ') + ' has no crew member on record to book the added days to', 'warning');
     return;
   }
-  confirmClashesOrProceed(calPlanClashes(plan), function() { calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive); });
+  confirmClashesOrProceed(calPlanClashes(plan), function() { calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive, target, edge); });
 }
 
 // `live` is the bar's bookings, `jobLive` every live booking of the job: a
 // crew member's text names all their days on the job, not only this bar's.
-async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive) {
+// `target` (and a stretch's `edge`) is the drop the plan was made from.
+async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive, target, edge) {
   var occupancy = CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
   var staged = CalOpsCore.stageCollisionSafeMoves(occupancy, CalOpsCore.planKeyMoves(plan));
   if (staged.skipped.length) {
@@ -11646,7 +11649,16 @@ async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive
   var snapshot = _calEvents.slice();
   _calEvents = CalOpsCore.applyPlanToEvents(_calEvents, plan);
   renderCalendar();
-  var saving = calSaveJobPlan(jobId, CalOpsCore.planWriteBatches(staged, plan), snapshot);
+  // A bar holding every live booking of a job of several bookings may be the
+  // whole job (calSaveBarOrWholeJob checks it against a fresh read). A bar
+  // that is part of a job, or a job of one booking, keeps its own writes.
+  var saveOutcome = {};
+  var batches = CalOpsCore.planWriteBatches(staged, plan);
+  var saving = live.length > 1 && live.length === jobLive.length
+    ? calSaveBarOrWholeJob(jobId, kind === 'move'
+      ? { job_id: jobId, mode: 'move', new_start: target }
+      : { job_id: jobId, mode: 'stretch', edge: edge, target: target }, plan, batches, snapshot, jobRows, live, saveOutcome)
+    : calSaveJobPlan(jobId, batches, snapshot);
   var after = CalOpsCore.applyPlanToEvents(jobLive, plan);
   // The job's client and site come from a row the calendar feed carried.
   var jobEv = snapshot.find(function(e) { return e.job_id === jobId && e.client_name !== undefined; }) || live[0];
@@ -11656,9 +11668,114 @@ async function calSaveConfirmedJobPlan(jobId, kind, plan, live, jobRows, jobLive
     startChanged: !!(plan.from && plan.to && plan.from.start !== plan.to.start),
     clientTicked: !!plan.from && CalOpsCore.isNextUpcoming(jobLive, plan.from.start, localDateStr(new Date())),
     crewChanges: CalOpsCore.crewDayChanges(jobLive, after, crewDisplayName),
-    saving: saving
+    saving: saving,
+    saveOutcome: saveOutcome
   });
   if (await saving) showToast(kind === 'move' ? 'Rescheduled' : 'Duration updated', 'success');
+}
+
+// ops-api reschedule_job_bookings moves every live booking the job has, so a
+// bar is saved as the whole job only when a read taken now (job_bookings,
+// never the kept job read) still shows exactly the bar's bookings on its
+// days. job_bookings carries no booking type, so a booking the job read did
+// not know counts as crew work. Otherwise, or when that read fails, the bar
+// keeps its own writes and moves only itself.
+async function calSaveBarOrWholeJob(jobId, request, plan, batches, snapshot, jobRows, live, outcome) {
+  _calSavingJobs[jobId] = true;
+  _calSavesInFlight++;
+  var fresh = null;
+  try {
+    fresh = await opsFetch('job_bookings', { job_id: jobId });
+  } catch (e) {
+    console.warn('calendar save: the job\'s bookings read failed, saving the bar booking by booking:', e && e.message);
+  } finally {
+    _calSavesInFlight--;
+    delete _calSavingJobs[jobId];
+  }
+  return calStillWholeJob(live, jobRows, fresh && fresh.bookings, jobId)
+    ? calSaveJobReschedule(jobId, request, plan, snapshot, jobRows, outcome)
+    : calSaveJobPlan(jobId, batches, snapshot);
+}
+
+function calStillWholeJob(live, jobRows, bookings, jobId) {
+  if (!Array.isArray(bookings)) return false;
+  var typeOf = {};
+  (jobRows || []).forEach(function(r) { typeOf[r.assignment_id] = r.assignment_type; });
+  var key = function(e) { return e.assignment_id + '|' + e.scheduled_date + '|' + CalOpsCore.spanEnd(e); };
+  var now = CalOpsCore.assignmentRowsToEvents(bookings, jobId).filter(function(e) {
+    return CalOpsCore.isLiveJobRow(Object.assign({}, e, { assignment_type: typeOf[e.assignment_id] || null }));
+  }).map(key).sort();
+  var shown = live.map(key).sort();
+  return now.length === shown.length && now.every(function(k, i) { return k === shown[i]; });
+}
+
+// Saves a whole job's move or stretch with ONE reschedule_job_bookings call,
+// behind a calendar that already shows it. ops-api plans it with the same
+// rules as the calendar and writes every booking or none. A refusal (JB409:
+// a booking changed since it was read, an invoiced booking would come off,
+// or a date is taken; JB404: no such job) or any failure puts the grid back
+// as it was and says why in words. Answers true only when the server moved
+// the job onto the days shown; `outcome.note` says what the reschedule step
+// should say when it saved, but not as shown, so no text goes.
+async function calSaveJobReschedule(jobId, request, plan, snapshot, jobRows, outcome) {
+  _calSavingJobs[jobId] = true;
+  _calSavesInFlight++;
+  var result = null, failure = null;
+  try {
+    result = await opsPost('reschedule_job_bookings', request);
+  } catch (e) {
+    failure = e;
+  } finally {
+    _calSavesInFlight--;
+    delete _calSavingJobs[jobId];
+    calForgetJobRows(jobId);
+  }
+  var ok = !failure;
+  if (failure) {
+    if (snapshot && _calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
+    showToast(calDescribeRescheduleFailure(failure, plan.kind, jobRows), 'warning');
+  } else if (!result || result.changed !== true) {
+    ok = false;
+    if (snapshot && _calSavesInFlight === 0) { _calEvents = snapshot; renderCalendar(); }
+    showToast('Not changed - the server found nothing to move. The calendar now shows what was saved.', 'warning');
+  } else if (plan.to && result.to && (result.to.start !== plan.to.start || result.to.end !== plan.to.end)) {
+    ok = false;
+    if (outcome) outcome.note = 'The move saved, but not on the days shown, so no text was sent. The calendar shows what was saved.';
+    showToast('Saved, but not on the days shown. The calendar now shows what was saved.', 'warning');
+  }
+  refreshCalendarQuietly();
+  return ok;
+}
+
+// A reschedule_job_bookings refusal in words. A taken date names the person
+// and day, and a cancelled or completed holder (the feed hides both, and the
+// unique key still binds them).
+function calDescribeRescheduleFailure(error, kind, jobRows) {
+  var code = error && error.code;
+  var body = (error && error.body) || {};
+  var tail = '. The calendar now shows what was saved.';
+  var rows = jobRows || [];
+  var rowOf = function(id) {
+    return id && (rows.find(function(r) { return r.assignment_id === id; }) || _calEvents.find(function(e) { return e.assignment_id === id; }));
+  };
+  if (code === 'booking_date_taken' && body.scheduled_date) {
+    var who = crewDisplayName(rowOf(body.assignment_id) || { user_id: body.user_id || null });
+    var text = 'Not moved: ' + who + ' already has a booking on this job on ' + fmtDate(body.scheduled_date);
+    if (body.held_by && !String(body.held_by).startsWith('planned-')) {
+      var holder = rowOf(body.held_by);
+      var st = String((holder && (holder.status || holder.assignment_status)) || '').toLowerCase();
+      if (st === 'cancelled') text += ' (cancelled visit still holds that date)';
+      else if (st === 'complete' || st === 'completed') text += ' (completed visit still holds that date)';
+    }
+    return text + tail;
+  }
+  var msg = String((error && error.message) || error || 'the save failed').replace(/\.\s*$/, '');
+  if (code === 'booking_invoiced') {
+    var row = rowOf(body.assignment_id);
+    return 'Not removed: ' + (row ? crewDisplayName(row) + ' on ' + fmtDate(row.scheduled_date) : 'a booking') + ' - ' + msg + tail;
+  }
+  if (/^not changed/i.test(msg)) return msg + tail;
+  return (kind === 'move' ? 'Not moved' : 'Not changed') + ' - ' + msg + tail;
 }
 
 function handleCalDrop(event, cell) {
@@ -11799,15 +11916,15 @@ function maybeOfferRescheduleSms(ev, newDate, opts) {
       send(offerClient && clientBox && clientBox.checked, phoned.length && crewBox && crewBox.checked);
     }
   );
-  if (opts.saving) calHoldRescheduleStepForSave(opts.saving, send);
+  if (opts.saving) calHoldRescheduleStepForSave(opts.saving, send, opts.saveOutcome);
 }
 
 // The reschedule step opens while the move is still saving. Every text is
 // about the saved days, so a press before the save lands reads "Saving..."
 // and sends once it has; a save that fails turns the step into "the move did
-// not save, nothing was sent". Cancel, or a step replaced by another modal,
-// sends nothing.
-function calHoldRescheduleStepForSave(saving, send) {
+// not save, nothing was sent" (or `saveOutcome.note`, when it saved but not
+// as shown). Cancel, or a step replaced by another modal, sends nothing.
+function calHoldRescheduleStepForSave(saving, send, saveOutcome) {
   var btn = document.getElementById('confirmModalProceed');
   var backdrop = document.getElementById('calConfirmBackdrop');
   if (!btn) return;
@@ -11815,7 +11932,7 @@ function calHoldRescheduleStepForSave(saving, send) {
   var outcome = null;
   saving.then(function(ok) {
     outcome = ok ? 'saved' : 'failed';
-    if (!ok && stepOpen()) calShowRescheduleSaveFailed();
+    if (!ok && stepOpen()) calShowRescheduleSaveFailed(saveOutcome && saveOutcome.note);
   });
   btn.onclick = function() {
     var clientBox = document.getElementById('calReschedClient');
@@ -11834,10 +11951,10 @@ function calHoldRescheduleStepForSave(saving, send) {
   };
 }
 
-function calShowRescheduleSaveFailed() {
+function calShowRescheduleSaveFailed(note) {
   var modal = document.getElementById('calConfirmModal');
-  modal.innerHTML = '<h3>Move not saved</h3>' +
-    '<p id="calReschedSaveFailed">The move did not save, so no text was sent. The calendar shows what was saved.</p>' +
+  modal.innerHTML = '<h3>' + (note ? 'Move saved differently' : 'Move not saved') + '</h3>' +
+    '<p id="calReschedSaveFailed">' + escapeHtml(note || 'The move did not save, so no text was sent. The calendar shows what was saved.') + '</p>' +
     '<div class="modal-actions"><button class="btn-proceed" id="confirmModalProceed" onclick="closeConfirmModal()">OK</button></div>';
 }
 

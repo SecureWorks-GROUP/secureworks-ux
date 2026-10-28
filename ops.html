@@ -5949,6 +5949,7 @@ __swOpsStampAssets([
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <button class="btn btn-secondary btn-sm" onclick="addDepositPreset(20)" style="font-size:11px;">20% Deposit</button>
         <button class="btn btn-secondary btn-sm" onclick="addDepositPreset(50)" style="font-size:11px;">50% Deposit</button>
+        <button class="btn btn-secondary btn-sm" id="uniInvQuotedDepositBtn" onclick="addQuotedDepositPreset()" style="font-size:11px; display:none;">Quoted Deposit</button>
         <button class="btn btn-secondary btn-sm" onclick="addCouncilFeePreset()" style="font-size:11px;">Council/Permit Fee</button>
         <button class="btn btn-secondary btn-sm" onclick="addBalancePreset()" style="font-size:11px;">Balance Due</button>
       </div>
@@ -6378,7 +6379,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-intake-cockpit.js?v=1'},
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
-  {t:'js', u:'modules/ops-modals.js?v=5'},
+  {t:'js', u:'modules/ops-modals.js?v=6'},
   {t:'js', u:'modules/job-scope-record.js?v=1'},
   // <dispatch-version>
   window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=9'}

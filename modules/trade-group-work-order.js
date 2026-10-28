@@ -75,7 +75,11 @@
     if (submitted[groupId]) { showMsg(el, submitted[groupId]); return; }
     var controls = document.createElement('div');
     if (res.awaiting === 'ready' && res.client_signed === true) {
-      controls.innerHTML = '<p>Finalise the crew split to lock the hours and rates before invoicing.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
+      var pot = res.pot_total;
+      var poolLabel = typeof pot === 'number' && Number.isFinite(pot) && pot >= 0
+        ? 'Approved work-order pool: $' + pot.toFixed(2) + ' excluding GST. '
+        : '';
+      controls.innerHTML = '<p>' + poolLabel + 'The approved work-order pool is split between the crew using hours × agreed rates as weights. These rates do not guarantee hourly payment. Finalising locks the hours, rates and shares before invoicing.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
     } else if (res.awaiting === 'frozen' && Number(res.my_share) > 0) {
       controls.innerHTML = '<p>Submit your share as a separate invoice for office review.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my share for office review</button>';
       controls.querySelector('[data-group-wo-gst]').checked = options.gstOn === true;

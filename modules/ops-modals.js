@@ -1093,6 +1093,7 @@ async function onInvJobSelect(jobId) {
 
     // Show presets
     document.getElementById('uniInvPresets').style.display = '';
+    _invShowQuotedDepositPreset();
 
     // Start clean — user adds items via presets or manually
     container.innerHTML = '';
@@ -1217,6 +1218,31 @@ function addDepositPreset(pct) {
   _currentRefSuffix = (contactLabel ? contactLabel + '-' : '') + 'DEP' + pct;
   updateRefSuffixDisplay();
   addInvLine(desc, 1, depositExGst);
+}
+
+// The deposit percent the quote was sent with (pricing_json.deposit.percent,
+// saved by the scope engine), or null when the job has none.
+function _invQuotedDepositPercent() {
+  if (!_invJobCache) return null;
+  var pricing = _invJobCache.pricing_json;
+  if (typeof pricing === 'string') { try { pricing = JSON.parse(pricing); } catch (e) { return null; } }
+  var pct = pricing && pricing.deposit ? Number(pricing.deposit.percent) : NaN;
+  return (isFinite(pct) && pct > 0 && pct <= 100) ? pct : null;
+}
+
+function _invShowQuotedDepositPreset() {
+  var btn = document.getElementById('uniInvQuotedDepositBtn');
+  if (!btn) return;
+  var pct = _invQuotedDepositPercent();
+  if (pct == null || pct === 20 || pct === 50) { btn.style.display = 'none'; return; }
+  btn.textContent = pct + '% Deposit (quoted)';
+  btn.style.display = '';
+}
+
+function addQuotedDepositPreset() {
+  var pct = _invQuotedDepositPercent();
+  if (pct == null) { alert('This job has no quoted deposit.'); return; }
+  addDepositPreset(pct);
 }
 
 function addCouncilFeePreset() {

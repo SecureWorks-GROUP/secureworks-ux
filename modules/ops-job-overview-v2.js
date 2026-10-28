@@ -316,6 +316,18 @@ var JobOverviewV2Core = (function () {
       writer_on: writer.on == null ? (r.writer_on == null ? null : !!r.writer_on) : !!writer.on
     };
   }
+  // The Money block under the story (story_text.money, story-book-v1): lines the database writes from Job Profit,
+  // shown word for word, never reworded here. Null when the backend sends none (an older backend, or no lines).
+  function storyBook(raw) {
+    var r = obj(raw);
+    var b = r && obj(r.money);
+    if (!b) return null;
+    var lines = arr(b.lines).filter(function (l) { return typeof l === 'string'; })
+      .map(function (l) { return l.replace(/[\u0000-\u001f\u007f]/g, ' ').trim(); }).filter(Boolean);
+    if (!lines.length) return null;
+    var incomplete = typeof b.incomplete_line === 'string' && b.incomplete_line.trim() ? b.incomplete_line.trim() : null;
+    return { lines: lines, complete: b.complete === true, incomplete: incomplete, source: str(b.source) };
+  }
   // Paragraphs of a section: blank lines split them.
   function paragraphs(v) {
     return clean(v).split(/\n\s*\n/).map(function (p) { return p.replace(/\s*\n\s*/g, ' ').trim(); }).filter(Boolean);
@@ -1302,7 +1314,7 @@ var JobOverviewV2Core = (function () {
     shortWhen: shortWhen, shortDate: shortDate, longDate: longDate, perthDayKey: perthDayKey,
     clean: clean, cut: cut, firstSentence: firstSentence, headlineFrom: headlineFrom, firstName: firstName, money: money,
     humanStatus: humanStatus, hasBanned: hasBanned, flagOn: flagOn, isNotDeployed: isNotDeployed,
-    storyText: storyText, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
+    storyText: storyText, storyBook: storyBook, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
     invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation, heldList: heldList,
@@ -1409,6 +1421,7 @@ var JobOverviewV2 = (function () {
     m.futureMoney = C.futureMoney(story);
     m.quoted = C.quotedValue(detail, ov);
     m.text = C.storyText(ov && ov.story_text);
+    m.book = C.storyBook(ov && ov.story_text);
     m.failures = C.sourceFailures(ov);
     m.refreshFailed = !!(e && e.refreshFailed);
     m.wm = story && C.obj(story.now) ? C.whoseMove(story.now.whose_move, job, story) : null;
@@ -1601,7 +1614,7 @@ var JobOverviewV2 = (function () {
       '</div><div class="ov2-lede" id="ov2Headline">' + esc(headline) + '</div>' +
       (sec && sec.where_it_is_at ? '<p class="ov2-p">' + esc(sec.where_it_is_at) + '</p>' : (hl.rest ? '<p class="ov2-p">' + esc(hl.rest) + '</p>' : '')) + '</div>';
     h += nextHtml(m);
-    h += storyMomentsHtml(m) + storyMoneyHtml(m);
+    h += storyMomentsHtml(m) + storyMoneyHtml(m) + storyBookHtml(m);
     h += openItemsHtml(m, true);
     h += heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
     if (sec) {
@@ -1635,6 +1648,16 @@ var JobOverviewV2 = (function () {
       '<p>' + esc(f.held ? 'Held, not owed now.' : 'Not an issued debt.') + '</p>' +
       (f.basis ? '<p>' + esc(f.basis) + '</p>' : '') + (f.why ? '<p>' + esc(f.why) + '</p>' : '') + '</div>';
     return h;
+  }
+  // The books' own lines, word for word (TP-14). The story's prose never restates a figure from them.
+  function storyBookHtml(m) {
+    var b = m.book;
+    if (!b) return '';
+    return '<div class="ov2-story-block ov2-book" id="ov2Book" aria-label="Money, from the books"><h3>Money, from the books</h3>' +
+      '<ul class="ov2-book-lines">' + b.lines.map(function (l) {
+        return '<li' + (b.incomplete && l === b.incomplete ? ' class="ov2-book-gap"' : '') + '>' + esc(l) + '</li>';
+      }).join('') + '</ul>' +
+      '<p class="ov2-im">' + esc(b.source === 'job_profit' ? 'From Job Profit, the same figures as its screen.' : 'Job Profit has no record of this job.') + '</p></div>';
   }
   function lastWordHtml(m) {
     function row(label, n) {
@@ -2271,6 +2294,9 @@ var JobOverviewV2 = (function () {
     '.ov2-story-money>div{background:var(--sw-bg,#F8F6F3);padding:9px 10px;min-width:0}',
     '.ov2-story-money span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--sw-mid,#4C6A7C)}',
     '.ov2-story-money strong{display:block;font-size:15px;line-height:1.3;color:var(--sw-dark-deep,#1A272E);overflow-wrap:anywhere}',
+    '.ov2-book-lines{list-style:none;margin:6px 0 0;padding:0;font-size:12px;line-height:1.45;font-variant-numeric:tabular-nums}',
+    '.ov2-book-lines li{padding:3px 0;border-bottom:1px solid var(--sw-light,#EDF1F4);overflow-wrap:anywhere}',
+    '.ov2-book-lines li.ov2-book-gap{color:var(--sw-red,#E74C3C);font-weight:700}',
     '.ov2-story-last{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}',
     '.ov2-story-last h3{grid-column:1/-1}',
     '.ov2-story-last>div{min-width:0;background:var(--sw-bg,#F8F6F3);padding:8px 10px}',

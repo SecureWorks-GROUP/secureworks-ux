@@ -256,6 +256,24 @@ test('a written story shows its sections and when it was written', async ({ page
   expect(text).not.toMatch(/[\u2013\u2014]/);
 });
 
+test('the Money block from the books shows under the story word for word, its gap line marked', async ({ page }) => {
+  await boot(page, { overviewOpts: { writtenStory: true, moneyBook: true } });
+  await openJob(page);
+  const book = page.locator('#ov2Book');
+  await expect(book).toContainText('Money, from the books');
+  await expect(book.locator('li')).toHaveCount(5);
+  await expect(book.locator('li').first()).toHaveText('Quoted: $6,423.50 ex GST.');
+  await expect(book.locator('li.ov2-book-gap')).toHaveText('Costs incomplete: 2 bills that probably belong to this job are waiting to be placed.');
+  await expect(book).toContainText('From Job Profit, the same figures as its screen.');
+});
+
+test('no Money block when the backend sends none', async ({ page }) => {
+  await boot(page, { overviewOpts: { writtenStory: true } });
+  await openJob(page);
+  await expect(page.locator('#ov2Headline')).toBeVisible();
+  await expect(page.locator('#ov2Book')).toHaveCount(0);
+});
+
 test.describe('in a browser far from Perth', () => {
   test.use({ timezoneId: 'Europe/London' });
   test('times still show in Perth time', async ({ page }) => {

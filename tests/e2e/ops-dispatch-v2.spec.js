@@ -155,8 +155,8 @@ test.describe('Dispatch v2 list', () => {
     const list = root.locator('.dpc-job-list');
     await expect(root.locator('[data-dpc-mode="active"]')).toHaveText('Active 3');
     await expect(root.locator('[data-dpc-mode="archive"]')).toHaveText('Archive 1');
-    await expect(list.locator('.dpc-grp-name')).toHaveText(['Order Materials', 'Awaiting Supplier', 'Order Confirmed', 'Schedule Install', 'Scheduled', 'Repairs: Materials', 'Repairs: Scheduled']);
-    await expect(list.locator('.dpc-grp-count')).toHaveText(['1', '1', '0', '0', '0', '1', '0']);
+    await expect(list.locator('.dpc-grp-name')).toHaveText(['Order Materials', 'Awaiting Supplier', 'Order Confirmed', 'Schedule Install', 'Scheduled', 'In Progress', 'Rectification', 'Repairs: Materials', 'Repairs: Scheduled']);
+    await expect(list.locator('.dpc-grp-count')).toHaveText(['1', '1', '0', '0', '0', '0', '0', '1', '0']);
     await expect(list.locator('.dpc-job strong')).toHaveText(['SWF-910001 · Jane Smith', 'SWP-910002 · Tom Lee', 'SWR-910003 · Ann Wu']);
     const f1 = list.locator('.dpc-job', { hasText: 'SWF-910001' });
     await expect(f1.locator(':scope > span:not(.dpc-job-top):not(.dpc-flags):not(.dpc-vh):not(.dpc-arrthin)').first()).toHaveText('Gwelup · 40m Colorbond fence');
@@ -179,6 +179,81 @@ test.describe('Dispatch v2 list', () => {
     await openJob(root, 'SWP-910002');
     await expect(root.locator('.dpc-jobhead .dpc-flag-red')).toHaveText('Deposit not paid');
     await expect(root.locator('.dpc-jobhead .dpc-flag-amber')).toHaveText('No install booked');
+  });
+
+  test('In Progress and Rectification are listed; an on-site job with nothing open is short; On us says what to do; Waiting on us keeps those jobs', async ({ page }) => {
+    const onSite = ROW({
+      id: 'job-g1', job_number: 'SWF-910004', client_name: 'Sam Day', site_suburb: 'Balga', type: 'fencing', work_type: 'fencing',
+      status: 'in_progress', updated_at: '2026-10-17T05:00:00+00:00',
+      board: {
+        title: 'SWF-910004 · Sam Day', days_in_stage: 2, install: INSTALL(dayFrom(-2), { passed: true }),
+        arrival: Object.assign(ARRIVAL(dayFrom(-2), [{ supplier_name: 'Metroll', delivery_date: dayFrom(-4), mark: 'solid', flag: null, material_stage: 'delivered', material_stage_label: 'Delivered', waiting_on: 'nobody', todo: null, extra: false }]),
+          { counts: { orders: 1, sent: 1, confirmed: 1, late: 0, open: 0, on_us: 0, extra_open: 0 } }),
+        waiting: { on_us: false, todo: [] },
+      },
+    });
+    const extra = { supplier_name: 'Stratco WA', delivery_date: dayFrom(3), mark: 'ring', flag: null, material_stage: 'order_materials', material_stage_label: 'Order materials', waiting_on: 'us', todo: 'Send the order to Stratco WA', extra: true };
+    const fixing = ROW({
+      id: 'job-g2', job_number: 'SWP-910005', client_name: 'Kim Ng', site_suburb: 'Morley', type: 'patio', work_type: 'patio',
+      status: 'rectification', updated_at: '2026-10-16T05:00:00+00:00', description: 'Flashing and a downpipe',
+      board: {
+        title: 'SWP-910005 · Kim Ng', days_in_stage: 1, install: INSTALL(dayFrom(-5), { passed: true }),
+        arrival: Object.assign(ARRIVAL(dayFrom(-5), [extra]), { counts: { orders: 1, sent: 0, confirmed: 0, late: 0, open: 1, on_us: 1, extra_open: 1 } }),
+        waiting: { on_us: true, todo: ['Send the order to Stratco WA'] },
+      },
+    });
+    const { root, writes } = await boot(page, {
+      pipeline: () => {
+        const out = ACTIVE();
+        out.columns.accepted[0].board.waiting = { on_us: true, todo: ['Pay Metroll', 'Check the quote from Bunnings', 'Send the order to Emu Concrete'] };
+        out.columns.accepted.push(JSON.parse(JSON.stringify(onSite)), JSON.parse(JSON.stringify(fixing)));
+        out.total = 5;
+        return out;
+      },
+    });
+    const list = root.locator('.dpc-job-list');
+    await expect(list.locator('.dpc-grp-name')).toHaveText(['Order Materials', 'Awaiting Supplier', 'Order Confirmed', 'Schedule Install', 'Scheduled', 'In Progress', 'Rectification', 'Repairs: Materials', 'Repairs: Scheduled']);
+    await expect(list.locator('.dpc-grp-count')).toHaveText(['1', '1', '0', '0', '0', '1', '1', '1', '0']);
+    // Nothing open and nothing on us: the short card, no Arrival line.
+    const g1 = list.locator('.dpc-job', { hasText: 'SWF-910004' });
+    await expect(g1).toHaveClass(/dpc-job-compact/);
+    await expect(g1.locator('.dpc-muted')).toHaveText(`Balga · 2 days in stage · Install was ${words(dayFrom(-2))}`);
+    await expect(g1.locator('.dpc-arrthin, .dpc-onus')).toHaveCount(0);
+    // An extra still to order: the full card, Extra order, and what is on us.
+    const g2 = list.locator('.dpc-job', { hasText: 'SWP-910005' });
+    await expect(g2).not.toHaveClass(/dpc-job-compact/);
+    await expect(g2.locator('.dpc-flag-extra')).toHaveText('Extra order');
+    await expect(g2.locator('.dpc-onus')).toHaveText('On us Send the order to Stratco WA');
+    await expect(list.locator('.dpc-job', { hasText: 'SWF-910001' }).locator('.dpc-onus')).toHaveText('On us Pay Metroll · Check the quote from Bunnings (+1 more)');
+    await expect(list.locator('.dpc-job', { hasText: 'SWP-910002' }).locator('.dpc-onus')).toHaveCount(0);
+
+    // Waiting on us keeps only the jobs waiting on us, and the work type narrows it.
+    const onUs = root.locator('[data-dpc-onus]');
+    await expect(onUs).toHaveText('Waiting on us 2');
+    await expect(onUs).toHaveAttribute('aria-pressed', 'false');
+    await onUs.click();
+    await expect(onUs).toHaveAttribute('aria-pressed', 'true');
+    await expect(onUs).toBeFocused();
+    await expect(list.locator('.dpc-job strong')).toHaveText(['SWF-910001 · Jane Smith', 'SWP-910005 · Kim Ng']);
+    await expect(list.locator('.dpc-grp-name')).toHaveText(['Order Materials', 'Rectification']);
+    await root.locator('[data-dpc-type="repair"]').click();
+    await expect(onUs).toHaveText('Waiting on us 0');
+    await expect(list).toContainText('No repair jobs are waiting on us.');
+    await root.locator('[data-dpc-type="all"]').click();
+    await onUs.click();
+    await expect(list.locator('.dpc-job')).toHaveCount(5);
+    // Archive has no Waiting on us button.
+    await root.locator('[data-dpc-mode="archive"]').click();
+    await expect(root.locator('[data-dpc-onus]')).toHaveCount(0);
+    await root.locator('[data-dpc-mode="active"]').click();
+
+    // The open job's Arrival line says each order's stage, what is on us, and Extra.
+    await openJob(root, 'SWP-910005');
+    const item = root.locator('.dpc-arr-list li', { hasText: 'Stratco WA' });
+    await expect(item.locator('.dpc-arr-stage')).toHaveText('· Order materials, on us: Send the order to Stratco WA');
+    await expect(item.locator('.dpc-flag-extra')).toHaveText('Extra');
+    expect(await root.locator('.dpc-job-list').innerText()).not.toMatch(/[–—]/);
+    expect(writes()).toEqual([]);
   });
 
   test('a stage section folds and stays folded after a reload', async ({ page }) => {
@@ -266,8 +341,8 @@ test.describe('Dispatch v2 rail', () => {
     const tape = root.locator('[data-dpc-region="tape"]');
     await expect(tape.locator('.dpc-tape-meta')).toContainText('Pipeline stage');
     await expect(tape.locator('.dpc-tape-meta strong')).toHaveText('Order Materials');
-    await expect(tape.locator('.dpc-tape-meta')).toContainText('1 of 5');
-    await expect(tape.locator('.dpc-tape-label')).toHaveText(['Order Materials', 'Awaiting Supplier', 'Order Confirmed', 'Schedule Install', 'Scheduled']);
+    await expect(tape.locator('.dpc-tape-meta')).toContainText('1 of 7');
+    await expect(tape.locator('.dpc-tape-label')).toHaveText(['Order Materials', 'Awaiting Supplier', 'Order Confirmed', 'Schedule Install', 'Scheduled', 'In Progress', 'Rectification']);
     await expect(tape.locator('[data-dpc-stage="order_materials"]')).toHaveAttribute('aria-current', 'step');
     await expect(tape.locator('[data-dpc-stage="order_materials"]')).toBeDisabled();
     await expect(tape).toContainText('Same as the Ops Dash pipeline. Moving here moves the job there too.');

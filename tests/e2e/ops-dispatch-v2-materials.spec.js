@@ -94,7 +94,16 @@ function fakeV2(seed = {}) {
     'job-f1': [['1800H standard width panels with 2400H posts', 14], ['2400H posts', 15]],
     'job-p1': [['Solarspan 75mm roof panels', 8]],
   };
-  const job = (id) => fake.jobs[id] || (fake.jobs[id] = { work_type: TYPES[id], job_number: NUMS[id], boxes: [], lines: [], photos: [], emails: [], main: null });
+  const job = (id) => fake.jobs[id] || (fake.jobs[id] = { work_type: TYPES[id], job_number: NUMS[id], boxes: [], lines: [], photos: [], emails: [], main: null, stages: {} });
+  const STAGE_LABELS = { order_materials: 'Order materials', sent: 'Sent to supplier', quote_received: 'Quote received', awaiting_payment: 'Awaiting payment',
+    order_confirmed: 'Order confirmed', manufacturing: 'Manufacturing', ready: 'Materials ready', delivered: 'Delivered' };
+  // A box's material stage: the one a person set, else Sent once an email went, else Order materials.
+  const stageOut = (j, sid) => {
+    const set = (j.stages || {})[sid];
+    const sent = j.emails.some((m) => m.supplier_id === sid && m.status === 'sent');
+    const key = set ? set.key : sent ? 'sent' : 'order_materials';
+    return { box_id: 'box-' + sid, key, label: STAGE_LABELS[key], source: set ? 'set' : 'worked_out', set_at: set ? set.set_at : null, set_by_email: set ? set.set_by_email : null };
+  };
   Object.keys(seed).forEach((id) => Object.assign(job(id), JSON.parse(JSON.stringify(seed[id]))));
   const forced = (action) => { const q = fake.fail[action]; return q && q.length ? q.shift() : null; };
   const no = (status, code, extra) => ({ status, body: Object.assign({ error: 'e2e refusal: ' + code, code }, extra) });
@@ -124,6 +133,7 @@ function fakeV2(seed = {}) {
           approved_email: s.approved, send_blocked: s.approved ? null : { code: 'no_approved_email', message: BLOCK_MSG },
           lines: j.lines.filter((l) => l.supplier_id === sid).map(lineOut), photos: j.photos.filter((p) => p.supplier_id === sid),
           open_email: open ? emailOut(open) : null, sent_emails: j.emails.filter((m) => m.supplier_id === sid && m.status === 'sent').map(emailOut),
+          material_stage: stageOut(j, sid),
         };
       }),
     };
@@ -236,6 +246,19 @@ function fakeV2(seed = {}) {
       if (j.lines.some((l) => l.supplier_id === b.supplier_id) || j.photos.some((p) => p.supplier_id === b.supplier_id)) return no(409, 'supplier_has_lines');
       j.boxes = j.boxes.filter((x) => x !== b.supplier_id);
       return { success: true };
+    },
+    // The stage press: refused when the screen's stamp is not the box's.
+    dispatch_v2_set_material_stage: (url, b) => {
+      const f = forced('dispatch_v2_set_material_stage');
+      if (f) return f;
+      const id = Object.keys(fake.jobs).find((jid) => fake.jobs[jid].boxes.some((sid) => 'box-' + sid === b.box_id));
+      if (!id) return no(404, 'box_not_found');
+      const j = fake.jobs[id];
+      const sid = j.boxes.find((x) => 'box-' + x === b.box_id);
+      const now = stageOut(j, sid);
+      if (now.set_at !== b.expected_set_at) return no(409, 'stage_changed', { box: now });
+      j.stages[sid] = { key: b.material_stage, set_at: stamp(), set_by_email: 'shaun@ops.test' };
+      return { success: true, job_status_changed: false, box: stageOut(j, sid), arrival: null };
     },
     dispatch_v2_set_main_supplier: (url, b) => {
       const j = job(b.job_id);
@@ -686,6 +709,31 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     await mat.locator('.dpc-v2-res', { hasText: 'Banksia Roofing' }).click();
     await expect(boxOf(mat, 'Banksia Roofing')).toBeVisible();
     await expect(mat.locator('.dpc-v2-main, [data-dpc-v2-main], .dpc-v2-standing')).toHaveCount(0);
+  });
+
+  test('a supplier box shows its material stage; a pick sends one set_material_stage with the guard; a stage changed elsewhere shows the latest', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat, writes } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    const pick = acacia.locator('[data-dpc-v2-stage]');
+    await expect(pick).toHaveValue('order_materials');
+    await expect(pick.locator('option')).toHaveText(['Order materials', 'Sent to supplier', 'Quote received', 'Awaiting payment', 'Order confirmed', 'Manufacturing', 'Materials ready', 'Delivered']);
+    await expect(acacia.locator('.dpc-v2-stage-who')).toHaveText('Worked out from the emails and lines');
+    await pick.selectOption('awaiting_payment');
+    await expect(acacia.locator('.dpc-card-msg')).toHaveText('Stage saved: Acacia Steel, Awaiting payment.');
+    await expect(pick).toHaveValue('awaiting_payment');
+    await expect(acacia.locator('.dpc-v2-stage-who')).toContainText('Set by shaun@ops.test');
+    expect(writes().map((c) => [c.action, c.body])).toEqual([['dispatch_v2_set_material_stage', { box_id: 'box-' + SID(1), material_stage: 'awaiting_payment', expected_set_at: null, operator_email: expect.any(String) }]]);
+
+    // Someone else marks it ready; this screen still shows Awaiting payment.
+    const mine = fake.jobs['job-f1'].stages[SID(1)].set_at;
+    fake.jobs['job-f1'].stages[SID(1)] = { key: 'ready', set_at: '2026-10-23T09:00:00.000Z', set_by_email: 'hugo@ops.test' };
+    await pick.selectOption('delivered');
+    await expect(mat).toContainText('This order\'s stage was changed somewhere else. Showing the latest.');
+    await expect(pick).toHaveValue('ready');
+    await expect(acacia.locator('.dpc-v2-stage-who')).toContainText('Set by hugo@ops.test');
+    expect(writes().map((c) => c.body.expected_set_at)).toEqual([null, mine]);
+    expect(writes().filter((c) => c.action !== 'dispatch_v2_set_material_stage')).toEqual([]);
   });
 
   test('a photo is shrunk to a JPEG and added; a photo too big and an iPhone HEIC photo are refused in plain words', async ({ page }) => {

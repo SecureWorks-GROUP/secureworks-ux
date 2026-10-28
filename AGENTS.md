@@ -209,8 +209,10 @@ ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
 A V2 save paints at once and writes behind it (a Schedule bar that is the whole
-of a job of several bookings: ONE all-or-nothing ops-api `reschedule_job_bookings`
-call, `calSaveJobReschedule`; anything else `calSaveJobPlan`: batches from
+of a job of several bookings, confirmed by an uncached ops-api `job_bookings`
+read taken as the save starts (`calSaveBarOrWholeJob`): ONE all-or-nothing
+`reschedule_job_bookings` call, `calSaveJobReschedule`; anything else, or that
+read failing or showing any other booking, `calSaveJobPlan`: batches from
 `CalOpsCore.planWriteBatches` sent concurrently, the last write leaving each
 date in a later batch so ghost reconcile stays right; a failure puts the
 calendar back and names the row), then re-reads only the feed without blanking
@@ -218,8 +220,10 @@ the grid (`refreshCalendarQuietly`). Schedule bars may be backed by several same
 move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
 writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
 safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
-window PLUS the dragged job's non-cancelled bookings from ops-api
-`job_bookings` (`calJobRows`, started at drag start and cached a minute) — because the window alone is blind past its edge and when
+window PLUS the dragged job's full assignment set from the existing
+`job_detail` read (`calJobRows`, started at drag start and cached a minute;
+`job_bookings` carries no cancelled rows and no booking type, so it is not
+used here) — because the window alone is blind past its edge and when
 the feed is truncated. The bar's own rows move together, so they never block it. A Schedule-bar drag is all-or-nothing: if any
 crew chain would collide with a row that stays put (another booking of the job,
 or a cancelled or completed one), nothing is written,
@@ -229,7 +233,7 @@ A single-row move/resize onto a held date is skipped with both visits kept,
 never deleted or allowed to abort the drag; a skip with no genuine holder (two
 rows of one bar collapsing onto one date, e.g. deliberately scheduled Sat+Sun
 rows) says so instead of blaming an existing visit. Ghost observer rows remain
-backend-owned and absent from the calendar feed; the `job_bookings` read supplies
+backend-owned and absent from the calendar feed; the `job_detail` read supplies
 them, but a key held ONLY by a ghost does not block, because ops-api releases
 the manager's own mirror off `(job_id,user_id,scheduled_date)` before writing a
 real crew row there. Staging drops ghosts from occupancy, so they are never a
@@ -239,10 +243,8 @@ manager's own ghost mirror on `(job, user, date)`, so a stale ghost belonging
 to a former or second ops manager can still surface the duplicate-key toast
 for that user's own real row; widening the release is backend follow-up
 `opsapi-ghost-release-any-manager`. That read also carries
-the completed rows the feed hides; they block too, and a toast names them as
-"(completed visit still holds that date)". It leaves cancelled rows out, which
-the unique key still binds: the save is refused and put back, and the toast says
-a cancelled visit may hold that date. Guard:
+cancelled/completed rows the feed hides; they block too, and a toast names them
+as "(cancelled|completed visit still holds that date)". Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with

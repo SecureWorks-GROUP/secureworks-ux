@@ -67,8 +67,8 @@ function fixtureEvents() {
 // default), { dragLs } to seed localStorage.sw_cal_dragv2 before load.
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents(), reads: { job_bookings: 0, job_detail: 0 } };
-  // { holdJobRead }: every job_bookings read waits until the test calls
-  // state.releaseJobRead().
+  // { holdJobRead }: every job_detail read (the drag's job read) waits until
+  // the test calls state.releaseJobRead().
   const jobReadGate = new Promise((r) => { state.releaseJobRead = r; });
   const writes = [];
   // Crew texts the page sends through ghl-proxy send_sms. Stubbed: nothing
@@ -105,12 +105,14 @@ async function bootCalendar(page, opts = {}) {
     if (action === 'get_crew_availability') return json(opts.availability || []);
     if (action === 'list_users') return json({ users: opts.users || USERS });
     if (action === 'job_bookings') {
-      // The drag's light read of the job's bookings (`reads` counts each).
+      // The read taken as a whole-job save starts (`reads` counts each).
+      // { laterJobRows }: rows booked by someone else after the job was
+      // first read, so only a job read after the first carries them.
+      const later = state.reads.job_bookings + state.reads.job_detail > 0 ? (opts.laterJobRows || []) : [];
       state.reads.job_bookings++;
-      if (opts.holdJobRead) await jobReadGate;
       const jobId = new URL(url).searchParams.get('job_id');
       return json(jobBookingsAnswer(jobId, state.events.map((e) => ({ ...e, role: 'installer', status: e.assignment_status }))
-        .concat(opts.extraJobRows || [])));
+        .concat(opts.extraJobRows || [], later)));
     }
     if (action === 'reschedule_job_bookings') {
       // A whole job's move or stretch in one all-or-nothing call. Planned with
@@ -136,13 +138,16 @@ async function bootCalendar(page, opts = {}) {
     }
     if (action === 'job_detail') {
       state.reads.job_detail++;
+      if (opts.holdJobRead) await jobReadGate;
       const jobId = new URL(url).searchParams.get('jobId');
       return json({
         job: { id: jobId },
-        // { extraJobRows }: rows only the job read carries (ghost watchers).
+        // { extraJobRows }: rows only the job reads carry (ghost watchers,
+        // bookings past the loaded window).
         assignments: state.events.filter((e) => e.job_id === jobId).map((e) => ({
           id: e.assignment_id, job_id: e.job_id, user_id: e.user_id, role: 'installer',
-          status: e.assignment_status, scheduled_date: e.scheduled_date, scheduled_end: e.scheduled_end,
+          status: e.assignment_status, assignment_type: e.assignment_type,
+          scheduled_date: e.scheduled_date, scheduled_end: e.scheduled_end,
         })).concat((opts.extraJobRows || []).filter((a) => a.job_id === jobId)),
       });
     }
@@ -854,7 +859,7 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
   // The whole job in ONE all-or-nothing call (ops-api reschedule_job_bookings,
   // owner's go 28 Oct 2026): Milan Mall, 4 crew x 4 days, was 16 saves one
   // after another, and a failure partway left the job half moved.
-  test('Milan Mall, 4 crew x 4 days: the whole job moves with one call, painted at once, checked through job_bookings', async ({ page }) => {
+  test('Milan Mall, 4 crew x 4 days: the whole job moves with one call, painted at once, confirmed by a fresh job_bookings read', async ({ page }) => {
     const { writes, texts, state } = await bootCalendar(page, {
       events: perDayRows([D.MON, D.TUE, D.WED, D.THU]), users: CREW4, writeDelayMs: 1500,
     });
@@ -880,9 +885,60 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     expect(client[0].body).toMatchObject({ job_id: 'j-mm', comms_trigger: 'install_rescheduled', template_vars: { new_date: D.MON2 } });
     for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.MON2, D.TUE2, D.WED2, D.THU2]);
     await expect(page.getByText('Rescheduled', { exact: true })).toBeVisible();
-    // the clash check read the light job_bookings, never the full job_detail
-    expect(state.reads.job_bookings).toBeGreaterThan(0);
-    expect(state.reads.job_detail).toBe(0);
+    // the clash check read job_detail; one fresh job_bookings read confirmed the whole job
+    expect(state.reads.job_detail).toBeGreaterThan(0);
+    expect(state.reads.job_bookings).toBe(1);
+  });
+
+  test('a meeting on the job past the loaded window is not crew work: the job still moves whole and no text names its day', async ({ page }) => {
+    // Hugo also has a site meeting on the job three weeks out, which only the
+    // job read carries. It is its own line: it never makes the bar part of the
+    // job and never appears in Hugo's days.
+    const MEET = isoStr(plusDays(monA, 21));
+    const { writes, texts, state } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4,
+      extraJobRows: [{ id: 'mm-hugo-meet', job_id: 'j-mm', user_id: 'u-hugo', role: 'installer', status: 'scheduled',
+        assignment_type: 'meeting', scheduled_date: MEET, scheduled_end: MEET }],
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    await expect(page.locator('#calReschedClient')).toBeChecked();
+    await page.locator('#confirmModalProceed').click();
+
+    await expect.poll(() => texts.length).toBe(2);
+    expect(writes.filter((w) => w.action !== 'send_client_update').map((w) => w.action)).toEqual(['reschedule_job_bookings']);
+    expect(reschedules(writes)[0].body).toMatchObject({ job_id: 'j-mm', mode: 'move', new_start: D.WED });
+    const label = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/,/g, '');
+    const hugo = texts.find((t) => t.phone === '+61400000001').message;
+    expect(hugo).toContain('Your days: ' + [D.WED, D.THU].map(label).join(', '));
+    expect(hugo).not.toContain(label(MEET));
+    expect(datesOf(state, 'u-hugo')).toEqual([D.WED, D.THU]);
+    expect(datesOf(state, 'u-liam')).toEqual([D.WED, D.THU]);
+  });
+
+  test('a booking added since the drag read the job is never moved: the bar saves booking by booking', async ({ page }) => {
+    // The drag's job read (kept a minute) shows the bar as the whole job, but
+    // someone has since booked Liam on Friday. The whole-job call would move
+    // that booking too, so the fresh read taken as the save starts sends the
+    // bar down its own writes, and Friday stays.
+    const { writes, state } = await bootCalendar(page, {
+      events: perDayRows([D.MON, D.TUE], CREW4.slice(0, 2)), users: CREW4,
+      laterJobRows: [{ id: 'mm-liam-later', job_id: 'j-mm', user_id: 'u-liam', role: 'installer', status: 'scheduled',
+        scheduled_date: D.FRI, scheduled_end: D.FRI }],
+    });
+    await toSchedule(page);
+    await realDrag(page, page.locator('.cal-schedule-bar[data-job-id="j-mm"]').first(),
+      page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBe(4);
+    await expect(page.getByText('Rescheduled', { exact: true })).toBeVisible();
+    expect(reschedules(writes)).toHaveLength(0);
+    expect(writes.filter((w) => w.action === 'update_assignment').map((w) => w.body.assignmentId).sort())
+      .toEqual(['mm-hugo-0', 'mm-hugo-1', 'mm-liam-0', 'mm-liam-1']);
+    expect(state.reads.job_bookings).toBe(1);
+    expect(datesOf(state, 'u-hugo')).toEqual([D.WED, D.THU]);
+    expect(datesOf(state, 'u-liam')).toEqual([D.WED, D.THU]);
   });
 
   test('a whole-job move ops-api refuses (JB409) puts every booking back, says why in words and sends no text', async ({ page }) => {
@@ -903,9 +959,9 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     await expect(page.locator('#confirmModalProceed')).toHaveText('Saving...');
 
     await expect(page.locator('#calReschedSaveFailed')).toHaveText('The move did not save, so no text was sent. The calendar shows what was saved.');
-    // the held date is a cancelled booking: the job read leaves those out, so the toast says what holds it
+    // the date was taken after the job was read: the toast names the person and day in words
     await expect(page.getByText('Not moved: Liam already has a booking on this job on ' + fmtDate(D.THU) +
-      ' (a cancelled visit still holds that date). The calendar now shows what was saved.')).toBeVisible();
+      '. The calendar now shows what was saved.')).toBeVisible();
     for (const u of CREW4) await expect.poll(() => shownDatesOf(page, u.id), { message: u.name }).toEqual([D.MON, D.TUE]);
     for (const u of CREW4) expect(datesOf(state, u.id), u.name).toEqual([D.MON, D.TUE]);
     await page.locator('#confirmModalProceed').click();
@@ -925,7 +981,7 @@ test.describe('One booking per person per day (Milan Mall shape): each bar stand
     await realDrag(page, bar.locator('.cal-resize-handle.right'), page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]'));
     await expect(page.getByText('Not changed - Job not found. The calendar now shows what was saved.')).toBeVisible();
     for (const u of CREW4.slice(0, 2)) await expect.poll(() => shownDatesOf(page, u.id), { message: u.name }).toEqual([D.MON, D.TUE]);
-    expect(page.getByText('Duration updated')).toHaveCount(0);
+    await expect(page.getByText('Duration updated')).toHaveCount(0);
     expect(writes.map((w) => w.action)).toEqual(['reschedule_job_bookings']);
     expect(texts).toHaveLength(0);
   });

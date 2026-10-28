@@ -154,8 +154,8 @@ async function bootCalendar(page, options = {}) {
       });
     }
     if (action === 'job_bookings') {
-      // The drag's job read: the job's bookings, cancelled ones left out.
-      if (options.jobReadFails) return json({ error: 'e2e job read down' }, 500);
+      // The read taken as a whole-job save starts: the job's bookings,
+      // cancelled ones left out.
       const jobId = new URL(url).searchParams.get('job_id');
       if (!rows.some((row) => row.job_id === jobId)) return json({ error: 'Job not found', code: 'job_not_found' }, 404);
       return json(jobBookingsAnswer(jobId, rows));
@@ -192,6 +192,8 @@ async function bootCalendar(page, options = {}) {
       return json(answer);
     }
     if (action === 'job_detail') {
+      // The drag's job read: every booking, cancelled ones too.
+      if (options.jobReadFails) return json({ error: 'e2e job read down' }, 500);
       const jobId = new URL(url).searchParams.get('jobId');
       const job = rows.find((row) => row.job_id === jobId);
       if (!job) return json({ error: 'not found' }, 404);
@@ -203,6 +205,7 @@ async function bootCalendar(page, options = {}) {
           user_id: row.user_id,
           role: row.role,
           status: row.status,
+          assignment_type: row.assignment_type,
           scheduled_date: row.scheduled_date,
           scheduled_end: row.scheduled_end,
           users: row.user_id ? { id: row.user_id, name: USERS.find((u) => u.id === row.user_id)?.name } : null,
@@ -417,13 +420,12 @@ test('a visit of the job the calendar feed left out still holds its date: the ba
   assertUnique(rows);
 });
 
-test('a multi-crew bar is all-or-nothing: a cancelled row holding one crew\'s date moves nobody and is named', async ({ page }) => {
+test('a multi-crew bar is all-or-nothing: one blocked crew chain moves nobody and names the real visit', async ({ page }) => {
   // Hugo and Isaac share Mon+Tue; Isaac also has a cancelled Fri row the feed
   // hides but the unique key still binds. Dragging the bar to Thu would move
-  // Hugo cleanly but block Isaac's Tue -> Fri row. The job read
-  // (job_bookings) leaves cancelled rows out, so the bar, the whole job, goes
-  // to ops-api in one call, which refuses it whole: the job is never torn
-  // across crews, it is put back, and the toast says what holds the date.
+  // Hugo cleanly but block Isaac's Tue -> Fri row. The job must not be torn
+  // across crews, and the toast counts the ONE real holder, not Isaac's two
+  // cascaded candidates.
   const rows = [
     assignment('h-0', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
     assignment('h-1', 'u-hugo', 'Hugo', D.TUE, { role: 'lead_installer' }),
@@ -442,15 +444,47 @@ test('a multi-crew bar is all-or-nothing: a cancelled row holding one crew\'s da
   await expect(bar.locator('.bar-crew .crew-initial')).toHaveCount(2);
   await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
 
-  await expect(page.getByText(`Not moved: Isaac already has a booking on this job on ${fmtDate(D.FRI)} (a cancelled visit still holds that date). The calendar now shows what was saved.`)).toBeVisible();
+  await expect(page.getByText(`Not moved — 1 existing visit kept: Isaac on ${fmtDate(D.FRI)} (cancelled visit still holds that date)`)).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
-  await expect(page.locator('#calReschedSaveFailed')).toBeVisible();
-  expect(writes.map((w) => w.action)).toEqual(['reschedule_job_bookings']);
-  await expect.poll(() => page.evaluate(() => window._calEvents.filter((e) => e.job_id === 'job-consecutive')
-    .map((e) => e.assignment_id + ':' + e.scheduled_date).sort())).toEqual([`h-0:${D.MON}`, `h-1:${D.TUE}`, `i-0:${D.MON}`, `i-1:${D.TUE}`]);
+  await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
+  expect(writes).toHaveLength(0);
   const byId = Object.fromEntries(rows.map((row) => [row.id, row.scheduled_date]));
   expect([byId['h-0'], byId['h-1'], byId['i-0'], byId['i-1'], byId['i-existing']])
     .toEqual([D.MON, D.TUE, D.MON, D.TUE, D.FRI]);
+  assertUnique(rows);
+});
+
+test('a bar that is part of a job stays all-or-nothing: a cancelled row holding one crew\'s date writes nothing', async ({ page }) => {
+  // As above, but the job also has a booking next week, so the Mon-Tue bar is
+  // only part of it and saves booking by booking. The job read must still
+  // carry Isaac's cancelled Fri row, or Hugo and Isaac's Mon would move and
+  // Isaac's Tue -> Fri would then be refused, tearing the bar across crews.
+  const NEXT_MON = addIsoDays(D.MON, 7);
+  const rows = [
+    assignment('h-0', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
+    assignment('h-1', 'u-hugo', 'Hugo', D.TUE, { role: 'lead_installer' }),
+    assignment('i-0', 'u-isaac', 'Isaac', D.MON),
+    assignment('i-1', 'u-isaac', 'Isaac', D.TUE),
+    assignment('h-next', 'u-hugo', 'Hugo', NEXT_MON, { role: 'lead_installer' }),
+    assignment('i-existing', 'u-isaac', 'Isaac', D.FRI, {
+      status: 'cancelled', assignment_status: 'cancelled', feed_hidden: true,
+    }),
+    assignment('g-mon', 'u-shaun', null, D.MON, { role: 'observer', is_ghost: true }),
+    assignment('g-tue', 'u-shaun', null, D.TUE, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  await page.locator('#btnViewSchedule').click();
+  const bar = page.locator('.cal-schedule-bar[data-assignment-id="h-0"]');
+  await expect(bar.locator('.bar-crew .crew-initial')).toHaveCount(2);
+  await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
+
+  await expect(page.getByText(`Not moved — 1 existing visit kept: Isaac on ${fmtDate(D.FRI)} (cancelled visit still holds that date)`)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  await page.waitForTimeout(300);
+  expect(writes).toHaveLength(0);
+  const byId = Object.fromEntries(rows.map((row) => [row.id, row.scheduled_date]));
+  expect([byId['h-0'], byId['h-1'], byId['i-0'], byId['i-1'], byId['h-next'], byId['i-existing']])
+    .toEqual([D.MON, D.TUE, D.MON, D.TUE, NEXT_MON, D.FRI]);
   assertUnique(rows);
 });
 
@@ -522,11 +556,10 @@ test('a bar with deliberately scheduled Sat and Sun rows says its days would col
   assertUnique(rows);
 });
 
-test('a cancelled row that still holds the target date: the move is put back and the toast says so in words, never the database error', async ({ page }) => {
-  // The feed never shows a cancelled row and the job read (job_bookings)
-  // leaves it out, but the unique key still binds it. The booking's own
-  // update is refused, the calendar puts it back, and the toast must say why
-  // nothing is visible where the Captain is being told a booking exists.
+test('a cancelled row that still holds the target date is named as cancelled, not as a visit on the calendar', async ({ page }) => {
+  // The feed never shows a cancelled row, but the unique key still binds it;
+  // the job-scoped read supplies it and the toast must say why nothing is
+  // visible where the Captain is being told a visit exists.
   const rows = [
     assignment('h-source', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
     assignment('h-cancelled', 'u-hugo', 'Hugo', D.WED, {
@@ -538,11 +571,10 @@ test('a cancelled row that still holds the target date: the move is put back and
   const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Hugo"] .cal-job-block`);
   await realDrag(page, source, page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Hugo"]`));
 
-  await expect(page.getByText(`Not moved: Hugo on ${fmtDate(D.MON)} - another booking of this job already holds that date (it may be a cancelled visit, which the calendar does not show). The calendar now shows what was saved.`)).toBeVisible();
+  await expect(page.getByText(`Already scheduled there — Hugo on ${fmtDate(D.WED)} (cancelled visit still holds that date)`)).toBeVisible();
   await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
-  expect(writes.map((w) => [w.action, w.body.assignmentId])).toEqual([['update_assignment', 'h-source']]);
+  expect(writes).toHaveLength(0);
   expect(rows.find((row) => row.id === 'h-source').scheduled_date).toBe(D.MON);
-  await expect.poll(() => page.evaluate(() => window._calEvents.find((e) => e.assignment_id === 'h-source').scheduled_date)).toBe(D.MON);
   assertUnique(rows);
 });
 

@@ -91,6 +91,17 @@
  * A date set by hand replaces the supplier's reply date and never moves the
  * job. Its answer redraws the Arrival line; the list is then read again.
  *
+ * Material stages (Shaun and Marnin, 27 Oct 2026): each supplier box shows
+ * where its order is at (Order materials, Sent to supplier, Quote received,
+ * Awaiting payment, Order confirmed, Manufacturing, Materials ready,
+ * Delivered), worked out from its emails and lines until a person picks one.
+ * A pick sends ops-api dispatch_v2_set_material_stage once, guarded on the
+ * stamp the box showed; it never moves the job and sends nothing. The list
+ * now runs to In Progress and Rectification (extras are ordered there): an
+ * on-site job with nothing open draws a short card. Each card says what is
+ * waiting on us ("On us ..."), an order made on or after the install day is
+ * tagged Extra, and the Waiting on us button keeps only those jobs.
+ *
  * The Install section (v2 slice 7) shows the install day from the board and
  * who is booked from the list row's dispatch_install. It has no write: Mark
  * confirmed is gone. It makes, moves, locks or confirms no booking (never
@@ -138,7 +149,9 @@
       { key: 'awaiting_supplier', label: 'Awaiting Supplier' },
       { key: 'order_confirmed', label: 'Order Confirmed' },
       { key: 'schedule_install', label: 'Schedule Install' },
-      { key: 'scheduled', label: 'Scheduled' }
+      { key: 'scheduled', label: 'Scheduled' },
+      { key: 'in_progress', label: 'In Progress' },
+      { key: 'rectification', label: 'Rectification' }
     ],
     repairs: [
       { key: 'materials', label: 'Materials' },
@@ -391,6 +404,48 @@
   }
 
   function flagHtml(f) { return '<span class="dpc-flag dpc-flag-' + f.tone + '">' + esc(f.text) + '</span>'; }
+
+  // ── Material stages and "waiting on us" (backend contract section 3b) ──
+
+  // In Progress and Rectification: the crew has been, extras are ordered
+  // there. Their card is short unless an order is still open.
+  var ON_SITE_STAGES = { in_progress: true, rectification: true };
+  function onSiteStage(b) { return !!b && b.track === 'pipeline' && ON_SITE_STAGES[b.stage_key] === true; }
+
+  // What the job waits on us for, in plain words ([] when nothing).
+  function waitingTodo(b) {
+    var w = b && b.waiting;
+    if (!w || typeof w !== 'object' || w.on_us !== true || !Array.isArray(w.todo)) return [];
+    return w.todo.map(text).filter(Boolean);
+  }
+
+  // A listed Active job waiting on us (the Waiting on us button keeps these).
+  function rowOnUs(row) {
+    var b = boardOf(row);
+    return !!b && b.view !== 'archive' && !!b.waiting && b.waiting.on_us === true;
+  }
+
+  function arrivalCount(a, name) {
+    var c = arrivalOk(a) && a.counts && typeof a.counts === 'object' ? a.counts[name] : null;
+    return typeof c === 'number' && isFinite(c) ? c : null;
+  }
+
+  // "Extra order" / "2 extra orders": ordered on or after the install day and
+  // not delivered yet.
+  function extraFlag(a) {
+    var n = arrivalCount(a, 'extra_open');
+    if (!n) return null;
+    return { tone: 'extra', text: n === 1 ? 'Extra order' : n + ' extra orders' };
+  }
+
+  // The card's "On us" line: the first two things to do, then how many more.
+  var ON_US_SHOWN = 2;
+  function onUsHtml(todo) {
+    if (!todo.length) return '';
+    var shown = todo.slice(0, ON_US_SHOWN).join(' · ');
+    var more = todo.length > ON_US_SHOWN ? ' (+' + (todo.length - ON_US_SHOWN) + ' more)' : '';
+    return '<span class="dpc-onus"><b>On us</b> ' + esc(shown + more) + '</span>';
+  }
 
   // ── v2 slice 3: the header rail's rules ──
 
@@ -886,6 +941,8 @@
 
   var state = {
     type: 'all',
+    // The Waiting on us button: Active lists only the jobs waiting on us.
+    onUs: false,
     search: '',
     leftOpen: readStore('localStorage', LS_LEFT) !== '0',
     scopeOpen: readStore('localStorage', LS_SCOPE) !== '0',
@@ -965,7 +1022,14 @@
   function current() { return searching() ? state.found : viewData(state.mode); }
 
   // The listed rows of the view that is showing, through the work type buttons.
-  function listedRows() { return filterByType(current().rows, state.type); }
+  function listedRows() { return narrowRows(current().rows); }
+
+  // Through the work type buttons, and on Active the Waiting on us button.
+  function onUsFiltering() { return state.onUs && state.mode === 'active'; }
+  function narrowRows(rows) {
+    var out = filterByType(rows, state.type);
+    return onUsFiltering() ? out.filter(rowOnUs) : out;
+  }
 
   function listFailed() { return current().status === 'error'; }
 
@@ -1581,15 +1645,27 @@
   // Name", suburb and what the job is, days in stage and the install day (an
   // archived card: when it was installed and archived), the red and amber
   // flags, and the thin Arrival line.
+  //
+  // In Progress and Rectification with no open order and nothing on us draw
+  // short: type, title, and one line (days in stage and the install day).
   function cardHtml(row) {
     var b = boardOf(row);
     var k = typeKey(row);
     var archived = !!b && b.view === 'archive';
-    var h = '<button type="button" class="dpc-job' + (archived ? ' dpc-job-archived' : '') + '" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) + '">';
+    var todo = b && !archived ? waitingTodo(b) : [];
+    var compact = !archived && onSiteStage(b) && arrivalCount(b.arrival, 'open') === 0 && !todo.length;
+    var h = '<button type="button" class="dpc-job' + (archived ? ' dpc-job-archived' : '') + (compact ? ' dpc-job-compact' : '') + '" data-dpc-job="' + esc(row.id) + '" aria-pressed="' + (row.id === state.jobId) + '">';
     var next = text(row.dispatch_next_step);
     h += '<span class="dpc-job-top"><span class="dpc-type' + (k ? ' dpc-type-' + k : '') + '">' + esc(typeLabel(row)) + '</span>' +
       (next ? '<span class="dpc-next">' + esc(next) + '</span>' : '') + '</span>';
     h += '<strong>' + esc(cardTitle(row)) + '</strong>';
+    if (compact) {
+      var short = [b ? text(b.suburb) : text(row.site_suburb), daysText(b), installWords(b)].filter(Boolean).join(' · ');
+      if (short) h += '<span class="dpc-muted">' + esc(short) + '</span>';
+      var cflags = flagsOf(b);
+      if (cflags.length) h += '<span class="dpc-flags">' + cflags.map(flagHtml).join('') + '</span>';
+      return h + '</button>';
+    }
     var sub = [b ? text(b.suburb) : text(row.site_suburb), text(row.description)].filter(Boolean).join(' · ');
     if (sub) h += '<span>' + esc(sub) + '</span>';
     // Items ready (slice 4, kept from v1), days in stage and the install day.
@@ -1597,7 +1673,10 @@
     var meta = !b ? '' : archived ? archiveWords(b) : [ready, daysText(b), installWords(b)].filter(Boolean).join(' · ');
     if (meta) h += '<span class="dpc-muted">' + esc(meta) + '</span>';
     var flags = b ? flagsOf(b) : [];
+    var extra = b && !archived ? extraFlag(b.arrival) : null;
+    if (extra) flags.push(extra);
     if (flags.length) h += '<span class="dpc-flags">' + flags.map(flagHtml).join('') + '</span>';
+    h += onUsHtml(todo);
     if (b && !archived) h += arrivalThinHtml(b.arrival);
     return h + '</button>';
   }
@@ -1646,6 +1725,7 @@
     if (listedRows().length) return '';
     var kind = state.type === 'all' ? '' : (TYPE_LABELS[state.type] || state.type).toLowerCase() + ' ';
     if (searching()) return '<div class="dpc-empty">No ' + (archive ? 'archived ' : '') + 'jobs match.</div>';
+    if (onUsFiltering()) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs are waiting on us.</div>';
     if (archive) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs archived in the last ' + esc(from.archiveDays) + ' days.</div>';
     if (kind) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs.</div>';
     // Active with no jobs at all: says so, and still shows its stage
@@ -1669,10 +1749,10 @@
   // nothing narrows the list, and is left out of a search or a type.
   function groupsHtml() {
     var from = current();
-    var narrowed = searching() || state.type !== 'all';
+    var narrowed = searching() || state.type !== 'all' || onUsFiltering();
     var h = '';
     from.groups.forEach(function (g) {
-      var rows = filterByType(g.rows, state.type);
+      var rows = narrowRows(g.rows);
       if (!rows.length && narrowed) return;
       var archive = g.key === 'archive';
       var label = archive ? 'Dispatch archive' : g.label;
@@ -1699,6 +1779,15 @@
       '<button type="button" data-dpc-mode="archive" aria-pressed="' + (state.mode === 'archive') + '">Archive' + count(state.arch) + '</button>';
   }
 
+  // The Waiting on us button (Active only), with how many listed jobs wait on
+  // us through the work type buttons.
+  function onUsBtnHtml() {
+    if (state.mode !== 'active') return '';
+    var from = current();
+    var n = from.status === 'ok' ? filterByType(from.rows, state.type).filter(rowOnUs).length : null;
+    return '<button type="button" data-dpc-onus aria-pressed="' + state.onUs + '">Waiting on us' + (n === null ? '' : ' <b>' + n + '</b>') + '</button>';
+  }
+
   function chipsHtml() {
     return TYPES.map(function (t) {
       return '<button type="button" data-dpc-type="' + t.key + '" aria-pressed="' + (state.type === t.key) + '">' + esc(t.label) + '</button>';
@@ -1717,9 +1806,10 @@
     h += '<button type="button" class="dpc-side-btn" data-dpc-side aria-label="Collapse accepted work" title="Collapse">&laquo;</button></div>';
     h += '<div class="dpc-mode" role="group" aria-label="Which jobs" data-dpc-region="mode">' + modeHtml() + '</div>';
     h += '<div class="dpc-chips" role="group" aria-label="Work type" data-dpc-region="chips">' + chipsHtml() + '</div>';
+    h += '<div class="dpc-chips dpc-onus-row" data-dpc-region="onus">' + onUsBtnHtml() + '</div>';
     h += '<input type="search" class="dpc-search" data-dpc-search placeholder="Search job, suburb or client" value="' + esc(state.search) + '" aria-label="Search jobs">';
     h += '</div><div class="dpc-job-list" data-dpc-region="list"></div>';
-    h += '<div class="dpc-foot">Active: accepted jobs in pipeline order, from Order Materials to Scheduled. Archive: jobs that left Scheduled in the last 30 days.</div>';
+    h += '<div class="dpc-foot">Active: accepted jobs in pipeline order, from Order Materials to Rectification. Archive: jobs that left Scheduled in the last 30 days.</div>';
     return h + '</aside>';
   }
 
@@ -1745,6 +1835,13 @@
     if (chips) Array.prototype.forEach.call(chips.querySelectorAll('[data-dpc-type]'), function (b) {
       b.setAttribute('aria-pressed', String(b.getAttribute('data-dpc-type') === state.type));
     });
+    var onus = region('onus');
+    if (onus && onus.innerHTML !== onUsBtnHtml()) {
+      var hadOnUs = onus.contains(document.activeElement);
+      onus.innerHTML = onUsBtnHtml();
+      var ob = onus.querySelector('[data-dpc-onus]');
+      if (hadOnUs && ob) ob.focus();
+    }
     var stateHtml = listState();
     var rows = stateHtml ? [] : listedRows();
     if (!state.leftOpen) {
@@ -1921,11 +2018,22 @@
     }
     h += '</div><ul class="dpc-arr-list' + (p.outs.length > 1 ? ' dpc-arr-list-outs' : '') + '">';
     p.marks.concat(p.outs).forEach(function (m) {
-      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + '</li>';
+      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + '</li>';
     });
     h += '</ul></div>';
     h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
     return h + '</div>';
+  }
+
+  // An order's material stage on the full Arrival line: "· Awaiting payment,
+  // on us: Pay Metroll", and Extra for an order made once the crew was on site.
+  function arrStageHtml(o) {
+    if (!o || !text(o.material_stage_label)) return '';
+    var h = ' <span class="dpc-arr-stage">· ' + esc(o.material_stage_label);
+    if (o.waiting_on === 'us' && text(o.todo)) h += ', on us: ' + esc(o.todo);
+    h += '</span>';
+    if (o.extra === true) h += ' <span class="dpc-flag dpc-flag-extra">Extra</span>';
+    return h;
   }
 
   function paintArrival() {
@@ -3006,7 +3114,11 @@
     if (!fresh) return false;
     state.arrival[jobId] = { status: 'ok', data: fresh };
     [state.base.rows, state.found.rows, state.arch.rows, state.row ? [state.row] : []].forEach(function (rows) {
-      rows.forEach(function (r) { if (r && r.id === jobId && boardOf(r)) r.board.arrival = fresh.arrival; });
+      rows.forEach(function (r) {
+        if (!r || r.id !== jobId || !boardOf(r)) return;
+        r.board.arrival = fresh.arrival;
+        if (isObj(fresh.waiting)) r.board.waiting = fresh.waiting;
+      });
     });
     return true;
   }
@@ -3913,7 +4025,33 @@
       lines: (Array.isArray(s.lines) ? s.lines : []).filter(function (l) { return isObj(l) && l.id; }).map(v2LineFrom).sort(v2ByPos),
       photos: (Array.isArray(s.photos) ? s.photos : []).filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom),
       open: v2EmailFrom(s.open_email),
-      sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean)
+      sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean),
+      stage: v2StageFrom(s.material_stage)
+    };
+  }
+
+  // The order's material stage (backend contract section 3b): picked by a
+  // person, or worked out from the box's emails and lines. set_at is the
+  // stamp the press guards on (null = no stage of its own yet).
+  var V2_STAGES = [
+    { key: 'order_materials', label: 'Order materials' },
+    { key: 'sent', label: 'Sent to supplier' },
+    { key: 'quote_received', label: 'Quote received' },
+    { key: 'awaiting_payment', label: 'Awaiting payment' },
+    { key: 'order_confirmed', label: 'Order confirmed' },
+    { key: 'manufacturing', label: 'Manufacturing' },
+    { key: 'ready', label: 'Materials ready' },
+    { key: 'delivered', label: 'Delivered' }
+  ];
+  function v2StageLabel(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return V2_STAGES[i].label;
+    return null;
+  }
+  function v2StageFrom(m) {
+    if (!isObj(m) || !v2StageLabel(m.key)) return null;
+    return {
+      box_id: text(m.box_id) || null, key: m.key, label: text(m.label) || v2StageLabel(m.key),
+      source: m.source === 'set' ? 'set' : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null
     };
   }
 
@@ -4113,10 +4251,11 @@
 
   // A refusal the screen words itself. changed: re-read, the screen was out of date.
   var V2_CHANGED = ['line_changed', 'line_not_on_job', 'supplier_not_on_job', 'email_changed', 'email_not_editable', 'email_not_discardable',
-    'email_not_sendable', 'job_not_found'];
+    'email_not_sendable', 'job_not_found', 'stage_changed', 'box_not_found'];
   function v2Words(err, fallback) {
     var code = err && err.code;
     if (code === 'line_locked') return { changed: true, text: 'That line went out on a sent order, so it cannot be changed.' };
+    if (code === 'stage_changed') return { changed: true, text: 'This order\'s stage was changed somewhere else. Showing the latest.' };
     if (V2_CHANGED.indexOf(code) >= 0) return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
     if (code === 'too_many_lines') return { text: 'A job can hold 500 lines at most.' };
     if (code === 'too_many_photos') return { text: 'A job can hold 20 photos at most. Delete one first.' };
@@ -4381,6 +4520,73 @@
   // The main supplier tick (fencing only): the box whose email gets the two
   // standing lines. Unticking the ticked box clears the tick, and the server's
   // default (the box with the panels, else the first box) applies again.
+  // One press: the order's material stage, set by hand. Never moves the job's
+  // stage or status and sends nothing.
+  function v2SetStage(jobId, sid, value) {
+    var e = v2Entry(jobId);
+    var b = v2Box(e, sid);
+    var key = 'stage:' + sid;
+    var label = v2StageLabel(value);
+    if (!e || e.status !== 'ok' || !b || !b.stage || e.busy[key] || !label) return;
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    var body = b.stage.box_id ? { box_id: b.stage.box_id } : { job_id: jobId, supplier_id: sid };
+    body.material_stage = value;
+    body.expected_set_at = b.stage.set_at;
+    Promise.resolve().then(function () {
+      return global.opsPost('dispatch_v2_set_material_stage', body);
+    }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + label + '.' };
+      if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
+      if (state.jobId === jobId) paintArrival();
+      paintList(true);
+      // The list read again: the card's On us line and counts, from the server.
+      loadBase();
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      v2Fail(jobId, key, err, 'The stage was not saved.');
+    });
+  }
+
+  // The open job's Arrival line entry for a supplier box, or null.
+  function v2ArrivalOrder(sid) {
+    var a = state.row ? arrivalFor(state.row).arrival : null;
+    if (!a) return null;
+    for (var i = 0; i < a.orders.length; i++) {
+      var o = a.orders[i];
+      if (o && o.source === 'supplier_box' && String(o.supplier_id) === sid) return o;
+    }
+    return null;
+  }
+
+  // The stage line under a box's head: the picker, who it waits on, who set
+  // it, and the next thing to do.
+  function v2StageHtml(e, b) {
+    var s = b.stage;
+    if (!s) return '';
+    var key = 'stage:' + b.supplier_id;
+    var busy = !!e.busy[key];
+    var h = '<div class="dpc-v2-stage"><label class="dpc-v2-stage-pick"><span>Materials stage</span><select data-dpc-v2-stage="' + esc(b.supplier_id) + '"' +
+      ' aria-label="Materials stage for ' + esc(b.name) + '"' + (busy ? ' disabled' : '') + '>';
+    V2_STAGES.forEach(function (st) {
+      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+    });
+    h += '</select></label>';
+    var o = v2ArrivalOrder(b.supplier_id);
+    if (o && o.waiting_on === 'us') h += '<span class="dpc-status dpc-tone-warn">On us</span>';
+    else if (o && o.waiting_on === 'supplier') h += '<span class="dpc-status dpc-tone-muted">Waiting on the supplier</span>';
+    if (o && o.extra === true) h += '<span class="dpc-flag dpc-flag-extra">Extra order</span>';
+    h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : s.source === 'set'
+      ? 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '')
+      : 'Worked out from the emails and lines') + '</span>';
+    if (o && text(o.todo)) h += '<p class="dpc-v2-hint dpc-v2-stage-next">Next: ' + esc(o.todo) + '</p>';
+    h += '</div>';
+    return h + v2MsgHtml(e.msg[key]);
+  }
+
   function v2SetMain(jobId, sid, on) {
     var e = v2Entry(jobId);
     if (!e || e.status !== 'ok' || e.busy.main) return;
@@ -4996,6 +5202,7 @@
       h += '<div class="dpc-v2-blocked" role="note"><strong>Send blocked.</strong> ' + esc(b.blocked.message || 'This supplier has no approved order email. Ask Shaun to add one before sending.') +
         ' You can still split lines to it.</div>';
     }
+    h += v2StageHtml(e, b);
     if (fencing && b.is_main) h += '<p class="dpc-v2-hint">Main supplier: its email ends with 4 x bags of quickset, then Fixings, Post Caps and Screws as necessary.</p>';
     h += v2LinesHtml(e, sid, b.lines, b);
     if (fencing && b.is_main) h += '<div class="dpc-lines dpc-v2-lines">' + v2StandingHtml() + '</div>';
@@ -5208,7 +5415,7 @@
 
   // Where the keyboard was inside the section, to put it back after a repaint.
   var V2_FOCUS_KEYS = ['data-dpc-v2-cell', 'data-dpc-v2-id', 'data-dpc-v2-mf', 'data-dpc-v2-mid', 'data-dpc-v2', 'data-dpc-v2-sid', 'data-dpc-v2-status',
-    'data-dpc-v2-move', 'data-dpc-v2-pmove', 'data-dpc-v2-main', 'data-dpc-v2-date', 'data-dpc-v2-attach', 'data-dpc-v2-q'];
+    'data-dpc-v2-move', 'data-dpc-v2-pmove', 'data-dpc-v2-main', 'data-dpc-v2-date', 'data-dpc-v2-attach', 'data-dpc-v2-q', 'data-dpc-v2-stage'];
   function v2Focus(el) {
     var a = document.activeElement;
     if (!a || !el.contains(a)) return null;
@@ -5309,6 +5516,7 @@
     if (t.hasAttribute('data-dpc-v2-move')) { v2MoveLine(jobId, t.getAttribute('data-dpc-v2-move'), v2Key(t.value)); return true; }
     if (t.hasAttribute('data-dpc-v2-pmove')) { v2MovePhoto(jobId, t.getAttribute('data-dpc-v2-pmove'), v2Key(t.value)); return true; }
     if (t.hasAttribute('data-dpc-v2-main')) { v2SetMain(jobId, t.getAttribute('data-dpc-v2-main'), !!t.checked); return true; }
+    if (t.hasAttribute('data-dpc-v2-stage')) { v2SetStage(jobId, t.getAttribute('data-dpc-v2-stage'), t.value); return true; }
     if (t.hasAttribute('data-dpc-v2-date')) { e.dates[t.getAttribute('data-dpc-v2-date')] = t.value; return true; }
     if (t.hasAttribute('data-dpc-v2-file')) {
       var file = t.files && t.files[0];
@@ -5491,7 +5699,7 @@
   function onClick(e) {
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
-      '[data-dpc-mode],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
+      '[data-dpc-mode],[data-dpc-onus],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
@@ -5526,6 +5734,7 @@
       selectJob(rowById(t.getAttribute('data-dpc-job')));
     }
     else if (t.hasAttribute('data-dpc-type')) { state.type = t.getAttribute('data-dpc-type'); paintList(); }
+    else if (t.hasAttribute('data-dpc-onus')) { state.onUs = !state.onUs; paintList(); }
     else if (t.hasAttribute('data-dpc-mode')) {
       // Active or Archive. The work type and a search are cleared; a view
       // not read yet (or failed) is read now.

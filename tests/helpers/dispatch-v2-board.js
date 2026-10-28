@@ -17,7 +17,8 @@
 // An answer marked `v1: true` is passed through untouched: an ops-api that
 // does not know board=v2 yet.
 const V2_STAGES = {
-  pipeline: [['order_materials', 'Order Materials'], ['awaiting_supplier', 'Awaiting Supplier'], ['order_confirmed', 'Order Confirmed'], ['schedule_install', 'Schedule Install'], ['scheduled', 'Scheduled']],
+  pipeline: [['order_materials', 'Order Materials'], ['awaiting_supplier', 'Awaiting Supplier'], ['order_confirmed', 'Order Confirmed'], ['schedule_install', 'Schedule Install'], ['scheduled', 'Scheduled'],
+    ['in_progress', 'In Progress'], ['rectification', 'Rectification']],
   repairs: [['materials', 'Materials'], ['scheduled', 'Scheduled']],
 };
 const PERTH_TODAY = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);

@@ -286,7 +286,7 @@ test('Dispatch: the job list is real, complete, newest first and free of sample 
   await expect(cards.nth(2)).toContainText('Not booked');
   await expect(cards.nth(1)).toContainText(`Install was ${dowOf(PERTH_YEAR - 1, 9, 14)} 14/9/${PERTH_YEAR - 1}`);
   await expect(cards.nth(3).locator('.dpc-type')).toHaveText('Insurance');
-  await expect(root.locator('.dpc-foot')).toHaveText('Active: accepted jobs in pipeline order, from Order Materials to Scheduled. Archive: jobs that left Scheduled in the last 30 days.');
+  await expect(root.locator('.dpc-foot')).toHaveText('Active: accepted jobs in pipeline order, from Order Materials to Rectification. Archive: jobs that left Scheduled in the last 30 days.');
 
   // Nothing says sample or concept, and nothing from the later slices is drawn.
   const tabText = await page.locator('#viewDispatch').innerText();
@@ -773,7 +773,7 @@ test('Dispatch: an empty list, a degraded read and a failed job read each say so
   // v2: the empty line, then every stage section at 0.
   await expect(root.locator('.dpc-job-list > .dpc-empty')).toHaveText('No jobs to show.');
   await expect(root.locator('.dpc-job')).toHaveCount(0);
-  await expect(root.locator('.dpc-job-list .dpc-grp-count')).toHaveText(['0', '0', '0', '0', '0', '0', '0']);
+  await expect(root.locator('.dpc-job-list .dpc-grp-count')).toHaveText(['0', '0', '0', '0', '0', '0', '0', '0', '0']);
   await expect(root.locator('.dpc-jobhead')).toHaveText('No job to show.');
   expect(of('job_detail').length).toBe(0);
 

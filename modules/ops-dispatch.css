@@ -509,6 +509,22 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc .dpc-job-archived { background: #E6ECEF; }
 .dpc .dpc-job-archived strong { color: var(--steel-2); }
 .dpc-queue .dpc-job .dpc-muted { display: block; margin-top: 2px; }
+/* Material stages: the Extra tag, the card's On us line, the short on-site
+   card, the Waiting on us button, and the stage line in a supplier box. */
+.dpc-flag-extra { background: #FDE9E1; color: var(--signal-deep); }
+.dpc .dpc-job .dpc-onus { display: block; margin-top: 6px; font-size: 11.5px; color: #A83C16; overflow-wrap: anywhere; }
+.dpc-onus b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; margin-right: 4px; }
+.dpc .dpc-job-compact { padding-top: 8px; padding-bottom: 8px; }
+.dpc .dpc-job-compact strong { font-size: 15px; margin: 3px 0 1px; }
+.dpc-onus-row { margin-top: -4px; }
+.dpc .dpc-onus-row button { flex: none; padding: 6px 12px; }
+.dpc-v2-stage { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 10px 12px 0; }
+.dpc-v2-stage-pick { display: flex; flex-direction: column; gap: 3px; }
+.dpc-v2-stage-pick span { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+.dpc-v2-stage-pick select { max-width: 100%; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+.dpc-v2-stage-who { font-size: 12px; color: var(--mute); padding-bottom: 7px; }
+.dpc .dpc-v2-stage .dpc-v2-stage-next { flex-basis: 100%; margin: 0; }
+.dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */
 .dpc-arrthin { display: block !important; position: relative; height: 10px; margin: 8px 2px 0; }

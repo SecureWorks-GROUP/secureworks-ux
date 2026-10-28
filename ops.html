@@ -11376,8 +11376,10 @@ async function calStagingOccupancy(jobId) {
 // The job-scoped read behind every drag (its rows outside the window, and the
 // cancelled / completed rows the feed hides). It starts when the drag starts,
 // so it is usually in hand by the drop, and is kept for a minute; every save
-// on the job, and every loadCalendar(), drops it. ops-api has no lighter read of one job's bookings than
-// job_detail today. A failed read answers null: a Crew-view booking stages
+// on the job, and every loadCalendar(), drops it. It stays on job_detail:
+// ops-api job_bookings carries no cancelled rows and no booking type, so it
+// is used only for the fresh whole-job check as a save starts
+// (calSaveBarOrWholeJob). A failed read answers null: a Crew-view booking stages
 // against the loaded window alone, as before, and a Schedule-bar change refuses.
 var _calJobRowsCache = {};
 var CAL_JOB_ROWS_TTL_MS = 60000;

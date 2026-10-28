@@ -27212,6 +27212,7 @@ async function loadOpsNotes(jobId) {
     var data = await opsFetch('list_ops_notes', { jobId: jobId });
     if (!_opsNotesPopup || _opsNotesJobId !== jobId) return;
     var body = _opsNotesPopup.querySelector('.ops-notes-popup-body');
+    setOpsNotesBadge(jobId, (data.notes && data.notes.length) || 0);
     if (!data.notes || data.notes.length === 0) {
       body.innerHTML = '<div style="padding:12px;color:var(--sw-text-sec);font-size:13px;">No notes yet</div>';
     } else {
@@ -27359,23 +27360,34 @@ async function deleteOpsNote(noteId) {
 async function refreshOpsNotesBadge(jobId) {
   try {
     var data = await opsFetch('list_ops_notes', { jobId: jobId });
-    var count = (data.notes && data.notes.length) || 0;
-    var btns = document.querySelectorAll('.ops-note-btn[data-job-id="' + jobId + '"]');
-    btns.forEach(function(btn) {
-      var badge = btn.querySelector('.ops-note-badge');
-      if (count > 0) {
-        btn.classList.add('has-notes');
-        if (badge) {
-          badge.textContent = count;
-        } else {
-          btn.insertAdjacentHTML('beforeend', '<span class="ops-note-badge">' + count + '</span>');
-        }
-      } else {
-        btn.classList.remove('has-notes');
-        if (badge) badge.remove();
-      }
-    });
+    setOpsNotesBadge(jobId, (data.notes && data.notes.length) || 0);
   } catch(e) { /* silent */ }
+}
+
+// Draw the notes badge from a count just read, and keep the board's cached row
+// in step so a repaint from _pipelineData (drawer, view switch, refused drag)
+// does not bring back the count the board was loaded with.
+function setOpsNotesBadge(jobId, count) {
+  if (_pipelineData && _pipelineData.columns) {
+    Object.values(_pipelineData.columns).forEach(function(arr) {
+      (arr || []).forEach(function(j) { if (j && j.id === jobId) j.ops_notes_count = count; });
+    });
+  }
+  var btns = document.querySelectorAll('.ops-note-btn[data-job-id="' + jobId + '"]');
+  btns.forEach(function(btn) {
+    var badge = btn.querySelector('.ops-note-badge');
+    if (count > 0) {
+      btn.classList.add('has-notes');
+      if (badge) {
+        badge.textContent = count;
+      } else {
+        btn.insertAdjacentHTML('beforeend', '<span class="ops-note-badge">' + count + '</span>');
+      }
+    } else {
+      btn.classList.remove('has-notes');
+      if (badge) badge.remove();
+    }
+  });
 }
 
 // ── Trade <-> Ops Comms Popup (two-way job_events note thread) ──

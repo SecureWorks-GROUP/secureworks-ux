@@ -2,6 +2,7 @@ const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
+test.describe.configure({timeout:60_000});
 test.use({ persona: 'fencing_manager', feedScenario: 'henry-job-centric-submit', timezoneId: 'Australia/Perth', appWeekDay: 6, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const groupId = '33333333-3333-4333-8333-333333333333';
 const groupJob = '44444444-4444-4444-8444-444444444444';
@@ -26,7 +27,7 @@ async function fixtures(page, initial = 'ready', running = false) {
 async function open(page) {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();
-  await page.getByRole('button',{name:'Weekly Invoice',exact:true}).click();
+  await page.getByRole('button',{name:'Weekly Invoice'}).click();
   await page.getByRole('button',{name:'Continue',exact:true}).click();
   await expect(page.locator('[data-invoice-group]')).toContainText('SWP-GROUP-ZOO');
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);

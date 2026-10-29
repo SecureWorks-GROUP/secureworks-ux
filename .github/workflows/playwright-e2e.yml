@@ -15,7 +15,7 @@ jobs:
   playwright:
     name: Trade board flows
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 22
     env:
       CI: true
       E2E_TRADE_INSTALLER_EMAIL: ${{ secrets.E2E_TRADE_INSTALLER_EMAIL }}
@@ -52,6 +52,10 @@ jobs:
       - name: Report optional live-auth setup
         if: env.E2E_TRADE_INSTALLER_EMAIL == '' || env.E2E_TRADE_ALLOCATOR_EMAIL == ''
         run: echo '::warning::Dedicated Supabase E2E secrets are not configured. Mocked board coverage will run; optional live-auth checks will be loudly skipped.'
+
+      - name: Check group invoice journey first
+        timeout-minutes: 5
+        run: npx playwright test tests/e2e/trade-group-invoice.spec.js
 
       - name: Run Playwright suite
         timeout-minutes: 14

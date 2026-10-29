@@ -8,8 +8,10 @@
   var transport = null;
   var bound = false;
   var armed = false;
+  var options = {};
+  var submitted = {};
 
-  function use(fn) { transport = fn; }
+  function use(fn, config) { transport = fn; options = config || {}; }
 
   function arm(data) {
     var core = C();
@@ -56,12 +58,33 @@
       var mode = core.tradeMode(res);
       if (mode === 'off') { armed = false; el.innerHTML = ''; return; }
       el.setAttribute('data-group-id', (res && res.group_id) || '');
-      el.innerHTML = core.tradeHtml(mode, res);
+      render(el, mode, res);
     }).catch(function (e) {
       armed = false;
       var box = slot(jobId);
       if (box) box.innerHTML = '';
     });
+  }
+
+  function render(el, mode, res) {
+    el.innerHTML = C().tradeHtml(mode, res);
+    el._groupShare = res;
+    var card = el.querySelector('[data-group-wo]');
+    if (!card || !res || res.group_share_office_review_required !== true) return;
+    var groupId = res.group_id;
+    if (submitted[groupId]) { showMsg(el, submitted[groupId]); return; }
+    var controls = document.createElement('div');
+    if (res.awaiting === 'ready' && res.client_signed === true) {
+      var pot = res.pot_total;
+      var poolLabel = typeof pot === 'number' && Number.isFinite(pot) && pot >= 0
+        ? 'Approved work-order pool: $' + pot.toFixed(2) + ' excluding GST. '
+        : '';
+      controls.innerHTML = '<p>' + poolLabel + 'The approved work-order pool is split between the crew using hours × agreed rates as weights. These rates do not guarantee hourly payment. Finalising locks the hours, rates and shares before invoicing.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
+    } else if (res.awaiting === 'frozen' && Number(res.my_share) > 0) {
+      controls.innerHTML = '<p>Submit your share as a separate invoice for office review.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my share for office review</button>';
+      controls.querySelector('[data-group-wo-gst]').checked = options.gstOn === true;
+    }
+    card.appendChild(controls);
   }
 
   function slotHtml(jobId) {
@@ -91,6 +114,33 @@
     var action = btn.getAttribute('data-group-wo-action');
     var core = C();
     if (!core) return;
+    if (action === 'freeze' || action === 'invoice') {
+      var share = el._groupShare;
+      if (el._groupBusy || !share || share.group_share_office_review_required !== true || submitted[share.group_id]) return;
+      if (action === 'freeze' && (share.awaiting !== 'ready' || share.client_signed !== true)) return;
+      if (action === 'invoice' && (share.awaiting !== 'frozen' || !(Number(share.my_share) > 0))) return;
+      el._groupBusy = true;
+      btn.disabled = true;
+      var request = action === 'freeze'
+        ? call('freeze_group_work_order', null, { group_id: share.group_id })
+        : call('generate_trade_invoice', null, { extra_items: [{ type: 'group share', group_id: share.group_id }], gst_on: !!(el.querySelector('[data-group-wo-gst]') || {}).checked });
+      request.then(function (res) {
+        if (action === 'freeze') {
+          if (!res || res.awaiting !== 'frozen') throw new Error('The split was not confirmed. Refresh before continuing.');
+          return paint(jobId);
+        }
+        var confirmed = res && res.success === true && res.invoice_id && res.office_review === 'held' && !res.xero_bill_id;
+        submitted[share.group_id] = confirmed
+          ? 'Your share invoice is saved for office review. No Xero bill has been created.'
+          : 'Submission outcome needs an office check. Do not submit this share again.';
+        if (slot(jobId) === el) { render(el, core.tradeMode(share), share); }
+      }).catch(function (e) {
+        // A lost response can follow a committed invoice. Never invite a blind retry.
+        if (action === 'invoice') submitted[share.group_id] = 'Submission outcome needs an office check. Do not submit this share again.';
+        if (slot(jobId) === el) showMsg(el, action === 'invoice' ? submitted[share.group_id] : (e.message || 'Could not finalise the split.'));
+      }).finally(function () { el._groupBusy = false; btn.disabled = !!submitted[share.group_id]; });
+      return;
+    }
     if (action === 'create') {
       call('create_group_work_order', null, { job_id: jobId }).then(function () {
         armed = true;
@@ -117,7 +167,7 @@
       call('submit_group_work_order_hours', null, core.hoursBody(groupId, parsed)).then(function (res) {
         if (core.isOff(res) || core.tradeMode(res) === 'off') { el.innerHTML = ''; return; }
         el.setAttribute('data-group-id', (res && res.group_id) || groupId);
-        el.innerHTML = core.tradeHtml(core.tradeMode(res), res);
+        render(el, core.tradeMode(res), res);
       }).catch(function () { el.innerHTML = ''; });
     }
   }

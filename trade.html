@@ -32,8 +32,8 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=office-signoff-20261027"></script>
-  <script src="modules/trade-group-work-order.js?v=office-signoff-20261027"></script>
+  <script src="shared/group-work-order.js?v=zoo-integration-20261029"></script>
+  <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
   <script src="modules/trade-invoice-running-draft.js?v=20261024"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -14165,7 +14165,7 @@
   function renderGroupWorkOrderSlot(data) {
     if (!window.GroupWorkOrderTrade || !data || !data.job || isForeignCrewJob(data)) return '';
     if (!GroupWorkOrderTrade.arm(data)) return '';
-    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); });
+    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); }, { gstOn: _invoiceGstDefault(_hoursData || _user) });
     return GroupWorkOrderTrade.slotHtml(data.job.id);
   }
 

@@ -9,12 +9,17 @@ the Ops Dash shows about that. Code: `modules/ops-job-closeout.js` (pure rules b
 
 ## Preview switch
 
-Off unless `?closeout=preview` (remembered as `localStorage.sw_closeout_preview = '1'`);
-`?closeout=live` turns it off again. It is a sibling of the work order screens'
-`?wo=preview`, not the same switch, because this has nothing to do with work orders
-and the captain may make one live without the other. With it off, the tags and the
-status buttons are exactly as before, even when the feed carries the close-out block.
-The Review text switch (below) is live for every staff user and does not need it.
+The tags and the Review text switch (below) are live for every staff user and do not
+need it. The preview now gates only the Get Review status buttons (see Get Review as
+a stage). Off unless `?closeout=preview` (remembered as
+`localStorage.sw_closeout_preview = '1'`); `?closeout=live` turns it off again. It is a
+sibling of the work order screens' `?wo=preview`, not the same switch, because this has
+nothing to do with work orders and the captain may make one live without the other.
+With it off, the status buttons are exactly as before.
+
+The tags were preview-only until 29 Oct 2026. Fencing and patio cards always went
+through the same renderer, so a browser that had once opened `?closeout=preview`
+showed "Archives in Xh" on both while every other browser showed it on neither.
 
 ## The read-only block it draws from
 
@@ -100,5 +105,5 @@ backlog). Moving a card into Get Review by hand asks the backend's one review se
 under its own switches.
 
 Guards: `tests/e2e/ops-job-closeout-core.spec.js` (pure rules) and
-`tests/e2e/ops-job-closeout.spec.js` (the real page, preview off and on, the switch
-without the preview, with `set_review_opt_out` mocked).
+`tests/e2e/ops-job-closeout.spec.js` (the real page: the tags and the switch without
+the preview, the ladder with the preview off and on, `set_review_opt_out` mocked).

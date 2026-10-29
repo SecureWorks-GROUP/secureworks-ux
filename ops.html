@@ -6401,7 +6401,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
 </script>
-<!-- Paid close-out tags and Get Review ladder (docs/job-closeout-screens.md): off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
+<!-- Paid close-out tags (live) and Get Review ladder (docs/job-closeout-screens.md): the ladder is off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-closeout.js?v=1'}]);
 </script>
@@ -18462,8 +18462,8 @@ function renderKanbanCard(j, status) {
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
-  // <job-closeout-tags> fencing and patio close-out tags (while ?closeout=preview is on)
-  // and the live Review text switch
+  // <job-closeout-tags> fencing and patio close-out tags and the Review text
+  // switch (both live)
   if (window.JobCloseoutOps) html += JobCloseoutOps.cardTagsHtml(j, status);
   // <job-deposit-flag> deposit voided or unpaid after the move (modules/ops-job-deposit-flag.js)
   if (window.DepositFlagOps) html += DepositFlagOps.cardHtml(j, status);
@@ -24682,8 +24682,8 @@ function renderOverviewView(data) {
     html += '<span style="font-size:13px;flex:1;">' + a.icon + ' ' + a.message + '</span>';
     html += '<span style="font-size:11px;color:var(--sw-mid);">&#8594;</span></div>';
   });
-  // <job-closeout-tags> the same close-out tags (preview only) and live Review text
-  // switch on the job page
+  // <job-closeout-tags> the same close-out tags and Review text switch (both live)
+  // on the job page
   if (window.JobCloseoutOps) html += JobCloseoutOps.detailTagsHtml(data);
   // <job-deposit-flag> the same flag on the job page, with Mark dealt with
   if (window.DepositFlagOps) html += DepositFlagOps.detailHtml(data);

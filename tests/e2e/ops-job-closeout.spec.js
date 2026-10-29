@@ -1,7 +1,8 @@
 // Paid close-out tags and the Get Review ladder in ops.html
 // (docs/job-closeout-screens.md). Runs the shipped renderKanbanCard and
-// getNextStatuses on the real page: the preview off must leave both exactly as
-// they were; the preview on draws the tags from the row's `closeout` block only.
+// getNextStatuses on the real page: the tags are live and drawn from the row's
+// `closeout` block only; the preview off must leave the status buttons exactly as
+// they were.
 const { test, expect } = require('@playwright/test');
 
 const FUTURE = () => new Date(Date.now() + 5 * 3600000 - 60000).toISOString();
@@ -18,16 +19,31 @@ function cards(page, rows) {
 const base = { id: 'f1', type: 'fencing', client_name: 'Test Client', value: 6667, days_in_stage: 2 };
 const withBlock = (closeout) => Object.assign({}, base, { closeout });
 
-test('preview off (the default): cards and status buttons are unchanged by a closeout block', async ({ page }) => {
+const tagTexts = (page, html) => page.evaluate((h) => {
+  const d = document.createElement('div');
+  d.innerHTML = h;
+  return Array.from(d.querySelectorAll('.closeout-tag')).map((e) => e.textContent);
+}, html);
+
+test('preview off (the default): fencing and patio cards draw the tags, status buttons are unchanged', async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.removeItem('sw_closeout_preview'); } catch (e) {} });
   await openOps(page);
   const block = { paid_less_than_quoted: true, shortfall_inc: 10, review: { status: 'sent' }, archive_due_at: FUTURE(), held: null };
-  const [plain, tagged] = await cards(page, [
+  const [plain, fencing, patio, makesafe] = await cards(page, [
     { job: base, status: 'get_review' },
     { job: withBlock(block), status: 'get_review' },
+    { job: Object.assign(withBlock(block), { type: 'patio' }), status: 'get_review' },
+    { job: Object.assign(withBlock(block), { type: 'makesafe' }), status: 'get_review' },
   ]);
-  expect(tagged).toBe(plain);
-  expect(tagged).not.toContain('closeout-tag');
+  expect(plain).not.toContain('closeout-tag');
+  const want = ['Paid less than quoted', 'Review sent', 'Archives in 5h'];
+  expect(await tagTexts(page, fencing)).toEqual(want);
+  expect(await tagTexts(page, patio)).toEqual(want);
+  expect(makesafe).not.toContain('closeout-tag');
+  const detail = await page.evaluate((b) => JobCloseoutOps.detailTagsHtml({
+    job: { id: 'f1', type: 'fencing', status: 'get_review' }, closeout: b,
+  }), block);
+  expect(await tagTexts(page, detail)).toEqual(want);
   const ladder = await page.evaluate(() => ({
     fencingFinal: getNextStatuses('final_payment', 'fencing'),
     fencingReview: getNextStatuses('get_review', 'fencing'),
@@ -54,7 +70,7 @@ test('Get Review sits between Invoiced and Archived on the fencing and patio boa
   expect(await page.evaluate(() => SW_STATE_MACHINE.mapStatus('get_review').derived_view)).toBe(false);
 });
 
-test('preview on: small tags from the closeout block, the new ladder, nothing without a block', async ({ page }) => {
+test('preview on: the same tags from the closeout block, the new ladder, nothing without a block', async ({ page }) => {
   await openOps(page, '?closeout=preview');
   const [short, review, none, makesafe] = await cards(page, [
     { job: withBlock({ paid_less_than_quoted: true, shortfall_inc: 5649, review: null }), status: 'invoiced' },
@@ -62,15 +78,10 @@ test('preview on: small tags from the closeout block, the new ladder, nothing wi
     { job: base, status: 'get_review' },
     { job: Object.assign({}, base, { type: 'makesafe', closeout: { paid_less_than_quoted: true } }), status: 'invoiced' },
   ]);
-  const tagTexts = (html) => page.evaluate((h) => {
-    const d = document.createElement('div');
-    d.innerHTML = h;
-    return Array.from(d.querySelectorAll('.closeout-tag')).map((e) => e.textContent);
-  }, html);
-  expect(await tagTexts(short)).toEqual(['Paid less than quoted']);
-  expect(await tagTexts(review)).toEqual(['Review not sent: no contact linked', 'Archives in 5h']);
-  expect(await tagTexts(none)).toEqual([]);
-  expect(await tagTexts(makesafe)).toEqual([]);
+  expect(await tagTexts(page, short)).toEqual(['Paid less than quoted']);
+  expect(await tagTexts(page, review)).toEqual(['Review not sent: no contact linked', 'Archives in 5h']);
+  expect(await tagTexts(page, none)).toEqual([]);
+  expect(await tagTexts(page, makesafe)).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('sw_closeout_preview'))).toBe('1');
 
   const ladder = await page.evaluate(() => ({
@@ -139,16 +150,16 @@ async function drawCards(page, rows) {
 // The switch's state rides the closeout block; who and when ride the row.
 const reviewRow = (closeout, extra) => Object.assign({}, base, extra, { closeout });
 
-test('review switch: live with the preview off (tags still need the preview), hidden outside Complete to Get Review and when the field is absent', async ({ page }) => {
+test('review switch: live with the preview off (beside the live tags), hidden outside Complete to Get Review and when the field is absent', async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.removeItem('sw_closeout_preview'); } catch (e) {} });
   await openOps(page);
   const tagged = { review_opt_out: false, paid_less_than_quoted: true, shortfall_inc: 10, archive_due_at: FUTURE() };
   const [live] = await cards(page, [{ job: reviewRow(tagged), status: 'get_review' }]);
   expect(live).toContain('data-review-toggle="f1"');
-  expect(live).not.toContain('closeout-tag');
+  expect(await tagTexts(page, live)).toEqual(['Paid less than quoted', 'Archives in 5h']);
   const detail = await page.evaluate((b) => JobCloseoutOps.detailTagsHtml({ job: { id: 'f1', type: 'patio', status: 'invoiced' }, closeout: b }), tagged);
   expect(detail).toContain('data-review-toggle="f1"');
-  expect(detail).not.toContain('closeout-tag');
+  expect(await tagTexts(page, detail)).toEqual(['Paid less than quoted']);
   expect(await page.evaluate(() => getNextStatuses('invoiced', 'patio'))).toEqual([]);
 
   const [noField, early, makesafe, invoiced, complete, final, review] = await cards(page, [

@@ -5,10 +5,11 @@
 // docs/job-closeout-v1.md (a paid fencing or patio job goes to Get Review, one
 // review text goes out, and the card archives 24 hours later).
 //
-// Preview: off unless ?closeout=preview or localStorage sw_closeout_preview = '1'
-// (?closeout=live turns it off again). With it off, the tags and the status
-// buttons stay exactly as they were. The Review text switch below is live and
-// does not need the preview.
+// The tags and the Review text switch below are live and do not need the
+// preview. Preview: off unless ?closeout=preview or localStorage
+// sw_closeout_preview = '1' (?closeout=live turns it off again); it now gates
+// only the Get Review status buttons (nextStatuses). With it off, the status
+// buttons stay exactly as they were.
 //
 // Reads only. Each fencing and patio row of `pipeline` (and `job_detail`) may
 // carry one read-only block:
@@ -369,8 +370,8 @@ var JobCloseoutOps = (function () {
   // A tag must never break a card: any throw draws nothing.
   function cardTagsHtml(job, status) {
     try {
-      var tags = previewOn() ? JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) : '';
-      return tags + toggleHtml(job, job.closeout, status);
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(job, status, Date.now())) +
+        toggleHtml(job, job.closeout, status);
     } catch (e) { return ''; }
   }
 
@@ -380,8 +381,7 @@ var JobCloseoutOps = (function () {
       if (!data || !data.job) return '';
       var job = data.job;
       var block = data.closeout !== undefined ? data.closeout : job.closeout;
-      var tags = previewOn() ? JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(viewOf(job, block), job.status, Date.now())) : '';
-      return tags +
+      return JobCloseoutCore.tagsHtml(JobCloseoutCore.tags(viewOf(job, block), job.status, Date.now())) +
         toggleHtml(job, block, job.status, { detail: true });
     } catch (e) { return ''; }
   }
@@ -440,6 +440,10 @@ var JobCloseoutOps = (function () {
   function nextStatuses(current, type) {
     try { return JobCloseoutCore.nextStatuses(current, type, previewOn()); } catch (e) { return null; }
   }
+
+  // Read the switch on load, so ?closeout=preview is remembered at once (the
+  // tags no longer read it, and the ladder may not be asked for on this load).
+  try { previewOn(); } catch (e) { /* the ladder reads it again when asked */ }
 
   return {
     previewOn: previewOn,

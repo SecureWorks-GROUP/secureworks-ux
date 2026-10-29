@@ -1627,7 +1627,7 @@
   // still before Order confirmed (a later stage set by hand keeps today's).
   function sugFootWords(e, s) {
     var o = sugBoxOrder(e, s);
-    var p = o ? v2PayFrom(o.payment) : null;
+    var p = o ? v2PayFrom(o.payment, o.material_stage) : null;
     var at = o ? v2StageAt(o.material_stage) : -1;
     if (!p || p.state !== 'unpaid' || at < 0 || at >= v2StageAt('order_confirmed')) return 'Accept saves this date on the supplier box. It does not move the job.';
     return 'Accept saves this ' + (o.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' date. ' + (text(o.supplier_name) || 'This supplier') +
@@ -2492,14 +2492,14 @@
 
   // An order's payment pill on the full Arrival line (piece B).
   function arrPayHtml(o) {
-    var pill = o ? payPillHtml(v2PayFrom(o.payment)) : '';
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
     return pill ? ' ' + pill : '';
   }
 
   // The payment pill under an order's marker on the Arrival line itself
   // (the list under the line is for narrow screens).
   function arrMarkPayHtml(o) {
-    var pill = o ? payPillHtml(v2PayFrom(o.payment)) : '';
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
     return pill ? '<span class="dpc-arr-pay">' + pill + '</span>' : '';
   }
 
@@ -3675,7 +3675,7 @@
       var off = ed && ed.busy ? ' disabled' : '';
       var pickup = o.fulfilment === 'pickup';
       // Not paid yet or Paid, beside the date (piece B; nothing from an older server).
-      var pill = payPillHtml(v2PayFrom(o.payment));
+      var pill = payPillHtml(v2PayFrom(o.payment, o.material_stage));
       var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>' + pill;
       h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
       h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + (pickup ? ', pickup' : '') + '</small></span>';
@@ -4528,7 +4528,7 @@
       date_mode: v2DateModeFrom(s.date_mode),
       stage: v2StageFrom(s.material_stage),
       // The payment step (section 3c): null from an older server.
-      payment: v2PayFrom(s.payment)
+      payment: v2PayFrom(s.payment, s.material_stage)
     };
   }
 
@@ -5141,12 +5141,18 @@
   var PAY_STATES = ['not_needed', 'unpaid', 'paid', 'pay_on_pickup', 'pay_on_delivery', 'unknown'];
 
   // The box's payment as the server says it, or null (an older server, or a
-  // purchase order with no box).
-  function v2PayFrom(p) {
+  // purchase order with no box). stage is the order's material stage as
+  // shown (its key, or the stage object), for working out to_pay below.
+  function v2PayFrom(p, stage) {
     if (!isObj(p) || PAY_STATES.indexOf(p.state) < 0) return null;
     var g = isObj(p.guard) ? p.guard : {};
+    var key = text(isObj(stage) ? stage.key : stage);
     return {
       terms: text(p.terms) || 'unknown', state: p.state, paid: p.paid === true,
+      // To pay now: unpaid and the order's stage shown is Awaiting payment.
+      // The server says so in to_pay; a server from before that field is
+      // worked out the same way from the state and the stage.
+      to_pay: typeof p.to_pay === 'boolean' ? p.to_pay : p.state === 'unpaid' && key === 'awaiting_payment',
       paid_at: text(p.paid_at) || null, paid_by_email: text(p.paid_by_email) || null,
       pay_on: p.pay_on === 'pickup' || p.pay_on === 'delivery' ? p.pay_on : null,
       pay_on_set_at: text(p.pay_on_set_at) || null, pay_on_set_by_email: text(p.pay_on_set_by_email) || null,
@@ -5163,7 +5169,7 @@
     if (!b) return null;
     if (b.payment) return b.payment;
     var o = v2ArrivalOrder(b.supplier_id);
-    return o ? v2PayFrom(o.payment) : null;
+    return o ? v2PayFrom(o.payment, o.material_stage) : null;
   }
 
   // Which box a press is for: its id when the screen knows it, else the job
@@ -5221,7 +5227,7 @@
     if (kind === 'payon') { body.pay_on = tag; body.expected_set_at = p.guard.pay_on_set_at; } else body.expected_paid_at = p.guard.paid_at;
     Promise.resolve().then(function () { return global.opsPost(PAY_ACTIONS[kind], body); }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
-      var fresh = isObj(resp.box) ? v2PayFrom(resp.box.payment) : null;
+      var fresh = isObj(resp.box) ? v2PayFrom(resp.box.payment, resp.box.material_stage) : null;
       if (fresh) b.payment = fresh;
       e.msg[key] = { text: v2PayDoneWords(kind, b, resp, tag) };
       v2PayAfter(jobId, resp);
@@ -5268,11 +5274,12 @@
   }
 
   // The payment pill beside an order: Not paid yet (amber) on a pay-first
-  // order nobody has marked paid, Paid (green) once someone has. Nothing on an
-  // on-account order, and nothing from an older server (p is null).
+  // order that is to pay now (unpaid at Awaiting payment), Paid (green) once
+  // someone has marked it. Nothing on an unpaid order at any other stage, on
+  // an on-account order, or from an older server (p is null).
   function payPillHtml(p) {
     if (!p) return '';
-    if (p.state === 'unpaid') return '<span class="dpc-flag dpc-flag-amber dpc-paypill">Not paid yet</span>';
+    if (p.to_pay) return '<span class="dpc-flag dpc-flag-amber dpc-paypill">Not paid yet</span>';
     if (p.state === 'paid') return '<span class="dpc-flag dpc-flag-paid dpc-paypill">Paid</span>';
     // Pay on pickup / delivery: confirmed without paying yet.
     if (p.state === 'pay_on_pickup' || p.state === 'pay_on_delivery') return '<span class="dpc-flag dpc-flag-payon dpc-paypill">' + payOnWord(p.state === 'pay_on_pickup' ? 'pickup' : 'delivery') + '</span>';

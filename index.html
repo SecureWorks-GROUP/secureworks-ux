@@ -3534,9 +3534,11 @@ function makeSortable(tableId) {
           // Parse numbers: strip $, %, commas, handle —
           var aNum = parseFloat(aText.replace(/[$,%,]/g, '')) || 0;
           var bNum = parseFloat(bText.replace(/[$,%,]/g, '')) || 0;
-          if (aText === '—') aNum = -Infinity;
-          if (bText === '—') bNum = -Infinity;
-          return (aNum - bNum) * dir;
+          // A blank or Unknown figure sorts lowest, never among the real 0s (R-22).
+          if (aText === '—' || /^Unknown/.test(aText)) aNum = -Infinity;
+          if (bText === '—' || /^Unknown/.test(bText)) bNum = -Infinity;
+          if (aNum === bNum) return 0;
+          return (aNum < bNum ? -1 : 1) * dir;
         }
         return aText.localeCompare(bText) * dir;
       });
@@ -3568,7 +3570,10 @@ function exportCSV(tableId, filename) {
   table.querySelectorAll('tbody tr').forEach(function(tr) {
     var cells = [];
     tr.querySelectorAll('td').forEach(function(td) {
-      var val = td.textContent.trim().replace(/"/g, '""');
+      // A line break inside a cell (an Unknown margin and its reason) exports as " - ".
+      var copy = td.cloneNode(true);
+      copy.querySelectorAll('br').forEach(function(br) { br.parentNode.replaceChild(document.createTextNode(' - '), br); });
+      var val = copy.textContent.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
       cells.push('"' + val + '"');
     });
     if (cells.length > 0) rows.push(cells.join(','));
@@ -4400,7 +4405,7 @@ function jplCostsCard(summary, fmt) {
       label: 'Placed Costs',
       value: fmt(s.total_bills),
       sub: s.costs_complete === false
-        ? 'Not complete: ' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' with costs Unknown'
+        ? 'Not complete: ' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' with margin Unknown'
         : 'Costs complete',
       complete: s.costs_complete !== false,
     };

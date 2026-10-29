@@ -51,7 +51,7 @@ eq(
 let c = ctx.jplCostsCard(fullSummary, fmt);
 eq(c.label, 'Placed Costs', 'costs label');
 eq(c.value, '$12,500', 'placed costs value');
-eq(c.sub, 'Not complete: 2 jobs with costs Unknown', 'costs_complete false shown');
+eq(c.sub, 'Not complete: 2 jobs with margin Unknown', 'costs_complete false shown');
 eq(c.complete, false, 'complete flag');
 c = ctx.jplCostsCard(Object.assign({}, fullSummary, { costs_complete: true, jobs_margin_unknown: 0 }), fmt);
 eq(c.sub, 'Costs complete', 'costs_complete true shown');

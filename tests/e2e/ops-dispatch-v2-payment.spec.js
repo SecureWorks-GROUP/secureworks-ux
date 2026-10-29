@@ -14,7 +14,7 @@ const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
 const { V2_ANSWER, V2_EMPTY_READS } = require('../helpers/dispatch-v2-board');
-const { JOB_ID, JOB_NUMBER, SID, BOX, fakePayment } = require('../helpers/dispatch-v2-payment');
+const { JOB_ID, JOB_NUMBER, SID, BOX, dayFrom, dayWords, fakePayment } = require('../helpers/dispatch-v2-payment');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
@@ -298,6 +298,42 @@ test.describe('Dispatch v2 payment step: the job move waits for the payment', ()
     await sug.locator('[data-dpc-sug-accept]').click();
     await expect(tape(root).locator('.dpc-tape-confirm')).toContainText('Move ' + JOB_NUMBER + ' to Order Confirmed?');
     await expect(root.locator('[data-dpc-region="mail"] .dpc-rep-msg').first()).not.toContainText('Awaiting payment');
+  });
+});
+
+test.describe('Dispatch v2 payment step: stage wording', () => {
+  const pick = (box) => box.locator('[data-dpc-v2-stage]');
+  const who = (box) => box.locator('.dpc-v2-stage .dpc-v2-stage-who');
+
+  test('a pickup box says Picked up, and Materials ready to be picked up with its date', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true, lysaght: { stage: 'ready', stageSource: 'set', stageAt: '2026-10-29T07:00:00.000Z', stageBy: 'shaun@ops.test', paid: { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' } } });
+    const { root, mat, of } = await boot(page, fake);
+    const box = boxOf(mat, 'Lysaght');
+    await expect(pick(box)).toHaveValue('ready');
+    await expect(pick(box).locator('option[value="delivered"]')).toHaveText('Picked up');
+    await expect(pick(boxOf(mat, 'Stratco WA')).locator('option[value="delivered"]')).toHaveText('Delivered');
+    await expect(box.locator('.dpc-v2-stage-next')).toHaveText('Next: Materials ready to be picked up, ' + dayWords(dayFrom(4)));
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' })).toContainText('Materials ready, on us: Materials ready to be picked up, ' + dayWords(dayFrom(4)));
+    await pick(box).selectOption('delivered');
+    await expect(box).toContainText('Stage saved: Lysaght, Picked up.');
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' })).toContainText('Picked up');
+    expect(of('dispatch_v2_set_material_stage').map((c) => c.body.material_stage)).toEqual(['delivered']);
+  });
+
+  test('a pickup on the install day skips Materials ready in its picker', async ({ page }) => {
+    const fake = fakePayment({ install: dayFrom(4), lysaght: { paid: { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' } } });
+    const { mat } = await boot(page, fake);
+    await expect(pick(boxOf(mat, 'Lysaght')).locator('option')).toHaveText(['Order materials', 'Sent to supplier', 'Quote received', 'Awaiting payment', 'Order confirmed', 'Manufacturing', 'Picked up']);
+    await expect(pick(boxOf(mat, 'Twinside Retaining')).locator('option[value="ready"]')).toHaveCount(1);
+  });
+
+  test('an older ops-api: worked out, Delivered and every stage, as today', async ({ page }) => {
+    const { mat } = await boot(page, fakePayment({ old: true, install: dayFrom(4) }));
+    const box = boxOf(mat, 'Lysaght');
+    await expect(who(box)).toHaveText('Worked out from the emails and lines');
+    await expect(pick(box).locator('option[value="delivered"]')).toHaveText('Delivered');
+    await expect(pick(box).locator('option')).toHaveCount(8);
+    await expect(mat).not.toContainText('Awaiting payment until');
   });
 });
 

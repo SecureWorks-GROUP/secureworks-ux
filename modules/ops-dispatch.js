@@ -4192,11 +4192,21 @@
     return {
       box_id: text(m.box_id) || null, key: m.key, label: text(m.label) || v2StageLabel(m.key),
       source: V2_STAGE_SOURCES.indexOf(m.source) >= 0 ? m.source : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null,
-      // Piece B (section 3c): the reply that moved it, and a confirmed date
-      // the payment step is holding. Both absent from an older server.
+      // Piece B (section 3c): the reply that moved it, a confirmed date the
+      // payment step is holding, and a pickup on the install's first day that
+      // skips Materials ready. All absent from an older server.
       reply: r ? { email_id: text(r.email_id) || null, received_at: text(r.received_at) || null } : null,
-      held_by_payment: m.held_by_payment === true
+      held_by_payment: m.held_by_payment === true, skips_ready: m.skips_ready === true
     };
+  }
+
+  // A stage's word on this box: a pickup's last stage is Picked up. Only from
+  // a server that knows the payment step (it sends the payment object, or
+  // says Picked up itself); an older one keeps Delivered, as today.
+  function v2StageWord(b, key) {
+    var knows = b && (b.payment || (b.stage && b.stage.key === 'delivered' && b.stage.label === 'Picked up'));
+    if (key === 'delivered' && knows && b.fulfilment === 'pickup') return 'Picked up';
+    return v2StageLabel(key);
   }
 
   // A dispatch_v2_materials answer missing its draft list or its boxes is a
@@ -4682,7 +4692,7 @@
       return global.opsPost('dispatch_v2_set_material_stage', body);
     }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
-      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + label + '.' };
+      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + (v2StageWord(b, value) || label) + '.' };
       if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
       if (state.jobId === jobId) paintArrival();
       paintList(true);
@@ -4716,7 +4726,9 @@
     var h = '<div class="dpc-v2-stage"><label class="dpc-v2-stage-pick"><span>Materials stage</span><select data-dpc-v2-stage="' + esc(b.supplier_id) + '"' +
       ' aria-label="Materials stage for ' + esc(b.name) + '"' + (busy ? ' disabled' : '') + '>';
     V2_STAGES.forEach(function (st) {
-      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+      // A pickup collected on the install's first day skips Materials ready.
+      if (st.key === 'ready' && s.skips_ready && s.key !== 'ready') return;
+      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(v2StageWord(b, st.key)) + '</option>';
     });
     h += '</select></label>';
     var o = v2ArrivalOrder(b.supplier_id);

@@ -169,6 +169,30 @@ test.describe('Dispatch v2: the Materials panel', () => {
     await expect(btn('Twinside Retaining')).toBeFocused();
   });
 
+  test('each row has an eight-step strip: done steps, the step it is on in its colour, and its words', async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ onAccount: true, lysaght: { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test', paid: { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' } } }));
+    const panel = panelOf(root);
+    const strip = (name) => panel.locator('.dpc-mp-r', { hasText: name }).locator('.dpc-mp-strip i');
+    const cap = (name) => panel.locator('.dpc-mp-r', { hasText: name }).locator('.dpc-mp-stripc');
+    await expect(strip('Lysaght')).toHaveCount(8);
+    const lys = await strip('Lysaght').evaluateAll((els) => els.map((e) => e.className));
+    expect(lys).toEqual(['d', 'd', 'd', 'd', 'd', 'cs', '', '']);
+    await expect(cap('Lysaght')).toHaveText('Manufacturing · step 6 of 8');
+    const twin = await strip('Twinside Retaining').evaluateAll((els) => els.map((e) => e.className));
+    expect(twin).toEqual(['d', 'd', 'd', 'cu', '', '', '', '']);
+    await expect(cap('Twinside Retaining')).toHaveText('Payment · step 4 of 8');
+    await expect(cap('Stratco WA')).toHaveText('Order confirmed · step 5 of 8');
+  });
+
+  test('a paid order says so under its strip; a pickup on the install day hatches Materials ready', async ({ page }) => {
+    const fake = fakePayment({ install: dayFrom(4), lysaght: { paid: { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' } } });
+    const { root } = await boot(page, fake);
+    const row = panelOf(root).locator('.dpc-mp-r', { hasText: 'Lysaght' });
+    await expect(row.locator('.dpc-mp-stripc')).toHaveText('Order confirmed · paid');
+    const cells = await row.locator('.dpc-mp-strip i').evaluateAll((els) => els.map((e) => e.className));
+    expect(cells).toEqual(['d', 'd', 'd', 'd', 'ck', '', 'k', '']);
+  });
+
   test("an older ops-api keeps today's Arrival line", async ({ page }) => {
     const { root } = await boot(page, fakePayment({ old: true, onAccount: true }));
     const arr = panelOf(root);

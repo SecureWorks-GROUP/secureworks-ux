@@ -585,12 +585,20 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-mp-t { display: block; font-weight: 600; font-size: 11.5px; }
 .dpc-mp-t.us { color: #A83C16; } .dpc-mp-t.sp { color: #2c5d86; } .dpc-mp-t.ok { color: #2f7d4f; } .dpc-mp-t.late { color: #b3261e; }
 .dpc-mp-rows { border-top: 1px solid #eef1f3; margin-top: 4px; }
-.dpc-mp-r { display: flex; align-items: center; gap: 16px; padding: 9px 0; border-bottom: 1px solid #f1f4f6; font-size: 12.5px; }
+.dpc-mp-r { display: grid; grid-template-columns: 150px 200px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 9px 0; border-bottom: 1px solid #f1f4f6; font-size: 12.5px; }
 .dpc-mp-r:last-child { border-bottom: 0; }
-.dpc-mp-name { flex: 0 0 160px; font-size: 13px; overflow-wrap: anywhere; }
-.dpc-mp-na { flex: 1; min-width: 0; }
+.dpc-mp-name { font-size: 13px; overflow-wrap: anywhere; }
+.dpc-mp-na { min-width: 0; }
+/* The order strip: eight steps, done green, the current one taller in its colour. */
+.dpc-mp-strip { display: flex; gap: 3px; align-items: center; height: 12px; }
+.dpc-mp-strip i { flex: 1; height: 8px; border-radius: 2px; background: #e3e8eb; }
+.dpc-mp-strip i.d { background: #2f7d4f; }
+.dpc-mp-strip i.k { background: repeating-linear-gradient(90deg, #9fcfb1 0 3px, #fff 3px 5px); }
+.dpc-mp-strip i.cu, .dpc-mp-strip i.cs, .dpc-mp-strip i.ck { height: 12px; }
+.dpc-mp-strip i.cu { background: #A83C16; } .dpc-mp-strip i.cs { background: #2c5d86; } .dpc-mp-strip i.ck { background: #2f7d4f; }
+.dpc-mp-stripc { font-size: 11px; color: var(--mute); margin-top: 3px; }
 .dpc-mp-na small { display: block; color: var(--mute); }
-.dpc-mp-act { flex: 0 0 auto; }
+.dpc-mp-act { justify-self: end; }
 .dpc-mp-onus, .dpc-mp-supw, .dpc-mp-done { font-weight: 600; }
 .dpc-mp-onus { color: #A83C16; } .dpc-mp-supw { color: #2c5d86; } .dpc-mp-done { color: #2f7d4f; }
 .dpc-mp-onus b, .dpc-mp-supw b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; }

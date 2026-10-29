@@ -2306,10 +2306,55 @@
       (busy ? ' disabled' : '') + '>' + (busy === 'paid' ? 'Saving...' : 'Mark paid') + '</button>';
   }
 
-  // One row per order: the name, the next step, and its button.
+  // ── The order strip (piece D): the eight material stages as one bar ──
+  // Done steps are green, the step the order is on stands taller in its
+  // colour (orange on us, blue on the supplier, green confirmed), and the
+  // steps still to come are grey. A pickup collected on the install's first
+  // day skips Materials ready: that step is hatched.
+  function mpStepAt(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return i;
+    return -1;
+  }
+
+  // The class of the step the order is on. Order confirmed and Delivered
+  // are green whoever the job then waits on: the order itself is settled.
+  function mpStepNowCls(o) {
+    var key = text(o.material_stage);
+    if (key === 'delivered' || key === 'order_confirmed') return 'ck';
+    var tone = mpTone(o);
+    if (tone === 'us') return 'cu';
+    if (tone === 'sp') return 'cs';
+    if (tone === 'ok') return 'ck';
+    return o.waiting_on === 'us' ? 'cu' : 'cs';
+  }
+
+  // The words under the strip: "Manufacturing · step 6 of 8", or for a
+  // confirmed order that is settled, "Order confirmed · paid".
+  function mpStripWords(o, at) {
+    var key = text(o.material_stage);
+    var p = v2PayFrom(o.payment);
+    if (key === 'order_confirmed' && p && p.paid) return 'Order confirmed · paid';
+    if (key === 'order_confirmed' && p && p.pay_on) return 'Order confirmed · ' + payOnWord(p.pay_on).toLowerCase();
+    var word = key === 'awaiting_payment' ? 'Payment' : text(o.material_stage_label) || v2StageLabel(key);
+    return word + ' · step ' + (at + 1) + ' of ' + V2_STAGES.length;
+  }
+
+  function mpStripHtml(o) {
+    var at = mpStepAt(text(o.material_stage));
+    if (at < 0) return '<div class="dpc-mp-st"></div>';
+    var now = mpStepNowCls(o);
+    var h = '<div class="dpc-mp-st"><div class="dpc-mp-strip" aria-hidden="true">';
+    V2_STAGES.forEach(function (st, i) {
+      var cls = st.key === 'ready' && o.skips_ready === true && i !== at ? 'k' : i < at ? 'd' : i === at ? now : '';
+      h += '<i' + (cls ? ' class="' + cls + '"' : '') + '></i>';
+    });
+    return h + '</div><div class="dpc-mp-stripc">' + esc(mpStripWords(o, at)) + '</div></div>';
+  }
+
+  // One row per order: the name, its strip, the next step, and its button.
   function mpRowHtml(jobId, o) {
     return '<div class="dpc-mp-r" data-dpc-mp-order="' + esc(text(o.supplier_id) || text(o.key)) + '"><b class="dpc-mp-name">' + esc(text(o.supplier_name) || 'Supplier') + '</b>' +
-      '<div class="dpc-mp-na">' + mpNextHtml(o) + '</div><span class="dpc-mp-act">' + mpPayBtnHtml(jobId, o) + '</span></div>';
+      mpStripHtml(o) + '<div class="dpc-mp-na">' + mpNextHtml(o) + '</div><span class="dpc-mp-act">' + mpPayBtnHtml(jobId, o) + '</span></div>';
   }
 
   function mpHtml(row, a) {

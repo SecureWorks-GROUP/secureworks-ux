@@ -58,6 +58,7 @@ function seedBoxes(opts = {}) {
 
 function fakePayment(opts = {}) {
   const old = opts.old === true;
+  const noToPay = opts.noToPay === true;
   let clock = Date.parse('2026-10-29T06:40:00.000Z');
   const stamp = () => new Date((clock += 60000)).toISOString();
   // work: 'repair' (the default, the job that started it) or 'fencing' (a
@@ -74,8 +75,11 @@ function fakePayment(opts = {}) {
     const pf = bx.terms === 'pay_first';
     const state = bx.paid ? 'paid' : bx.payOn ? 'pay_on_' + bx.payOn.v : pf ? 'unpaid' : 'not_needed';
     const counts = !!bx.paid || !!bx.payOn;
+    // to_pay: unpaid and the stage shown is Awaiting payment. noToPay is a
+    // payment-step server from before the field.
+    const toPay = noToPay ? {} : { to_pay: state === 'unpaid' && stageOf(bx).key === 'awaiting_payment' };
     return {
-      terms: bx.terms, state, paid: !!bx.paid,
+      terms: bx.terms, state, paid: !!bx.paid, ...toPay,
       paid_at: bx.paid ? bx.paid.at : null, paid_by_email: bx.paid ? bx.paid.by : null,
       pay_on: bx.payOn ? bx.payOn.v : null, pay_on_set_at: bx.payOn ? bx.payOn.at : null, pay_on_set_by_email: bx.payOn ? bx.payOn.by : null,
       earlier_order_paid_at: bx.earlierPaidAt || null, earlier_order_pay_on_set_at: null,
@@ -148,12 +152,15 @@ function fakePayment(opts = {}) {
       waiting_on_us: onUs,
     };
     if (old) return a;
+    // The job-wide hold counts every unpaid pay-first box; the counts and the
+    // named list count only the orders to pay now.
     const unpaid = fake.boxes.filter((bx) => payment(bx).blocks_job_move).map((bx) => bx.name);
+    const toPay = fake.boxes.filter((bx) => payment(bx).state === 'unpaid' && stageOf(bx).key === 'awaiting_payment').map((bx) => bx.name);
     Object.assign(a.counts, {
-      unpaid: unpaid.length, held_by_payment: orders.filter((o) => o.held_by_payment).length,
+      unpaid: toPay.length, held_by_payment: orders.filter((o) => o.held_by_payment).length,
       asap_waiting: orders.filter((o) => o.flag === 'asap').length,
     });
-    a.payment = { any_unpaid: unpaid.length > 0, unpaid_suppliers: unpaid };
+    a.payment = { any_unpaid: unpaid.length > 0, unpaid_suppliers: toPay };
     a.earliest_install = null;
     return a;
   };

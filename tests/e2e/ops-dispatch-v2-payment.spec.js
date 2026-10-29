@@ -393,3 +393,28 @@ test.describe('Dispatch v2 payment step: a reply moves the stage, and a held dat
     await expect(root.locator('[data-dpc-region="mail"] [data-dpc-sug="sg-ly"] .dpc-sug-foot')).toHaveText('Accept saves this date on the supplier box. It does not move the job.');
   });
 });
+
+test.describe('Dispatch v2 payment step: Not paid yet only while the order is to pay', () => {
+  // Lysaght set by hand to Manufacturing and not paid; Twinside still at Awaiting payment.
+  const making = { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test' };
+  const pills = async (root, mat, name, n) => {
+    await expect(boxOf(mat, name).locator('.dpc-v2-stage .dpc-paypill')).toHaveCount(n);
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(name === 'Lysaght' ? 1 : 2) + '"] .dpc-paypill')).toHaveCount(n);
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: name }).locator('.dpc-paypill')).toHaveCount(n);
+  };
+
+  test('an unpaid order past Awaiting payment shows no Not paid yet pill anywhere; one to pay still does', async ({ page }) => {
+    const { root, mat } = await boot(page, fakePayment({ lysaght: making }));
+    await pills(root, mat, 'Lysaght', 0);
+    await pills(root, mat, 'Twinside Retaining', 1);
+    await expect(boxOf(mat, 'Twinside Retaining').locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Not paid yet');
+    // The box keeps its own Mark paid: it follows can_mark_paid.
+    await expect(boxOf(mat, 'Lysaght').locator('.dpc-v2-paybtn')).toHaveText('Mark paid');
+  });
+
+  test('a server without to_pay works it out from the state and the stage', async ({ page }) => {
+    const { root, mat } = await boot(page, fakePayment({ noToPay: true, lysaght: making }));
+    await pills(root, mat, 'Lysaght', 0);
+    await pills(root, mat, 'Twinside Retaining', 1);
+  });
+});

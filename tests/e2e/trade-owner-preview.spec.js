@@ -11,6 +11,7 @@ const isaac = { ...PERSONAS.installer.profile, id: '22222222-2222-4222-8222-2222
 test.use({ persona: 'owner_preview' });
 
 test('owner views a selected trade’s real screen read-only and exits without changing identity', async ({ appPage: page }) => {
+  test.setTimeout(60_000);
   const reads = [];
   const mutations = [];
   await page.route('**/functions/v1/ops-api?**', async route => {
@@ -77,6 +78,7 @@ test('owner views a selected trade’s real screen read-only and exits without c
     window.dispatchEvent(new Event('online'));
   }, { queued, clock });
   await inspectShare('723.89');
+  await test.info().attach('Henry read-only Trade preview', { body: await page.screenshot(), contentType: 'image/png' });
   expect(await page.evaluate(() => localStorage.getItem('sw_action_queue'))).toBe(queued);
   expect(await page.evaluate(() => localStorage.getItem('sw_pending_clock_owner'))).toBe(clock);
   // Remove the disposable fixtures before returning to the real owner lens.

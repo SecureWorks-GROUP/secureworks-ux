@@ -73,6 +73,7 @@ var GroupWorkOrderCore = (function () {
       my_share: needs ? null : finiteOrNull(src.my_share),
       needs_hours: needs,
       client_signed: src.client_signed === true,
+      awaiting: String(src.awaiting || ""),
       group_id: src.group_id == null ? '' : String(src.group_id)
     };
   }
@@ -107,11 +108,19 @@ var GroupWorkOrderCore = (function () {
       h += '<p data-group-wo-msg>' + esc(message || 'That could not be read.') + '</p>';
     } else {
       var view = closedShare(raw);
-      h += '<p data-group-wo-signed>' + (view.client_signed ? 'The client has signed.' : 'The client has not signed yet.') + '</p>';
+      h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
       if (view.pot_total != null) h += '<p data-group-wo-total>Total ' + esc(money(view.pot_total)) + '</p>';
       if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
       if (view.needs_hours) h += '<p data-group-wo-needs-hours>Save your hours to see your share.</p>';
-      h += hoursForm();
+      var waiting = {
+        awaiting_signoff: 'The office needs to record client sign-off before your share can be finalised.',
+        awaiting_others: 'Waiting for the remaining crew hours.',
+        awaiting_rate: 'The office needs to confirm crew rates.',
+        ready: 'Hours and sign-off are ready. Your share has not been finalised yet.',
+        frozen: 'Your share is finalised.'
+      };
+      if (waiting[view.awaiting]) h += '<p data-group-wo-status>' + esc(waiting[view.awaiting]) + '</p>';
+      if (view.awaiting !== 'frozen') h += hoursForm();
     }
     if (message && mode !== 'error') h += '<p data-group-wo-msg>' + esc(message) + '</p>';
     h += '</section>';
@@ -196,7 +205,7 @@ var GroupWorkOrderCore = (function () {
     var id = row && row.user_id != null ? String(row.user_id) : '';
     var people = (read && read.participants) || [];
     for (var i = 0; i < people.length; i++) {
-      if (people[i] && String(people[i].user_id) === id && people[i].signature_name) return String(people[i].signature_name);
+      if (people[i] && String(people[i].user_id) === id && (people[i].name || people[i].signature_name)) return String(people[i].name || people[i].signature_name);
     }
     return 'Crew member';
   }
@@ -206,9 +215,29 @@ var GroupWorkOrderCore = (function () {
     var h = '<section data-office-group-wo-card aria-label="Group work order">';
     h += '<div class="gwo-title">Group work order</div>';
     if (finiteOrNull(read.pot_total) != null) h += '<p data-office-group-total>Total ' + esc(money(read.pot_total)) + '</p>';
-    h += '<p>' + (read.client_signed ? 'The client has signed.' : 'The client has not signed yet.') + '</p>';
+    h += '<p>' + (read.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
+    if (read.client_signoff_method === 'office_waiver') {
+      h += '<p data-office-group-override>Recorded by the office: ' + esc(read.client_signoff_reason || '') + '</p>';
+    }
+    var people = Array.isArray(read.participants) ? read.participants : [];
+    var hours = Array.isArray(read.hours) ? read.hours : [];
+    if (people.length) {
+      h += '<ul aria-label="Crew hours">';
+      people.forEach(function (person) {
+        var total = hours.filter(function (row) { return row.user_id === person.user_id; }).reduce(function (sum, row) { return sum + (Number(row.hours) || 0); }, 0);
+        h += '<li>' + esc(shareName(read, person)) + ': ' + esc(total) + ' hours saved</li>';
+      });
+      h += '</ul>';
+    }
+    if (!read.client_signed) {
+      h += '<form data-office-signoff-form>';
+      h += '<label>Reason for office sign-off <textarea data-office-signoff-reason required minlength="3" maxlength="2000" placeholder="Who confirmed the client approval, and when?"></textarea></label>';
+      h += '<p>This records an office override. It does not create a client signature or submit invoices.</p>';
+      h += '<button type="submit">Record office sign-off</button></form>';
+    }
+    h += '<p data-office-group-message role="status" aria-live="polite"></p>';
     var shares = Array.isArray(read.shares) ? read.shares : [];
-    if (!shares.length) h += '<p data-office-group-shares>No shares yet.</p>';
+    if (!shares.length) h += '<p data-office-group-shares>' + (read.client_signed ? 'Sign-off recorded. Shares have not been finalised yet.' : 'Shares are waiting for sign-off.') + '</p>';
     else {
       h += '<ul data-office-group-shares>';
       shares.forEach(function (row) {

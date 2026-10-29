@@ -67,6 +67,7 @@ const context = {
   _isMakesafeCard: function() { return false },
   console,
 }
+context._tradePreviewId = null; // Ordinary signed-in view in this fixture.
 vm.createContext(context)
 vm.runInContext(block, context)
 
@@ -1051,6 +1052,7 @@ for (const badAmount of [-30, '-30', 'abc', 0, '0']) {
     setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
     _invalidateAssignmentLifecycleCaches: function() {},
   }
+  ctx._tradePreviewId = null; // Ordinary signed-in view in this fixture.
   vm.createContext(ctx)
   vm.runInContext(html.slice(qStart, qEnd), ctx)
 
@@ -2274,6 +2276,7 @@ for (const badAmount of [-30, '-30', 'abc', 0, '0']) {
       _invalidateAssignmentLifecycleCaches: function() {},
     }
     ctx._sent = sent
+    ctx._tradePreviewId = null; // Ordinary signed-in view in this fixture.
     vm.createContext(ctx)
     vm.runInContext(html.slice(qStart, qEnd), ctx)
     return ctx

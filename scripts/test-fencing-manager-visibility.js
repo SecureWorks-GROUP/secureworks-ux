@@ -27,6 +27,7 @@ const context = {
     managed_verticals: ['fencing']
   }
 };
+context._tradePreviewId = null; // Ordinary signed-in view in this fixture.
 vm.createContext(context);
 vm.runInContext([
   block('// <trade-visibility-core>', '// </trade-visibility-core>'),

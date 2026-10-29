@@ -244,6 +244,63 @@ test.describe('Dispatch v2 payment step: Pay on pickup or delivery', () => {
   });
 });
 
+test.describe('Dispatch v2 payment step: the job move waits for the payment', () => {
+  const tape = (root) => root.locator('[data-dpc-region="tape"]');
+  const sugOf = (root) => root.locator('[data-dpc-region="mail"] [data-dpc-sug="sg-ly"]');
+
+  test('Accept on an unpaid pay-first box says it stays at Awaiting payment and offers no job move', async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing' });
+    const { root, of } = await boot(page, fake);
+    const sug = sugOf(root);
+    await expect(sug.locator('.dpc-sug-foot')).toHaveText('Accept saves this pickup date. Lysaght stays at Awaiting payment until someone presses Mark paid.');
+    await sug.locator('[data-dpc-sug-accept]').click();
+    await expect(root.locator('[data-dpc-region="mail"] .dpc-rep-msg').first()).toContainText(
+      'Lysaght stays at Awaiting payment until someone presses Mark paid. The job is not offered a move to Order Confirmed while Lysaght and Twinside Retaining are not paid.');
+    await expect(sug.locator('.dpc-sug-state')).toContainText('Accepted by shaun@ops.test');
+    await expect(tape(root).locator('.dpc-tape-confirm')).toHaveCount(0);
+    expect(of('update_job_status')).toEqual([]);
+  });
+
+  test('a server that still sends the offer while payment_hold is true gets no popup', async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing' });
+    const { root } = await boot(page, fake, {
+      api: { dispatch_v2_suggestion_accept: () => Object.assign(fake.acceptAnswer(), { stage_move_offer: { job_id: JOB_ID, from_status: 'order_materials', to_status: 'order_confirmed' }, stage_move_held: null }) },
+    });
+    await sugOf(root).locator('[data-dpc-sug-accept]').click();
+    await expect(sugOf(root).locator('.dpc-sug-state')).toContainText('Accepted');
+    await expect(tape(root).locator('.dpc-tape-confirm')).toHaveCount(0);
+  });
+
+  test('payments that could not be checked hold the move too, and say so', async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing' });
+    const { root } = await boot(page, fake, {
+      api: { dispatch_v2_suggestion_accept: () => Object.assign(fake.acceptAnswer(), { stage_move_offer: null, stage_move_held: { reason: 'payment_unknown', suppliers: [] }, payment_hold: null }) },
+    });
+    await sugOf(root).locator('[data-dpc-sug-accept]').click();
+    await expect(root.locator('[data-dpc-region="mail"] .dpc-rep-msg').first()).toContainText('The job is not offered a move to Order Confirmed: the payments could not be checked.');
+    await expect(tape(root).locator('.dpc-tape-confirm')).toHaveCount(0);
+  });
+
+  test('once every pay-first box is paid or tagged, Accept offers the move as today', async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing', lysaght: { paid: { at: '2026-10-29T06:00:00.000Z', by: 'shaun@ops.test' } }, twinside: { payOn: { v: 'pickup', at: '2026-10-29T06:01:00.000Z', by: 'shaun@ops.test' } } });
+    const { root } = await boot(page, fake);
+    const sug = sugOf(root);
+    await expect(sug.locator('.dpc-sug-foot')).toHaveText('Accept saves this date on the supplier box. It does not move the job.');
+    await sug.locator('[data-dpc-sug-accept]').click();
+    await expect(tape(root).locator('.dpc-tape-confirm')).toContainText('Move ' + JOB_NUMBER + ' to Order Confirmed?');
+  });
+
+  test('an older ops-api: the note and the offer are as today', async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing', old: true });
+    const { root } = await boot(page, fake);
+    const sug = sugOf(root);
+    await expect(sug.locator('.dpc-sug-foot')).toHaveText('Accept saves this date on the supplier box. It does not move the job.');
+    await sug.locator('[data-dpc-sug-accept]').click();
+    await expect(tape(root).locator('.dpc-tape-confirm')).toContainText('Move ' + JOB_NUMBER + ' to Order Confirmed?');
+    await expect(root.locator('[data-dpc-region="mail"] .dpc-rep-msg').first()).not.toContainText('Awaiting payment');
+  });
+});
+
 test.describe('Dispatch v2 payment step: Mark paid moves the stage', () => {
   test('a box moved by Mark paid says so on its stage line', async ({ page }) => {
     const { mat } = await boot(page, fakePayment());
@@ -274,5 +331,29 @@ test.describe('Dispatch v2 payment step: Pay on moves the stage, on any box', ()
     await expect(box.locator('.dpc-v2-payon-set .dpc-flag-payon')).toHaveText('Pay on delivery');
     await expect(box.locator('.dpc-flag-payon')).toHaveCount(1);
     expect(of('dispatch_v2_set_pay_on').map(sent)).toEqual([{ box_id: BOX(3), pay_on: 'delivery', expected_set_at: null }]);
+  });
+});
+
+test.describe('Dispatch v2 payment step: a reply moves the stage, and a held date', () => {
+  const pick = (box) => box.locator('[data-dpc-v2-stage]');
+  const who = (box) => box.locator('.dpc-v2-stage .dpc-v2-stage-who');
+
+  test('a box moved by a reply says so; a date the payment step holds is explained until Mark paid', async ({ page }) => {
+    const { mat } = await boot(page, fakePayment());
+    const box = boxOf(mat, 'Lysaght');
+    await expect(pick(box)).toHaveValue('awaiting_payment');
+    await expect(who(box)).toContainText('Moved here by their reply, ');
+    await expect(box.locator('.dpc-v2-stage-next')).toHaveText('Next: Pay Lysaght');
+    // Lysaght's date is confirmed, but the payment step holds the stage.
+    await expect(box).toContainText("The supplier's date is saved. This order stays at Awaiting payment until someone presses Mark paid.");
+    await box.locator('.dpc-v2-paybtn').click();
+    await expect(pick(box)).toHaveValue('order_confirmed');
+    await expect(box).not.toContainText("The supplier's date is saved.");
+  });
+
+  test("Accept's note keeps today's words once the box is past Order confirmed, even unpaid", async ({ page }) => {
+    const fake = fakePayment({ work: 'fencing', lysaght: { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test' } });
+    const { root } = await boot(page, fake);
+    await expect(root.locator('[data-dpc-region="mail"] [data-dpc-sug="sg-ly"] .dpc-sug-foot')).toHaveText('Accept saves this date on the supplier box. It does not move the job.');
   });
 });

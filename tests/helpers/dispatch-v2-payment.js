@@ -60,7 +60,9 @@ function fakePayment(opts = {}) {
   const old = opts.old === true;
   let clock = Date.parse('2026-10-29T06:40:00.000Z');
   const stamp = () => new Date((clock += 60000)).toISOString();
-  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, accept: null };
+  // work: 'repair' (the default, the job that started it) or 'fencing' (a
+  // pipeline job, where Accept can offer the job-wide stage move).
+  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair' };
   Object.assign(fake.boxes[0], opts.lysaght || {});
   if (opts.twinside) Object.assign(fake.boxes[1], opts.twinside);
   const forced = (action) => { const q = fake.fail[action]; return q && q.length ? q.shift() : null; };
@@ -163,14 +165,14 @@ function fakePayment(opts = {}) {
     const b = { title: JOB_NUMBER + ' · Peter Example', suburb: 'Willagee', install: fake.install ? { booked: true, day: fake.install, first_day: fake.install, last_day: fake.install, archive_on: null, passed: false, tentative: true } : { booked: false, day: null, first_day: null, last_day: null, archive_on: null, passed: false, tentative: false }, days_in_stage: 1, arrival: arrival(), waiting: waiting() };
     if (!old) b.payment_hold = paymentHold();
     return {
-      id: JOB_ID, job_number: JOB_NUMBER, client_name: 'Peter Example', site_suburb: 'Willagee', type: 'repair', work_type: 'repair', status: 'materials',
+      id: JOB_ID, job_number: JOB_NUMBER, client_name: 'Peter Example', site_suburb: 'Willagee', type: fake.work, work_type: fake.work, status: fake.work === 'repair' ? 'materials' : 'order_materials',
       site_address: '1 Example Street', value: 1800, value_inc_gst: true, description: 'Retaining wall repair', next_scheduled_date: fake.install, last_scheduled_date: null,
       council_status: null, council_required: false, po_count: 0, dispatch_next_step: null, ghl_contact_id: null, updated_at: '2026-10-29T05:00:00+00:00',
       board: b,
     };
   };
   fake.arrivalAnswer = () => {
-    const out = { job_id: JOB_ID, job_number: JOB_NUMBER, work_type: 'repair', stage: { track: 'repairs', key: 'materials', label: 'Materials', order: 1, phase: 'window' }, install: null, installs: 'ok', arrival: arrival(), arrival_read: 'ok', waiting: waiting() };
+    const out = { job_id: JOB_ID, job_number: JOB_NUMBER, work_type: fake.work, stage: fake.work === 'repair' ? { track: 'repairs', key: 'materials', label: 'Materials', order: 1, phase: 'window' } : { track: 'pipeline', key: 'order_materials', label: 'Order Materials', order: 1, phase: 'window' }, install: null, installs: 'ok', arrival: arrival(), arrival_read: 'ok', waiting: waiting() };
     if (!old) Object.assign(out, { payment_hold: paymentHold(), accounts_read: 'ok', replies_read: 'ok' });
     return out;
   };
@@ -181,7 +183,7 @@ function fakePayment(opts = {}) {
     return Object.assign(o, { reply: st.source === 'reply' ? bx.reply : null, held_by_payment: order(bx).held_by_payment, skips_ready: skipsReady(bx) });
   };
   fake.materials = () => ({
-    job_id: JOB_ID, job_number: JOB_NUMBER, work_type: 'repair', team_cc: { email: 'ses@secureworkswa.com.au', open_question: null },
+    job_id: JOB_ID, job_number: JOB_NUMBER, work_type: fake.work, team_cc: { email: fake.work === 'repair' ? 'ses@secureworkswa.com.au' : 'fencing@secureworkswa.com.au', open_question: null },
     from: 'admin@secureworkswa.com.au', test_send_done: true, main_supplier_id: null, main_supplier_ticked: false, can_suggest: false,
     draft_list: { lines: [], photos: [] },
     suppliers: fake.boxes.map((bx, i) => {
@@ -211,8 +213,40 @@ function fakePayment(opts = {}) {
     arrival: fake.arrivalAnswer(),
   });
 
+  // Supplier replies: Lysaght's reply with its pickup date to Accept. The
+  // suggestion names its order; the order names its supplier box.
+  fake.accepted = false;
+  fake.replies = () => ({
+    ok: true, job_id: JOB_ID, orders_wired: true, scan: { enabled: true },
+    emails: [{ id: EID(91), received_at: '2026-10-29T04:58:00Z', from_email: 'orders@lysaght.example', subject: 'RE: Material Order Ref ' + JOB_NUMBER, snippet: 'Ready for pickup Monday.',
+      supplier_name: 'Lysaght', state: 'matched', rung: 'thread', match_reason: null, job_id: JOB_ID, job_number: JOB_NUMBER, order_id: 'ord-ly', candidates: [], delivery_label: null, decision: null }],
+    suggestions: [{ id: 'sg-ly', email_id: EID(91), order_id: old ? undefined : 'ord-ly', supplier_name: 'Lysaght', label: 'Pickup ' + dayWords(dayFrom(4)), quote: 'Ready for pickup Monday.',
+      weekday_mismatch: false, day_word_only: false, other_dates: [], state: fake.accepted ? 'accepted' : 'open', can_accept: true, needs_order_pick: false,
+      acted_by_email: fake.accepted ? 'shaun@ops.test' : null, acted_at: fake.accepted ? '2026-10-29T06:41:00Z' : null }],
+    orders: [{ order_id: 'ord-ly', supplier_id: old ? undefined : SID(1), supplier_name: 'Lysaght', fulfilment: 'pickup', sent_at: '2026-10-29T04:28:00Z' }],
+  });
+  // The offer a fencing job gets today once a supplier confirms, before the hold.
+  const offerToday = () => (fake.work === 'repair' ? null : { job_id: JOB_ID, from_status: 'order_materials', to_status: 'order_confirmed' });
+  fake.acceptAnswer = () => {
+    const bx = fake.boxes[0];
+    fake.accepted = true;
+    bx.confirmed = true;
+    bx.date = bx.date || dayFrom(4);
+    const out = { ok: true, order: { supplier_name: bx.name, confirmed_delivery_date: bx.date }, stage_move_offer: offerToday() };
+    if (old) return out;
+    const unpaid = fake.boxes.filter((x) => payment(x).blocks_job_move).map((x) => x.name);
+    return Object.assign(out, {
+      stage_move_offer: unpaid.length ? null : out.stage_move_offer,
+      stage_move_held: unpaid.length ? { reason: 'unpaid', suppliers: unpaid } : null,
+      payment_hold: unpaid.length > 0, box_payment: payment(bx),
+    });
+  };
+
   fake.api = {
     pipeline: () => ({ columns: { accepted: [fake.row()] }, total: 1, dispatch_materials: 'ok' }),
+    dispatch_v2_replies: () => fake.replies(),
+    dispatch_v2_suggestion_accept: () => forced('dispatch_v2_suggestion_accept') || fake.acceptAnswer(),
+    update_job_status: () => ({ success: true }),
     dispatch_arrival: () => fake.arrivalAnswer(),
     dispatch_v2_materials: () => forced('dispatch_v2_materials') || fake.materials(),
     dispatch_v2_mark_paid: (url, b) => {

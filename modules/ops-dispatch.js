@@ -1550,6 +1550,84 @@
     return 'Delivery date saved' + (o && text(o.supplier_name) ? ': ' + text(o.supplier_name) : '') + (d ? ', ' + dayText(d) : '') + '.';
   }
 
+  // ── The payment hold on Accept (backend contract section 3c, piece B) ──
+  // Accept saves a supplier's date, but a pay-first box stays at Awaiting
+  // payment until someone presses Mark paid, and the job-wide "Move to Order
+  // Confirmed?" offer is withheld while any pay-first box on the job is
+  // unpaid. An older server sends none of these fields: today's behaviour.
+
+  // True when the job's move must not be offered after an Accept: the answer
+  // says so, or the job's own reads already did.
+  function acceptHeld(jobId, resp) {
+    if (resp && (resp.payment_hold === true || isObj(resp.stage_move_held))) return true;
+    return jobPayHold(jobId);
+  }
+
+  // Whether the job is held by an unpaid pay-first box, from its Arrival read
+  // or its list row. False when the server does not say (an older server).
+  function jobPayHold(jobId) {
+    var e = state.arrival[jobId];
+    if (e && e.status === 'ok' && e.data && e.data.payment_hold === true) return true;
+    var b = boardOf(rowById(jobId));
+    if (b && b.payment_hold === true) return true;
+    var a = b && isObj(b.arrival) ? b.arrival : null;
+    return !!(a && isObj(a.payment) && a.payment.any_unpaid === true);
+  }
+
+  // The payment words after an Accept's "Delivery date saved" line.
+  function acceptPayWords(resp) {
+    if (!isObj(resp)) return '';
+    var out = '';
+    var name = (isObj(resp.order) && text(resp.order.supplier_name)) || 'This supplier';
+    if (isObj(resp.box_payment) && resp.box_payment.holds_stage === true) out += ' ' + name + ' stays at Awaiting payment until someone presses Mark paid.';
+    var held = resp.stage_move_held;
+    if (isObj(held)) {
+      var names = Array.isArray(held.suppliers) ? held.suppliers.map(text).filter(Boolean) : [];
+      if (held.reason === 'payment_unknown') out += ' The job is not offered a move to Order Confirmed: the payments could not be checked.';
+      else out += ' The job is not offered a move to Order Confirmed while ' + (names.length ? listWords(names) + (names.length === 1 ? ' is' : ' are') : 'a supplier is') + ' not paid.';
+    }
+    return out;
+  }
+
+  // "A", "A and B", "A, B and C".
+  function listWords(names) {
+    if (names.length < 2) return names.join('');
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+
+  // The supplier box a suggested date is for, as its Arrival line order: by
+  // the suggestion's order (or the order picked, or the email's), through the
+  // replies read's orders, else by the supplier's name. Null when unknown.
+  function sugBoxOrder(e, s) {
+    var a = state.row ? arrivalFor(state.row).arrival : null;
+    if (!a) return null;
+    var oid = text(s.order_id) || text(e.pick[s.id]);
+    if (!oid) {
+      var m = e.data.emails.filter(function (x) { return x.id === s.email_id; })[0];
+      oid = m ? text(m.order_id) : '';
+    }
+    var ro = oid ? e.data.orders.filter(function (o) { return o.order_id === oid; })[0] : null;
+    var sid = ro ? text(ro.supplier_id) : '';
+    var name = (ro && text(ro.supplier_name)) || text(s.supplier_name);
+    for (var i = 0; i < a.orders.length; i++) {
+      var o = a.orders[i];
+      if (!o || o.source !== 'supplier_box') continue;
+      if (sid ? String(o.supplier_id) === sid : name && text(o.supplier_name) === name) return o;
+    }
+    return null;
+  }
+
+  // The note under Accept: as today, unless the box is pay first, unpaid and
+  // still before Order confirmed (a later stage set by hand keeps today's).
+  function sugFootWords(e, s) {
+    var o = sugBoxOrder(e, s);
+    var p = o ? v2PayFrom(o.payment) : null;
+    var at = o ? v2StageAt(o.material_stage) : -1;
+    if (!p || p.state !== 'unpaid' || at < 0 || at >= v2StageAt('order_confirmed')) return 'Accept saves this date on the supplier box. It does not move the job.';
+    return 'Accept saves this ' + (o.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' date. ' + (text(o.supplier_name) || 'This supplier') +
+      ' stays at Awaiting payment until someone presses Mark paid.';
+  }
+
   var REP_NOT_DONE = {
     confirm: 'Not put on the job.', reject: 'Not sent back.', hide: 'Not hidden.',
     dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.'
@@ -1575,15 +1653,19 @@
     Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
       if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
       delete e.busy[id];
-      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) };
+      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) + (kind === 'accept' ? acceptPayWords(resp) : '') };
       readReplies(jobId, true);
       if (kind === 'confirm' || kind === 'reject') trayReread();
       if (kind !== 'accept') return;
+      // Read before the Arrival line is read again below.
+      var held = acceptHeld(jobId, resp);
       // The date is on the supplier box now: redraw the Arrival line and the list.
       if (state.row && state.row.id === jobId) loadArrival(state.row);
       loadBase();
       var offer = resp.stage_move_offer;
-      if (isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
+      // Never offered while a pay-first box is unpaid (piece B): that move
+      // texts the fencing or patio manager, so it must wait for the payment.
+      if (!held && isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
         state.stage.confirm = { jobId: jobId, to: text(offer.to_status), label: pipelineLabel(text(offer.to_status)), offer: { from_status: text(offer.from_status) } };
         state.stage.msg = null;
         paintTape();
@@ -3616,7 +3698,7 @@
       var canAccept = s.can_accept !== false && (!s.needs_order_pick || !!e.pick[s.id]);
       h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-sug-accept="' + esc(s.id) + '"' + (busy || !canAccept ? ' disabled' : '') + '>' + (busy === 'accept' ? 'Saving...' : 'Accept') + '</button>';
       h += '<button type="button" data-dpc-sug-dismiss="' + esc(s.id) + '"' + off + '>' + (busy === 'dismiss' ? 'Dismissing...' : 'Dismiss') + '</button></div>';
-      h += '<p class="dpc-sug-foot">Accept saves this date on the supplier box. It does not move the job.</p>';
+      h += '<p class="dpc-sug-foot">' + esc(sugFootWords(e, s)) + '</p>';
     } else {
       var who = text(s.acted_by_email);
       h += '<p class="dpc-sug-state">' + esc((SUG_STATE[s.state] || 'Done') + (who ? ' by ' + who : '') + (parseStamp(s.acted_at) ? ', ' + stampText(s.acted_at) : '') + '.') + '</p>';
@@ -4095,14 +4177,25 @@
     for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return V2_STAGES[i].label;
     return null;
   }
-  // Where a stage came from: picked by a person (set), moved by Mark paid or
-  // Pay on (payment), else worked out. An unknown value reads as worked out.
-  var V2_STAGE_SOURCES = ['set', 'payment'];
+  // A stage's place in the list (0 to 7), or -1 when unknown.
+  function v2StageAt(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return i;
+    return -1;
+  }
+  // Where a stage came from: picked by a person (set), moved by a matched
+  // supplier reply (reply) or by Mark paid / Pay on (payment), else worked
+  // out. An unknown value reads as worked out.
+  var V2_STAGE_SOURCES = ['set', 'reply', 'payment'];
   function v2StageFrom(m) {
     if (!isObj(m) || !v2StageLabel(m.key)) return null;
+    var r = isObj(m.reply) ? m.reply : null;
     return {
       box_id: text(m.box_id) || null, key: m.key, label: text(m.label) || v2StageLabel(m.key),
-      source: V2_STAGE_SOURCES.indexOf(m.source) >= 0 ? m.source : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null
+      source: V2_STAGE_SOURCES.indexOf(m.source) >= 0 ? m.source : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null,
+      // Piece B (section 3c): the reply that moved it, and a confirmed date
+      // the payment step is holding. Both absent from an older server.
+      reply: r ? { email_id: text(r.email_id) || null, received_at: text(r.received_at) || null } : null,
+      held_by_payment: m.held_by_payment === true
     };
   }
 
@@ -4635,6 +4728,7 @@
     if (!(bp && bp.pay_on)) h += payPillHtml(bp);
     h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : v2StageWho(b, s)) + '</span>';
     if (o && text(o.todo)) h += '<p class="dpc-v2-hint dpc-v2-stage-next">Next: ' + esc(o.todo) + '</p>';
+    if (s.held_by_payment) h += '<p class="dpc-v2-hint">The supplier\'s date is saved. This order stays at Awaiting payment until someone presses Mark paid.</p>';
     h += '</div>';
     return h + v2MsgHtml(e.msg[key]) + v2PayHtml(e, b);
   }
@@ -4642,6 +4736,7 @@
   // Who or what put the box at its stage.
   function v2StageWho(b, s) {
     if (s.source === 'set') return 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '');
+    if (s.source === 'reply') return 'Moved here by their reply' + (s.reply && s.reply.received_at ? ', ' + stampText(s.reply.received_at) : '');
     if (s.source === 'payment') {
       var p = v2BoxPay(b);
       if (p && p.paid) return 'Moved here when marked paid' + (p.paid_at ? ', ' + stampText(p.paid_at) : '');

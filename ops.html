@@ -5096,6 +5096,8 @@ __swOpsStampAssets([
            Ops worklist that drains U3's materials_reconciliation_queue by hand.
            accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
            closes the row with no fact. Every action is auditable (who + when + manual marker). -->
+      <!-- AI bill placement (modules/ops-bills-ai.js): what the AI placed, why, and Undo. -->
+      <div id="billsAiPanel" style="margin-bottom:14px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;"></div>
       <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
           <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
@@ -18767,7 +18769,7 @@ function showSubTab(tab) {
   if (tab === 'invoices') loadInvoices();
   if (tab === 'pos') { loadPOs(); loadPendingPrices(); }
   if (tab === 'workorders') loadWOs();
-  if (tab === 'billrecon') loadMaterialsRecon();
+  if (tab === 'billrecon') { loadMaterialsRecon(); if (window.BillsAi) BillsAi.load(); }
   if (tab === 'quotes') loadQuotes();
   if (tab === 'tradebills') loadTradeBills();
   if (tab === 'financehealth') loadFinanceHealth();
@@ -31835,6 +31837,12 @@ if (document.readyState === 'loading') {
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-debt-workshop.js?v=1'}
+]);
+</script>
+<!-- AI bill placement in Bills to place (modules/ops-bills-ai.js) -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-bills-ai.js?v=1'}
 ]);
 </script>
 <!-- Matching: the Context reconciliation list (modules/ops-recon.js) -->

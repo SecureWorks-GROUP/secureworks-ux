@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=zoo-integration-20261029"></script>
+  <script src="shared/group-work-order.js?v=all-in-group-20261029"></script>
   <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
-  <script src="modules/trade-group-invoice.js?v=normal-group-invoice-20261029"></script>
+  <script src="modules/trade-group-invoice.js?v=all-in-group-20261029"></script>
   <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -7414,7 +7414,7 @@
     if (profileNav) { profileNav.disabled = true; profileNav.title = 'Profile settings are unavailable in preview'; }
     document.querySelectorAll('button').forEach(function(el) {
       var handler = el.getAttribute('onclick') || '';
-      if (el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
+      if (el.hasAttribute('data-invoice-group-submit') || el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
         el.disabled = true; el.title = 'Read-only trade preview';
       }
     });
@@ -23817,7 +23817,7 @@
 
   function _applyInvDraft(draft) {
     if (window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
       GroupWorkOrderInvoice.restore(draft.groupIds || []);
     }
     _invRows = draft.rows || [];
@@ -25268,6 +25268,24 @@
     return changed;
   }
 
+  // The API defaults to30rows. Follow its cursor before treating a list as complete.
+  function readAllInvoiceWorkOrders() {
+    var rows = [];
+    function page(offset) {
+      return api('my_work_orders', {mode:'all',type:isPerMetreUser() ? 'fencing' : undefined,status:'complete',page_size:500,offset:offset}).then(function(res) {
+        if (!res || !Array.isArray(res.work_orders)) throw new Error('Work orders could not be checked.');
+        rows = rows.concat(res.work_orders);
+        if (res.truncated === true || res.next_offset != null) {
+          var next = Number(res.next_offset);
+          if (!Number.isInteger(next) || next <= offset) throw new Error('The work-order list is incomplete.');
+          return page(next);
+        }
+        return Object.assign({},res,{work_orders:rows,truncated:false,next_offset:null});
+      });
+    }
+    return page(0);
+  }
+
   function _hydratePerMetreWorkOrderCards() {
     if (!isPerMetreUser() || !_jobCentricActive || !_invoiceBuilderOpen) return;
     var seq = ++_pmWoHydrateSeq;
@@ -25278,7 +25296,7 @@
       renderInvoiceBuilder();
     }
     var hydrateCtx = _invoiceApiContext();
-    api('my_work_orders', { mode: 'all' }).then(function(res) {
+    readAllInvoiceWorkOrders().then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
       if (!_workOrdersHydratePayloadComplete(res)) {
         // Missing work_orders is not an empty success. Do not merge/reconcile
@@ -27475,7 +27493,7 @@
       }
       function _confirmJobCentricWorkOrdersExclusive() {
         if (!postedWoIds.length) return Promise.resolve({ ok: true, byId: {} });
-        return api('my_work_orders', { mode: 'all' }).then(function(res) {
+        return readAllInvoiceWorkOrders().then(function(res) {
           if (!_invoiceApiCurrent(ctx)) return { cancelled: true };
           var check = _jobCentricWorkOrdersStillExclusive(res, postedWoIds);
           if (!check.ok) {
@@ -27740,7 +27758,7 @@
     });
 
     if (!isExpense && jobCentricEnabled() && window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
       GroupWorkOrderInvoice.load();
       html += GroupWorkOrderInvoice.html();
     }

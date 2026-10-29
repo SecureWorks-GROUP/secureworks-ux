@@ -69,6 +69,7 @@ var GroupWorkOrderCore = (function () {
     var src = raw && typeof raw === 'object' ? raw : {};
     var needs = src.needs_hours === true;
     return {
+      ...(src.pay_basis === 'all_in_12_6_v1' ? {pay_basis: src.pay_basis, my_budget:finiteOrNull(src.my_budget), my_cash_pay:finiteOrNull(src.my_cash_pay), my_super:finiteOrNull(src.my_super)} : {}),
       pot_total: needs ? null : finiteOrNull(src.pot_total),
       my_share: needs ? null : finiteOrNull(src.my_share),
       needs_hours: needs,
@@ -109,8 +110,9 @@ var GroupWorkOrderCore = (function () {
     } else {
       var view = closedShare(raw);
       h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
-      if (view.pot_total != null) h += '<p data-group-wo-total>Total ' + esc(money(view.pot_total)) + '</p>';
-      if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
+      if (view.pot_total != null) h += '<p data-group-wo-total>' + (view.pay_basis === 'all_in_12_6_v1' ? 'Pay + super pool ' : 'Total ') + esc(money(view.pot_total)) + '</p>';
+      if (view.my_budget != null) h += '<p data-group-wo-share>Your allocation including pay and super ' + esc(money(view.my_budget)) + '</p><p>Pay ' + esc(money(view.my_cash_pay)) + ' · Super ' + esc(money(view.my_super)) + '</p>';
+      else if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
       if (view.needs_hours) h += '<p data-group-wo-needs-hours>Save your hours to see your share.</p>';
       var waiting = {
         awaiting_signoff: 'The office needs to record client sign-off before your share can be finalised.',

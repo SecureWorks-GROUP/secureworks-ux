@@ -12,6 +12,7 @@ function block(open, close) {
   return html.slice(a + open.length, b);
 }
 const context = { console };
+context._tradePreviewId = null; // Ordinary signed-in view in this fixture.
 vm.createContext(context);
 vm.runInContext([
   block('// <friendly-error>', '// </friendly-error>'),
@@ -68,6 +69,7 @@ async function mockedFeedFailure(statuses) {
     getTradeJobType: () => 'makesafe',
     toast: () => {}
   };
+  apiContext._tradePreviewId = null; // Ordinary signed-in view in this fixture.
   vm.createContext(apiContext);
   vm.runInContext([
     block('// <foreign-job-readonly>', '// </foreign-job-readonly>'),

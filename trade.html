@@ -3590,6 +3590,12 @@
 <!-- User menu (tap name to show) -->
 <div id="userMenu" style="display:none;position:fixed;top:56px;right:8px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:200;min-width:140px;overflow:hidden">
   <div class="user-menu-access" id="userMenuAccess"></div>
+  <button class="user-menu-btn" id="viewAsTradeBtn" onclick="openTradePreviewPicker()" hidden>View as trade</button>
+  <div id="tradePreviewPicker" hidden style="padding:10px 14px;max-width:280px">
+    <label for="tradePreviewSelect">View as trade (read only)</label>
+    <select id="tradePreviewSelect" aria-label="Trade to preview" style="width:100%;margin-top:6px;min-height:44px" onchange="startTradePreview(this.value)"><option value="">Choose a trade</option></select>
+    <p style="font-size:12px;line-height:1.5;margin:8px 0 0">Live jobs and pay. Changes and submissions are disabled.</p>
+  </div>
   <button class="user-menu-btn" id="userMenuActivity" onclick="openActivityFromMenu()">Activity</button>
   <button class="user-menu-btn" id="userMenuScoper" onclick="openScoperFromMenu()" hidden>Scope a job</button>
   <button class="user-menu-btn" onclick="doLogout()">Sign out</button>
@@ -4038,6 +4044,9 @@
 
   // ── State ──
   var cloud = null;
+  var _tradePreviewId = new URL(window.location.href).searchParams.get('preview_trade_user_id');
+  var _tradePreviewResolved = '';
+  var _tradePreviewReads = new Set(['trade_preview_context','trade_calendar','my_jobs','search_all_jobs','trade_job_detail','my_work_orders','my_job_work_order','group_work_order_my_share','my_hours','my_money','my_trade_invoices','get_trade_invoice','get_running_invoice_draft','my_invoices','crew_charges_on_my_jobs']);
   var _user = null;          // { id, name, email, role, org_id }
   var _currentJobId = null;
   var _currentJob = null;    // full job detail response
@@ -4248,6 +4257,7 @@
     return canUseEveryoneLens() || perms.can_allocate === true || perms.sees_all_makesafes === true;
   }
   function syncBoardNav(feed, failed) {
+    if (_tradePreviewId) { var previewBoard = document.getElementById('navBoard'); if (previewBoard) previewBoard.style.display = 'none'; return; }
     var btn = document.getElementById('navBoard');
     if (!btn || !_user) return;
     var show = hasBoardResponsibility(feed) || !!failed;
@@ -4484,6 +4494,7 @@
 
   // Server clock recovery — check my_jobs data for this trade's own active clock
   function checkServerClockRecovery(data, requestedAll) {
+    if (_tradePreviewId) return;
     if (_clockState === 'on') return; // already clocked on locally
     try {
       // Each item in these arrays IS an assignment (flat structure from my_jobs)
@@ -4583,12 +4594,14 @@
     _key: function(jobId, type) { return 'sw_draft_' + jobId + '_' + type; },
 
     save: function(jobId, type, data) {
+      if (_tradePreviewId) return;
       try {
         localStorage.setItem(this._key(jobId, type), JSON.stringify(data));
       } catch(e) { /* quota exceeded — ignore */ }
     },
 
     load: function(jobId, type) {
+      if (_tradePreviewId) return null;
       try {
         var raw = localStorage.getItem(this._key(jobId, type));
         return raw ? JSON.parse(raw) : null;
@@ -4596,11 +4609,13 @@
     },
 
     clear: function(jobId, type) {
+      if (_tradePreviewId) return;
       try { localStorage.removeItem(this._key(jobId, type)); } catch(e) {}
     },
 
     // Save unsent notes for later sync
     queueNote: function(jobId, text) {
+      if (_tradePreviewId) return;
       var key = 'sw_pending_notes';
       var pending = [];
       try { pending = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
@@ -4613,6 +4628,7 @@
     },
 
     clearPendingNotes: function() {
+      if (_tradePreviewId) return;
       try { localStorage.removeItem('sw_pending_notes'); } catch(e) {}
     }
   };
@@ -4739,6 +4755,7 @@
   var _ghlBase = window.SUPABASE_URL + '/functions/v1/ghl-proxy';
 
   function ghlApi(action, params, postBody) {
+    if (_tradePreviewId) return Promise.reject(_apiError(403, 'Comms are unavailable in read-only trade preview.'));
     return getAuthToken().then(function(token) {
       if (!token) throw _apiError(401, 'Sign in required');
       var url = _ghlBase + '?action=' + action;
@@ -4779,6 +4796,7 @@
 
   function api(action, params, postBody, options) {
     options = options || {};
+    if (_tradePreviewId && !_tradePreviewReads.has(action)) return Promise.reject(_apiError(403, 'Read-only preview: changes and submissions are disabled.'));
     var preserveSession = options.preserveSessionOnAuthFailure === true;
     if (blockedForeignJobWrite(action, params, postBody)) {
       var blocked = _apiError(403, 'View only — this job belongs to another crew');
@@ -4796,6 +4814,7 @@
         throw cancelled;
       }
       var url = _opsApiBase + '?action=' + action;
+      if (_tradePreviewId) url += '&preview_trade_user_id=' + encodeURIComponent(_tradePreviewId);
       if (params) {
         Object.keys(params).forEach(function(k) {
           if (params[k] != null) url += '&' + k + '=' + encodeURIComponent(params[k]);
@@ -5250,6 +5269,7 @@
   }
 
   function _writeInboxIndex(ids) {
+    if (_tradePreviewId) return undefined;
     try { localStorage.setItem(_INBOX_INDEX_KEY, JSON.stringify(ids || [])); } catch (e) {}
   }
 
@@ -5275,6 +5295,7 @@
   }
 
   function _writeInboxItem(item) {
+    if (_tradePreviewId) return false;
     if (!item || !item.id) return false;
     var key = _inboxItemKey(item.id);
     var raw;
@@ -5317,6 +5338,7 @@
   }
 
   function _clearInboxIds(ids) {
+    if (_tradePreviewId) return undefined;
     var drop = {};
     (ids || []).forEach(function(id) { drop[String(id)] = true; });
     for (var i = 0; i < (ids || []).length; i++) _storageRemove(_inboxItemKey(ids[i]));
@@ -5816,6 +5838,7 @@
   }
 
   function _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount() {
+    if (_tradePreviewId) return;
     var mutator = function(queue) {
       var kept = [];
       for (var i = 0; i < queue.length; i++) {
@@ -6530,6 +6553,7 @@
   }
 
   function queueOfflineAction(action, postBody) {
+    if (_tradePreviewId) return Promise.resolve(false);
     // A blocked view-only write must not be parked for later retry either.
     if (blockedForeignJobWrite(action, null, postBody)) return;
     if (_isOfflineInvoiceAction(action)) {
@@ -6557,6 +6581,7 @@
   var _offlineQueueSyncAgain = false;
 
   function syncOfflineQueue() {
+    if (_tradePreviewId) return Promise.resolve();
     if (_offlineQueueSyncing) {
       _offlineQueueSyncAgain = true;
       return Promise.resolve();
@@ -6760,6 +6785,7 @@
   }
 
   function _syncOfflineQueueOnce() {
+    if (_tradePreviewId) return Promise.resolve();
     var mutated = _mutateOfflineQueue(function(items) {
       var kept = [];
       for (var i = 0; i < items.length; i++) {
@@ -6832,6 +6858,7 @@
 
   // Retry queue on connectivity restore + page load
   window.addEventListener('online', function() {
+    if (_tradePreviewId) return;
     setTimeout(syncOfflineQueue, 2000); // Brief delay for connection to stabilize
   });
   // Run on page load after auth is ready
@@ -7304,6 +7331,95 @@
   });
 
   function onLogin(profile) {
+    if (_tradePreviewId && !_tradeHoldForRecovery) {
+      var key = String(profile && profile.id) + ':' + _tradePreviewId;
+      if (_tradePreviewResolved === key) return;
+      _tradePreviewResolved = key;
+      api('trade_preview_context', { user_id: _tradePreviewId }).then(function(res) {
+        if (!res || res.read_only !== true || !res.profile) throw new Error('Preview is unavailable.');
+        applyTradeLogin(res.profile);
+        showTradePreviewBanner(res.profile);
+        loadTradePreviewChoices();
+      }).catch(function(err) {
+        showTradePreviewBanner(null, friendlyError(err));
+        document.getElementById('viewLogin').classList.remove('active');
+      });
+      return;
+    }
+    applyTradeLogin(profile);
+    if (profile && ['admin','owner'].indexOf(String(profile.role)) !== -1) loadTradePreviewChoices();
+  }
+
+  function loadTradePreviewChoices() {
+    return api('trade_preview_context').then(function(res) {
+      if (!res || res.can_preview !== true) return;
+      var select = document.getElementById('tradePreviewSelect');
+      select.innerHTML = '<option value="">Choose a trade</option>';
+      (res.trades || []).forEach(function(trade) {
+        var option = document.createElement('option');
+        option.value = trade.id; option.textContent = trade.name || 'Unnamed trade';
+        select.appendChild(option);
+      });
+      select.value = _tradePreviewId || '';
+      document.getElementById('viewAsTradeBtn').hidden = false;
+    }).catch(function() {});
+  }
+
+  window.openTradePreviewPicker = function() {
+    document.getElementById('tradePreviewPicker').hidden = false;
+    document.getElementById('tradePreviewSelect').focus();
+  };
+  window.startTradePreview = function(id) {
+    if (!id) return;
+    var url = new URL(window.location.href);
+    url.searchParams.set('preview_trade_user_id', id);
+    window.location.assign(url.href);
+  };
+  window.exitTradePreview = function() {
+    var url = new URL(window.location.href);
+    url.searchParams.delete('preview_trade_user_id');
+    window.location.assign(url.href);
+  };
+
+  function showTradePreviewBanner(profile, error) {
+    var banner = document.createElement('section');
+    banner.id = 'tradePreviewBanner'; banner.setAttribute('role','status');
+    banner.style.cssText = 'position:sticky;top:56px;z-index:190;padding:12px 16px;background:#fff3d6;color:#352b12;border-bottom:1px solid #b68a30;display:flex;align-items:center;gap:12px;flex-wrap:wrap';
+    var label = document.createElement('div'); label.style.flex = '1';
+    var title = document.createElement('strong');
+    title.textContent = profile ? 'Viewing ' + (profile.name || 'trade') + ' · Read only' : 'Trade preview unavailable';
+    label.appendChild(title);
+    var note = document.createElement('div'); note.style.cssText = 'font-size:13px;line-height:1.5';
+    note.textContent = error || 'Live trade view. Changes and invoice submissions are disabled.';
+    label.appendChild(note); banner.appendChild(label);
+    var exit = document.createElement('button'); exit.type = 'button';
+    exit.textContent = 'Exit preview'; exit.setAttribute('data-preview-exit','');
+    exit.onclick = window.exitTradePreview;
+    exit.style.cssText = 'min-height:44px;padding:8px 14px;border:1px solid #786125;border-radius:6px;background:white;color:#352b12;font:inherit;cursor:pointer';
+    banner.appendChild(exit);
+    var old = document.getElementById('tradePreviewBanner'); if (old) old.remove();
+    document.querySelector('.header').insertAdjacentElement('afterend',banner);
+    new MutationObserver(lockTradePreviewControls).observe(document.body,{childList:true,subtree:true});
+    lockTradePreviewControls();
+  }
+
+  function lockTradePreviewControls() {
+    if (!_tradePreviewId) return;
+    document.querySelectorAll('input,textarea,select').forEach(function(el) {
+      if (el.id === 'tradePreviewSelect' || /search|filter|week/i.test(el.id || '') || el.type === 'search') return;
+      el.disabled = true; el.title = 'Read-only trade preview';
+    });
+    var profileNav = document.querySelector('#bottomNav [data-view="profile"]');
+    if (profileNav) { profileNav.disabled = true; profileNav.title = 'Profile settings are unavailable in preview'; }
+    document.querySelectorAll('button').forEach(function(el) {
+      var handler = el.getAttribute('onclick') || '';
+      if (el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
+        el.disabled = true; el.title = 'Read-only trade preview';
+      }
+    });
+  }
+
+  function applyTradeLogin(profile) {
     if (_tradeHoldForRecovery) {
       beginPasswordRecovery(profile);
       return;
@@ -7348,10 +7464,10 @@
     loadAvailabilityData();
 
     // Sync any pending offline notes
-    syncPendingNotes();
+    if (!_tradePreviewId) syncPendingNotes();
 
     // Sync queued phase updates
-    scheduleSyncAfterAuth();
+    if (!_tradePreviewId) scheduleSyncAfterAuth();
 
     // Load crew review badge count for leads (non-blocking)
     if (_userTier >= 2) {
@@ -7408,6 +7524,7 @@
 
   // Sync pending notes that were saved while offline
   function syncPendingNotes() {
+    if (_tradePreviewId) return undefined;
     var pending = drafts.getPendingNotes();
     if (pending.length === 0) return;
 
@@ -7436,6 +7553,7 @@
 
   // Also sync when coming back online
   window.addEventListener('online', function() {
+    if (_tradePreviewId) return;
     if (_user) syncPendingNotes();
   });
 
@@ -7828,6 +7946,7 @@
   // entries for that viewer may coexist; every previous viewer is pruned.
   var _prunedForKey = null;
   function pruneJobListCaches(keepKey) {
+    if (_tradePreviewId) return undefined;
     var owner = jobListCacheOwnerPrefix();
     if (_prunedForKey === owner) return; // once per signed-in user, not once per lens
     _prunedForKey = owner;
@@ -7927,6 +8046,7 @@
   }
 
   function _financialInvoiceApi(action, params, body, ctx) {
+    if (_tradePreviewId) return Promise.reject(_apiError(403, 'Read-only trade preview.'));
     if (!_webLocksAvailable()) return Promise.reject(_invoiceWriteLeaseLostError());
     return _withFinancialWebLock(action, function() {
       var pending = _beginFinancialWriteSend(action, body);
@@ -7975,6 +8095,7 @@
   }
 
   function saveJobListCache(data) {
+    if (_tradePreviewId) return undefined;
     // A logout already in flight must not be undone by a request that settles
     // during the sign-out window — _user is still set, so the key still resolves.
     if (_sessionExpired) return;
@@ -8000,6 +8121,7 @@
   }
 
   function loadJobListCache() {
+    if (_tradePreviewId) return null;
     var key = jobListCacheKey();
     if (!key) return null;
     pruneJobListCaches(key);
@@ -9243,6 +9365,7 @@
   var _currentJobTab = null;
 
   function persistTradeState() {
+    if (_tradePreviewId) return;
     try {
       localStorage.setItem('sw_trade_state', JSON.stringify({
         view: _currentView,
@@ -14542,6 +14665,7 @@
   // Fetch the HTML and show it in-app; "Print / Save PDF" uses the phone's
   // print sheet. The backend guarantees the extract carries no money.
   window.openTradeQuoteExtract = function(jobId, documentId, label) {
+    if (_tradePreviewId) { toast('Quote extracts are unavailable in read-only trade preview.', true); return; }
     var ov = document.getElementById('quoteExtractOverlay');
     var frame = document.getElementById('quoteExtractFrame');
     var status = document.getElementById('quoteExtractStatus');
@@ -18025,6 +18149,7 @@
   }
 
   function saveAvailabilityData() {
+    if (_tradePreviewId) return undefined;
     try {
       localStorage.setItem('sw_avail_pattern', JSON.stringify(_weeklyPattern));
       localStorage.setItem('sw_avail_exceptions', JSON.stringify(_exceptions));
@@ -18694,6 +18819,7 @@
 
   var _makesafeV5Feed = null, _makesafeV5FeedAt = 0, _makesafeV5FeedPromise = null;
   function fetchMakesafeV5Feed(force) {
+    if (_tradePreviewId) return Promise.resolve(null);
     if (!force && _makesafeV5Feed && Date.now() - _makesafeV5FeedAt < 90000) {
       syncBoardNav(_makesafeV5Feed, false);
       return Promise.resolve(_makesafeV5Feed);
@@ -23642,6 +23768,7 @@
   }
 
   function _readInvDraft() {
+    if (_tradePreviewId) return null;
     try {
       var owner = _invDraftOwnerId();
       if (!owner) return null;
@@ -23710,6 +23837,7 @@
   // Keyed by authenticated user so a shared-device account switch cannot
   // restore another trade's WO allocations or deductions.
   function _saveInvDraft() {
+    if (_tradePreviewId) return;
     if (!_invoiceBuilderOpen) return;
     var key = _invDraftStorageKey();
     if (!key) return;
@@ -23756,6 +23884,7 @@
       clearTimeout(_invRunningSaveTimer);
       _invRunningSaveTimer = null;
     }
+    if (_tradePreviewId) return;
     try {
       var key = _invDraftStorageKey();
       if (key) sessionStorage.removeItem(key);
@@ -24082,6 +24211,7 @@
   };
 
   function _scheduleRunningInvoiceAutosave() {
+    if (_tradePreviewId) return;
     if (!runningInvoiceDraftOn() || !_invoiceBuilderOpen || _invRunningHydrating) return;
     if (_invRunningSaveTimer) clearTimeout(_invRunningSaveTimer);
     _invRunningSaveTimer = setTimeout(function() {
@@ -34456,6 +34586,7 @@
   }
 
   window.addEventListener('online', function() {
+    if (_tradePreviewId) return;
     updateOfflineBar();
     toast('Back online');
     syncPendingNotes();

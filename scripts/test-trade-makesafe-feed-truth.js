@@ -69,6 +69,7 @@ const context = {
   _makesafeV5Feed: null,
   MakesafeTradeV5: null
 };
+context._tradePreviewId = null; // Ordinary signed-in view in this fixture.
 vm.createContext(context);
 vm.runInContext([
   'var _makesafeV5Feed = null, MakesafeTradeV5 = null;',

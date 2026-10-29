@@ -27447,7 +27447,8 @@
       return;
     }
 
-    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.' + _invoiceDeductionConfirmLine(_invoiceDeductionWeek())).then(function(ok) {
+    var postedJobCount = built.includedCount + groupExtras.length;
+    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + postedJobCount + ' job' + (postedJobCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.' + _invoiceDeductionConfirmLine(_invoiceDeductionWeek())).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();

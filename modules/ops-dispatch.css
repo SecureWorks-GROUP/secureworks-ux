@@ -602,6 +602,9 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-mp-onus, .dpc-mp-supw, .dpc-mp-done { font-weight: 600; }
 .dpc-mp-onus { color: #A83C16; } .dpc-mp-supw { color: #2c5d86; } .dpc-mp-done { color: #2f7d4f; }
 .dpc-mp-onus b, .dpc-mp-supw b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; }
+/* The On us bar: everything on the job's materials waiting on us, in one line. */
+.dpc-mp-sumbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff4ee; border-radius: 8px; padding: 9px 12px; margin: 8px 0 10px; font-size: 13px; color: var(--ink); }
+.dpc-mp-sumbar b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: #A83C16; margin-right: 6px; }
 .dpc-mp-legend b.us { color: #A83C16; } .dpc-mp-legend b.sp { color: #2c5d86; } .dpc-mp-legend b.ok { color: #2f7d4f; }
 .dpc-arr-stage { color: var(--mute); }
 

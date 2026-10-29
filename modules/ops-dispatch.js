@@ -2380,9 +2380,23 @@
     });
     h += '</div></div>';
     h += '<div class="dpc-mp-rows">' + a.orders.filter(isObj).map(function (o) { return mpRowHtml(row.id, o); }).join('') + '</div>';
+    h += mpOnUsHtml(a);
     h += '<p class="dpc-arr-legend dpc-mp-legend"><b class="us">Orange</b> = needs us. <b class="sp">Blue</b> = waiting on the supplier. <b class="ok">Green</b> = confirmed and paid. ' +
       'Solid = date confirmed. Ring = no confirmed date yet. Dashed = ordered ASAP, waiting on their date.</p>';
     return h + '</div>';
+  }
+
+  // ── The On us bar (piece D) ──
+  // Everything on the job's materials that waits on us, in one line under the
+  // rows: the server's own list (arrival.waiting_on_us, in box order). When
+  // every order has a confirmed date and no install is booked, the server
+  // puts "All materials by Wed 4/11. Book the install from Thu 5/11 and tell
+  // the client" in that list instead. Nothing on us: no bar.
+  function mpOnUsHtml(a) {
+    var lines = (Array.isArray(a.waiting_on_us) ? a.waiting_on_us : []).map(text).filter(Boolean);
+    if (!lines.length) return '';
+    var words = lines.map(function (l) { return /[.!?]$/.test(l) ? l : l + '.'; }).join(' ');
+    return '<div class="dpc-mp-sumbar" role="note"><span><b>On us</b> ' + esc(words) + '</span></div>';
   }
 
   // Draws the Materials panel again when it is the one on the job (its Mark

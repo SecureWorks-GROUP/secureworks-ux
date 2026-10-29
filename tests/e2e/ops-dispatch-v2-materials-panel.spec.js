@@ -193,12 +193,25 @@ test.describe('Dispatch v2: the Materials panel', () => {
     expect(cells).toEqual(['d', 'd', 'd', 'd', 'ck', '', 'k', '']);
   });
 
+  test('the On us bar lists what waits on us, and goes once nothing does', async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ onAccount: true }));
+    const bar = panelOf(root).locator('.dpc-mp-sumbar');
+    await expect(bar).toHaveText('On us Pay Lysaght. Pay Twinside Retaining. Book the install and tell the client.');
+    // Paid and with the supplier: nothing is on us.
+    const making = { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test', paid: { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' } };
+    const page2 = await page.context().newPage();
+    const second = await boot(page2, fakePayment({ lysaght: making, twinside: making }));
+    await expect(panelOf(second.root).locator('.dpc-mp-r')).toHaveCount(2);
+    await expect(panelOf(second.root).locator('.dpc-mp-sumbar')).toHaveCount(0);
+  });
+
   test("an older ops-api keeps today's Arrival line", async ({ page }) => {
     const { root } = await boot(page, fakePayment({ old: true, onAccount: true }));
     const arr = panelOf(root);
     await expect(arr.locator('.dpc-arr-title')).toHaveText('Arrival line');
     await expect(arr).not.toHaveClass(/dpc-mp/);
     await expect(arr.locator('.dpc-mp-rail')).toHaveCount(0);
+    await expect(root.locator('.dpc-mp-sumbar, .dpc-mp-strip')).toHaveCount(0);
     await expect(arr.locator('.dpc-arr-mk')).toHaveCount(3);
   });
 });

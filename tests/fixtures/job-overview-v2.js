@@ -278,6 +278,13 @@ function buildJobOverview(opts = {}) {
     };
   }
   if (opts.staleStory) overview.story_text.status = 'stale';
+  if (opts.moneyBook) overview.story_text.money = {
+    version: 'story-book-v1', source: 'job_profit', complete: false,
+    lines: ['Quoted: $6,423.50 ex GST.', 'Invoiced: no customer invoice is issued yet.', 'Total costs placed: $0.00 ex GST.',
+      'Margin: Unknown, because 2 bills that probably belong to this job are waiting to be placed.',
+      'Costs incomplete: 2 bills that probably belong to this job are waiting to be placed.'],
+    incomplete_line: 'Costs incomplete: 2 bills that probably belong to this job are waiting to be placed.',
+  };
   return overview;
 }
 

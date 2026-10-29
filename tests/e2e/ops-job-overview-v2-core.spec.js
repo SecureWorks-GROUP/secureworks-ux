@@ -286,6 +286,18 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(list.items[1].secs).toBe(210);
   });
 
+  test('the Money block from the books: word for word, null when the backend sends none', () => {
+    expect(C.storyBook(null)).toBe(null);
+    expect(C.storyBook({ status: 'none' })).toBe(null);
+    expect(C.storyBook({ money: { lines: [] } })).toBe(null);
+    const b = C.storyBook(overview({ moneyBook: true }).story_text);
+    expect(b.lines[0]).toBe('Quoted: $6,423.50 ex GST.');
+    expect(b.lines).toHaveLength(5);
+    expect(b.complete).toBe(false);
+    expect(b.incomplete).toBe('Costs incomplete: 2 bills that probably belong to this job are waiting to be placed.');
+    expect(C.storyBook({ money: { lines: ['Other: -$12.00 ex GST.', 7, null], complete: true } })).toEqual({ lines: ['Other: -$12.00 ex GST.'], complete: true, incomplete: null, source: '' });
+  });
+
   test('the written story: tolerant of its shape, cleaned, null when unusable', () => {
     expect(C.storyText(null)).toBe(null);
     expect(C.storyText({ status: 'none' })).toMatchObject({ state: 'none', sections: null });

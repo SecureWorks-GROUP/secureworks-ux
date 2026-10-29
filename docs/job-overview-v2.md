@@ -40,6 +40,7 @@ The screen paints at once from `job_detail` (already read by `openJobDetail`), t
 | `files.attachments[]`: `file_name` (`name`), `at` (`event_at`, `occurred_at`), `page_count` | attachment cards (not clickable: there is no staff action to open one yet) |
 | `files.media_count`, `files.scope` | photos and scope cards when `job_detail` has none |
 | `story_text` (`context_job_story_text_get`): `status` `fresh` / `stale` / `none`, `writer.open_request`, and the current row (`sections` {headline, the_job, how_we_got_here, where_it_is_at, watch_out}, `written_at`, `evidence_until`) under `text` | the written story, request state and its stamp |
+| `story_text.money` (backend `20261028190000`, `story-book-v1`): `{version, source job_profit\|none, lines, complete, incomplete_line}` | **Money, from the books** under the story: each line word for word (`C.storyBook`), the `incomplete_line` marked. The story's prose never restates a figure from it (the writer refuses one). No block when the backend sends none |
 
 The card qualifiers stay visible with written stories off:
 

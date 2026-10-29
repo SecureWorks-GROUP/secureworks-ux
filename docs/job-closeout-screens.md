@@ -37,9 +37,9 @@ closeout: {
 }
 ```
 
-The backend adds this block in its own follow-up. Until then no row carries it, so
-nothing is drawn. The screen never works a tag out for itself: no block, no tags,
-and a job type other than fencing or patio gets no tags at all.
+The backend sends this block; a row without it draws nothing. The screen never
+works a tag out for itself: no block, no tags, and a job type other than fencing or
+patio gets no tags at all.
 
 ## The tags (small, in the card's `kanban-meta-badge` style)
 

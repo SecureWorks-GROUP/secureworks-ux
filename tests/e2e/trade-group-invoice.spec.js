@@ -119,3 +119,23 @@ test('all-inclusive group shows cash and super and submits one separate share fr
   await expect(page.locator('[data-invoice-money-summary]')).toContainText('Earned$60.00');
   await page.screenshot({path:test.info().outputPath('group-invoice-proof.png'),fullPage:true});
 });
+
+
+test('future allocated group is discoverable and joinable before hours without exposing pay',async({appPage:page})=>{
+ let joined=false; const writes=[];
+ await page.route('**/functions/v1/ops-api?**',async route=>{
+  const req=route.request(),action=new URL(req.url()).searchParams.get('action');
+  const reply=body=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+  if(action==='my_group_work_orders')return reply({enabled:true,group_job_ids:[groupJob],groups:[{...base,pot_total:null,my_share:null,needs_hours:true,client_signed:false,awaiting:joined?'needs_hours':'needs_join'}]});
+  if(action==='join_group_work_order'){joined=true;writes.push(req.postDataJSON());return reply({group_id:groupId});}
+  return route.fallback();
+ });
+ await open(page);
+ const card=page.locator('[data-invoice-group]');
+ await expect(card).not.toContainText('2,160');
+ await expect(card.getByRole('button',{name:'Join group work order',exact:true})).toBeVisible();
+ await card.getByRole('button',{name:'Join group work order',exact:true}).click();
+ await expect(card).toContainText('Add your hours before your share can be calculated.');
+ expect(writes).toEqual([{group_id:groupId}]);
+ await expect(card.getByRole('button',{name:'Finalise group shares',exact:true})).toHaveCount(0);
+});

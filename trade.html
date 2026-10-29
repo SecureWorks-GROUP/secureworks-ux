@@ -34,7 +34,7 @@
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=all-in-group-20261029"></script>
   <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
-  <script src="modules/trade-group-invoice.js?v=all-in-group-20261029"></script>
+  <script src="modules/trade-group-invoice.js?v=allocated-group-20261029"></script>
   <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -7414,7 +7414,7 @@
     if (profileNav) { profileNav.disabled = true; profileNav.title = 'Profile settings are unavailable in preview'; }
     document.querySelectorAll('button').forEach(function(el) {
       var handler = el.getAttribute('onclick') || '';
-      if (el.hasAttribute('data-invoice-group-submit') || el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
+      if (el.hasAttribute('data-invoice-group-join') || el.hasAttribute('data-invoice-group-submit') || el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
         el.disabled = true; el.title = 'Read-only trade preview';
       }
     });

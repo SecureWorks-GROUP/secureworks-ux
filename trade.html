@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=zoo-integration-20261029"></script>
+  <script src="shared/group-work-order.js?v=all-in-group-20261029"></script>
   <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
-  <script src="modules/trade-group-invoice.js?v=normal-group-invoice-20261029"></script>
+  <script src="modules/trade-group-invoice.js?v=all-in-group-20261029"></script>
   <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -7414,7 +7414,7 @@
     if (profileNav) { profileNav.disabled = true; profileNav.title = 'Profile settings are unavailable in preview'; }
     document.querySelectorAll('button').forEach(function(el) {
       var handler = el.getAttribute('onclick') || '';
-      if (el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
+      if (el.hasAttribute('data-invoice-group-submit') || el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
         el.disabled = true; el.title = 'Read-only trade preview';
       }
     });
@@ -23817,7 +23817,7 @@
 
   function _applyInvDraft(draft) {
     if (window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
       GroupWorkOrderInvoice.restore(draft.groupIds || []);
     }
     _invRows = draft.rows || [];
@@ -27740,7 +27740,7 @@
     });
 
     if (!isExpense && jobCentricEnabled() && window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
       GroupWorkOrderInvoice.load();
       html += GroupWorkOrderInvoice.html();
     }

@@ -82,3 +82,32 @@ test('Save and reload retains selected group identity and rechecks the server sh
   await expect(page.locator('[data-invoice-group-select]')).toBeChecked();
   await expect(page.locator('[data-invoice-money-summary]')).toContainText('783.89');
 });
+
+
+test('all-inclusive group shows cash and super and submits one separate share from the normal invoice', async ({appPage:page}) => {
+  let phase='ready'; const posts=[];
+  await page.route('**/functions/v1/ops-api?**', async route => {
+    const req=route.request(),action=new URL(req.url()).searchParams.get('action');
+    const reply=body=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+    const share={...base,pot_total:2720,pay_basis:'all_in_12_6_v1',budget_includes_super:true,client_signed:true,awaiting:phase,
+      projected_my_share:859.96,projected_my_budget:911.56,projected_cash_pay:808.36,projected_super:103.20,
+      my_share:phase==='frozen'?859.96:null,my_budget:phase==='frozen'?911.56:null,my_cash_pay:phase==='frozen'?808.36:null,my_super:phase==='frozen'?103.20:null};
+    if(action==='my_group_work_orders')return reply({enabled:true,group_job_ids:[groupJob],groups:[share]});
+    if(action==='freeze_group_work_order'){phase='frozen';return reply({...share,awaiting:'frozen',my_share:859.96});}
+    if(action==='generate_trade_invoice'){posts.push(req.postDataJSON());return reply({success:true,invoice_id:'all-in-group-invoice',office_review:'held',xero_bill_id:null});}
+    return route.fallback();
+  });
+  await open(page);
+  const card=page.locator('[data-invoice-group]');
+  await expect(card).toContainText('pay + super pool: $2,720.00');
+  await expect(card).toContainText('allocation: $911.56 including pay and super');
+  await expect(card).toContainText('Your pay: $808.36 · Your super: $103.20');
+  page.once('dialog',d=>d.accept()); await card.getByRole('button',{name:'Finalise group shares',exact:true}).click();
+  await expect(card.locator('[data-invoice-group-select]')).toHaveCount(0);
+  await expect(card.getByRole('button',{name:'Submit my group share',exact:true})).toBeVisible();
+  page.once('dialog',d=>d.accept()); await card.getByRole('button',{name:'Submit my group share',exact:true}).click();
+  await expect(card).toContainText('saved for office review');
+  expect(posts).toEqual([{extra_items:[{type:'group share',group_id:groupId}],gst_on:false}]);
+  await expect(page.locator('[data-invoice-money-summary]')).toContainText('Earned$60.00');
+  await page.screenshot({path:test.info().outputPath('group-invoice-proof.png'),fullPage:true});
+});

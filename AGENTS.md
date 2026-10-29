@@ -828,6 +828,10 @@ The middle Job Story card reads the live card's `now`, timeline, money and loops
 the Quoted band uses only a recorded current-quote value. Backend `notes` is an
 object with `items[]`, and its invoice rows need the matching `job_detail` row
 for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
+**Where each bill counts** (`C.billOutcomes`/`C.billLine`) reads `job_overview.bills` only and
+uses the CIO card display contract r6 words (sha256 `c317ed45...`; table in the doc): no amount,
+every line ends "See Money", unknown is never "counts here", a failed read is never "no bills".
+Guard: `tests/e2e/ops-job-overview-v2-bills.spec.js`.
 
 ## Scope reader (`modules/job-scope-record.js`)
 

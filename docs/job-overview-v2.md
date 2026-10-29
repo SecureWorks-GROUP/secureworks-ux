@@ -40,6 +40,7 @@ The screen paints at once from `job_detail` (already read by `openJobDetail`), t
 | `files.attachments[]`: `file_name` (`name`), `at` (`event_at`, `occurred_at`), `page_count` | attachment cards (not clickable: there is no staff action to open one yet) |
 | `files.media_count`, `files.scope` | photos and scope cards when `job_detail` has none |
 | `story_text` (`context_job_story_text_get`): `status` `fresh` / `stale` / `none`, `writer.open_request`, and the current row (`sections` {headline, the_job, how_we_got_here, where_it_is_at, watch_out}, `written_at`, `evidence_until`) under `text` | the written story, request state and its stamp |
+| `bills` (backend `20261029170100`, `context-job-bill-outcomes-v1`, contract `cfo-bill-cost-outcome-v1`) and `sources.bills`: per bill `xero_invoice_id`, `invoice_number`, `supplier`, `bill_status`, `bill_state`, `where_counted`, `here` {counts, reason}, `other_jobs` [{job_number, counts}], `held_reason`, `overhead_part`, `mirror_bill`; never an amount | **Where each bill counts** under the story (`C.billOutcomes`, `C.billLine`): one line per bill in the CIO card display contract's revision 6 words (below) |
 | `story_text.money` (backend `20261028190000`, `story-book-v1`): `{version, source job_profit\|none, lines, complete, incomplete_line}` | **Money, from the books** under the story: each line word for word (`C.storyBook`), the `incomplete_line` marked. The story's prose never restates a figure from it (the writer refuses one). No block when the backend sends none |
 
 The card qualifiers stay visible with written stories off:
@@ -52,6 +53,44 @@ The card qualifiers stay visible with written stories off:
 `POST ops-api?action=request_job_story {jobId}` asks for a rewrite (Rewrite). The answer's `outcome` (or `state`: `queued`, `already_open`, `recent`) is said in words. `off` says "Rewriting is not switched on yet", and a refusal or unknown outcome never claims a request was made; an unknown action reads "Rewriting is not switched on yet".
 
 The reply box sends exactly what the Comms tab sends: `POST ghl-proxy?action=send_sms` with the signed-in user's token and `{contactId, message, jobId}`. It is a success only when the answer says `success: true`; a 409 duplicate ("the same text in the last 10 minutes") or a contact mismatch is said in words and nothing is retried. A long dash or an emoji keeps Send disabled with the reason (company rule for texts). After a send the cached Comms thread (`sessionStorage sw_convo_<contact>`) is dropped so the Comms tab reads it fresh.
+
+## Where each bill counts (INT-10)
+
+The words are the CIO card display contract for bills, revision 6 (21 Oct 2026, sha256
+`c317ed451b0dffd9cca6c666ea7cccb99ff3d426fa8aba73cc9353141a29fb06`), mapped from Finance's
+`where_counted`, `bill_state` and reason codes:
+
+| Finance's answer | r6 row | Line |
+|---|---|---|
+| here, counted_in_full | 8 | Money counts this bill's cost here. See Money. |
+| here, with an overhead part | 8o | Money counts part of this bill's cost here and part to overhead (no job). See Money. |
+| here, counted_in_part | 5 | Money counts part of this bill's cost here. The rest is not placed yet. See Money. |
+| elsewhere | 9A | Money counts this bill's cost on SWF-B. See Money. (overhead variant as r6) |
+| here_and_elsewhere | 10 | Money counts part of this bill's cost here and part on SWF-B[, and part to overhead (no job)]. See Money. |
+| held, `not_job_related_mark_on_counted_bill` (F1, JP-21) | 1 | Where this bill's cost counts is not settled. It waits on an open money decision (JP-21). See Money. |
+| no_job, `installer_unconfirmed` | 3 | Installer bill: confirmation is missing. Money does not count it on any job until then. See Money. |
+| no_job, voided, and our copy says VOIDED or DELETED | 4 | Xero voided this bill. Money counts it on no job. See Money. |
+| no_job, `xero_link_read_through_overhead` | 14h (LG-2) | An overhead part is recorded on this bill while Xero still links it here. Money does not count it on this job. See Money. |
+| no_job, `labour_part_unconfirmed` | 14h (LG-1) | A labour part of this bill waits for a person to confirm it. Money does not count that part yet. See Money. |
+| no_job, `xero_link_hidden_by_other_row`; held for any other reason | 14h | Where this bill's cost counts is not settled. See Money. |
+| not job related, or whole-bill overhead | 7 (CFO's hold: row 14) | Where this bill's cost counts is not known here. See Money. |
+| unknown, a value the card does not know, or a failed read | 14 | Where this bill's cost counts is not known here. See Money. |
+
+Lines r6 has no row for are proposed (marked `data-ov2-fresh`, for design and CFO): a trade-app
+mirror bill (r6 row 14's note), "Trade app bill: Money counts its cost through the trade app's
+own lines, not as this bill. See Money." with a **Trade app bill** mark; `over_counted`, "Money
+counts more of this bill's cost on jobs than the bill itself. See Money."; a draft bill, "Xero has
+not approved this bill yet. Money counts it on no job until then. See Money."; and any other
+counted-nowhere reason, "Money counts this bill on no job. See Money."
+
+Each bill shows its number, supplier and Xero status ("Paid in Xero", never "settled"), never an
+amount. An unknown names its reason under the line (the placement's own code, else "Money cannot
+say what state this bill is in", "This job holds no placement of the bill" or "Money's answer is
+not one this card knows"). A refused or failed read is one line, "Where this job's bills count is
+not known here." with the reason, never "no bills"; a server that predates the read reads "not
+switched on yet". Every not known or not settled line is echoed once in **What we don't know**.
+r6's "not confirmed yet" variants (rows 11 and 12) are not drawn: Finance's `placed_by` is
+descriptive only, so they wait on a field that says a placement is confirmed.
 
 ## Rules the screen keeps
 
@@ -73,4 +112,5 @@ The reply box sends exactly what the Comms tab sends: `POST ghl-proxy?action=sen
 ## Tests
 
 - `tests/e2e/ops-job-overview-v2-core.spec.js`: pure node, runs the code between `// <job-overview-v2-core>` and `// </job-overview-v2-core>` (switch precedence, Perth time in any zone, long dashes, money rules, file order, timeline folding, open item groups, whose move, the conversation, the story text shapes, and no long dash or emoji in the module file).
+- `tests/e2e/ops-job-overview-v2-bills.spec.js`: the bill outcome rule against every r6 row (extracted from the core) and the card in `ops.html` against a stubbed `job_overview` (bills here, split, unknown, held, trade-app mirror; a refused read; a server without the read).
 - `tests/e2e/ops-job-overview-v2.spec.js`: the real `ops.html` with every backend call stubbed from `tests/fixtures/job-overview-v2.js` (invented people, dates from today's Perth date).

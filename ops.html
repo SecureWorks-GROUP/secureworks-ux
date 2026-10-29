@@ -19864,11 +19864,16 @@ function jpOpenBillsToPlace() {
   showSubTab('billrecon');
 }
 // TP-11: Needs a person (modules/ops-recon.js) opens one bill here, with its lines, to decide.
+// An armed second press never follows the person from one view to the other: opening a bill
+// here always disarms it, so the first press of a confirm is always made where they are working.
+function _mrqDisarm(id) {
+  if (!id) return;
+  delete _matRecon.notjobArmed[id];
+  if (_matRecon.pick[id]) _matRecon.pick[id].armed = 0;
+}
 function mrqOpenBill(id) {
-  if (_matRecon.openId && _matRecon.openId !== id) {
-    delete _matRecon.notjobArmed[_matRecon.openId];
-    if (_matRecon.pick[_matRecon.openId]) _matRecon.pick[_matRecon.openId].armed = 0;
-  }
+  _mrqDisarm(_matRecon.openId);
+  _mrqDisarm(id);
   _matRecon.openId = id || null;
   _matRecon.scrollTo = id || null;
   _mrqActiveHost = document.getElementById('matReconPanel');
@@ -21507,7 +21512,11 @@ function _mrqSplitTyped(id) {
 function _mrqWireHost(host) {
     if (!host || host.__mrqWired) return;
     host.__mrqWired = true;
-    var mark = function() { _mrqActiveHost = host; };
+    var mark = function() {
+      // Moving to the other view disarms the open bill: its confirm press starts again here.
+      if (_mrqActiveHost && _mrqActiveHost !== host) _mrqDisarm(_matRecon.openId);
+      _mrqActiveHost = host;
+    };
     host.addEventListener('click', function(ev) {
       var el = ev.target.closest('[data-mrq-act]');
       if (!el || !host.contains(el)) return;

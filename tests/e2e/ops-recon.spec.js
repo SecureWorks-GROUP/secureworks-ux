@@ -526,3 +526,29 @@ test('TP-11: a bill job search typed on the card is the one searched', async ({ 
   expect(q).toEqual(['SWP-3003']);
   await expect(box).toHaveValue('SWP-3003');
 });
+
+test('TP-11: an armed Not job related never carries from the card into Bill Reconciliation', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  await decide(page, 'q-file');
+  await billCard(page, 'q-file').locator('[data-mrq-act="notjob"]').click();
+  await expect(billCard(page, 'q-file').locator('[data-mrq-notjob-armed]')).toBeVisible();
+  await page.waitForTimeout(750);
+  await billCard(page, 'q-file').locator('[data-np-open]').click();
+  await expect(page.locator('#subBillrecon')).toBeVisible();
+  const notjob = page.locator('#matReconBody [data-mrq-detail="q-file"] [data-mrq-act="notjob"]');
+  await expect(notjob).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-file"] [data-mrq-notjob-armed]')).toHaveCount(0);
+  // One press here only arms it again; nothing is filed.
+  await notjob.click();
+  expect(await billPosts(page)).toEqual([]);
+});
+
+test('TP-11: a repaint of the bill section keeps a job search being typed on the card', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  await decide(page, 'q-keep');
+  const box = billCard(page, 'q-keep').locator('[data-mrq-q="q-keep"]');
+  await box.fill('SWP-30');
+  await page.evaluate(() => window.npRepaint());
+  await expect(box).toHaveValue('SWP-30');
+  expect(await billPosts(page)).toEqual([]);
+});

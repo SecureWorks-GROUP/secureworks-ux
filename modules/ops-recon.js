@@ -666,7 +666,7 @@ function npSectionInner() {
   if (past) h += npBillCard(past, true);
   var left = st.rows.length - NP.shown;
   if (left > 0) h += '<div class="rc-empty"><button type="button" data-np-more>Show ' + Math.min(NP_PAGE, left) + ' more of ' + left + '</button></div>';
-  if (st.full) h += '<div class="rc-empty" data-np-full>This holds the 1000 newest open bills. There may be more; older ones come in as these are placed.</div>';
+  if (st.full) h += '<div class="rc-empty" data-np-full>This holds the ' + st.rows.length + ' newest open bills. There may be more; older ones come in as these are placed.</div>';
   return h;
 }
 
@@ -680,8 +680,12 @@ function npRepaint() {
   var sec = root.querySelector('[data-np-bills]');
   var sum = root.querySelector('[data-np-summary]');
   if (!sec || !sum) return;
+  // Keep a job search the person is typing on an open card (a slow AI read can land mid-word).
+  var B = npBills();
+  var typed = B ? B.keepTyped(sec) : null;
   sec.innerHTML = npSectionInner();
   sum.innerHTML = npSummaryHtml();
+  if (B) B.restoreFocus(sec, typed);
 }
 
 function npOpenBill(id) {

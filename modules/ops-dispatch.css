@@ -537,6 +537,9 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-arr-pay { display: block; margin-top: 3px; }
 .dpc-arr.dpc-arr-pays { height: 100px; }
 .dpc-arr.dpc-arr-two.dpc-arr-pays { height: 136px; }
+/* Pay on pickup / Pay on delivery (piece B): confirmed now, paid on the day. */
+.dpc-flag-payon { background: transparent; color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
+.dpc-v2-payon-set .dpc-v2-stage-who { flex: 1; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */

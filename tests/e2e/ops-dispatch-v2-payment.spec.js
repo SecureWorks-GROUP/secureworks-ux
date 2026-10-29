@@ -182,6 +182,68 @@ test.describe('Dispatch v2 payment step: the Not paid yet pill', () => {
   });
 });
 
+test.describe('Dispatch v2 payment step: Pay on pickup or delivery', () => {
+  test('Pay on pickup confirms the order without paying, shows a tag with who set it, and Take off clears it', async ({ page }) => {
+    const fake = fakePayment();
+    const { root, mat, of } = await boot(page, fake);
+    const box = boxOf(mat, 'Lysaght');
+    // The box goes out for pickup, so the button says pickup.
+    await expect(box.locator('[data-dpc-v2="payon"]')).toHaveText('Pay on pickup');
+    await box.locator('[data-dpc-v2="payon"]').click();
+    await expect(box).toContainText('Pay on pickup set: Lysaght. The order counts as confirmed. Nothing was paid or sent.');
+    const tag = box.locator('.dpc-v2-payon-set');
+    await expect(tag.locator('.dpc-flag-payon')).toHaveText('Pay on pickup');
+    await expect(tag).toContainText('Set by shaun@ops.test');
+    // The tag shows once on the box (its own row, no pill beside the stage);
+    // Deliveries and the Arrival line show it as their pill.
+    await expect(box.locator('.dpc-flag-payon')).toHaveCount(1);
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(1) + '"] .dpc-paypill')).toHaveText('Pay on pickup');
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' }).locator('.dpc-paypill')).toHaveText('Pay on pickup');
+    // Mark paid can still be pressed on the day they pay.
+    await expect(box.locator('.dpc-v2-paybtn')).toHaveText('Mark paid');
+    await expect(box.locator('.dpc-v2-pay [data-dpc-v2="payon"][data-dpc-v2-payon="pickup"]')).toHaveCount(0);
+    const setAt = fake.boxes[0].payOn.at;
+
+    await tag.locator('[data-dpc-v2="payon"]').click();
+    await expect(box).toContainText('Pay on tag taken off: Lysaght.');
+    await expect(box.locator('.dpc-v2-payon-set')).toHaveCount(0);
+    await expect(box.locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Not paid yet');
+    expect(of('dispatch_v2_set_pay_on').map(sent)).toEqual([
+      { box_id: BOX(1), pay_on: 'pickup', expected_set_at: null },
+      { box_id: BOX(1), pay_on: null, expected_set_at: setAt },
+    ]);
+    expect(of('update_repair_stage').concat(of('update_job_status'))).toEqual([]);
+  });
+
+  test('a delivery box says Pay on delivery', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true, twinside: { fulfilment: 'delivery' } });
+    const { mat, of } = await boot(page, fake);
+    const box = boxOf(mat, 'Twinside Retaining');
+    await expect(box.locator('[data-dpc-v2="payon"]')).toHaveText('Pay on delivery');
+    await box.locator('[data-dpc-v2="payon"]').click();
+    await expect(box.locator('.dpc-v2-payon-set .dpc-flag-payon')).toHaveText('Pay on delivery');
+    expect(of('dispatch_v2_set_pay_on').map(sent)).toEqual([{ box_id: BOX(2), pay_on: 'delivery', expected_set_at: null }]);
+  });
+
+  test('a tag changed somewhere else (409 pay_on_changed) says so and shows the latest', async ({ page }) => {
+    const fake = fakePayment();
+    const { mat } = await boot(page, fake);
+    const box = boxOf(mat, 'Lysaght');
+    await expect(box.locator('[data-dpc-v2="payon"]')).toBeVisible();
+    fake.boxes[0].payOn = { v: 'pickup', at: '2026-10-29T06:20:00.000Z', by: 'nithin@ops.test' };
+    await box.locator('[data-dpc-v2="payon"]').click();
+    await expect(mat).toContainText('The pay on tag on Lysaght was changed somewhere else. Showing the latest.');
+    await expect(box.locator('.dpc-v2-payon-set')).toContainText('Set by nithin@ops.test');
+  });
+
+  test('an older ops-api offers no Pay on button', async ({ page }) => {
+    const { mat } = await boot(page, fakePayment({ old: true }));
+    await expect(mat.locator('.dpc-v2-box')).toHaveCount(2);
+    await expect(mat.locator('[data-dpc-v2="payon"]')).toHaveCount(0);
+    await expect(mat).not.toContainText('Pay on');
+  });
+});
+
 test.describe('Dispatch v2 payment step: Mark paid moves the stage', () => {
   test('a box moved by Mark paid says so on its stage line', async ({ page }) => {
     const { mat } = await boot(page, fakePayment());
@@ -189,5 +251,28 @@ test.describe('Dispatch v2 payment step: Mark paid moves the stage', () => {
     await box.locator('.dpc-v2-paybtn').click();
     await expect(box.locator('[data-dpc-v2-stage]')).toHaveValue('order_confirmed');
     await expect(box.locator('.dpc-v2-stage .dpc-v2-stage-who')).toContainText('Moved here when marked paid, ');
+  });
+});
+
+test.describe('Dispatch v2 payment step: Pay on moves the stage, on any box', () => {
+  test('a box moved by Pay on says so on its stage line', async ({ page }) => {
+    const { mat } = await boot(page, fakePayment());
+    const two = boxOf(mat, 'Twinside Retaining');
+    await two.locator('[data-dpc-v2="payon"]').click();
+    await expect(two.locator('.dpc-v2-stage .dpc-v2-stage-who')).toContainText('Moved here by Pay on pickup, ');
+    // Twinside has no date yet: confirmed, waiting on the supplier for one.
+    await expect(two.locator('.dpc-v2-stage-next')).toHaveText('Next: Waiting on Twinside Retaining for a date');
+  });
+
+  test('an on-account box can be set to pay on delivery too, with no Mark paid', async ({ page }) => {
+    const { mat, of } = await boot(page, fakePayment({ onAccount: true }));
+    const box = boxOf(mat, 'Stratco WA');
+    await expect(box.locator('[data-dpc-v2="paid"]')).toHaveCount(0);
+    await expect(box.locator('[data-dpc-v2="payon"]')).toHaveText('Pay on delivery');
+    await expect(box.locator('.dpc-v2-pay small')).toHaveText('Confirms the order now and records who set it. A record only: it pays nobody and sends nothing.');
+    await box.locator('[data-dpc-v2="payon"]').click();
+    await expect(box.locator('.dpc-v2-payon-set .dpc-flag-payon')).toHaveText('Pay on delivery');
+    await expect(box.locator('.dpc-flag-payon')).toHaveCount(1);
+    expect(of('dispatch_v2_set_pay_on').map(sent)).toEqual([{ box_id: BOX(3), pay_on: 'delivery', expected_set_at: null }]);
   });
 });

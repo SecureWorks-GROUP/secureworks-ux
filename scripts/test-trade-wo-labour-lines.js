@@ -62,6 +62,7 @@ assert(start !== -1 && end !== -1 && end > start, 'JC-PAYLOAD block markers exis
 const block = html.slice(start, end)
 
 const context = {
+  invoiceGroupJob: () => false, invoiceGroupItems: () => [], invoiceGroupTotal: () => 0, invoiceGroupsReady: () => true,
   // The block references _isMakesafeCard (defined outside it in trade.html);
   // none of these cards are make-safe, so a false stub is faithful.
   _isMakesafeCard: function() { return false },
@@ -1008,6 +1009,8 @@ for (const badAmount of [-30, '-30', 'abc', 0, '0']) {
   const sent = []
   const webLocks = createWebLockBroker()
   const ctx = {
+  invoiceGroupJob: () => false,
+  invoiceGroupTotal: () => 0,
     localStorage: {
       getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
       setItem: function(k, v) { store[k] = String(v) },

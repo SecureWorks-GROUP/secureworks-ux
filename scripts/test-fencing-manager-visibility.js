@@ -16,6 +16,7 @@ function block(open, close) {
 }
 
 const context = {
+  invoiceGroupJob: () => false, invoiceGroupItems: () => [], invoiceGroupTotal: () => 0, invoiceGroupsReady: () => true,
   console,
   window: {},
   _isAdmin: false,
@@ -344,7 +345,7 @@ assert((function() {
     html.includes('final_deductions: finalDeductions') &&
     !jc.includes('_hoursCardLumpExtras') &&
     !submit.includes('_invLumpExtraItems') &&
-    submit.includes('var extraItems = built.cardExtraItems.concat(legacyExtras);') &&
+    submit.includes('var extraItems = built.cardExtraItems.concat(groupExtras, legacyExtras);') &&
     submit.includes('_invFinalDeductions()');
 })(),
   'invoice-level and hours-card lumps stay on captain-B final_deductions, not extra_items');

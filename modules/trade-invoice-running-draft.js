@@ -86,6 +86,7 @@
     state = state || {};
     return {
       version: VERSION,
+      ...(Array.isArray(state.groupIds) && state.groupIds.length ? { groupIds: state.groupIds.map(String) } : {}),
       jobCards: clone(state.jobCards || []) || [],
       invRows: clone(state.invRows || []) || [],
       invLumpLines: clone(state.invLumpLines || []) || [],
@@ -143,6 +144,7 @@
       suggested: input.lines || []
     });
     var snap = snapshot({
+      groupIds: existing.groupIds || [],
       jobCards: merged.cards,
       invRows: existing.invRows || [],
       invLumpLines: existing.invLumpLines || [],

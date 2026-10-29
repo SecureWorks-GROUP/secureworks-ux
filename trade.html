@@ -34,7 +34,8 @@
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=zoo-integration-20261029"></script>
   <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
-  <script src="modules/trade-invoice-running-draft.js?v=20261024"></script>
+  <script src="modules/trade-group-invoice.js?v=normal-group-invoice-20261029"></script>
+  <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
   <style>
@@ -4046,7 +4047,7 @@
   var cloud = null;
   var _tradePreviewId = new URL(window.location.href).searchParams.get('preview_trade_user_id');
   var _tradePreviewResolved = '';
-  var _tradePreviewReads = new Set(['trade_preview_context','trade_calendar','my_jobs','search_all_jobs','trade_job_detail','my_work_orders','my_job_work_order','group_work_order_my_share','my_hours','my_money','my_trade_invoices','get_trade_invoice','get_running_invoice_draft','my_invoices','crew_charges_on_my_jobs']);
+  var _tradePreviewReads = new Set(['trade_preview_context','trade_calendar','my_jobs','search_all_jobs','trade_job_detail','my_work_orders','my_job_work_order','group_work_order_my_share','my_group_work_orders','my_hours','my_money','my_trade_invoices','get_trade_invoice','get_running_invoice_draft','my_invoices','crew_charges_on_my_jobs']);
   var _user = null;          // { id, name, email, role, org_id }
   var _currentJobId = null;
   var _currentJob = null;    // full job detail response
@@ -7413,7 +7414,7 @@
     if (profileNav) { profileNav.disabled = true; profileNav.title = 'Profile settings are unavailable in preview'; }
     document.querySelectorAll('button').forEach(function(el) {
       var handler = el.getAttribute('onclick') || '';
-      if (el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
+      if (el.hasAttribute('data-invoice-group-finalise') || el.hasAttribute('data-group-wo-action') || el.hasAttribute('data-quote-extract') || /(?:save|submit|delete|remove|approve|reject|clock|complete|assign|join|signGroup|captureGroup|freezeGroup)/i.test(handler)) {
         el.disabled = true; el.title = 'Read-only trade preview';
       }
     });
@@ -22480,6 +22481,7 @@
   }
 
   window.openInvoiceBuilder = function(opts) {
+    if (window.GroupWorkOrderInvoice) GroupWorkOrderInvoice.reset();
     opts = opts || {};
     _invRows = [];
     _invExtraLines = []; // legacy compat
@@ -23752,6 +23754,7 @@
 
   function _invDraftHasWork(draft) {
     if (!draft) return false;
+    if (draft.groupIds && draft.groupIds.length > 0) return true;
     if (draft.rows && draft.rows.length > 0) return true;
     if (draft.jobCards && draft.jobCards.length > 0) return true;
     if (draft.invLumpLines && draft.invLumpLines.length > 0) return true;
@@ -23813,6 +23816,10 @@
   }
 
   function _applyInvDraft(draft) {
+    if (window.GroupWorkOrderInvoice) {
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.restore(draft.groupIds || []);
+    }
     _invRows = draft.rows || [];
     _jobCards = _restoreJobCardsDraft(draft.jobCards);
     _invLumpLines = Array.isArray(draft.invLumpLines) ? draft.invLumpLines.slice() : [];
@@ -23848,6 +23855,7 @@
       sessionStorage.setItem(key, JSON.stringify({
         user_id: _invDraftOwnerId(),
         rows: _invRows,
+        groupIds: window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.selectedIds() : [],
         jobCards: _serializeJobCardsDraft(_jobCards),
         invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
         jobCentric: !!_jobCentricActive,
@@ -23860,6 +23868,7 @@
     } catch(e) {}
   }
   function _clearInvDraft() {
+    if (window.GroupWorkOrderInvoice) GroupWorkOrderInvoice.reset();
     _invoiceBuilderOpen = false;
     _jobCentricActive = false;
     _pmDraftIsPerMetre = false;
@@ -24084,7 +24093,8 @@
   function _runningInvoiceSnapshot() {
     var core = window.TradeInvoiceRunningDraft;
     return core.snapshot({
-      jobCards: _serializeJobCardsDraft(_jobCards),
+      groupIds: window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.selectedIds() : [],
+      jobCards: _serializeJobCardsDraft(_jobCards.filter(function(c) { return !invoiceGroupJob(c); })),
       invRows: _invRows,
       invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
       dismissedKeys: _invDismissedKeys || [],
@@ -24135,6 +24145,7 @@
       if (!core) { _invRunningHydrating = false; return; }
       var builder = res && res.draft_builder;
       if (builder && Array.isArray(builder.jobCards)) {
+        if (window.GroupWorkOrderInvoice) GroupWorkOrderInvoice.restore(builder.groupIds || []);
         _jobCards = _restoreJobCardsDraft(builder.jobCards);
         _invRows = Array.isArray(builder.invRows) ? builder.invRows : [];
         _invLumpLines = Array.isArray(builder.invLumpLines) ? builder.invLumpLines.slice() : [];
@@ -24177,6 +24188,7 @@
     opts = opts || {};
     if (!runningInvoiceDraftOn()) return Promise.resolve(false);
     if (_invRunningHydrating && opts.quiet) return Promise.resolve(false);
+    if (jobCentricEnabled() && !invoiceGroupsReady()) { if (!opts.quiet) toast('Wait for your group work orders to be checked before saving.', true); return Promise.resolve(false); }
     var core = window.TradeInvoiceRunningDraft;
     if (!core) return Promise.resolve(false);
     _syncRowsFromDOM();
@@ -25330,7 +25342,7 @@
   // cards can submit. Do not reconcile against {} until a successful read.
   function _jobCentricHasBlockedWorkOrder() {
     return (_jobCards || []).some(function(c) {
-      return !!(c && c.included && _jobCardWorkOrderBlocked(c));
+      return !!(c && c.included && !invoiceGroupJob(c) && _jobCardWorkOrderBlocked(c));
     });
   }
   function _jobCentricSubmitBlockedByHydrate() {
@@ -25338,7 +25350,7 @@
     if (_pmWoHydrateState === 'pending') return true;
     if (_pmWoHydrateState === 'error') {
       return _jobCards.some(function(c) {
-        return c && c.included && c.wo_mode && c.work_order_id;
+        return c && c.included && !invoiceGroupJob(c) && c.wo_mode && c.work_order_id;
       });
     }
     return false;
@@ -25594,6 +25606,15 @@
     return true;
   }
 
+  function invoiceGroupJob(c) { return !!(window.GroupWorkOrderInvoice && c && GroupWorkOrderInvoice.isGroupJob(c.job_id)); }
+  function invoiceGroupItems() { return window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.items() : []; }
+  function invoiceGroupTotal() { return window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.total() : 0; }
+  function invoiceGroupsReady() { return !window.GroupWorkOrderInvoice || GroupWorkOrderInvoice.ready(); }
+  function refreshInvoiceGroups() {
+    if (!_invoiceBuilderOpen) return;
+    _syncJobCardsFromDOM(); _syncRowsFromDOM(); _syncInvLumpLinesFromDOM();
+    renderInvoiceBuilder();
+  }
   function renderJobCardsHtml() {
     _pinAssignedCardRates();
     var data = _hoursData || {};
@@ -25627,7 +25648,7 @@
 
     // Group cards by scheduled_date
     var byDay = {};
-    _jobCards.forEach(function(c, i) { c._idx = i; (byDay[c.scheduled_date] = byDay[c.scheduled_date] || []).push(c); });
+    _jobCards.forEach(function(c, i) { c._idx = i; if (invoiceGroupJob(c)) return; (byDay[c.scheduled_date] = byDay[c.scheduled_date] || []).push(c); });
 
     // Render every Mon–Sun day of the week (so "+ Add job" is reachable even on
     // days with nothing assigned), plus any extra keys (e.g. unscheduled ''). [Q15]
@@ -25825,7 +25846,7 @@
     var rate = Number(data.rate || _tradeRate || 0);
     var sub = 0;
     _jobCards.forEach(function(c) {
-      if (!c.included) return;
+      if (!c.included || invoiceGroupJob(c)) return;
       if (c.commission_mode) {
         var ca = Number(c.commission_amount);
         if (ca > 0) sub += ca;
@@ -25850,7 +25871,7 @@
     }, 0);
     extraSub = Math.round(extraSub * 100) / 100;
     var lumpSub = _invLumpTotal();
-    return Math.round((jcSub + extraSub - lumpSub) * 100) / 100;
+    return Math.round((jcSub + invoiceGroupTotal() + extraSub - lumpSub) * 100) / 100;
   }
 
   // A submitted PDF is evidence of what the backend persisted, so it may only
@@ -26836,7 +26857,7 @@
   }
   function _buildJobCentricPayload(cards, opts) {
     opts = opts || {};
-    var included = (cards || []).filter(function(c) { return c.included; });
+    var included = (cards || []).filter(function(c) { return c.included && !invoiceGroupJob(c); });
     function _jobCardEmitsWorkOrder(c) {
       return !!(c && c.wo_mode && !(c.wo_blocked && c.wo_hours_ack));
     }
@@ -27306,6 +27327,7 @@
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
     var ctx = _invoiceApiContext();
+    if (!invoiceGroupsReady()) { toast('Check your group work orders before submitting.', true); return; }
     if (_jobCentricSubmitBlockedByHydrate()) {
       toast(_pmWoHydrateState === 'error'
         ? 'Work-order amounts did not load. Retry before submitting a work-order card.'
@@ -27371,7 +27393,8 @@
       return;
     }
     var legacyExtras = legacyManualRows.map(_rowToExtraItem);
-    var extraItems = built.cardExtraItems.concat(legacyExtras);
+    var groupExtras = invoiceGroupItems();
+    var extraItems = built.cardExtraItems.concat(groupExtras, legacyExtras);
     if (_pmWoHydrateState === 'ok') {
       var nonExclusiveWo = extraItems.filter(function(item) {
         var id = String((item && item.work_order_id) || '').trim();
@@ -27387,7 +27410,7 @@
       return;
     }
 
-    var sub = built.subtotal;
+    var sub = built.subtotal + invoiceGroupTotal();
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
     var finalDeductionTotal = _invFinalDeductions().reduce(function(t, d) { return t + (Number(d.unit_rate) || 0); }, 0);
     var postGross = Math.round((sub - finalDeductionTotal) * 100) / 100;
@@ -27401,7 +27424,7 @@
     var outOfWeek = _jobCards.filter(function(c) {
       // Assigned cards only: they were loaded for the viewed week, so a date
       // outside it proves the week is stale. Searched-in jobs may be late claims.
-      if (!c || !c.included || !c.scheduled_date || c.manually_added) return false;
+      if (!c || !c.included || invoiceGroupJob(c) || !c.scheduled_date || c.manually_added) return false;
       var d = String(c.scheduled_date).slice(0, 10);
       return d < postWeekStart || d > postWeekEnd;
     });
@@ -27424,7 +27447,8 @@
       return;
     }
 
-    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.' + _invoiceDeductionConfirmLine(_invoiceDeductionWeek())).then(function(ok) {
+    var postedJobCount = built.includedCount + groupExtras.length;
+    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + postedJobCount + ' job' + (postedJobCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.' + _invoiceDeductionConfirmLine(_invoiceDeductionWeek())).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();
@@ -27483,7 +27507,7 @@
             rebuildErr.code = 'wo_exclusive_reread_incomplete';
             throw rebuildErr;
           }
-          jobCentricBody.extra_items = rebuilt.cardExtraItems.concat(legacyExtras);
+          jobCentricBody.extra_items = rebuilt.cardExtraItems.concat(groupExtras, legacyExtras);
           jobCentricBody.manual_assignments = rebuilt.manualAssignments;
         }
         return _postJobCentricGenerate();
@@ -27715,6 +27739,12 @@
       dayRowMap[dk].push(row);
     });
 
+    if (!isExpense && jobCentricEnabled() && window.GroupWorkOrderInvoice) {
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id);
+      GroupWorkOrderInvoice.load();
+      html += GroupWorkOrderInvoice.html();
+    }
+
     // ── Job-centric cards (cutover path) vs legacy 7-day clock-row timesheet ──
     _jobCentricActive = !isExpense && jobCentricEnabled();
     if (_jobCentricActive) {
@@ -27774,12 +27804,14 @@
     if (_jobCentricActive) {
       // Job-centric: submit via manual_assignments (server resolves the rate).
       // Extras still ride along through submitJobCentricInvoice.
-      var jcHasCards = _jobCards.some(function(c) { return c.included; });
+      var jcHasCards = invoiceGroupItems().length > 0 || _jobCards.some(function(c) { return c.included && !invoiceGroupJob(c); });
       var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
       var woAuthBlocked = _jobCentricHasBlockedWorkOrder();
       var jcHasLumps = _invFinalDeductions().length > 0;
       html += _runningInvoiceActionsHtml();
-      if (woHydrateBlocked) {
+      if (!invoiceGroupsReady()) {
+        html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px">Submit Invoice</button>';
+      } else if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
         html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
           + (_pmWoHydrateState === 'error'

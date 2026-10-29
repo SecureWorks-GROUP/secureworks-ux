@@ -40,7 +40,7 @@
       h += '<div data-invoice-group="'+id+'" style="padding:12px;margin:8px 0;border:1px solid var(--sw-border);border-radius:10px;background:var(--sw-card)"><strong>'+esc(g.job_number)+' · '+esc(g.client_name)+'</strong>';
       h += '<div style="font-size:12px;margin-top:4px">Group work order · '+esc(g.site_suburb)+'</div>';
       if (g.pot_total != null) h += '<div>Approved '+(allIn ? 'pay + super pool' : 'labour pool')+': $'+money(g.pot_total)+' ex GST</div>';
-      h += '<div data-group-acceptance>'+ (g.client_signed === true ? 'Sign-off accepted' : 'Waiting for client sign-off · invoicing blocked') +'</div>';
+      h += '<div data-group-acceptance>'+ (g.awaiting === 'needs_join' || g.awaiting === 'awaiting_office' ? 'Your allocated group work order' : g.client_signed === true ? 'Sign-off accepted' : 'Waiting for client sign-off · invoicing blocked') +'</div>';
       if (allIn && (g.my_budget != null || g.projected_my_budget != null)) {
         var budget = g.my_budget != null ? g.my_budget : g.projected_my_budget;
         var cash = g.my_cash_pay != null ? g.my_cash_pay : g.projected_cash_pay;
@@ -48,7 +48,11 @@
         h += '<div>Your allocation: $'+money(budget)+' including pay and super</div><div>Your pay: $'+money(cash)+' · Your super: $'+money(superPay)+'</div>';
         h += '<p style="font-size:12px">Your rate × hours determines your percentage of the pool. Super is inside this allocation.</p>';
       }
-      if (frozen && allIn) {
+      if (g.awaiting === 'needs_join') {
+        h += '<p>Join this group and record your hours to calculate your allocation.</p><button type="button" class="btn btn-secondary" data-invoice-group-join="'+id+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.join(this.getAttribute(\'data-invoice-group-join\'))">Join group work order</button>';
+      } else if (g.awaiting === 'awaiting_office') {
+        h += '<p>This group is already finalised. Ask the office to check your allocation before joining.</p>';
+      } else if (frozen && allIn) {
         if (submitted[owner+':'+g.group_id]) h += '<p role="status">'+esc(submitted[owner+':'+g.group_id])+'</p>';
         else h += '<p style="font-size:12px">This creates your group invoice for office review. Other jobs and extras stay on your weekly invoice.</p><button type="button" class="btn btn-secondary" data-invoice-group-submit="'+id+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.submit(this.getAttribute(\'data-invoice-group-submit\'))">Submit my group share</button>';
       } else if (frozen) {
@@ -69,6 +73,12 @@
     selectedIds: selectedIds, restore: restore, ready: function() { return state === 'ready' && !busy; }, reset: reset,
     retry: function() { load(true); changed(); },
     select: function(id,on) { selected[id] = !!on; changed(); },
+    join: function(id) {
+      var g=groups.find(function(row) {return row.group_id===id;});
+      if(busy || !g || g.awaiting!=='needs_join') return;
+      busy=id; changed();
+      api('join_group_work_order',null,{group_id:id}).then(function() {busy='';load(true);}).catch(function(err) {busy='';window.toast(err.message || 'Could not join the group.',true);changed();});
+    },
     submit: function(id) {
       var g = groups.find(function(row) { return row.group_id === id; });
       if (busy || submitted[owner+':'+id] || !g || g.awaiting !== 'frozen' || g.client_signed !== true || !(Number(g.my_share)>0)) return;

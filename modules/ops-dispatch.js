@@ -2022,20 +2022,22 @@
     if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
     var p = arrivalPlot(a);
     var two = p.marks.some(function (m) { return m.row === 1; });
-    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + '"><span class="dpc-arr-rail"></span>';
+    // A payment pill under a marker needs a little more room below the line.
+    var pays = a.orders.some(function (o) { return !!arrMarkPayHtml(o); });
+    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + (pays ? ' dpc-arr-pays' : '') + '"><span class="dpc-arr-rail"></span>';
     h += '<span class="dpc-arr-tod">Today ' + esc(dayText(p.today)) + '</span>';
     h += p.inst ? '<span class="dpc-arr-inst"><span>Install ' + esc(dayText(p.inst)) + '</span></span>' : '<span class="dpc-arr-noinst">No install booked</span>';
     p.marks.forEach(function (m) {
       var edge = m.pct < 7 ? ' dpc-arr-edge' : '';
-      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small></span>';
+      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small>' + arrMarkPayHtml(m.order) + '</span>';
     });
     if (p.outs.length) {
       var one = p.outs.length === 1 ? p.outs[0] : null;
-      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small></span>';
+      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small>' + (one ? arrMarkPayHtml(one.order) : '') + '</span>';
     }
     h += '</div><ul class="dpc-arr-list' + (p.outs.length > 1 ? ' dpc-arr-list-outs' : '') + '">';
     p.marks.concat(p.outs).forEach(function (m) {
-      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + '</li>';
+      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + arrPayHtml(m.order) + '</li>';
     });
     h += '</ul></div>';
     h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
@@ -2051,6 +2053,19 @@
     h += '</span>';
     if (o.extra === true) h += ' <span class="dpc-flag dpc-flag-extra">Extra</span>';
     return h;
+  }
+
+  // An order's payment pill on the full Arrival line (piece B).
+  function arrPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment)) : '';
+    return pill ? ' ' + pill : '';
+  }
+
+  // The payment pill under an order's marker on the Arrival line itself
+  // (the list under the line is for narrow screens).
+  function arrMarkPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment)) : '';
+    return pill ? '<span class="dpc-arr-pay">' + pill + '</span>' : '';
   }
 
   function paintArrival() {
@@ -3221,11 +3236,13 @@
       var small = from ? '<small>' + esc(from) + '</small>' : '';
       var off = ed && ed.busy ? ' disabled' : '';
       var pickup = o.fulfilment === 'pickup';
-      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
+      // Not paid yet or Paid, beside the date (piece B; nothing from an older server).
+      var pill = payPillHtml(v2PayFrom(o.payment));
+      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>' + pill;
       h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
       h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + (pickup ? ', pickup' : '') + '</small></span>';
       // Expected: the date while it is not confirmed.
-      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
+      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em>' + pill + '<button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
       else if (!o.date_confirmed) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
       else h += '<span class="dpc-dstate"><em>-</em></span>';
       // Confirmed by supplier: the date once it is.
@@ -4613,6 +4630,7 @@
     if (o && o.waiting_on === 'us') h += '<span class="dpc-status dpc-tone-warn">On us</span>';
     else if (o && o.waiting_on === 'supplier') h += '<span class="dpc-status dpc-tone-muted">Waiting on the supplier</span>';
     if (o && o.extra === true) h += '<span class="dpc-flag dpc-flag-extra">Extra order</span>';
+    h += payPillHtml(v2BoxPay(b));
     h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : v2StageWho(b, s)) + '</span>';
     if (o && text(o.todo)) h += '<p class="dpc-v2-hint dpc-v2-stage-next">Next: ' + esc(o.todo) + '</p>';
     h += '</div>';
@@ -4753,6 +4771,16 @@
   function v2PayRetryAttrs(m, sid) {
     if (!m || !m.press) return null;
     return 'data-dpc-v2="' + esc(m.press.kind) + '" data-dpc-v2-sid="' + esc(sid) + '"' + (m.press.payOn ? ' data-dpc-v2-payon="' + esc(m.press.payOn) + '"' : '');
+  }
+
+  // The payment pill beside an order: Not paid yet (amber) on a pay-first
+  // order nobody has marked paid, Paid (green) once someone has. Nothing on an
+  // on-account order, and nothing from an older server (p is null).
+  function payPillHtml(p) {
+    if (!p) return '';
+    if (p.state === 'unpaid') return '<span class="dpc-flag dpc-flag-amber dpc-paypill">Not paid yet</span>';
+    if (p.state === 'paid') return '<span class="dpc-flag dpc-flag-paid dpc-paypill">Paid</span>';
+    return '';
   }
 
   // Mark paid (and what it does) on a pay-first box not paid for this order;

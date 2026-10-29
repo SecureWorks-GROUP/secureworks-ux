@@ -144,6 +144,44 @@ test.describe('Dispatch v2 payment step: Mark paid and Undo paid', () => {
   });
 });
 
+test.describe('Dispatch v2 payment step: the Not paid yet pill', () => {
+  test('an unpaid pay-first order says Not paid yet on its box, its Deliveries row and the Arrival line; Paid once marked', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const { root, mat } = await boot(page, fake);
+    const box = boxOf(mat, 'Lysaght');
+    const deliv = root.locator('[data-dpc-deliv-box="' + SID(1) + '"]');
+    const arr = root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' });
+    await expect(box.locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Not paid yet');
+    await expect(deliv.locator('.dpc-paypill')).toHaveText('Not paid yet');
+    await expect(arr.locator('.dpc-paypill')).toHaveText('Not paid yet');
+    // On the line itself, under the order's marker (the list is for narrow screens).
+    const mark = root.locator('[data-dpc-region="arrival"] .dpc-arr-mk', { hasText: 'Lysaght' });
+    await expect(mark.locator('.dpc-paypill')).toBeVisible();
+    await expect(mark.locator('.dpc-paypill')).toHaveText('Not paid yet');
+    // Twinside has no date yet: the pill sits beside "No date yet".
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(2) + '"] .dpc-paypill')).toHaveText('Not paid yet');
+    // On account: no pill anywhere.
+    await expect(boxOf(mat, 'Stratco WA').locator('.dpc-paypill')).toHaveCount(0);
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(3) + '"] .dpc-paypill')).toHaveCount(0);
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Stratco WA' }).locator('.dpc-paypill')).toHaveCount(0);
+
+    await box.locator('.dpc-v2-paybtn').click();
+    await expect(box.locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Paid');
+    await expect(deliv.locator('.dpc-paypill')).toHaveText('Paid');
+    await expect(arr.locator('.dpc-paypill')).toHaveText('Paid');
+    await expect(mark.locator('.dpc-paypill')).toHaveText('Paid');
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(2) + '"] .dpc-paypill')).toHaveText('Not paid yet');
+  });
+
+  test('an older ops-api shows no payment pill anywhere', async ({ page }) => {
+    const fake = fakePayment({ old: true });
+    const { root } = await boot(page, fake);
+    await expect(root.locator('[data-dpc-deliv-box="' + SID(1) + '"]')).toBeVisible();
+    await expect(root.locator('.dpc-paypill')).toHaveCount(0);
+    await expect(root).not.toContainText('Not paid yet');
+  });
+});
+
 test.describe('Dispatch v2 payment step: Mark paid moves the stage', () => {
   test('a box moved by Mark paid says so on its stage line', async ({ page }) => {
     const { mat } = await boot(page, fakePayment());

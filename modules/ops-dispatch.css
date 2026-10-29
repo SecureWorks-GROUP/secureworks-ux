@@ -530,6 +530,13 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc .dpc-v2-paybtn { background: var(--sage); border-color: var(--sage); color: #fff; font-weight: 600; }
 .dpc .dpc-v2-paybtn:hover:not(:disabled) { background: #3B5E48; border-color: #3B5E48; }
 .dpc-v2-paid { font-size: 12.5px; color: var(--sage); font-weight: 600; }
+/* The payment pill (piece B): Not paid yet is amber (dpc-flag-amber), Paid is green. */
+.dpc-flag-paid { background: #E4EFE6; color: var(--sage); }
+.dpc-paypill { white-space: nowrap; }
+.dpc-dstate .dpc-paypill { margin-left: 6px; font-family: var(--body); }
+.dpc-arr-pay { display: block; margin-top: 3px; }
+.dpc-arr.dpc-arr-pays { height: 100px; }
+.dpc-arr.dpc-arr-two.dpc-arr-pays { height: 136px; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */
@@ -588,8 +595,8 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-arr-legend .late { color: #b3261e; }
 /* A narrow line keeps the dots and the two day labels, and lists the orders under it. */
 @container (max-width: 459px) {
-  .dpc-arr, .dpc-arr-two { height: 50px; }
-  .dpc-arr-mk b, .dpc-arr-mk small { display: none; }
+  .dpc-arr, .dpc-arr-two, .dpc-arr.dpc-arr-pays, .dpc-arr.dpc-arr-two.dpc-arr-pays { height: 50px; }
+  .dpc-arr-mk b, .dpc-arr-mk small, .dpc-arr-mk .dpc-arr-pay { display: none; }
   .dpc-arr-list, .dpc-arr-list-outs { display: block; }
   .dpc-arr-list li.on { display: flex; }
 }

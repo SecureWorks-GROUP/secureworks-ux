@@ -1996,6 +1996,7 @@
         <h3>Job Profitability — Revenue vs Margin %</h3>
         <div class="chart-wrapper" style="height:320px;">
           <div id="jplScatterChart"></div>
+          <p id="jplScatterNote" style="display:none;text-align:center;color:var(--sw-text-sec);padding:60px;"></p>
         </div>
       </div>
 
@@ -2009,7 +2010,7 @@
           <thead>
             <tr>
               <th style="width:30px;"></th>
-              <th>Client</th>
+              <th>Job / Client</th>
               <th>Type</th>
               <th>Status</th>
               <th class="num">Quote</th>
@@ -4412,6 +4413,44 @@ function jplCostsCard(summary, fmt) {
   }
   return { label: 'Total Costs', value: fmt(s.total_bills), sub: '', complete: null };
 }
+// The job's identity as the read returns it: job_number and client_name
+// (the old response's client is the fallback). Plain text, not yet escaped.
+function jplJobNumber(job) { return job && job.job_number ? String(job.job_number) : ''; }
+function jplClientName(job) {
+  if (!job) return '';
+  var name = job.client_name != null && job.client_name !== '' ? job.client_name : job.client;
+  return name != null && name !== '' ? String(name) : '';
+}
+// The Job / Client table cell as HTML: job number, customer, suburb, all escaped.
+function jplJobCell(job) {
+  var num = jplJobNumber(job);
+  var name = jplClientName(job);
+  var out = num ? '<strong>' + jplText(num) + '</strong>' : '';
+  if (name) out += (out ? '<br>' : '') + jplText(name);
+  if (!out) out = '—';
+  if (job && job.suburb) out += '<br><small style="color:var(--sw-text-sec);">' + jplText(job.suburb) + '</small>';
+  return out;
+}
+// The scatter point's name, plain text: "job number, customer".
+function jplJobLabel(job) {
+  return [jplJobNumber(job), jplClientName(job)].filter(Boolean).join(', ') || 'Job';
+}
+// The words in place of the scatter when no job can be plotted. A job with an
+// Unknown margin is not a point at 0%, so when every invoiced job is Unknown
+// the words say no margin is known yet and why, never that there is nothing.
+function jplScatterEmptyText(jobs) {
+  var unknown = (jobs || []).filter(function(j) { return j && j.invoiced > 0 && !jplIsNum(j.margin_pct); });
+  if (!unknown.length) return 'No invoiced jobs to plot yet';
+  var reasons = [];
+  unknown.forEach(function(j) {
+    var r = j.margin_reason ? String(j.margin_reason).replace(/^Unknown:\s*/, '') : '';
+    if (r && reasons.indexOf(r) < 0) reasons.push(r);
+  });
+  var n = unknown.length;
+  var why = reasons.length === 1 ? ' (' + reasons[0] + ')'
+    : reasons.length > 1 ? ' (each reason is shown against the job in the table below)' : '';
+  return 'No margins are known yet, so nothing is plotted: ' + n + ' invoiced job' + (n === 1 ? ' has' : 's have') + ' margin Unknown' + why + '.';
+}
 // </job-pl-money>
 
 function renderJobPLStats(summary) {
@@ -4479,7 +4518,7 @@ function renderJobPLTable(jobs) {
 
     html += '<tr>' +
       '<td>' + (hasInvoices ? '<button class="expand-btn" onclick="toggleJobDetail(' + idx + ')">+</button>' : '') + '</td>' +
-      '<td>' + (job.client || '—') + (job.suburb ? '<br><small style="color:var(--sw-text-sec);">' + job.suburb + '</small>' : '') + '</td>' +
+      '<td>' + jplJobCell(job) + '</td>' +
       '<td><span class="job-status status-' + job.type + '" style="background:' +
         (job.type === 'patio' ? 'rgba(52,152,219,0.12)' : job.type === 'fencing' ? 'rgba(230,126,34,0.12)' : 'rgba(142,68,173,0.12)') + ';color:' +
         (job.type === 'patio' ? '#3498DB' : job.type === 'fencing' ? '#E67E22' : '#8E44AD') + ';">' +
@@ -4551,10 +4590,18 @@ function renderJobScatter(jobs) {
   // Filter to jobs with actual invoiced data
   // An unknown margin (null) is not a point at 0%: leave it off the plot.
   var plotJobs = (jobs || []).filter(function(j) { return j.invoiced > 0 && jplIsNum(j.margin_pct); });
+  var note = document.getElementById('jplScatterNote');
   if (plotJobs.length === 0) {
-    el.parentElement.innerHTML = '<p style="text-align:center;color:var(--sw-text-sec);padding:60px;">No invoiced jobs to plot yet</p>';
+    // Keep the chart host in place so a later reload with known margins can
+    // draw into it; only the old chart goes, and the words show beside it.
+    if (window._jplScatterChart) { try { window._jplScatterChart.destroy(); } catch (e) {} window._jplScatterChart = null; }
+    el.innerHTML = '';
+    el.style.display = 'none';
+    if (note) { note.textContent = jplScatterEmptyText(jobs); note.style.display = ''; }
     return;
   }
+  if (note) { note.textContent = ''; note.style.display = 'none'; }
+  el.style.display = '';
 
   // Group by type for separate series
   var typeConfig = {
@@ -4572,7 +4619,7 @@ function renderJobScatter(jobs) {
     series.push({
       name: cfg.label,
       data: typeJobs.map(function(j) {
-        return { x: j.invoiced, y: j.margin_pct, client: j.client, suburb: j.suburb };
+        return { x: j.invoiced, y: j.margin_pct, label: jplJobLabel(j), suburb: j.suburb };
       }),
     });
     colors.push(cfg.color);
@@ -4601,8 +4648,8 @@ function renderJobScatter(jobs) {
         var di = opts.dataPointIndex;
         var d = opts.w.config.series[si].data[di];
         return '<div style="padding:8px 12px;font-size:12px;background:#1A2332;color:#fff;border-radius:8px;">' +
-          (d.client || 'Job') + ': ' + fmt$(d.x) + ' rev, ' + d.y + '% margin' +
-          (d.suburb ? ' (' + d.suburb + ')' : '') + '</div>';
+          jplText(d.label || 'Job') + ': ' + fmt$(d.x) + ' rev, ' + jplText(d.y) + '% margin' +
+          (d.suburb ? ' (' + jplText(d.suburb) + ')' : '') + '</div>';
       },
     },
     annotations: { yaxis: [{

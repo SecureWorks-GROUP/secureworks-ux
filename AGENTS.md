@@ -773,8 +773,14 @@ a read that fails for another reason keeps what the browser last saw (`sw_recon_
 `?recon=0` or `localStorage.sw_recon === '0'` turns it off, `?recon=1` / `'1'` forces it on.
 Below the daily list, Bills to place lists the open bills (`materials_recon_queue` status open,
 joined by `xero_invoice_id` to `materials_ai_placements` view=left) with the best guess, its
-reason and which keys agreed or disagreed; each opens in Financials > Bill Reconciliation with
-`mrqOpenBill(id)` and is decided there. The tab never places, moves or files a bill. It reads ops-api
+reason and which keys agreed or disagreed. Decide here opens Bill Reconciliation's own decision
+panel in the card: ops.html exposes `BillsToPlace` (the one `_matRecon` state, `_mrqDetailHtml`,
+`_mrqWireHost`, `onChange` repaint), so the two-press confirm, the Xero Projects checks, Split
+and the writes (`_matReconAction`, the only poster of `materials_recon_assign` and
+`materials_recon_not_job_related`) are that code. Never copy them into the module; a typed bill
+box is read in the place being pressed (`_mrqActiveHost` / `_mrqQ`), because both places draw
+the same `data-mrq-*` ids. `mrqOpenBill(id)` still opens a bill in Financials. The message cards
+are a separate matter: they read ops-api
 `recon_daily_list` and records one `recon_record_decision` per confirmed tap, sending back the
 `evidence_hash` and `cause` the card was shown with and never a person (the backend takes the
 signed-in user). A choice says which job something belongs to; it never moves money, sends

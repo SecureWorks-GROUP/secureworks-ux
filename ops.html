@@ -19871,6 +19871,7 @@ function mrqOpenBill(id) {
   }
   _matRecon.openId = id || null;
   _matRecon.scrollTo = id || null;
+  _mrqActiveHost = document.getElementById('matReconPanel');
   // A search could hide the bill being opened.
   _matRecon.search = '';
   var s = document.getElementById('matReconSearch');
@@ -20934,6 +20935,8 @@ async function loadMaterialsRecon() {
     var data = await opsFetch('materials_recon_queue', { status: 'open', limit: MAT_RECON_QUEUE_LIMIT });
     if (seq !== _matRecon.seq) return;
     var all = (data && data.rows) || [];
+    // Needs a person (TP-11) reads an answer with no rows list as a failed read, never as none.
+    _matRecon.rowsShapeOk = !!(data && Array.isArray(data.rows));
     var rows = all.filter(function(r) { return r && r.status === 'open'; });
     rows.sort(function(a, b) { return _mrqEx(b) - _mrqEx(a) || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')); });
     _matRecon.rows = rows;
@@ -20956,7 +20959,7 @@ async function loadMaterialsRecon() {
     renderMaterialsRecon();
     if (want && _matRecon.openId === want) {
       if (!_matRecon.lines[want]) _mrqLoadLines(want);
-      var tr = document.querySelector('[data-mrq-row="' + CSS.escape(want) + '"]');
+      var tr = document.querySelector('#matReconPanel [data-mrq-row="' + CSS.escape(want) + '"]');
       if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'center' });
     }
   } catch (e) {
@@ -20984,7 +20987,45 @@ function _mrqVisibleRows() {
   });
 }
 
+// TP-11: the open bills are drawn in two places, this table and the Bills to place cards on
+// Needs a person (modules/ops-recon.js). Both read the one _matRecon state and press the same
+// handlers below, so every repaint goes through here. _mrqActiveHost is the place the person is
+// pressing in: a typed box is read, and keeps its focus, there and not in the other copy.
+var _mrqActiveHost = null;
+var _mrqViews = [];
+function _mrqScope() { return _mrqActiveHost || document.getElementById('matReconPanel'); }
+function _mrqQ(sel) {
+  var scope = _mrqScope();
+  return (scope && scope.querySelector(sel)) || document.querySelector(sel);
+}
+// Keep what the person typed in a job search box across repaints, and where the caret was.
+function _mrqKeepTyped(scope) {
+  var focusQ = null;
+  if (!scope) return null;
+  scope.querySelectorAll('[data-mrq-q]').forEach(function(inp) {
+    var qid = inp.getAttribute('data-mrq-q');
+    if (!_matRecon.pick[qid]) _matRecon.pick[qid] = {};
+    _matRecon.pick[qid].query = inp.value;
+    if (document.activeElement === inp) focusQ = { id: qid, start: inp.selectionStart, end: inp.selectionEnd };
+  });
+  return focusQ;
+}
+function _mrqRestoreFocus(scope, focusQ) {
+  if (!scope || !focusQ) return;
+  var again = scope.querySelector('[data-mrq-q="' + CSS.escape(focusQ.id) + '"]');
+  if (again) {
+    again.focus();
+    try { again.setSelectionRange(focusQ.start, focusQ.end); } catch (e) {}
+  }
+}
 function renderMaterialsRecon() {
+  var scope = _mrqScope();
+  var focusQ = _mrqKeepTyped(scope);
+  _mrqRenderTable();
+  _mrqViews.forEach(function(fn) { try { fn(); } catch (e) { console.error('bills to place view:', e); } });
+  _mrqRestoreFocus(scope, focusQ);
+}
+function _mrqRenderTable() {
   var body = document.getElementById('matReconBody');
   if (!body) return;
   if (!_matRecon.loaded) {
@@ -21002,14 +21043,6 @@ function renderMaterialsRecon() {
       : '<div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div>';
     return;
   }
-  // Keep what the operator typed in a job search box across repaints.
-  var focusQ = null;
-  body.querySelectorAll('[data-mrq-q]').forEach(function(inp) {
-    var qid = inp.getAttribute('data-mrq-q');
-    if (!_matRecon.pick[qid]) _matRecon.pick[qid] = {};
-    _matRecon.pick[qid].query = inp.value;
-    if (document.activeElement === inp) focusQ = { id: qid, start: inp.selectionStart, end: inp.selectionEnd };
-  });
   var c = _mrqCensus(), lb = c.openLowerBound ? 'at least ' : '', slb = c.statsLowerBound ? 'at least ' : '';
   var cnt = document.getElementById('matReconOpenCount');
   if (cnt) cnt.textContent = c.open + (c.openLowerBound ? '+' : '');
@@ -21068,13 +21101,6 @@ function renderMaterialsRecon() {
     html += '<div style="text-align:center;margin:12px 0;"><button class="btn btn-secondary btn-sm" data-mrq-act="more">Show ' + Math.min(MAT_RECON_PAGE, rows.length - _matRecon.shown) + ' more of ' + (rows.length - _matRecon.shown) + '</button></div>';
   }
   body.innerHTML = html;
-  if (focusQ) {
-    var again = body.querySelector('[data-mrq-q="' + CSS.escape(focusQ.id) + '"]');
-    if (again) {
-      again.focus();
-      try { again.setSelectionRange(focusQ.start, focusQ.end); } catch (e) {}
-    }
-  }
 }
 
 function _mrqDetailHtml(r) {
@@ -21272,7 +21298,7 @@ async function _mrqLoadLines(id) {
 }
 
 async function _mrqFind(id) {
-  var input = document.querySelector('[data-mrq-q="' + id + '"]');
+  var input = _mrqQ('[data-mrq-q="' + CSS.escape(id) + '"]');
   var q = String(input ? input.value : '').trim();
   var p = _matRecon.pick[id] = { query: q };
   if (q.length < 2) { p.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderMaterialsRecon(); return; }
@@ -21402,7 +21428,7 @@ function _mrqNotJob(id) {
 async function _mrqSplitFind(id) {
   var sp = _matRecon.split[id];
   if (!sp) return;
-  var input = document.querySelector('[data-mrq-sq="' + id + '"]');
+  var input = _mrqQ('[data-mrq-sq="' + CSS.escape(id) + '"]');
   var q = String(input ? input.value : '').trim();
   sp.query = q; delete sp.results; delete sp.searchErr; delete sp.searchHint;
   if (q.length < 2) { sp.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderMaterialsRecon(); return; }
@@ -21468,22 +21494,24 @@ function _mrqSplitTyped(id) {
   var st = _mrqSplitState(id), sp = _matRecon.split[id];
   if (!st || !sp) return;
   sp.armed = 0;
-  var left = document.querySelector('[data-mrq-left="' + CSS.escape(id) + '"]');
+  var left = _mrqQ('[data-mrq-left="' + CSS.escape(id) + '"]');
   if (left) { left.textContent = _mrqSplitLeftText(st); left.classList.toggle('ok', st.ok); }
-  var btn = document.querySelector('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-act="splitsave"]');
+  var btn = _mrqQ('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-act="splitsave"]');
   if (btn) { btn.disabled = !st.ok; btn.textContent = _mrqIsInstaller(id) ? 'Confirm and save the split' : 'Save the split'; }
-  var armedNote = document.querySelector('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-split-armed]');
+  var armedNote = _mrqQ('[data-mrq-split="' + CSS.escape(id) + '"] [data-mrq-split-armed]');
   if (armedNote) armedNote.remove();
 }
 
-(function wireMaterialsRecon() {
-  function onReady() {
-    var host = document.getElementById('matReconPanel');
+// Wires the bill presses on one host. Bill Reconciliation's panel is wired here; Needs a person
+// wires its own root through BillsToPlace.wire (TP-11), so both press the same code.
+function _mrqWireHost(host) {
     if (!host || host.__mrqWired) return;
     host.__mrqWired = true;
+    var mark = function() { _mrqActiveHost = host; };
     host.addEventListener('click', function(ev) {
       var el = ev.target.closest('[data-mrq-act]');
       if (!el || !host.contains(el)) return;
+      mark();
       if (el.tagName === 'TR' && ev.target.closest('a, button, input, label')) return;
       var act = el.getAttribute('data-mrq-act'), id = el.getAttribute('data-mrq-id');
       if (el.tagName === 'A') ev.preventDefault();
@@ -21531,6 +21559,7 @@ function _mrqSplitTyped(id) {
     });
     host.addEventListener('input', function(ev) {
       var t = ev.target, g = function(a) { return t.getAttribute && t.getAttribute(a); };
+      if (t.closest && t.closest('[data-mrq-q], [data-mrq-sq], [data-mrq-amt], [data-mrq-oh], [data-mrq-ohnote]')) mark();
       var sid = g('data-mrq-amt') || g('data-mrq-oh') || g('data-mrq-ohnote') || g('data-mrq-sq');
       var sp = sid && _matRecon.split[sid];
       if (!sp) return;
@@ -21542,6 +21571,7 @@ function _mrqSplitTyped(id) {
     });
     host.addEventListener('change', function(ev) {
       var sackId = ev.target.getAttribute && ev.target.getAttribute('data-mrq-sack');
+      if (sackId || (ev.target.getAttribute && ev.target.getAttribute('data-mrq-ack'))) mark();
       if (sackId && _matRecon.split[sackId]) {
         var spt = _matRecon.split[sackId].parts[Number(ev.target.getAttribute('data-mrq-i'))];
         if (spt) { spt.ack = !!ev.target.checked; _matRecon.split[sackId].armed = 0; }
@@ -21555,13 +21585,35 @@ function _mrqSplitTyped(id) {
     });
     host.addEventListener('keydown', function(ev) {
       var id = ev.target.getAttribute && ev.target.getAttribute('data-mrq-q');
-      if (id && ev.key === 'Enter') { ev.preventDefault(); _mrqFind(id); }
+      if (id && ev.key === 'Enter') { ev.preventDefault(); mark(); _mrqFind(id); }
       var sq = ev.target.getAttribute && ev.target.getAttribute('data-mrq-sq');
-      if (sq && ev.key === 'Enter') { ev.preventDefault(); _mrqSplitFind(sq); }
+      if (sq && ev.key === 'Enter') { ev.preventDefault(); mark(); _mrqSplitFind(sq); }
     });
-  }
+}
+(function wireMaterialsRecon() {
+  function onReady() { _mrqWireHost(document.getElementById('matReconPanel')); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady); else onReady();
 })();
+
+// TP-11: what Needs a person (modules/ops-recon.js) may use of this queue. It draws each open
+// bill from these rows, puts _mrqDetailHtml in the card it opens, and presses the handlers above
+// through wire(), so the two-press confirm, the Xero Projects checks, Split and the writes
+// (materials_recon_assign, materials_recon_split, materials_recon_not_job_related) are this code.
+var BillsToPlace = {
+  load: function() { return loadMaterialsRecon(); },
+  rows: function() { return _matRecon.rows; },
+  loaded: function() { return !!_matRecon.loaded && _matRecon.rowsShapeOk !== false; },
+  loadErr: function() { return _matRecon.loadErr || (_matRecon.loaded && _matRecon.rowsShapeOk === false ? 'the answer had no list of bills' : null); },
+  listFull: function() { return !!_matRecon.listFull; },
+  openId: function() { return _matRecon.openId; },
+  done: function() { return _matRecon.done.slice(); },
+  detailHtml: function(id) { var r = _mrqRow(id); return r ? _mrqDetailHtml(r) : ''; },
+  wire: function(host) { _mrqWireHost(host); },
+  keepTyped: function(scope) { return _mrqKeepTyped(scope); },
+  restoreFocus: function(scope, f) { _mrqRestoreFocus(scope, f); },
+  onChange: function(fn) { if (_mrqViews.indexOf(fn) === -1) _mrqViews.push(fn); }
+};
+window.BillsToPlace = BillsToPlace;
 // </materials-recon>
 
 async function loadPendingPrices() {

@@ -115,6 +115,63 @@ check('TP-11: the head line never counts an unread side as none', () => {
   const e = C.needsWords({ matchErr: true, billsErr: true });
   assert(/not known/.test(e) && !/\b0\b/.test(e));
 });
+// TP-11 slice 2: the bill cards on Needs a person, drawn from a stand-in for ops.html's BillsToPlace.
+function fakeBills(rows, opts) {
+  opts = opts || {};
+  return {
+    loaded: () => !opts.err, loadErr: () => opts.err || null, rows: () => rows, listFull: () => !!opts.full,
+    openId: () => opts.openId || null, done: () => opts.done || [],
+    detailHtml: (id) => '<i data-fake-detail="' + id + '"></i>',
+  };
+}
+function withBills(bills, ai, fn) {
+  const prevB = ctx.window.BillsToPlace, prevAi = ctx.NP.ai, prevErr = ctx.NP.aiErr;
+  ctx.window.BillsToPlace = bills; ctx.NP.ai = ai || []; ctx.NP.aiErr = null;
+  try { return fn(); } finally { ctx.window.BillsToPlace = prevB; ctx.NP.ai = prevAi; ctx.NP.aiErr = prevErr; }
+}
+const AI_JOB = [{ xero_invoice_id: 'x1', decision: 'job', job_id: 'jjjjjjjj-0000-4000-8000-000000000009', job_number: 'SWP-3003', confidence: 0.72, reason: 'Delivery address matches the job site' }];
+check('TP-11: a closed bill card offers Decide here; the open one carries Bill Reconciliation\'s own panel', () => {
+  const h = withBills(fakeBills(Q, { openId: 'q1' }), AI_JOB, () => ctx.npSectionInner());
+  assert((h.match(/data-np-bill=/g) || []).length === 3, 'three open bills drawn');
+  assert(/data-np-bill="q2"[\s\S]*?Decide here/.test(h));
+  assert(/data-np-bill="q1"[\s\S]*?>Close</.test(h));
+  assert(h.includes('<i data-fake-detail="q1"></i>'), 'the open card shows the shared decision panel');
+  assert(!h.includes('data-fake-detail="q2"'), 'only one bill is open at a time');
+  // The toggle is Bill Reconciliation's own act, so opening reads the lines the same way.
+  assert(/data-mrq-act="toggle" data-mrq-id="q2"/.test(h));
+  // The AI's guess is a one-press pick of that job, through the same pick handler.
+  assert(/data-mrq-act="pickcand" data-mrq-id="q1" data-mrq-job="jjjjjjjj-0000-4000-8000-000000000009" data-mrq-jobnum="SWP-3003"/.test(h));
+});
+check('TP-11: no AI pick is offered on a card the AI made no job guess for, or on a closed card', () => {
+  const h = withBills(fakeBills(Q, { openId: 'q2' }), AI_JOB, () => ctx.npSectionInner());
+  assert(!/data-np-aipick/.test(h));
+});
+check('TP-11: after a bill is cleared the head line counts drop in place; done lines show', () => {
+  const before = withBills(fakeBills(Q), [], () => ctx.npSummaryHtml());
+  assert(/3 bills to place \(\$1,100\.50 ex GST\)/.test(before), before);
+  const after = withBills(fakeBills(Q.filter((r) => r.id !== 'q2'), { done: ['$980.00 Timber Co B-2 placed on SWF-1001'] }), [], () => [ctx.npSummaryHtml(), ctx.npSectionInner()]);
+  assert(/2 bills to place \(\$120\.50 ex GST\)/.test(after[0]), after[0]);
+  assert(/data-np-done>\$980\.00 Timber Co B-2 placed on SWF-1001</.test(after[1]));
+  const none = withBills(fakeBills([]), [], () => ctx.npSectionInner());
+  assert(/data-np-empty/.test(none));
+});
+check('TP-11: a failed bill read is said in words, with no cards and no empty state', () => {
+  const h = withBills(fakeBills(Q, { err: 'API error: 500' }), [], () => [ctx.npSectionInner(), ctx.npSummaryHtml()]);
+  assert(/data-np-err/.test(h[0]) && /could not be read/.test(h[0]));
+  assert(!/data-np-bill=|data-np-empty/.test(h[0]));
+  assert(/Bills to place not known/.test(h[1]));
+});
+check('TP-11: the module never writes a bill itself; ops.html has one bill writer', () => {
+  assert(!/opsPost\(\s*['"]materials_recon_/.test(src), 'ops-recon.js posts no materials_recon_ write');
+  const html = fs.readFileSync('ops.html', 'utf8');
+  assert(/var BillsToPlace = \{/.test(html) && /window\.BillsToPlace = BillsToPlace/.test(html), 'ops.html exposes BillsToPlace');
+  for (const action of ['materials_recon_assign', 'materials_recon_not_job_related']) {
+    const posts = html.match(new RegExp("opsPost\\(\\s*'" + action + "'", 'g')) || [];
+    assert.strictEqual(posts.length, 0, action + ' is posted only through _matReconAction');
+    const viaAction = html.match(new RegExp("_matReconAction\\(id, '" + action + "'", 'g')) || [];
+    assert.strictEqual(viaAction.length, 1, action + ' has one press');
+  }
+});
 check('a suggested job on a message is confirm; another job is correct', () => {
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_A.job_id }), 'confirm');
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_B.job_id }), 'correct');
@@ -306,4 +363,4 @@ check('AC-M6: a text original shows the whole text; a bad answer and errors are 
 });
 
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
-console.log('PASS recon: tab flag, default-on probe, bills to place rows, actions, body, escalate, split, find by job, refusals, words, open the original');
+console.log('PASS recon: tab flag, default-on probe, bills to place rows and cards, actions, body, escalate, split, find by job, refusals, words, open the original');

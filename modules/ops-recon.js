@@ -18,9 +18,10 @@
 // ?recon=1 or sw_recon = '1' still forces it on, and anyone not allowed gets the refusal in words.
 // Below the daily list it shows Bills to place: the open supplier bills (materials_recon_queue)
 // with the AI reader's best guess, its reason and which keys agreed or disagreed
-// (materials_ai_placements view=left). Each bill is decided in Financials > Bill
-// Reconciliation (Decide in Bills to place opens it there, lines read); nothing on this tab
-// places, moves or files a bill.
+// (materials_ai_placements view=left). Decide here opens Bill Reconciliation's own decision
+// panel inside the card (ops.html BillsToPlace: the same state, checks and writes, never a copy),
+// so a bill is placed, split or filed without leaving the list. The message cards above still
+// only say which job something belongs to.
 // Every rule the screen applies lives in the pure ReconCore between the sentinels below.
 // Guards: npm run test:recon (in test:e2e) and tests/e2e/ops-recon.spec.js.
 
@@ -555,41 +556,50 @@ function loadRecon() {
   if (!rcRoot()) return;
   rcBind();
   rcRead(!!RC.items);
-  npRead(!!NP.rows);
+  npRead(NP.read);
 }
 
-// TP-11 Needs a person: the Bills to place side. The same reads Financials > Bill
-// Reconciliation and its AI panel make (materials_recon_queue status=open, the action's cap of
-// 1000, and materials_ai_placements view=left); each bill opens in Bills to place to decide.
+// TP-11 Needs a person: the Bills to place side. Bills come from Financials > Bill
+// Reconciliation's own state (window.BillsToPlace in ops.html: the materials_recon_queue read,
+// status open, its cap of 1000), joined to the AI reader's left-for-a-person rows
+// (materials_ai_placements view=left). A card opens on Decide here and shows Bill
+// Reconciliation's own decision panel, pressed through BillsToPlace.wire: the two-press confirm,
+// the Xero Projects checks, Split and the writes are that code, never a copy. A write repaints
+// this section and the head line through BillsToPlace.onChange.
 var NP_PAGE = 25;
-var NP_QUEUE_LIMIT = 1000;
-var NP = { rows: null, err: null, aiErr: null, full: false, loading: false, gen: 0, shown: NP_PAGE };
+var NP = { ai: [], aiErr: null, loading: false, read: false, gen: 0, shown: NP_PAGE };
+function npBills() { return typeof window !== 'undefined' && window.BillsToPlace ? window.BillsToPlace : null; }
 function npLabels() {
   return {
     reasons: typeof MAT_RECON_REASON_LABELS !== 'undefined' ? MAT_RECON_REASON_LABELS : null,
     rules: typeof MAT_RECON_PROPOSAL_RULES !== 'undefined' ? MAT_RECON_PROPOSAL_RULES : null
   };
 }
+// What the bill side knows right now: rows (null until read), err (a failed read), full (cut at the cap).
+function npState() {
+  var B = npBills();
+  if (!B) return { rows: null, err: NP.read ? new Error('Bills to place is not on this page') : null, full: false };
+  if (B.loadErr()) return { rows: null, err: new Error(B.loadErr()), full: false };
+  if (!B.loaded()) return { rows: null, err: null, full: false };
+  var aiAt = {};
+  (NP.ai || []).forEach(function (p) { if (p && p.xero_invoice_id && !p.undone_at && !aiAt[p.xero_invoice_id]) aiAt[p.xero_invoice_id] = p; });
+  var rows = ReconCore.billRows(B.rows(), NP.ai, npLabels());
+  rows.forEach(function (b) { b.aiRow = aiAt[b.xero_invoice_id] || null; });
+  return { rows: rows, err: null, full: B.listFull() };
+}
 async function npRead(quiet) {
   var gen = ++NP.gen;
-  if (!quiet || !NP.rows) { NP.loading = true; rcRender(); }
-  var q = opsFetch('materials_recon_queue', { status: 'open', limit: NP_QUEUE_LIMIT }).then(function (r) { return { ok: r }; }, function (e) { return { err: e }; });
+  var B = npBills();
+  NP.read = true;
+  if (!quiet) { NP.loading = true; npRepaint(); }
   var a = opsFetch('materials_ai_placements', { view: 'left', limit: 500 }).then(function (r) { return { ok: r }; }, function (e) { return { err: e }; });
-  var qr = await q, ar = await a;
+  if (B) { try { await B.load(); } catch (e) { /* loadMaterialsRecon keeps its own error */ } }
+  var ar = await a;
   if (gen !== NP.gen) return;
   NP.loading = false;
-  // An answer with no rows is a failed read, never "no bills to place".
-  if (!qr.err && (!qr.ok || !Array.isArray(qr.ok.rows))) qr = { err: new Error('Unexpected answer reading the bills') };
-  if (qr.err) {
-    if (!quiet || !NP.rows) { NP.rows = null; NP.err = qr.err; }
-  } else {
-    var aiRows = ar.ok && Array.isArray(ar.ok.placements) ? ar.ok.placements : [];
-    NP.aiErr = ar.err ? ar.err : (Array.isArray(ar.ok && ar.ok.placements) ? null : new Error('Unexpected answer'));
-    NP.rows = ReconCore.billRows(qr.ok.rows, aiRows, npLabels());
-    NP.full = qr.ok.rows.length >= NP_QUEUE_LIMIT;
-    NP.err = null;
-  }
-  rcRender();
+  NP.ai = ar.ok && Array.isArray(ar.ok.placements) ? ar.ok.placements : [];
+  NP.aiErr = ar.err ? ar.err : (Array.isArray(ar.ok && ar.ok.placements) ? null : new Error('Unexpected answer'));
+  npRepaint();
 }
 
 function npErrWords(e) {
@@ -598,9 +608,9 @@ function npErrWords(e) {
   return 'The bill list could not be read just now' + (e && e.message ? ': ' + e.message : '') + '. The bills waiting are not known, so nothing here means none.';
 }
 
-function npBillCard(b) {
+function npBillCard(b, open) {
   var id = rcEsc(b.id);
-  var h = '<div class="rc-card np-bill" data-np-bill="' + id + '">';
+  var h = '<div class="rc-card np-bill' + (open ? ' np-open' : '') + '" data-np-bill="' + id + '">';
   h += '<div class="rc-top"><span>' + rcEsc(b.supplier) + (b.number ? ' &middot; ' + rcEsc(b.number) : '') + '</span>' +
     '<span>' + (b.amountEx == null ? 'Amount not known' : rcEsc(ReconCore.money(b.amountEx)) + ' ex GST') + '</span></div>';
   h += '<div class="rc-meta">' + rcEsc(['Bill to place', b.date ? 'Dated ' + b.date : ''].filter(Boolean).join(' · ')) + '</div>';
@@ -613,23 +623,65 @@ function npBillCard(b) {
       return '<span class="' + cls + '">' + rcEsc(tag + k.words) + '</span>';
     }).join(' ') + '</div>';
   }
-  h += '<div class="rc-acts"><button type="button" class="rc-job" data-np-open="' + id + '">Decide in Bills to place</button></div>';
+  h += '<div class="rc-acts">' +
+    '<button type="button" class="rc-job" data-mrq-act="toggle" data-mrq-id="' + id + '" data-np-decide aria-expanded="' + (open ? 'true' : 'false') + '">' + (open ? 'Close' : 'Decide here') + '</button>' +
+    '<button type="button" data-np-open="' + id + '">Open in Bill Reconciliation</button></div>';
+  if (open) {
+    // The AI reader's guess is a job a person can pick in one press (the same pick as a
+    // suggested candidate); placing it still takes Place and its checks below.
+    var ai = b.aiRow;
+    if (ai && ai.decision === 'job' && ai.job_id && ai.job_number) {
+      h += '<div class="np-line"><button type="button" class="mrq-pickbtn" data-mrq-act="pickcand" data-mrq-id="' + id + '" data-mrq-job="' + rcEsc(ai.job_id) +
+        '" data-mrq-jobnum="' + rcEsc(ai.job_number) + '" data-np-aipick>Pick the AI\'s guess, <b>' + rcEsc(ai.job_number) + '</b></button></div>';
+    }
+    h += '<div class="np-detail" data-np-detail="' + id + '">' + npBills().detailHtml(b.id) + '</div>';
+  }
   return h + '</div>';
 }
 
-function npSection() {
-  var h = '<div class="rc-band" data-np-band>Bills to place' + (NP.rows ? ' (' + (NP.full ? 'at least ' : '') + NP.rows.length + ')' : '') +
-    '<small>Supplier bills on no job that the AI left for a person, largest first. Confirm, change the job, split or file each one in Bills to place.</small></div>';
-  if (NP.loading && !NP.rows) return h + '<div class="rc-empty">Reading the bills...</div>';
-  if (NP.err) return h + '<div class="rc-msg" data-np-err>' + rcEsc(npErrWords(NP.err)) + '</div>';
-  if (!NP.rows) return h;
+function npSummaryHtml() {
+  var st = npState();
+  return rcEsc(ReconCore.needsWords({
+    matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
+    billsErr: !!st.err, billCount: st.rows ? st.rows.length : null, billEx: st.rows ? ReconCore.billTotalEx(st.rows) : 0, billsFull: st.full
+  })) + (st.rows && st.rows.length ? ' <a href="#" data-np-jump>Go to bills</a>' : '');
+}
+
+function npSectionInner() {
+  var st = npState();
+  var B = npBills();
+  var h = '<div class="rc-band" data-np-band>Bills to place' + (st.rows ? ' (' + (st.full ? 'at least ' : '') + st.rows.length + ')' : '') +
+    '<small>Supplier bills on no job that the AI left for a person, largest first. Decide here to confirm, change the job, split or file one as not job related.</small></div>';
+  var done = B ? B.done() : [];
+  done.slice(0, 5).forEach(function (line) { h += '<div class="rc-done" data-np-done>' + rcEsc(line) + '</div>'; });
+  if (NP.loading && !st.rows && !st.err) return h + '<div class="rc-empty">Reading the bills...</div>';
+  if (st.err) return h + '<div class="rc-msg" data-np-err>' + rcEsc(npErrWords(st.err)) + '</div>';
+  if (!st.rows) return h;
   if (NP.aiErr) h += '<div class="rc-msg" data-np-aierr>The AI reader\'s guesses could not be read just now, so a bill may have one that is not shown.</div>';
-  if (!NP.rows.length) return h + '<div class="rc-empty" data-np-empty>No bill is waiting to be placed.</div>';
-  NP.rows.slice(0, NP.shown).forEach(function (b) { h += npBillCard(b); });
-  var left = NP.rows.length - NP.shown;
+  if (!st.rows.length) return h + '<div class="rc-empty" data-np-empty>No bill is waiting to be placed.</div>';
+  var openId = B.openId();
+  st.rows.slice(0, NP.shown).forEach(function (b) { h += npBillCard(b, openId === b.id); });
+  // A bill opened past the page is still drawn, so a decision never vanishes off the end.
+  var past = st.rows.slice(NP.shown).filter(function (b) { return b.id === openId; })[0];
+  if (past) h += npBillCard(past, true);
+  var left = st.rows.length - NP.shown;
   if (left > 0) h += '<div class="rc-empty"><button type="button" data-np-more>Show ' + Math.min(NP_PAGE, left) + ' more of ' + left + '</button></div>';
-  if (NP.full) h += '<div class="rc-empty" data-np-full>This holds the ' + NP_QUEUE_LIMIT + ' newest open bills. There may be more; older ones come in as these are placed.</div>';
+  if (st.full) h += '<div class="rc-empty" data-np-full>This holds the 1000 newest open bills. There may be more; older ones come in as these are placed.</div>';
   return h;
+}
+
+function npSection() { return '<div id="npBills" data-np-bills>' + npSectionInner() + '</div>'; }
+
+// Repaint only the bill section and the head line, so a decision under way on a message card
+// and the page's scroll are left alone.
+function npRepaint() {
+  var root = rcRoot();
+  if (!root) return;
+  var sec = root.querySelector('[data-np-bills]');
+  var sum = root.querySelector('[data-np-summary]');
+  if (!sec || !sum) return;
+  sec.innerHTML = npSectionInner();
+  sum.innerHTML = npSummaryHtml();
 }
 
 function npOpenBill(id) {
@@ -753,10 +805,7 @@ function rcRender() {
     '<button type="button" data-rc-reload class="btn btn-sm">Read again</button></div>' +
     '<div class="rc-lede">Everything waiting for a person to say which job it belongs to: messages and invoices to match, most at stake first, then supplier bills to place. ' +
     'A match here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
-  h += '<div class="rc-meta np-summary" data-np-summary>' + rcEsc(ReconCore.needsWords({
-    matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
-    billsErr: !!NP.err, billCount: NP.rows ? NP.rows.length : null, billEx: NP.rows ? ReconCore.billTotalEx(NP.rows) : 0, billsFull: NP.full
-  })) + (NP.rows && NP.rows.length ? ' <a href="#" data-np-jump>Go to bills</a>' : '') + '</div>';
+  h += '<div class="rc-meta np-summary" data-np-summary>' + npSummaryHtml() + '</div>';
   if (RC.msg) h += '<div class="rc-msg" data-rc-msg>' + rcEsc(RC.msg) + '</div>';
   RC.recorded.forEach(function (line) { h += '<div class="rc-done" data-rc-recorded>' + rcEsc(line) + '</div>'; });
   h += rcJobSection();
@@ -781,7 +830,10 @@ function rcRender() {
     if (also) h += '<div class="rc-empty" data-rc-leftout>' + rcEsc(also) + '</div>';
   }
   h += npSection();
+  var B = npBills();
+  var typed = B ? B.keepTyped(root) : null;
   root.innerHTML = h + '</div>';
+  if (B) B.restoreFocus(root, typed);
 }
 
 function rcJobSection() {
@@ -852,6 +904,8 @@ function rcBind() {
   var root = rcRoot();
   if (!root || root.__rcBound) return;
   root.__rcBound = true;
+  var B = npBills();
+  if (B) { B.wire(root); B.onChange(npRepaint); }
   root.addEventListener('click', function (ev) {
     var jump = ev.target.closest('[data-np-jump]');
     if (jump && root.contains(jump)) {
@@ -866,7 +920,7 @@ function rcBind() {
     var id = card && card.getAttribute('data-rc-subject');
     if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); npRead(false); return; }
     if (t.hasAttribute('data-np-open')) { npOpenBill(t.getAttribute('data-np-open')); return; }
-    if (t.hasAttribute('data-np-more')) { NP.shown += NP_PAGE; rcRender(); return; }
+    if (t.hasAttribute('data-np-more')) { NP.shown += NP_PAGE; npRepaint(); return; }
     if (t.hasAttribute('data-rc-yes')) { rcRecord(); return; }
     if (t.hasAttribute('data-rc-back')) { RC.pick = null; rcRender(); return; }
     if (t.hasAttribute('data-rc-clear')) { RC.job = null; RC.pick = null; rcRender(); return; }

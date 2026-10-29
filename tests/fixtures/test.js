@@ -1177,6 +1177,7 @@ const test = base.extend({
         },
         crew_charges_on_my_jobs: { charges: [] },
         my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
+        my_group_work_orders: { enabled: true, groups: [], group_job_ids: [] },
         my_hours: feedScenario === 'trade-invoice-running-draft'
           ? { ...labourExplainerHours, running_invoice_draft: true }
           : deductionDraftScenario

@@ -125,6 +125,8 @@ assert(!/—/.test(Core.REFUSAL_MSG), 'no em dash in words a trade reads')
 
 // ── 2. The payload the trade app posts ─────────────────────────────────────
 const ctx = {
+  invoiceGroupJob: () => false,
+  invoiceGroupTotal: () => 0,
   _isMakesafeCard: function (c) { return !!c.is_makesafe },
   RATE_NOT_SET_MSG: 'No pay rate is set for you yet.',
   console,

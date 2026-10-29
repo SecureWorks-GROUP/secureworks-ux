@@ -1331,7 +1331,7 @@ var JobOverviewV2Core = (function () {
   // Proposed lines for states r6 has no row for (marked on the card and in the PR, for design).
   var BILL_FRESH = {
     trade: "Trade app bill: Money counts its cost through the trade app's own lines, not as this bill. See Money.",
-    over: "Money counts more of this bill's cost on jobs than the bill itself. See Money.",
+    over: "Money counts more of this bill's cost than the bill itself. See Money.",
     draft: 'Xero has not approved this bill yet. Money counts it on no job until then. See Money.',
     noJob: 'Money counts this bill on no job. See Money.'
   };
@@ -1408,13 +1408,16 @@ var JobOverviewV2Core = (function () {
     if (where === 'elsewhere' || where === 'here_and_elsewhere') {
       if (!others.length) { r.row = '14'; r.words = BILL_ROW.r14; r.why = billWhy('where_counted_unknown'); r.unknown = true; return r; }
       var on = others.join(' and ');
+      // r6 row 5: a bill counted only in part keeps "The rest is not placed yet." wherever the parts are
+      var rest = state === 'counted_in_part' ? ' The rest is not placed yet.' : '';
       if (where === 'elsewhere') {
-        r.row = '9A';
-        r.words = oh ? "Money counts part of this bill's cost on " + on + ' and part to overhead (no job). See Money.'
-          : "Money counts this bill's cost on " + on + '. See Money.';
+        r.row = rest ? '5' : '9A';
+        r.words = (oh ? "Money counts part of this bill's cost on " + on + ' and part to overhead (no job).'
+          : rest ? "Money counts part of this bill's cost on " + on + '.'
+          : "Money counts this bill's cost on " + on + '.') + rest + ' See Money.';
       } else {
         r.row = '10';
-        r.words = "Money counts part of this bill's cost here and part on " + on + (oh ? ', and part to overhead (no job)' : '') + '. See Money.';
+        r.words = "Money counts part of this bill's cost here and part on " + on + (oh ? ', and part to overhead (no job)' : '') + '.' + rest + ' See Money.';
       }
       return r;
     }
@@ -1426,8 +1429,9 @@ var JobOverviewV2Core = (function () {
       return r;
     }
     if (reason === 'installer_unconfirmed') { r.row = '3'; r.words = BILL_ROW.r3; return r; }
-    if (reason === 'labour_part_unconfirmed') { r.row = '14h'; r.words = BILL_ROW.r14hLabour; return r; }
-    if (reason === 'xero_link_read_through_overhead') { r.row = '14h'; r.words = BILL_ROW.r14hOverhead; return r; }
+    // 14h lines are not settled: flagged so they are echoed in "What we don't know" (the line says why)
+    if (reason === 'labour_part_unconfirmed') { r.row = '14h'; r.words = BILL_ROW.r14hLabour; r.unknown = true; return r; }
+    if (reason === 'xero_link_read_through_overhead') { r.row = '14h'; r.words = BILL_ROW.r14hOverhead; r.unknown = true; return r; }
     if (reason === 'xero_link_hidden_by_other_row') { r.row = '14h'; r.words = BILL_ROW.r14hOther; r.unknown = true; r.why = 'Money is to look at this bill.'; return r; }
     // r6 row 7: CFO's hold, row 14, until F1 is settled
     if (reason === 'installer_not_job_related' || state === 'not_job_related') {

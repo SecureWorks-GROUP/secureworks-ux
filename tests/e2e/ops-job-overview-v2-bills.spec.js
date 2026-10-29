@@ -56,7 +56,16 @@ const ROWS = [
     "Where this bill's cost counts is not known here. See Money."],
   ['new', bill({ where_counted: 'trade_app', bill_state: 'trade_mirror', mirror_bill: true, here: here('mirror_bill_person_placed', { counts: 'not_counted', placed_by: 'person' }) }),
     "Trade app bill: Money counts its cost through the trade app's own lines, not as this bill. See Money."],
-  ['new', bill({ bill_state: 'over_counted' }), "Money counts more of this bill's cost on jobs than the bill itself. See Money."],
+  ['new', bill({ bill_state: 'over_counted' }), "Money counts more of this bill's cost than the bill itself. See Money."],
+  // r6 row 5 wherever the counted part is: a bill counted only in part never reads as counted whole
+  ['5', bill({ where_counted: 'elsewhere', bill_state: 'counted_in_part', here: here('xero_link_read_through_rows', { counts: 'not_counted' }), other_jobs: [other('SWF-990202')] }),
+    "Money counts part of this bill's cost on SWF-990202. The rest is not placed yet. See Money."],
+  ['5', bill({ where_counted: 'elsewhere', bill_state: 'counted_in_part', overhead_part: true, here: here('xero_link_read_through_rows', { counts: 'not_counted' }), other_jobs: [other('SWF-990202')] }),
+    "Money counts part of this bill's cost on SWF-990202 and part to overhead (no job). The rest is not placed yet. See Money."],
+  ['10', bill({ where_counted: 'here_and_elsewhere', bill_state: 'counted_in_part', other_jobs: [other('SWF-990202')] }),
+    "Money counts part of this bill's cost here and part on SWF-990202. The rest is not placed yet. See Money."],
+  ['14h', bill({ where_counted: 'no_job', bill_state: 'not_counted', here: here('labour_part_unconfirmed', { counts: 'not_counted' }) }),
+    'A labour part of this bill waits for a person to confirm it. Money does not count that part yet. See Money.'],
   ['new', bill({ where_counted: 'no_job', bill_state: 'not_counted', bill_status: 'DRAFT', here: here('bill_not_approved', { counts: 'not_counted' }) }),
     'Xero has not approved this bill yet. Money counts it on no job until then. See Money.'],
 ];
@@ -97,6 +106,15 @@ test.describe('bill outcomes: the rule (extracted from the module)', () => {
     expect(l.words).not.toMatch(/also on/i);
   });
 
+  test('every not known or not settled line is flagged, so it is echoed in What we don\'t know; settled lines are not', () => {
+    for (const [row, b] of ROWS) {
+      const l = C.billLine(b);
+      expect(l.unknown, row + ' ' + l.words).toBe(['1', '14h', '7', '14'].includes(row));
+    }
+    // the over-counted line is true whether the excess is on jobs or in an overhead part
+    expect(C.billLine(bill({ bill_state: 'over_counted', overhead_part: true })).words).not.toMatch(/on jobs/);
+  });
+
   test('no line carries an amount', () => {
     for (const [, b] of ROWS) expect(C.billLine(b).words).not.toMatch(/\$|\d+\.\d\d/);
   });
@@ -115,7 +133,7 @@ test.describe('bill outcomes: the rule (extracted from the module)', () => {
     expect(C.billOutcomes(ov({ contract_version: 'cfo-bill-cost-outcome-v1', shape: 'context-job-bill-outcomes-v1', bills: [] }, { ok: true, state: 'ok', count: 0 })).words)
       .toBe('No supplier bill is placed on this job.');
     const ok = C.billOutcomes(ov({ contract_version: 'cfo-bill-cost-outcome-v1', shape: 'context-job-bill-outcomes-v1',
-      bills: [bill({ bill_status: 'PAID' }), ROWS[11][1]] }, { ok: true, state: 'ok', count: 2 }));
+      bills: [bill({ bill_status: 'PAID' }), ROWS.find((r) => r[1].mirror_bill === true)[1]] }, { ok: true, state: 'ok', count: 2 }));
     expect(ok.bills.map((x) => [x.title, x.status, x.mirror])).toEqual([
       ['B-1 · Fence Supply Co', 'Paid in Xero', false],
       ['B-1 · Fence Supply Co', 'Approved in Xero', true],
@@ -196,6 +214,33 @@ test('the card shows where each bill counts, the unknown with its reason, and th
   // the bills come only inside job_overview: the card asks nothing else for them
   expect(await page.evaluate(() => window.__fetches.filter((a) => /bill_outcome|cfo_|cost_outcome/i.test(a)))).toEqual([]);
   expect(await page.evaluate(() => window.__fetches.filter((a) => a === 'job_overview').length)).toBeGreaterThan(0);
+});
+
+test('a bill counted only in part says the rest is not placed yet, on another job and split; the 14h lines are echoed', async ({ page }) => {
+  const bills = [
+    bill({ xero_invoice_id: 'X-PART-ELSE', invoice_number: 'B-201', where_counted: 'elsewhere', bill_state: 'counted_in_part',
+      here: here('xero_link_read_through_rows', { counts: 'not_counted' }), other_jobs: [other('SWF-990202')] }),
+    bill({ xero_invoice_id: 'X-PART-SPLIT', invoice_number: 'B-202', where_counted: 'here_and_elsewhere', bill_state: 'counted_in_part',
+      other_jobs: [other('SWF-990303')] }),
+    bill({ xero_invoice_id: 'X-LABOUR', invoice_number: 'B-203', where_counted: 'no_job', bill_state: 'not_counted',
+      here: here('labour_part_unconfirmed', { counts: 'not_counted' }) }),
+    bill({ xero_invoice_id: 'X-OH', invoice_number: 'B-204', where_counted: 'no_job', bill_state: 'overhead',
+      here: here('xero_link_read_through_overhead', { counts: 'not_counted' }) }),
+  ];
+  await boot(page, withBills(bills));
+  const block = page.locator('#ov2Bills');
+  const line = (id) => block.locator(`[data-ov2-bill="${id}"]`);
+  await expect(line('X-PART-ELSE')).toHaveAttribute('data-ov2-bill-row', '5');
+  await expect(line('X-PART-ELSE').locator('.ov2-bill-where'))
+    .toHaveText("Money counts part of this bill's cost on SWF-990202. The rest is not placed yet. See Money.");
+  await expect(line('X-PART-SPLIT').locator('.ov2-bill-where'))
+    .toHaveText("Money counts part of this bill's cost here and part on SWF-990303. The rest is not placed yet. See Money.");
+  // never the whole-bill line for a part
+  await expect(block).not.toContainText("Money counts this bill's cost on SWF-990202.");
+  const gaps = page.locator('#ov2Unknown [data-ov2-bill-gap]');
+  await expect(gaps).toHaveCount(2);
+  await expect(gaps.nth(0)).toHaveText('B-203 · Fence Supply Co: A labour part of this bill waits for a person to confirm it. Money does not count that part yet. See Money.');
+  await expect(gaps.nth(1)).toHaveText('B-204 · Fence Supply Co: An overhead part is recorded on this bill while Xero still links it here. Money does not count it on this job. See Money.');
 });
 
 test('a refused or failed bills read says not known here with its reason, never no bills', async ({ page }) => {

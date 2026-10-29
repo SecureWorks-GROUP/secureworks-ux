@@ -8,7 +8,7 @@
 // must then be today's.
 // Supplier names, the client and the job number are made up.
 const { test, expect } = require('@playwright/test');
-const { BOX, SID, dayFrom, fakePayment, boot, boxOf, sent } = require('../helpers/dispatch-v2-payment');
+const { BOX, SID, dayFrom, dayWords, fakePayment, boot, boxOf, sent } = require('../helpers/dispatch-v2-payment');
 
 const NO_DASH = /[–—]/;
 // A class list holding every one of these whole class words, in any order.
@@ -203,6 +203,27 @@ test.describe('Dispatch v2: the Materials panel', () => {
     const second = await boot(page2, fakePayment({ lysaght: making, twinside: making }));
     await expect(panelOf(second.root).locator('.dpc-mp-r')).toHaveCount(2);
     await expect(panelOf(second.root).locator('.dpc-mp-sumbar')).toHaveCount(0);
+  });
+
+  test('with every date confirmed and no install booked, a dashed green line marks the earliest install', async ({ page }) => {
+    const paid = { at: '2026-10-29T06:40:00.000Z', by: 'shaun@ops.test' };
+    const fake = fakePayment({ lysaght: { paid }, twinside: { date: dayFrom(6), confirmed: true, paid }, earliest: { day: dayFrom(7), after_day: dayFrom(6) } });
+    const { root } = await boot(page, fake);
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-mp-earlyl')).toHaveText('Earliest install ' + dayWords(dayFrom(7)));
+    await expect(panel.locator('.dpc-mp-early')).toHaveCount(1);
+    await expect(panel.locator('.dpc-mp-noinst')).toHaveCount(0);
+    await expect(panel.locator('.dpc-mp-sumbar')).toHaveText('On us All materials by ' + dayWords(dayFrom(6)) + '. Book the install from ' + dayWords(dayFrom(7)) + ' and tell the client.');
+    // The line sits after the last order.
+    const left = async (loc) => parseFloat(await loc.evaluate((e) => e.style.left));
+    expect(await left(panel.locator('.dpc-mp-early'))).toBeGreaterThan(await left(panel.locator('.dpc-mp-dot').last()));
+  });
+
+  test('an install booked draws its own line, not the earliest install', async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ install: dayFrom(8), earliest: { day: dayFrom(7), after_day: dayFrom(6) } }));
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-mp-instl')).toHaveText('Install ' + dayWords(dayFrom(8)));
+    await expect(panel.locator('.dpc-mp-early, .dpc-mp-noinst')).toHaveCount(0);
   });
 
   test("an older ops-api keeps today's Arrival line", async ({ page }) => {

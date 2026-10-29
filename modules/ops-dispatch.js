@@ -2185,10 +2185,12 @@
   // Whether an order sits in the bay: no date yet (or an ASAP order waiting on one).
   function mpInBay(o) { return !parseDay(o.delivery_date); }
 
-  // The last day the line has to reach.
+  // The last day the line has to reach (the earliest install too, when no
+  // install is booked).
   function mpEnd(a, t0) {
     var inst = parseDay(a.install_day);
-    var days = [inst ? dayNum(inst) : t0 + 7];
+    var early = inst ? null : mpEarliest(a);
+    var days = [inst ? dayNum(inst) : early ? dayNum(early) : t0 + 7];
     a.orders.forEach(function (o) { var d = isObj(o) && parseDay(o.delivery_date); if (d) days.push(dayNum(d)); });
     return Math.max.apply(null, days);
   }
@@ -2221,7 +2223,8 @@
       m.row = at - last[0] >= 15 ? 0 : at - last[1] >= 15 ? 1 : 0;
       last[m.row] = at;
     });
-    return { today: today, inst: inst, instPct: inst ? pct(inst) : null, marks: marks, bay: bay.length, pct: pct };
+    var early = inst ? null : mpEarliest(a);
+    return { today: today, inst: inst, instPct: inst ? pct(inst) : null, early: early, earlyPct: early ? pct(early) : null, marks: marks, bay: bay.length, pct: pct };
   }
 
   // An unpaid pay-first order that is at Awaiting payment: the only one
@@ -2436,8 +2439,21 @@
     }
   }
 
-  // The install end of the line when nothing is booked.
+  // ── The earliest install line (piece D) ──
+  // No install booked and every open order has a confirmed date: the server
+  // works out the earliest install (the next working day after the last
+  // order arrives, Monday to Friday, skipping WA public holidays) and the
+  // panel draws it as a dashed green line. A suggestion only: it never books.
+  // Before that, the end of the line says No install booked.
+  function mpEarliest(a) {
+    return isObj(a.earliest_install) ? parseDay(a.earliest_install.day) : null;
+  }
+
   function mpNoInstallHtml(a, p) {
+    if (p.early) {
+      var at = 'left:' + p.earlyPct.toFixed(1) + '%';
+      return '<span class="dpc-mp-inst dpc-mp-early" style="' + at + '"></span><span class="dpc-mp-instl dpc-mp-earlyl" style="' + at + '">Earliest install ' + esc(dayText(p.early)) + '</span>';
+    }
     return '<span class="dpc-mp-instl dpc-mp-noinst" style="left:' + MP_END + '%">No install booked</span>';
   }
 

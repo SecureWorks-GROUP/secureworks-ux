@@ -567,6 +567,9 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-mp-inst { position: absolute; top: 22px; height: 56px; width: 0; border-left: 2px solid var(--ink); }
 .dpc-mp-instl { position: absolute; top: 2px; transform: translateX(-50%); font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--ink); }
 .dpc-mp-noinst { color: #9a6200; transform: translateX(-100%); }
+/* The earliest install: a dashed green line, a suggestion only. */
+.dpc-mp-inst.dpc-mp-early { border-left: 2px dashed #2f7d4f; }
+.dpc-mp-earlyl { color: #2f7d4f; }
 .dpc-mp-dot { position: absolute; top: 44px; width: 22px; height: 22px; border-radius: 50%; transform: translateX(-50%); border: 3px solid #c5d0d6; background: #fff; z-index: 1; box-sizing: border-box; }
 .dpc-mp-dot.us { border-color: #A83C16; } .dpc-mp-dot.us.s { background: #A83C16; }
 .dpc-mp-dot.sp { border-color: #2c5d86; } .dpc-mp-dot.sp.s { background: #2c5d86; }

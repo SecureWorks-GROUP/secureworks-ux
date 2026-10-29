@@ -74,7 +74,7 @@ function fakePayment(opts = {}) {
   const stamp = () => new Date((clock += 60000)).toISOString();
   // work: 'repair' (the default, the job that started it) or 'fencing' (a
   // pipeline job, where Accept can offer the job-wide stage move).
-  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair' };
+  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair', earliest: opts.earliest || null };
   Object.assign(fake.boxes[0], opts.lysaght || {});
   if (opts.twinside) Object.assign(fake.boxes[1], opts.twinside);
   const forced = (action) => { const q = fake.fail[action]; return q && q.length ? q.shift() : null; };
@@ -166,7 +166,13 @@ function fakePayment(opts = {}) {
       asap_waiting: orders.filter((o) => o.flag === 'asap').length,
     });
     a.payment = { any_unpaid: unpaid.length > 0, unpaid_suppliers: unpaid };
-    a.earliest_install = null;
+    // Piece C: the earliest install, given as { day, after_day } by the test.
+    // With no install booked it takes the place of each "Book the install".
+    a.earliest_install = fake.earliest;
+    if (fake.earliest && !fake.install) {
+      const line = 'All materials by ' + dayWords(fake.earliest.after_day) + '. Book the install from ' + dayWords(fake.earliest.day) + ' and tell the client';
+      a.waiting_on_us = a.waiting_on_us.filter((t) => t !== 'Book the install and tell the client').concat([line]);
+    }
     return a;
   };
   const waiting = () => { const a = arrival(); return { on_us: a.waiting_on_us.length > 0, todo: a.waiting_on_us }; };

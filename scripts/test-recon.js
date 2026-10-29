@@ -48,6 +48,73 @@ check('the tab shows only with ?recon=1 or the browser flag', () => {
   assert.strictEqual(C.tabVisible('?recon=10', null), false);
   assert.strictEqual(C.tabVisible('', '1'), true);
 });
+check('TP-11: on by default (ask the server); ?recon=0 or sw_recon 0 turns it off; 1 forces it on', () => {
+  assert.strictEqual(C.tabSwitch('', null), 'ask');
+  assert.strictEqual(C.tabSwitch('?recon=1', null), 'on');
+  assert.strictEqual(C.tabSwitch('?a=1&recon=0', null), 'off');
+  assert.strictEqual(C.tabSwitch('?recon=10', null), 'ask');
+  assert.strictEqual(C.tabSwitch('', '1'), 'on');
+  assert.strictEqual(C.tabSwitch('', '0'), 'off');
+  assert.strictEqual(C.tabSwitch('?recon=1', '0'), 'on');
+  assert.strictEqual(C.tabSwitch('?recon=0', '1'), 'off');
+});
+check('TP-11: the probe shows the tab on a list, hides it on a refusal, and an unknown read stays unknown', () => {
+  assert.strictEqual(C.probeAnswer({ items: [] }, null), true);
+  assert.strictEqual(C.probeAnswer({}, null), null);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, code: 'operator_access_required' }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, code: 'operator_org_required' }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, body: { code: 'not_staff' } }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403 }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 401, code: 'user_jwt_required' }), null);
+  assert.strictEqual(C.probeAnswer(null, new Error('Sign in required')), null);
+  assert.strictEqual(C.probeAnswer(null, { status: 500 }), null);
+});
+const LABELS = { reasons: { no_ref_no_po: 'No reference, no matching PO' }, rules: { several_candidates: 'more than one job fits' } };
+const Q = [
+  { id: 'q1', status: 'open', xero_invoice_id: 'x1', contact_name: 'Steel Co', invoice_number: 'B-1', invoice_date: '2026-10-20', sub_total: 120.5, suggestion_reason: 'no_ref_no_po' },
+  { id: 'q2', status: 'open', xero_invoice_id: 'x2', contact_name: 'Timber Co', invoice_number: 'B-2', invoice_date: '2026-10-21', sub_total: 980,
+    proposal: { kind: 'review', rule: 'several_candidates', outcome: 'queued_for_review', candidates: [{ job_id: 'j1', job_number: 'SWF-1001', signals: ['po_number', 'site_suburb'] }, { job_id: 'j2', job_number: 'SWP-2002', signals: [] }] } },
+  { id: 'q3', status: 'open', xero_invoice_id: 'x3', contact_name: null, invoice_number: 'B-3', sub_total: null },
+  { id: 'q4', status: 'assigned', xero_invoice_id: 'x4', sub_total: 5000 },
+];
+const AI = [
+  { xero_invoice_id: 'x1', decision: 'job', job_number: 'SWP-3003', confidence: 0.72, reason: 'Delivery address matches the job site', second_check_status: 'disagreed', second_check: { decision: 'job', job_number: 'SWP-3004' } },
+  { xero_invoice_id: 'x1', decision: 'job', job_number: 'OLD-1', confidence: 0.4, reason: 'older row' },
+];
+check('TP-11: bills to place are the open rows only, largest first, an unknown amount last', () => {
+  const rows = C.billRows(Q, AI, LABELS);
+  assert.deepStrictEqual(rows.map((r) => r.id), ['q2', 'q1', 'q3']);
+  assert.strictEqual(rows[2].amountEx, null);
+  assert.strictEqual(rows[2].supplier, 'Supplier not named');
+  assert.strictEqual(C.billTotalEx(rows), 1100.5);
+});
+check('TP-11: each bill carries the best guess, its reason and which keys agreed or disagreed', () => {
+  const rows = C.billRows(Q, AI, LABELS);
+  const b1 = rows.find((r) => r.id === 'q1');
+  assert.strictEqual(C.billGuessWords(b1.guess), 'SWP-3003 (AI, sure 72%)');
+  assert.strictEqual(b1.reason, 'Delivery address matches the job site');
+  assert.deepStrictEqual(b1.keys, [{ agree: false, words: 'Second check disagreed: says SWP-3004' }]);
+  const b2 = rows.find((r) => r.id === 'q2');
+  assert.strictEqual(C.billGuessWords(b2.guess), 'No pick: 2 possible jobs (Bill agent)');
+  assert.strictEqual(b2.reason, 'more than one job fits');
+  assert.deepStrictEqual(b2.keys, [{ agree: null, words: 'SWF-1001: po number, site suburb' }]);
+  const b3 = rows.find((r) => r.id === 'q3');
+  assert.strictEqual(C.billGuessWords(b3.guess), 'No guess');
+  assert.strictEqual(b3.reason, '');
+  const noAi = C.billRows(Q, [], LABELS).find((r) => r.id === 'q1');
+  assert.strictEqual(noAi.reason, 'No reference, no matching PO');
+  assert.strictEqual(C.billGuessWords(C.billGuess({ suggested_job_number: 'SWF-9', suggestion_source: 'agent_prematch' }, null)), 'SWF-9 (Bill agent)');
+  assert.strictEqual(C.billGuessWords(C.billGuess({ proposal: { kind: 'job', job_number: 'SWF-8', confidence: 'high' } }, null)), 'SWF-8 (Bill agent, strong)');
+  assert.strictEqual(C.billGuessWords(C.billGuess({}, { decision: 'not_job_related', confidence: 0.6 })), 'Not job related? (AI, sure 60%)');
+  assert.deepStrictEqual(C.billKeys({}, { second_check_status: 'agreed' }), [{ agree: true, words: 'Second check agreed' }]);
+});
+check('TP-11: the head line never counts an unread side as none', () => {
+  assert.strictEqual(C.needsWords({ matchCount: 3, billCount: 2, billEx: 1100.5 }), '3 messages or invoices to match · 2 bills to place ($1,100.50 ex GST)');
+  assert.strictEqual(C.needsWords({ matchCount: 1, billCount: 1, billEx: 5 }), '1 message or invoice to match · 1 bill to place ($5.00 ex GST)');
+  assert.strictEqual(C.needsWords({ matchCount: 50, matchMore: true, billCount: 1000, billEx: 9, billsFull: true }), 'at least 50 messages or invoices to match · at least 1000 bills to place (at least $9.00 ex GST)');
+  const e = C.needsWords({ matchErr: true, billsErr: true });
+  assert(/not known/.test(e) && !/\b0\b/.test(e));
+});
 check('a suggested job on a message is confirm; another job is correct', () => {
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_A.job_id }), 'confirm');
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_B.job_id }), 'correct');
@@ -239,4 +306,4 @@ check('AC-M6: a text original shows the whole text; a bad answer and errors are 
 });
 
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
-console.log('PASS recon: tab flag, actions, body, escalate, split, find by job, refusals, words, open the original');
+console.log('PASS recon: tab flag, default-on probe, bills to place rows, actions, body, escalate, split, find by job, refusals, words, open the original');

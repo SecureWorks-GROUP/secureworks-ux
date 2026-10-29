@@ -19863,6 +19863,20 @@ function jpOpenBillsToPlace() {
   showView('financials');
   showSubTab('billrecon');
 }
+// TP-11: Needs a person (modules/ops-recon.js) opens one bill here, with its lines, to decide.
+function mrqOpenBill(id) {
+  if (_matRecon.openId && _matRecon.openId !== id) {
+    delete _matRecon.notjobArmed[_matRecon.openId];
+    if (_matRecon.pick[_matRecon.openId]) _matRecon.pick[_matRecon.openId].armed = 0;
+  }
+  _matRecon.openId = id || null;
+  _matRecon.scrollTo = id || null;
+  // A search could hide the bill being opened.
+  _matRecon.search = '';
+  var s = document.getElementById('matReconSearch');
+  if (s) s.value = '';
+  jpOpenBillsToPlace();
+}
 
 // A row the engine flags as having nothing linked reads "None linked", not $0.00.
 function _jpLinkedMoney(j, v, flag) {
@@ -20932,7 +20946,19 @@ async function loadMaterialsRecon() {
     _matRecon.loadErr = null;
     _matRecon.shown = MAT_RECON_PAGE;
     if (_matRecon.openId && !_mrqRow(_matRecon.openId)) _matRecon.openId = null;
+    // A bill opened from Needs a person: show it past the first page, read its lines, bring it into view.
+    var want = _matRecon.scrollTo;
+    _matRecon.scrollTo = null;
+    if (want && _matRecon.openId === want) {
+      var at = _mrqVisibleRows().indexOf(_mrqRow(want));
+      if (at >= _matRecon.shown) _matRecon.shown = at + 1;
+    }
     renderMaterialsRecon();
+    if (want && _matRecon.openId === want) {
+      if (!_matRecon.lines[want]) _mrqLoadLines(want);
+      var tr = document.querySelector('[data-mrq-row="' + CSS.escape(want) + '"]');
+      if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'center' });
+    }
   } catch (e) {
     if (seq !== _matRecon.seq) return;
     console.error('loadMaterialsRecon error:', e);
@@ -31778,6 +31804,8 @@ function initApp() {
   restoreTab();
   // Debt tab: hidden until switched on (?debt=1, localStorage sw_debt_ws, or the backend's tab_visible).
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
+  // Matching / Needs a person (TP-11): on by default for whoever the server lets read it; ?recon=0 turns it off.
+  if (typeof reconProbeVisibility === 'function') reconProbeVisibility();
   // Today is hidden and no longer loads the alert digest, so fetch it here
   // for the Jarvis bar badges on every tab.
   loadAiAlerts();

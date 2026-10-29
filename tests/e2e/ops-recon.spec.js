@@ -3,7 +3,10 @@
 // Offline: opsFetch and opsPost are replaced in the page. Names are made up.
 //
 // Contract under guard:
-//  - The Matching tab is hidden unless ?recon=1 or localStorage sw_recon = '1'.
+//  - TP-11: the tab is on by default for whoever the server lets read recon_daily_list, hidden
+//    when the server refuses, off with ?recon=0 and forced on with ?recon=1.
+//  - TP-11: Needs a person lists Bills to place below the daily list with the best guess, its
+//    reason and which keys agreed or disagreed; Decide opens that bill in Bill Reconciliation.
 //  - The list shows the three bands in order with their counts; an invoice card shows the
 //    invoice, the contact, the amount owed and the wait; a message card shows its preview.
 //  - A tap asks once, in words, then posts recon_record_decision with the hash and cause the
@@ -14,7 +17,8 @@
 //  - Find by job reads recon_job_items for a typed job number, shows rows the list leaves
 //    out, and a message with two suggested jobs can be recorded on both (split).
 const { test, expect } = require('@playwright/test');
-const { revealOpsStaticFixture } = require('../helpers/ops-auth');
+const path = require('node:path');
+const { installOpsSessionStub, revealOpsStaticFixture } = require('../helpers/ops-auth');
 
 const JOB_A = { job_id: 'aaaaaaaa-0000-4000-8000-000000000001', job_number: 'SWF-1001', type: 'fencing', status: 'accepted', suburb: 'Sampleton', live: true };
 const JOB_B = { job_id: 'bbbbbbbb-0000-4000-8000-000000000002', job_number: 'SWP-2002', type: 'patio', status: 'complete', suburb: 'Exampleby', live: false };
@@ -46,16 +50,32 @@ const JOB_ITEMS = {
     shown_hash: '00112233445566778899aabbccddeeff', offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] }],
 };
 
-async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS, data = list() } = {}) {
+const BILLS = {
+  ok: true, status: 'open', proposals: 'ok', stats: { open: 3 },
+  rows: [
+    { id: 'q-small', status: 'open', xero_invoice_id: 'x-small', contact_name: 'Sample Steel', invoice_number: 'SS-11', invoice_date: '2026-10-20', sub_total: 120.5, suggestion_reason: 'no_ref_no_po' },
+    { id: 'q-big', status: 'open', xero_invoice_id: 'x-big', contact_name: 'Example Timber', invoice_number: 'ET-22', invoice_date: '2026-10-21', sub_total: 980,
+      proposal: { kind: 'review', rule: 'several_candidates', outcome: 'queued_for_review', candidates: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001', signals: ['po_number'] }, { job_id: JOB_B.job_id, job_number: 'SWP-2002', signals: ['site_suburb'] }] } },
+  ],
+};
+const AI_LEFT = { ok: true, view: 'left', placements: [
+  { id: 'p1', xero_invoice_id: 'x-small', decision: 'job', job_number: 'SWF-1001', confidence: 0.72, reason: 'Delivery address matches the job site', outcome: 'left_for_person', second_check_status: 'disagreed', second_check: { decision: 'job', job_number: 'SWP-2002' } },
+] };
+
+async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS, data = list(), bills = null, ai = null, billsReject = null } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
-  await page.evaluate(({ data, jobItems, fetchAnswer, post, show }) => {
+  await page.evaluate(({ data, jobItems, fetchAnswer, post, show, bills, ai, billsReject }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
     window.__rcFetches = []; window.__rcPosts = [];
     window.opsFetch = (action, params) => {
       window.__rcFetches.push({ action, params });
       if (action === 'recon_job_items') return Promise.resolve(JSON.parse(JSON.stringify(jobItems)));
+      if (action === 'materials_recon_queue' && billsReject) return Promise.reject(Object.assign(new Error(billsReject.message || ''), billsReject));
+      if (action === 'materials_recon_queue' && bills) return Promise.resolve(JSON.parse(JSON.stringify(bills)));
+      if (action === 'materials_ai_placements' && ai) return Promise.resolve(JSON.parse(JSON.stringify(ai)));
+      if (action === 'get_xero_invoice') return Promise.resolve({ invoice: { invoice_number: params.xero_invoice_id, line_items: [{ description: 'Posts', account_code: '310', line_amount: 120.5 }] } });
       if (action !== 'recon_daily_list') return Promise.reject(Object.assign(new Error('Unknown action'), { status: 400 }));
       if (fetchAnswer && fetchAnswer.reject) return Promise.reject(Object.assign(new Error(fetchAnswer.reject.message || ''), fetchAnswer.reject));
       return Promise.resolve(JSON.parse(JSON.stringify(data)));
@@ -66,20 +86,109 @@ async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = tr
       return Promise.resolve({ recorded: true, decision_id: 1 });
     };
     if (show) showView('recon');
-  }, { data, jobItems, fetchAnswer, post, show });
+  }, { data, jobItems, fetchAnswer, post, show, bills, ai, billsReject });
   if (show) await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__rcPosts);
 const reads = (page) => page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'recon_daily_list').length);
 const card = (page, id) => page.locator(`#viewRecon [data-rc-subject="${id}"]`);
 
-test('the Matching tab is hidden until it is switched on', async ({ page }) => {
+test('signed out, the tab stays hidden; ?recon=1 forces it on and ?recon=0 keeps it off', async ({ page }) => {
   await openRecon(page, { show: false });
   await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
   await page.goto('/ops.html?recon=1');
   await revealOpsStaticFixture(page);
   await page.evaluate(() => { document.getElementById('mainApp').style.display = ''; });
   await expect(page.locator('.header-nav [data-view="recon"]')).toBeVisible();
+  await page.evaluate(() => localStorage.setItem('sw_recon_seen', '1'));
+  await page.goto('/ops.html?recon=0');
+  await revealOpsStaticFixture(page);
+  await page.evaluate(() => { document.getElementById('mainApp').style.display = ''; });
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+});
+
+// TP-11: a signed-in boot of ops.html, every ops-api call answered here.
+const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
+async function bootSignedIn(page, { query = '', daily = { status: 200, body: { items: [] } } } = {}) {
+  const calls = [];
+  await installOpsSessionStub(page);
+  await page.route('**/*', async (route) => {
+    const u = route.request().url();
+    if (u.startsWith('file://')) return route.continue();
+    const m = u.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
+    if (m) calls.push(u);
+    if (m && m[1] === 'recon_daily_list') return route.fulfill({ status: daily.status, contentType: 'application/json', body: JSON.stringify(daily.body) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(m && m[1] === 'pipeline' ? { columns: {} } : {}) });
+  });
+  await page.goto(OPS_FILE + query);
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  return calls;
+}
+const dailyReads = (calls) => calls.filter((u) => /action=recon_daily_list/.test(u));
+
+test('TP-11: signed in as someone the server lets match, the tab is on by default', async ({ page }) => {
+  const calls = await bootSignedIn(page);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeVisible();
+  expect(dailyReads(calls).length).toBeGreaterThanOrEqual(1);
+  expect(dailyReads(calls)[0]).toContain('limit=1');
+});
+
+test('TP-11: when the server refuses the person, the tab stays hidden', async ({ page }) => {
+  const calls = await bootSignedIn(page, { daily: { status: 403, body: { error: 'forbidden', code: 'operator_access_required' } } });
+  await expect.poll(() => dailyReads(calls).length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(200);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem('sw_recon_seen'))).toBe(null);
+});
+
+test('TP-11: ?recon=0 keeps the tab off and reads nothing to decide it', async ({ page }) => {
+  const calls = await bootSignedIn(page, { query: '?recon=0' });
+  await page.waitForTimeout(300);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+  expect(dailyReads(calls).length).toBe(0);
+});
+
+test('TP-11: Needs a person lists bills to place with the best guess, its reason and the keys, largest first', async ({ page }) => {
+  await openRecon(page, { bills: BILLS, ai: AI_LEFT });
+  await expect(page.locator('#viewRecon h2')).toHaveText('Needs a person');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('3 messages or invoices to match');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('2 bills to place ($1,100.50 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-band]')).toContainText('Bills to place (2)');
+  await expect(page.locator('#viewRecon [data-np-bill]')).toHaveCount(2);
+  const ids = await page.locator('#viewRecon [data-np-bill]').evaluateAll((els) => els.map((e) => e.getAttribute('data-np-bill')));
+  expect(ids).toEqual(['q-big', 'q-small']);
+  const small = page.locator('#viewRecon [data-np-bill="q-small"]');
+  await expect(small).toContainText('Sample Steel');
+  await expect(small).toContainText('$120.50 ex GST');
+  await expect(small.locator('[data-np-guess]')).toContainText('SWF-1001 (AI, sure 72%)');
+  await expect(small.locator('[data-np-reason]')).toContainText('Delivery address matches the job site');
+  await expect(small.locator('[data-np-keys]')).toContainText('Disagrees: Second check disagreed: says SWP-2002');
+  const big = page.locator('#viewRecon [data-np-bill="q-big"]');
+  await expect(big.locator('[data-np-guess]')).toContainText('No pick: 2 possible jobs (Bill agent)');
+  await expect(big.locator('[data-np-reason]')).toContainText('more than one job fits');
+  await expect(big.locator('[data-np-keys]')).toContainText('SWF-1001: po number');
+  // The daily list and its decision controls are still there, above the bills.
+  await expect(page.locator('#viewRecon [data-rc-band]')).toHaveCount(3);
+  expect(await page.evaluate(() => window.__rcPosts.length)).toBe(0);
+});
+
+test('TP-11: Decide in Bills to place opens that bill in Bill Reconciliation with its lines', async ({ page }) => {
+  await openRecon(page, { bills: BILLS, ai: AI_LEFT });
+  await page.locator('#viewRecon [data-np-bill="q-small"] [data-np-open]').click();
+  await expect(page.locator('#subBillrecon')).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-small"]')).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-small"]')).toContainText('Posts');
+  const lineReads = await page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'get_xero_invoice').map((f) => f.params.xero_invoice_id));
+  expect(lineReads).toEqual(['x-small']);
+  expect(await page.evaluate(() => window.__rcPosts.length)).toBe(0);
+});
+
+test('TP-11: a failed bill read says so and is never counted as none', async ({ page }) => {
+  await openRecon(page, { billsReject: { status: 500, message: 'boom' } });
+  await expect(page.locator('#viewRecon [data-np-err]')).toContainText('could not be read');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('Bills to place not known');
+  await expect(page.locator('#viewRecon [data-np-bill]')).toHaveCount(0);
+  await expect(page.locator('#viewRecon [data-np-empty]')).toHaveCount(0);
 });
 
 test('the list shows the three bands, most at stake first', async ({ page }) => {

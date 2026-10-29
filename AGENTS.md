@@ -766,8 +766,15 @@ This is the only debt screen: the old Clear Debt screens (Financials > Clear Deb
 
 ## Matching: the Context reconciliation list (`modules/ops-recon.js`)
 
-Hidden tab (`data-recon-nav`), shown only with `?recon=1` or `localStorage.sw_recon === '1'`;
-the server decides who may use it (admin, owner, ops manager). It reads ops-api
+On by default since TP-11 (the tab, `data-recon-nav`, is headed Needs a person): after sign in
+`reconProbeVisibility()` reads `recon_daily_list` once (limit 1) and shows the tab when the
+server answers it, hides it when the server refuses (admin, owner and ops manager may use it);
+a read that fails for another reason keeps what the browser last saw (`sw_recon_seen`).
+`?recon=0` or `localStorage.sw_recon === '0'` turns it off, `?recon=1` / `'1'` forces it on.
+Below the daily list, Bills to place lists the open bills (`materials_recon_queue` status open,
+joined by `xero_invoice_id` to `materials_ai_placements` view=left) with the best guess, its
+reason and which keys agreed or disagreed; each opens in Financials > Bill Reconciliation with
+`mrqOpenBill(id)` and is decided there. The tab never places, moves or files a bill. It reads ops-api
 `recon_daily_list` and records one `recon_record_decision` per confirmed tap, sending back the
 `evidence_hash` and `cause` the card was shown with and never a person (the backend takes the
 signed-in user). A choice says which job something belongs to; it never moves money, sends

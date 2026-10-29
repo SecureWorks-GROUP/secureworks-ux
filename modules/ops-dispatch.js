@@ -503,6 +503,8 @@
 
   function arrivalDateWords(o) {
     var d = parseDay(o.delivery_date);
+    // Piece C: sent ASAP, no supplier date yet. Not late.
+    if (o.flag === 'asap' && !d) return 'ASAP, waiting on their date';
     if (o.flag === 'no_date') return 'no date yet';
     if (o.flag === 'after_install') return (d ? dayText(d) + ', ' : '') + 'after the install';
     if (o.flag === 'not_sent') return d ? dayText(d) + ', not sent yet' : 'not sent yet';
@@ -513,6 +515,7 @@
   // solid (ok), ring (wait), red (late), grey ring (draft: not sent, or no date).
   function arrivalClass(o) {
     if (arrivalLate(o)) return 'late';
+    if (o.flag === 'asap' && !parseDay(o.delivery_date)) return 'asap';
     if (o.flag === 'not_sent' || !parseDay(o.delivery_date)) return 'draft';
     return o.mark === 'solid' ? 'ok' : 'wait';
   }
@@ -546,7 +549,8 @@
       m.row = row;
       last[row] = m.pct;
     });
-    return { today: today, inst: inst, marks: marks, outs: outs, outCls: outs.some(function (m) { return m.cls === 'late'; }) ? 'late' : 'draft' };
+    var outCls = outs.some(function (m) { return m.cls === 'late'; }) ? 'late' : outs.length && outs.every(function (m) { return m.cls === 'asap'; }) ? 'asap' : 'draft';
+    return { today: today, inst: inst, marks: marks, outs: outs, outCls: outCls };
   }
 
   // "2 orders: 1 confirmed, 1 not in time", or "All 3 confirmed in time".
@@ -556,7 +560,9 @@
     if (a.all_confirmed_in_time === true) return n === 1 ? 'Confirmed in time' : 'All ' + n + ' confirmed in time';
     var conf = a.orders.filter(function (o) { return o && o.mark === 'solid' && !arrivalLate(o); }).length;
     var late = a.orders.filter(arrivalLate).length;
+    var asap = a.orders.filter(function (o) { return o && arrivalClass(o) === 'asap'; }).length;
     var parts = [conf + ' confirmed'];
+    if (asap) parts.push(asap + ' ASAP waiting');
     if (late) parts.push(late + ' not in time');
     return n + (n === 1 ? ' order: ' : ' orders: ') + parts.join(', ');
   }
@@ -2122,7 +2128,8 @@
       h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + arrPayHtml(m.order) + '</li>';
     });
     h += '</ul></div>';
-    h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
+    h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.' +
+      (a.orders.some(function (o) { return o && arrivalClass(o) === 'asap'; }) ? ' <b class="asap">Dashed</b> = ordered ASAP, waiting on their date.' : '') + '</p>';
     return h + '</div>';
   }
 
@@ -4142,6 +4149,20 @@
   // Delivery.
   function v2FulfilOf(e, b) { return v2Fulfil((e.fulfil || {})[b.supplier_id]) || b.fulfilment || 'delivery'; }
 
+  // The box's date choice (backend contract section 3c, piece C): ASAP or
+  // Pick a date, or null from an older server (the calendar only, as today).
+  function v2DateModeFrom(m) {
+    if (!isObj(m) || (m.mode !== 'asap' && m.mode !== 'date')) return null;
+    return { mode: m.mode, set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null, derived: m.derived === true };
+  }
+
+  // The choice shown: the one pressed on this screen while it saves, else the box's.
+  function v2DateModeOf(e, b) {
+    if (!b.date_mode) return null;
+    var picked = (e.dmode || {})[b.supplier_id];
+    return picked === 'asap' || picked === 'date' ? picked : b.date_mode.mode;
+  }
+
   function v2BoxFrom(s) {
     var ap = isObj(s.approved_email) ? s.approved_email : null;
     return {
@@ -4154,6 +4175,8 @@
       open: v2EmailFrom(s.open_email),
       sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean),
       fulfilment: v2Fulfil(s.fulfilment),
+      // Piece C: ASAP or Pick a date. Null from an older server.
+      date_mode: v2DateModeFrom(s.date_mode),
       stage: v2StageFrom(s.material_stage),
       // The payment step (section 3c): null from an older server.
       payment: v2PayFrom(s.payment)
@@ -5135,16 +5158,20 @@
     var box = v2Box(e, sid);
     var key = 'make:' + sid;
     if (!box || e.busy[key]) return;
-    var date = wholeDay(e.dates[sid] || '') || null;
+    var mode = v2DateModeOf(e, box);
+    var date = mode === 'asap' ? null : wholeDay(e.dates[sid] || '') || null;
     // A rebuild keeps the held email's own delivery or pickup.
     var fulfilment = rebuild ? (box.open && box.open.fulfilment) || v2FulfilOf(e, box) : v2FulfilOf(e, box);
-    if (!rebuild && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That ' + fulfilment + ' date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
+    if (!rebuild && mode !== 'asap' && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That ' + fulfilment + ' date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
     e.busy[key] = true;
     delete e.msg[key];
     e.ask = null;
     paintV2();
     var body = { job_id: jobId, supplier_id: sid, delivery_date: rebuild ? (box.open && box.open.delivery_date) || null : date, rebuild: !!rebuild, fulfilment: fulfilment };
     if (rebuild && box.open) body.expected_updated_at = box.open.updated_at;
+    // Piece C: the date choice goes with it (only to a server that sent one).
+    // A rebuild keeps the held email's own: a date on it means Pick a date.
+    if (mode) body.date_mode = body.delivery_date ? 'date' : mode;
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_make_email', body); }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
       var m = v2EmailFrom(resp.email);
@@ -5162,6 +5189,58 @@
       delete e.busy[key];
       v2Fail(jobId, key, err, 'The email was not made.');
     });
+  }
+
+  // ── ASAP or Pick a date (backend contract section 3c, piece C) ──
+  // Most orders go out with no date in mind. ASAP greys the calendar out and
+  // the order email says "Date: ASAP"; Pick a date works as today. The choice
+  // is saved on the box (dispatch_v2_set_date_mode) and the next Make email
+  // uses it. It never touches a held or sent email.
+
+  function v2DateModeHtml(e, b, mode) {
+    if (!mode) return '';
+    var sid = esc(b.supplier_id);
+    var busy = !!e.busy['dmode:' + b.supplier_id];
+    var off = busy || b.blocked ? ' disabled' : '';
+    var btn = function (v, words) {
+      return '<button type="button" data-dpc-v2="datemode" data-dpc-v2-mode="' + v + '" data-dpc-v2-sid="' + sid + '" aria-pressed="' + (mode === v) + '"' + off + '>' + words + '</button>';
+    };
+    return '<span class="dpc-v2-seg" role="group" aria-label="Date for ' + esc(b.name) + '">' + btn('asap', 'ASAP') + btn('date', 'Pick a date') + '</span>';
+  }
+
+  function v2SetDateMode(jobId, sid, mode) {
+    var e = v2Entry(jobId);
+    var b = v2Box(e, sid);
+    var key = 'dmode:' + sid;
+    if (!e || e.status !== 'ok' || !b || !b.date_mode || e.busy[key] || (mode !== 'asap' && mode !== 'date')) return;
+    if (v2DateModeOf(e, b) === mode) return;
+    if (!e.dmode) e.dmode = {};
+    // Shown at once; put back if the save is refused.
+    e.dmode[sid] = mode;
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    var body = v2BoxRef(jobId, b);
+    body.date_mode = mode;
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_set_date_mode', body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      b.date_mode.mode = mode;
+      delete e.dmode[sid];
+      if (applyBoxArrival(jobId, resp) && state.jobId === jobId) paintArrival();
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      delete e.dmode[sid];
+      v2Fail(jobId, key, err, 'The date choice was not saved.');
+      if (e.msg[key] && e.msg[key].retry) e.msg[key].mode = mode;
+      paintV2If(jobId);
+    });
+  }
+
+  function v2DateModeRetryAttrs(m, sid) {
+    if (!m || !m.mode) return null;
+    return 'data-dpc-v2="datemode" data-dpc-v2-mode="' + esc(m.mode) + '" data-dpc-v2-sid="' + esc(sid) + '"';
   }
 
   function v2AddrText(list) { return list.join(', '); }
@@ -5601,12 +5680,17 @@
       var pick = v2FulfilOf(e, b) === 'pickup';
       h += '<div class="dpc-v2-make"><label class="dpc-v2-date dpc-v2-fulfil"><span>Delivery or pickup</span><select data-dpc-v2-fulfil="' + esc(sid) + '"' + (b.blocked ? ' disabled' : '') + '>' +
         '<option value="delivery"' + (pick ? '' : ' selected') + '>Delivery</option><option value="pickup"' + (pick ? ' selected' : '') + '>Pickup</option></select></label>';
-      h += '<label class="dpc-v2-date"><span>' + (pick ? 'Pickup date' : 'Delivery date') + '</span><input type="date" data-dpc-v2-date="' + esc(sid) + '" value="' + esc(e.dates[sid] || '') + '"' + (b.blocked ? ' disabled' : '') + '></label>';
+      var mode = v2DateModeOf(e, b);
+      var asap = mode === 'asap';
+      h += '<div class="dpc-v2-date"><span>' + (pick ? 'Pickup date' : 'Delivery date') + '</span><span class="dpc-v2-datepick">' + v2DateModeHtml(e, b, mode) +
+        '<input type="date" data-dpc-v2-date="' + esc(sid) + '" aria-label="' + (pick ? 'Pickup date' : 'Delivery date') + ' for ' + esc(b.name) + '" value="' + esc(asap ? '' : e.dates[sid] || '') + '"' + (b.blocked || asap ? ' disabled' : '') + '></span></div>';
       h += '<button type="button" class="dpc-primary" data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' + (e.busy[mkey] ? 'Making the email...' : 'Make email') + '</button></div>';
       if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
       else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
-      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.</p>';
+      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.' +
+        (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
       h += v2MsgHtml(e.msg[mkey], 'data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"');
+      h += v2MsgHtml(e.msg['dmode:' + sid], v2DateModeRetryAttrs(e.msg['dmode:' + sid], sid));
       return h + '</div>';
     }
     h += v2MsgHtml(e.msg[mkey]);
@@ -5876,6 +5960,7 @@
     else if (verb === 'make') v2MakeEmail(jobId, sid, false);
     else if (verb === 'paid' || verb === 'unpaid') v2PayPress(jobId, sid, verb);
     else if (verb === 'payon') v2PayPress(jobId, sid, verb, t.getAttribute('data-dpc-v2-payon'));
+    else if (verb === 'datemode') v2SetDateMode(jobId, sid, t.getAttribute('data-dpc-v2-mode'));
     else if (verb === 'test') v2AskSend(jobId, id, 'test');
     else if (verb === 'send') v2AskSend(jobId, id, 'real');
     else if (verb === 'resend') v2AskSend(jobId, id, 'resend');

@@ -540,6 +540,19 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 /* Pay on pickup / Pay on delivery (piece B): confirmed now, paid on the day. */
 .dpc-flag-payon { background: transparent; color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
 .dpc-v2-payon-set .dpc-v2-stage-who { flex: 1; }
+/* ASAP or Pick a date (piece C): a two-way choice beside the calendar, which ASAP greys out. */
+.dpc-v2-date .dpc-v2-datepick { display: inline-flex; align-items: center; gap: 8px; font: inherit; text-transform: none; letter-spacing: normal; color: inherit; }
+.dpc .dpc-v2-date .dpc-v2-seg { font: inherit; text-transform: none; letter-spacing: normal; }
+.dpc .dpc-v2-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.dpc .dpc-v2-seg button { border: 0; border-radius: 0; padding: 6px 12px; font-size: 13px; background: #fff; color: var(--mute); }
+.dpc .dpc-v2-seg button + button { border-left: 1px solid var(--line); }
+.dpc .dpc-v2-seg button[aria-pressed="true"] { background: var(--ink); color: #fff; font-weight: 600; }
+.dpc .dpc-v2-datepick input[type="date"]:disabled { opacity: .45; }
+/* The Arrival line: an ASAP order waiting on its date is an amber dashed ring, not red. */
+.dpc-arr-mk.asap i { background: #fff; border: 3px dashed #9A6200; }
+.dpc-arr-dot.asap, .dpc-arrthin-dot.asap { background: #fff; border: 2px dashed #9A6200; }
+.dpc-arr-mk.asap small { color: #9A6200; }
+.dpc-arr-legend b.asap { color: #9A6200; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */

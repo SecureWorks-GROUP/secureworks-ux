@@ -1975,8 +1975,9 @@
           <div class="report-stat-value" id="jplTotalInvoiced">—</div>
         </div>
         <div class="report-stat" id="jplCostsCard">
-          <div class="report-stat-label">Total Costs</div>
+          <div class="report-stat-label" id="jplCostsLabel">Total Costs</div>
           <div class="report-stat-value" id="jplTotalCosts">—</div>
+          <div class="report-stat-sub" id="jplCostsSub"></div>
         </div>
         <div class="report-stat" id="jplMarginCard">
           <div class="report-stat-label">Avg Margin %</div>
@@ -4353,12 +4354,70 @@ async function loadJobPL() {
   }
 }
 
+// <job-pl-money>
+// Job P&L money words (CFO-01 / R-22, reporting-api job_profitability reads
+// v_job_profit). An unknown margin is a word with its reason, never "null%" or
+// 0%. Works against the old response too (no margin_status / jobs_margin_known):
+// it then shows what it showed before. Pure: scripts/test-job-pl-money.js runs
+// this block in node.
+function jplText(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function jplIsNum(v) { return v != null && v !== '' && !isNaN(v) && isFinite(v); }
+// The margin % cell as HTML.
+function jplMarginPctCell(job) {
+  if (job && jplIsNum(job.margin_pct)) return jplText(job.margin_pct) + '%';
+  var reason = job && job.margin_reason ? String(job.margin_reason).replace(/^Unknown:\s*/, '') : '';
+  return 'Unknown' + (reason ? '<br><small style="color:var(--sw-text-sec);">' + jplText(reason) + '</small>' : '');
+}
+// The average margin figure.
+function jplAvgMarginText(summary) {
+  return jplIsNum(summary && summary.avg_margin_pct) ? summary.avg_margin_pct + '%' : 'Unknown';
+}
+// The line under the average margin.
+function jplProfitLine(summary, fmt) {
+  if (!summary) return '';
+  if (summary.jobs_margin_known != null) {
+    var n = summary.jobs_margin_known;
+    var unknown = summary.jobs_margin_unknown || 0;
+    var tail = unknown ? ' (' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' Unknown, not counted)' : '';
+    if (!n || summary.total_margin == null) return 'No job has complete costs yet' + tail;
+    if (jplIsNum(summary.margin_known_invoiced)) {
+      return fmt(summary.total_margin) + ' profit on ' + fmt(summary.margin_known_invoiced) + ' invoiced, ' + n + ' job' + (n === 1 ? '' : 's') + ' with complete costs' + tail;
+    }
+    return fmt(summary.total_margin) + ' profit on ' + n + ' job' + (n === 1 ? '' : 's') + ' with complete costs' + tail;
+  }
+  if (summary.total_invoiced > 0) return fmt(summary.total_margin) + ' profit on ' + fmt(summary.total_invoiced) + ' invoiced';
+  return '';
+}
+// The costs card: placed costs and whether they are complete.
+function jplCostsCard(summary, fmt) {
+  var s = summary || {};
+  if (s.total_bills_basis === 'placed_costs_only' || typeof s.costs_complete === 'boolean') {
+    var unknown = s.jobs_margin_unknown || 0;
+    return {
+      label: 'Placed Costs',
+      value: fmt(s.total_bills),
+      sub: s.costs_complete === false
+        ? 'Not complete: ' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' with costs Unknown'
+        : 'Costs complete',
+      complete: s.costs_complete !== false,
+    };
+  }
+  return { label: 'Total Costs', value: fmt(s.total_bills), sub: '', complete: null };
+}
+// </job-pl-money>
+
 function renderJobPLStats(summary) {
   document.getElementById('jplTotalInvoiced').textContent = fmt$(summary.total_invoiced);
-  document.getElementById('jplTotalCosts').textContent = fmt$(summary.total_bills);
+  var costs = jplCostsCard(summary, fmt$);
+  document.getElementById('jplCostsLabel').textContent = costs.label;
+  document.getElementById('jplTotalCosts').textContent = costs.value;
+  document.getElementById('jplCostsSub').textContent = costs.sub;
 
   // Avg Margin with RAG
-  document.getElementById('jplAvgMargin').textContent = (summary.avg_margin_pct != null ? summary.avg_margin_pct : '—') + '%';
+  document.getElementById('jplAvgMargin').textContent = jplAvgMarginText(summary);
   var avgEl = document.getElementById('jplAvgMargin');
   avgEl.className = 'report-stat-value ' + marginClass(summary.avg_margin_pct);
   var marginCard = document.getElementById('jplMarginCard');
@@ -4367,9 +4426,7 @@ function renderJobPLStats(summary) {
     marginCard.classList.add(summary.avg_margin_pct >= 30 ? 'rag-green' : summary.avg_margin_pct >= 25 ? 'rag-amber' : 'rag-red');
   }
   var marginSub = document.getElementById('jplMarginSub');
-  if (summary.total_invoiced > 0) {
-    marginSub.textContent = fmt$(summary.total_margin) + ' profit on ' + fmt$(summary.total_invoiced) + ' invoiced';
-  }
+  marginSub.textContent = jplProfitLine(summary, fmt$);
 
   // Quote Accuracy (margin slippage)
   var slippageEl = document.getElementById('jplSlippage');
@@ -4427,7 +4484,7 @@ function renderJobPLTable(jobs) {
       '<td class="num">' + fmt$(job.invoiced) + '</td>' +
       '<td class="num">' + fmt$(job.bills) + '</td>' +
       '<td class="num ' + mClass + '">' + fmt$(job.margin) + '</td>' +
-      '<td class="num ' + mClass + '">' + job.margin_pct + '%</td>' +
+      '<td class="num ' + mClass + '">' + jplMarginPctCell(job) + '</td>' +
     '</tr>';
 
     // Expandable detail row
@@ -4487,7 +4544,8 @@ function renderJobScatter(jobs) {
   if (!el) return;
 
   // Filter to jobs with actual invoiced data
-  var plotJobs = (jobs || []).filter(function(j) { return j.invoiced > 0; });
+  // An unknown margin (null) is not a point at 0%: leave it off the plot.
+  var plotJobs = (jobs || []).filter(function(j) { return j.invoiced > 0 && jplIsNum(j.margin_pct); });
   if (plotJobs.length === 0) {
     el.parentElement.innerHTML = '<p style="text-align:center;color:var(--sw-text-sec);padding:60px;">No invoiced jobs to plot yet</p>';
     return;

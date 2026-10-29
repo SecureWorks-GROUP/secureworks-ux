@@ -11,6 +11,8 @@ const { test, expect } = require('@playwright/test');
 const { BOX, SID, dayFrom, fakePayment, boot, boxOf, sent } = require('../helpers/dispatch-v2-payment');
 
 const NO_DASH = /[–—]/;
+// A class list holding every one of these whole class words, in any order.
+const cls = (...words) => new RegExp(words.map((w) => '(?=.*(^|\\s)' + w + '(\\s|$))').join(''));
 
 test.describe('Dispatch v2: ASAP or Pick a date', () => {
   test('a new box starts on ASAP: the calendar is greyed out and Make email asks for Date: ASAP', async ({ page }) => {
@@ -59,12 +61,11 @@ test.describe('Dispatch v2: ASAP or Pick a date', () => {
   });
 
   test('a sent ASAP order with no date is an amber dashed ring, not late', async ({ page }) => {
-    const { root } = await boot(page, fakePayment());
-    const arr = root.locator('[data-dpc-region="arrival"]');
-    await expect(arr.locator('.dpc-arr-list li', { hasText: 'Twinside Retaining' })).toContainText('Pickup ASAP, waiting on their date');
-    await expect(arr.locator('.dpc-arr-out')).toHaveClass(/asap/);
-    await expect(arr.locator('.dpc-arr-count')).toHaveText('2 orders: 1 confirmed, 1 ASAP waiting');
-    await expect(arr.locator('.dpc-arr-legend')).toContainText('Dashed = ordered ASAP, waiting on their date.');
+    const { root } = await boot(page, fakePayment({ onAccount: true }));
+    const panel = root.locator('[data-dpc-region="arrival"]');
+    await expect(panel.locator('.dpc-mp-lab', { hasText: 'Twinside Retaining' })).toContainText('Pickup ASAP, waiting on their date');
+    await expect(panel.locator('.dpc-mp-dot.asap')).toHaveCount(1);
+    await expect(panel.locator('.dpc-arr-count')).not.toContainText('not in time');
   });
 
   test('an older ops-api: no choice on the box, the calendar as today, and no date_mode sent', async ({ page }) => {
@@ -81,3 +82,99 @@ test.describe('Dispatch v2: ASAP or Pick a date', () => {
   });
 });
 
+test.describe('Dispatch v2: the Materials panel', () => {
+  const panelOf = (root) => root.locator('[data-dpc-region="arrival"]');
+  const dotOf = (panel, i) => panel.locator('.dpc-mp-dot').nth(i);
+
+  test("the panel takes the Arrival line's place: a dot per order by its date, the dateless in the bay, a row each", async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const { root } = await boot(page, fake);
+    const panel = panelOf(root);
+    await expect(panel).toHaveClass(/dpc-mp/);
+    await expect(panel.locator('.dpc-arr-title')).toHaveText('Materials');
+    await expect(panel.locator('.dpc-arr-q')).toHaveText('Where every order is, and will it all be on site before the install?');
+    await expect(root).not.toContainText('Arrival line');
+    await expect(panel.locator('.dpc-arr-count')).toHaveText('2 to pay · 1 all good');
+    await expect(panel.locator('.dpc-mp-tl')).toContainText('Today ');
+    await expect(panel.locator('.dpc-mp-noinst')).toHaveText('No install booked');
+    await expect(panel.locator('.dpc-mp-bayl')).toHaveText('No date yet');
+    // Sorted by where they sit: Lysaght (Mon), Stratco (Wed), Twinside (bay).
+    await expect(panel.locator('.dpc-mp-lab b')).toHaveText(['Lysaght', 'Stratco WA', 'Twinside Retaining']);
+    await expect(panel.locator('.dpc-mp-bdg')).toHaveText(['Pay', 'Confirmed', 'Pay']);
+    // Lysaght: needs us (orange), date confirmed (solid). Stratco: green solid.
+    // Twinside: needs us, no date, ordered ASAP (dashed ring).
+    await expect(dotOf(panel, 0)).toHaveClass(cls('us', 's'));
+    await expect(dotOf(panel, 1)).toHaveClass(cls('ok', 's'));
+    await expect(dotOf(panel, 2)).toHaveClass(cls('us', 'asap'));
+    await expect(dotOf(panel, 2)).not.toHaveClass(cls('s'));
+    const rows = panel.locator('.dpc-mp-r');
+    await expect(rows.locator('.dpc-mp-name')).toHaveText(['Lysaght', 'Twinside Retaining', 'Stratco WA']);
+    await expect(rows.nth(0).locator('.dpc-mp-onus')).toHaveText('On usPay Lysaght');
+    await expect(rows.nth(0).locator('small')).toContainText('Replied ');
+    await expect(rows.nth(2).locator('.dpc-mp-supw, .dpc-mp-onus, .dpc-mp-done')).toBeVisible();
+    await expect(panel.locator('.dpc-mp-legend')).toContainText('Orange = needs us.');
+    expect(await panel.innerText()).not.toMatch(NO_DASH);
+  });
+
+  test('Mark paid on a row records it, and the dot turns green', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const { root, mat, of } = await boot(page, fake);
+    const panel = panelOf(root);
+    const row = panel.locator('.dpc-mp-r', { hasText: 'Lysaght' });
+    await expect(row.locator('[data-dpc-v2="paid"]')).toHaveText('Mark paid');
+    await row.locator('[data-dpc-v2="paid"]').click();
+    await expect(panel.locator('.dpc-mp-bdg').first()).toHaveText('Confirmed');
+    await expect(dotOf(panel, 0)).toHaveClass(cls('ok'));
+    await expect(panel.locator('.dpc-mp-lab', { hasText: 'Lysaght' }).locator('.dpc-mp-t')).toHaveText('Paid');
+    await expect(panel.locator('.dpc-mp-r', { hasText: 'Lysaght' }).locator('[data-dpc-v2="paid"]')).toHaveCount(0);
+    await expect(boxOf(mat, 'Lysaght')).toContainText('Marked paid: Lysaght.');
+    expect(of('dispatch_v2_mark_paid').map(sent)).toEqual([{ box_id: BOX(1), expected_paid_at: null }]);
+  });
+
+  test('only an order at Awaiting payment counts "to pay" and gets Mark paid on its row', async ({ page }) => {
+    // Design section 10: Lysaght set by hand to Manufacturing (not paid), Twinside to pay.
+    const fake = fakePayment({ lysaght: { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test' } });
+    const { root, mat } = await boot(page, fake);
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-arr-count')).toHaveText('1 to pay · 1 waiting on supplier');
+    await expect(panel.locator('.dpc-mp-r', { hasText: 'Lysaght' }).locator('[data-dpc-v2="paid"]')).toHaveCount(0);
+    await expect(panel.locator('.dpc-mp-r', { hasText: 'Twinside Retaining' }).locator('[data-dpc-v2="paid"]')).toHaveText('Mark paid');
+    // The box keeps its own Mark paid.
+    await expect(boxOf(mat, 'Lysaght').locator('.dpc-v2-paybtn')).toHaveText('Mark paid');
+  });
+
+  test('unpaid orders that are delivered do not stop "All confirmed"', async ({ page }) => {
+    const set = { stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test' };
+    const fake = fakePayment({ lysaght: Object.assign({ stage: 'delivered' }, set), twinside: Object.assign({ stage: 'delivered' }, set) });
+    const { root } = await boot(page, fake);
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-arr-count')).toHaveText('All confirmed');
+    await expect(panel.locator('.dpc-mp-r [data-dpc-v2="paid"]')).toHaveCount(0);
+  });
+
+  test("a row's Mark paid shows Saving while it saves, and the focus stays on the row button it was on", async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const markPaid = fake.api.dispatch_v2_mark_paid;
+    const { root } = await boot(page, fake, { api: { dispatch_v2_mark_paid: async (url, b) => { await gate; return markPaid(url, b); } } });
+    const panel = panelOf(root);
+    const btn = (name) => panel.locator('.dpc-mp-r', { hasText: name }).locator('[data-dpc-v2="paid"]');
+    await btn('Lysaght').click();
+    await expect(btn('Lysaght')).toHaveText('Saving...');
+    await expect(btn('Lysaght')).toBeDisabled();
+    await btn('Twinside Retaining').focus();
+    release();
+    await expect(btn('Lysaght')).toHaveCount(0);
+    await expect(btn('Twinside Retaining')).toBeFocused();
+  });
+
+  test("an older ops-api keeps today's Arrival line", async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ old: true, onAccount: true }));
+    const arr = panelOf(root);
+    await expect(arr.locator('.dpc-arr-title')).toHaveText('Arrival line');
+    await expect(arr).not.toHaveClass(/dpc-mp/);
+    await expect(arr.locator('.dpc-mp-rail')).toHaveCount(0);
+    await expect(arr.locator('.dpc-arr-mk')).toHaveCount(3);
+  });
+});

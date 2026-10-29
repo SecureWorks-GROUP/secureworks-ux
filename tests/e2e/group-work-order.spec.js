@@ -331,6 +331,7 @@ test('the office sees every share, and a trade role or an unknown action sees no
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
   await page.evaluate(() => {
+    _currentJobId = 'job-1';
     window.__posts = [];
     document.getElementById('jobDetailView').classList.add('active');
     window.opsFetch = async function (action, params) {
@@ -401,4 +402,30 @@ test('the office sees every share, and a trade role or an unknown action sees no
   expect(post.action).toBe('unfreeze_group_work_order');
   expect(post.body).toEqual({ group_id: 'group-1' });
   expect(post.body.send).toBeUndefined();
+});
+
+
+test('office records existing client approval without creating a signature or submitting pay', async ({ page }) => {
+  await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
+  await page.evaluate(() => {
+    _currentJobId = 'job-office';
+    _currentJobData = {job:{id:'job-office'},group_work_order_enabled:true};
+    document.getElementById('jobDetailView').classList.add('active');
+    window.SECUREWORKS_CLOUD = {auth:{getRole:()=> 'owner'}};
+    window.__officeWrites = [];
+    window.__approved = false;
+    window.opsFetch = async () => ({group_id:'group-office',pot_total:2160,
+      participants:[{user_id:'crew',name:'Test Crew'}],hours:[{user_id:'crew',hours:18}],
+      client_signed:window.__approved,client_signoff_method:window.__approved?'office_waiver':null,
+      client_signoff_reason:window.__approved?'Owner confirmed prior approval':null,shares:[]});
+    window.opsPost = async (action,body) => {window.__officeWrites.push({action,body});window.__approved=true;return {ok:true};};
+    GroupWorkOrderOffice.paint(_currentJobData);
+  });
+  await expect(page.locator('[data-office-group-wo-card]')).toContainText('Test Crew: 18 hours saved');
+  await page.locator('[data-office-signoff-reason]').fill('Owner confirmed prior approval');
+  await page.getByRole('button',{name:'Record office sign-off'}).click();
+  await expect(page.locator('[data-office-group-override]')).toContainText('Owner confirmed prior approval');
+  await expect(page.locator('[data-office-signoff-form]')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.__officeWrites)).toEqual([{action:'waive_client_signoff',body:{job_id:'job-office',reason:'Owner confirmed prior approval'}}]);
 });

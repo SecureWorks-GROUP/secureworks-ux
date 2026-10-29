@@ -524,6 +524,12 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-stage-pick select { max-width: 100%; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
 .dpc-v2-stage-who { font-size: 12px; color: var(--mute); padding-bottom: 7px; }
 .dpc .dpc-v2-stage .dpc-v2-stage-next { flex-basis: 100%; margin: 0; }
+/* The payment step (piece B): Mark paid on a pay-first box, who marked it paid with Undo paid. */
+.dpc-v2-pay { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px 0; }
+.dpc-v2-pay small { flex: 1; min-width: 200px; font-size: 12px; color: var(--mute); }
+.dpc .dpc-v2-paybtn { background: var(--sage); border-color: var(--sage); color: #fff; font-weight: 600; }
+.dpc .dpc-v2-paybtn:hover:not(:disabled) { background: #3B5E48; border-color: #3B5E48; }
+.dpc-v2-paid { font-size: 12.5px; color: var(--sage); font-weight: 600; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */

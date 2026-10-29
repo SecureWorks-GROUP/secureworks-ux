@@ -612,6 +612,17 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */
+/* Job card dots (piece D): the Materials panel's dots, small, with name and badge. */
+.dpc-minidots { display: flex !important; gap: 4px 12px; flex-wrap: wrap; margin-top: 8px; font-size: 11.5px; color: var(--ink); }
+.dpc-minidot { display: inline-flex; align-items: center; gap: 5px; }
+.dpc-minidot i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 2.5px solid #c5d0d6; background: #fff; box-sizing: border-box; font-style: normal; }
+.dpc-minidot i.us { border-color: #A83C16; } .dpc-minidot i.us.s { background: #A83C16; }
+.dpc-minidot i.sp { border-color: #2c5d86; } .dpc-minidot i.sp.s { background: #2c5d86; }
+.dpc-minidot i.ok { border-color: #2f7d4f; } .dpc-minidot i.ok.s { background: #2f7d4f; }
+.dpc-minidot i.late { border-color: #b3261e; } .dpc-minidot i.late.s { background: #b3261e; }
+.dpc-minidot i.asap { border-style: dashed; }
+.dpc-minidot b { font: 700 9.5px var(--mono); text-transform: uppercase; color: #fff; border-radius: 3px; padding: 1px 4px; background: #9fb0ba; }
+.dpc-minidot b.us { background: #A83C16; } .dpc-minidot b.sp { background: #2c5d86; } .dpc-minidot b.ok { background: #2f7d4f; } .dpc-minidot b.late { background: #b3261e; }
 .dpc-arrthin { display: block !important; position: relative; height: 10px; margin: 8px 2px 0; }
 .dpc-arrthin-rail { position: absolute; left: 0; right: 20%; top: 4px; height: 2px; border-radius: 1px; background: #CFD9DE; }
 .dpc-arrthin-inst { position: absolute; left: 80%; top: 0; height: 10px; border-left: 2px solid var(--steel); }

@@ -236,3 +236,24 @@ test.describe('Dispatch v2: the Materials panel', () => {
     await expect(arr.locator('.dpc-arr-mk')).toHaveCount(3);
   });
 });
+
+test.describe('Dispatch v2: job card dots', () => {
+  test('the job card shows a small dot per order, its name and its badge, in place of the thin line', async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ onAccount: true }));
+    const card = root.locator('.dpc-job', { hasText: 'Peter Example' });
+    const dots = card.locator('.dpc-minidot');
+    await expect(dots).toHaveText(['Lysaght Pay', 'Twinside Retaining Pay', 'Stratco WA Confirmed']);
+    await expect(dots.nth(0).locator('i')).toHaveClass(cls('us', 's'));
+    await expect(dots.nth(1).locator('i')).toHaveClass(cls('us', 'asap'));
+    await expect(dots.nth(2).locator('i')).toHaveClass(cls('ok', 's'));
+    await expect(card.locator('.dpc-arrthin')).toHaveCount(0);
+    await expect(card.locator('.dpc-vh', { hasText: 'Materials:' })).toHaveText('Materials: 2 to pay · 1 all good.');
+  });
+
+  test("an older ops-api keeps the card's thin Arrival line", async ({ page }) => {
+    const { root } = await boot(page, fakePayment({ old: true, onAccount: true }));
+    const card = root.locator('.dpc-job', { hasText: 'Peter Example' });
+    await expect(card.locator('.dpc-arrthin-dot')).toHaveCount(3);
+    await expect(card.locator('.dpc-minidots')).toHaveCount(0);
+  });
+});

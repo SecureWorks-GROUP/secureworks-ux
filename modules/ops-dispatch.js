@@ -1782,8 +1782,30 @@
     if (extra) flags.push(extra);
     if (flags.length) h += '<span class="dpc-flags">' + flags.map(flagHtml).join('') + '</span>';
     h += onUsHtml(todo);
-    if (b && !archived) h += arrivalThinHtml(b.arrival);
+    if (b && !archived) h += cardArrivalHtml(b.arrival);
     return h + '</button>';
+  }
+
+  // The card's orders: the Materials panel's dots, small, when the server
+  // sends the new fields (piece D); else today's thin Arrival line.
+  function cardArrivalHtml(a) {
+    if (arrivalOk(a) && a.orders.length && mpOn(a)) return cardDotsHtml(a);
+    return arrivalThinHtml(a);
+  }
+
+  // ── Job card dots (piece D) ──
+  // One small dot per order in the panel's colours (solid = date confirmed,
+  // ring = not, dashed = ordered ASAP), the supplier's name and the badge,
+  // so the board shows where each order is without opening the job.
+  function cardDotsHtml(a) {
+    var h = '<span class="dpc-minidots">';
+    a.orders.filter(isObj).forEach(function (o) {
+      var tone = mpTone(o);
+      var badge = mpBadge(o);
+      h += '<span class="dpc-minidot"><i class="' + tone + (o.mark === 'solid' ? ' s' : '') + (o.flag === 'asap' ? ' asap' : '') + '" aria-hidden="true"></i>' +
+        esc(text(o.supplier_name) || 'Supplier') + (badge ? ' <b class="' + tone + '">' + esc(badge) + '</b>' : '') + '</span>';
+    });
+    return h + '</span><span class="dpc-vh">Materials: ' + esc(mpSummary(a).text) + '.</span>';
   }
 
   // The card's Arrival line: one thin line, a dot per order. Its words are for

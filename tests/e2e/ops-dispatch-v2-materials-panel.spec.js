@@ -82,6 +82,43 @@ test.describe('Dispatch v2: ASAP or Pick a date', () => {
   });
 });
 
+test.describe('Dispatch v2: the date choice after a send', () => {
+  test('a sent ASAP order can switch its next email to Pick a date; the sent order still reads ASAP', async ({ page }) => {
+    const { root, mat, of } = await boot(page, fakePayment({ onAccount: true }));
+    const box = boxOf(mat, 'Twinside Retaining');
+    await expect(box.locator('[data-dpc-v2-mode="asap"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(box.locator('.dpc-v2-sentmode')).toHaveCount(0);
+    await box.locator('[data-dpc-v2-mode="date"]').click();
+    await expect(box.locator('[data-dpc-v2-mode="date"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(box.locator('[data-dpc-v2-date]')).toBeEnabled();
+    await expect(box.locator('.dpc-v2-sentmode')).toHaveText('The order already sent asked for ASAP. The next email will ask for the date picked here.');
+    expect(of('dispatch_v2_set_date_mode').map(sent)).toEqual([{ box_id: BOX(2), date_mode: 'date' }]);
+    // The panel describes the order sent: still ASAP, waiting on their date.
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-mp-lab', { hasText: 'Twinside Retaining' })).toContainText('Pickup ASAP, waiting on their date');
+  });
+
+  test('a server without sent_mode reads the sent order as the box\'s mode and says nothing more', async ({ page }) => {
+    const { mat } = await boot(page, fakePayment({ onAccount: true, noSentMode: true, twinside: { dateMode: 'date', sentMode: 'asap' } }));
+    const box = boxOf(mat, 'Twinside Retaining');
+    await expect(box.locator('[data-dpc-v2-mode="date"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(box.locator('.dpc-v2-sentmode')).toHaveCount(0);
+  });
+
+  test('a date choice changed somewhere else (409 date_mode_changed) says so plainly and shows the latest', async ({ page }) => {
+    const fake = fakePayment({ fresh: true });
+    const { mat } = await boot(page, fake);
+    const box = boxOf(mat, 'Metroll');
+    await expect(box.locator('[data-dpc-v2-mode="asap"]')).toHaveAttribute('aria-pressed', 'true');
+    // Someone else picks a date first; this press then loses the race.
+    fake.boxes.find((bx) => bx.name === 'Metroll').dateMode = 'date';
+    fake.fail.dispatch_v2_set_date_mode = [{ status: 409, body: { error: 'e2e', code: 'date_mode_changed' } }];
+    await box.locator('[data-dpc-v2-mode="date"]').click();
+    await expect(box).toContainText("This order's date choice was changed somewhere else. Showing the latest.");
+    await expect(box.locator('[data-dpc-v2-mode="date"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(box.locator('.dpc-retry')).toHaveCount(0);
+  });
+});
+
 test.describe('Dispatch v2: the Materials panel', () => {
   const panelOf = (root) => root.locator('[data-dpc-region="arrival"]');
   const dotOf = (panel, i) => panel.locator('.dpc-mp-dot').nth(i);
@@ -255,5 +292,20 @@ test.describe('Dispatch v2: job card dots', () => {
     const card = root.locator('.dpc-job', { hasText: 'Peter Example' });
     await expect(card.locator('.dpc-arrthin-dot')).toHaveCount(3);
     await expect(card.locator('.dpc-minidots')).toHaveCount(0);
+  });
+});
+
+test.describe('Dispatch v2: the panel reads to_pay', () => {
+  const panelOf = (root) => root.locator('[data-dpc-region="arrival"]');
+  test('"to pay" and the row\'s Mark paid follow to_pay; a server without it works it out the same way', async ({ page }) => {
+    const making = { stage: 'manufacturing', stageSource: 'set', stageAt: '2026-10-29T07:34:00.000Z', stageBy: 'shaun@ops.test' };
+    for (const noToPay of [false, true]) {
+      const p = noToPay ? await page.context().newPage() : page;
+      const { root } = await boot(p, fakePayment({ noToPay, lysaght: making }));
+      const panel = panelOf(root);
+      await expect(panel.locator('.dpc-arr-count')).toHaveText('1 to pay · 1 waiting on supplier');
+      await expect(panel.locator('.dpc-mp-r', { hasText: 'Lysaght' }).locator('[data-dpc-v2="paid"]')).toHaveCount(0);
+      await expect(panel.locator('.dpc-mp-r', { hasText: 'Twinside Retaining' }).locator('[data-dpc-v2="paid"]')).toHaveText('Mark paid');
+    }
   });
 });

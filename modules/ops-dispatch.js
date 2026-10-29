@@ -2249,12 +2249,13 @@
     return { today: today, inst: inst, instPct: inst ? pct(inst) : null, early: early, earlyPct: early ? pct(early) : null, marks: marks, bay: bay.length, pct: pct };
   }
 
-  // An unpaid pay-first order that is at Awaiting payment: the only one
-  // counted "to pay" and given Mark paid on its row. Unpaid at any other
-  // stage (Sent before a quote, or a stage set by hand) counts by its colour.
+  // An order to pay now (payment.to_pay: unpaid and at Awaiting payment): the
+  // only one counted "to pay" and given Mark paid on its row. Unpaid at any
+  // other stage (Sent before a quote, or a stage set by hand) counts by its
+  // colour.
   function mpToPay(o) {
-    var p = v2PayFrom(o.payment);
-    return !!p && p.state === 'unpaid' && text(o.material_stage) === 'awaiting_payment';
+    var p = v2PayFrom(o.payment, o.material_stage);
+    return !!p && p.to_pay;
   }
 
   // The pill in the head: "1 to pay · 1 waiting on supplier", or all good.
@@ -2270,7 +2271,7 @@
     if (!orders.length) return { text: 'No orders yet', cls: '' };
     if (n.ok === orders.length) {
       // "and paid" only when something was paid (or tagged) and nothing is unpaid.
-      var pays = orders.map(function (o) { return v2PayFrom(o.payment); }).filter(Boolean);
+      var pays = orders.map(function (o) { return v2PayFrom(o.payment, o.material_stage); }).filter(Boolean);
       var paid = pays.some(function (p) { return p.paid || p.pay_on; }) && !pays.some(function (p) { return p.state === 'unpaid'; });
       return { text: 'All confirmed' + (paid ? ' and paid' : ''), cls: ' ok' };
     }
@@ -2286,7 +2287,7 @@
   // The words under a dot: the name, the date, and where the order is up to.
   function mpLabelHtml(m) {
     var o = m.order;
-    var p = v2PayFrom(o.payment);
+    var p = v2PayFrom(o.payment, o.material_stage);
     var stage = p && p.state === 'paid' && text(o.material_stage) === 'order_confirmed' ? 'Paid'
       : text(o.material_stage_label) + (o.material_stage_source === 'set' ? ' (set by hand)' : '');
     var at = m.bay ? 'left:' + m.labLeft.toFixed(1) + '%;width:' + m.labWidth.toFixed(1) + '%' : 'left:' + m.pct.toFixed(1) + '%';
@@ -2296,7 +2297,7 @@
 
   // Who or what put the order where it is, for the row's small line.
   function mpWho(o) {
-    var p = v2PayFrom(o.payment);
+    var p = v2PayFrom(o.payment, o.material_stage);
     var src = o.material_stage_source;
     if (src === 'payment' && p && p.paid) return 'Paid, marked' + (p.paid_by_email ? ' by ' + p.paid_by_email : '') + (p.paid_at ? ' ' + stampText(p.paid_at) : '');
     if (src === 'payment' && p && p.pay_on) return payOnWord(p.pay_on) + (p.pay_on_set_at ? ', set ' + stampText(p.pay_on_set_at) : '');
@@ -2321,7 +2322,7 @@
   // Mark paid on the row, only while the order is at Awaiting payment and the
   // open job's supplier box can take it (the box keeps its own Mark paid).
   function mpPayBtnHtml(jobId, o) {
-    var p = v2PayFrom(o.payment);
+    var p = v2PayFrom(o.payment, o.material_stage);
     var sid = text(o.supplier_id);
     if (!p || !p.can_mark_paid || !mpToPay(o) || !sid || state.jobId !== jobId) return '';
     var e = v2Entry(jobId);
@@ -2357,7 +2358,7 @@
   // confirmed order that is settled, "Order confirmed · paid".
   function mpStripWords(o, at) {
     var key = text(o.material_stage);
-    var p = v2PayFrom(o.payment);
+    var p = v2PayFrom(o.payment, o.material_stage);
     if (key === 'order_confirmed' && p && p.paid) return 'Order confirmed · paid';
     if (key === 'order_confirmed' && p && p.pay_on) return 'Order confirmed · ' + payOnWord(p.pay_on).toLowerCase();
     var word = key === 'awaiting_payment' ? 'Payment' : text(o.material_stage_label) || v2StageLabel(key);
@@ -4500,9 +4501,15 @@
 
   // The box's date choice (backend contract section 3c, piece C): ASAP or
   // Pick a date, or null from an older server (the calendar only, as today).
+  // mode is the choice for the next order email (the box's own choice wins
+  // after a send); sent_mode is what the order already sent asked for, and
+  // falls back to mode for a server that does not send it.
   function v2DateModeFrom(m) {
     if (!isObj(m) || (m.mode !== 'asap' && m.mode !== 'date')) return null;
-    return { mode: m.mode, set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null, derived: m.derived === true };
+    return {
+      mode: m.mode, sent_mode: m.sent_mode === 'asap' || m.sent_mode === 'date' ? m.sent_mode : m.mode,
+      set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null, derived: m.derived === true
+    };
   }
 
   // The choice shown: the one pressed on this screen while it saves, else the box's.
@@ -4782,6 +4789,7 @@
     var code = err && err.code;
     if (code === 'line_locked') return { changed: true, text: 'That line went out on a sent order, so it cannot be changed.' };
     if (code === 'stage_changed') return { changed: true, text: 'This order\'s stage was changed somewhere else. Showing the latest.' };
+    if (code === 'date_mode_changed') return { changed: true, text: 'This order\'s date choice was changed somewhere else. Showing the latest.' };
     if (V2_CHANGED.indexOf(code) >= 0) return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
     if (code === 'too_many_lines') return { text: 'A job can hold 500 lines at most.' };
     if (code === 'too_many_photos') return { text: 'A job can hold 20 photos at most. Delete one first.' };
@@ -6045,6 +6053,13 @@
       else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
       else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.' +
         (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
+      // The order already sent keeps the date choice it went out with: say
+      // so when the next email's choice is different.
+      var sentMode = b.sent.length && b.date_mode ? b.date_mode.sent_mode : null;
+      if (mode && sentMode && sentMode !== mode) {
+        h += '<p class="dpc-v2-hint dpc-v2-sentmode">The order already sent asked for ' + (sentMode === 'asap' ? 'ASAP' : 'a date') +
+          '. The next email will ' + (mode === 'asap' ? 'say ASAP' : 'ask for the date picked here') + '.</p>';
+      }
       h += v2MsgHtml(e.msg[mkey], 'data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"');
       h += v2MsgHtml(e.msg['dmode:' + sid], v2DateModeRetryAttrs(e.msg['dmode:' + sid], sid));
       return h + '</div>';

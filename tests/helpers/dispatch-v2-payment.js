@@ -78,6 +78,12 @@ function fakePayment(opts = {}) {
   const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair', earliest: opts.earliest || null };
   Object.assign(fake.boxes[0], opts.lysaght || {});
   if (opts.twinside) Object.assign(fake.boxes[1], opts.twinside);
+  // The mode each sent order went out with (date_mode.sent_mode); the box's
+  // dateMode is then the choice for the next email. noSentMode is a server
+  // from before sent_mode.
+  const noSentMode = opts.noSentMode === true;
+  fake.boxes.forEach((bx) => { if (!bx.unsent && bx.sentMode === undefined) bx.sentMode = bx.dateMode; });
+  const sentModeOf = (bx) => (bx.unsent ? bx.dateMode : bx.sentMode);
   const forced = (action) => { const q = fake.fail[action]; return q && q.length ? q.shift() : null; };
   const no = (status, code, extra) => ({ status, body: Object.assign({ error: 'e2e refusal: ' + code, code }, extra) });
   const boxBy = (b) => fake.boxes.find((x) => (b.box_id && BOX(x.n) === b.box_id) || (!b.box_id && SID(x.n) === b.supplier_id));
@@ -137,7 +143,7 @@ function fakePayment(opts = {}) {
       delivery_date: bx.date, date_source: bx.date ? 'box' : null, date_confirmed: bx.confirmed, box_id: BOX(bx.n),
       box_date_source: bx.date ? 'supplier_reply' : null, box_date_set_at: bx.date ? '2026-10-29T05:26:00Z' : null, box_date_set_by_email: bx.date ? 'shaun@ops.test' : null,
       fulfilment: bx.fulfilment, mark: bx.confirmed ? 'solid' : bx.date ? 'ring' : 'none',
-      flag: bx.unsent ? 'not_sent' : bx.date ? (fake.install && bx.date > fake.install ? 'after_install' : null) : old || bx.dateMode !== 'asap' ? 'no_date' : 'asap',
+      flag: bx.unsent ? 'not_sent' : bx.date ? (fake.install && bx.date > fake.install ? 'after_install' : null) : old || sentModeOf(bx) !== 'asap' ? 'no_date' : 'asap',
       material_stage: st.key, material_stage_label: labelOf(bx, st.key), material_stage_source: st.source,
       material_stage_set_at: st.set_at, material_stage_set_by_email: st.set_by_email,
       waiting_on: waitingOf(bx, st.key), todo: waitingOf(bx, st.key) === 'us' || !old ? todoOf(bx, st.key) : null, extra: false,
@@ -228,6 +234,7 @@ function fakePayment(opts = {}) {
         s.payment = payment(bx);
         s.approved_email.on_account = bx.terms === 'on_account';
         s.date_mode = { mode: bx.dateMode, set_at: bx.dateModeAt || null, set_by_email: bx.dateModeAt ? 'shaun@ops.test' : null, derived: false };
+        if (!noSentMode) s.date_mode.sent_mode = bx.unsent ? null : bx.sentMode;
       }
       return s;
     }),

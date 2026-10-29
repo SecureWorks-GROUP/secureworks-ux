@@ -175,6 +175,25 @@ test('TP-11: Needs a person lists bills to place with the best guess, its reason
   expect(await page.evaluate(() => window.__rcPosts.length)).toBe(0);
 });
 
+// A bill whose amount is not known (the queue allows a null subtotal) is never counted as $0 in the head line.
+const BILL_NO_AMOUNT = { id: 'q-none', status: 'open', xero_invoice_id: 'x-none', contact_name: 'Unknown Amount Pty', invoice_number: 'UA-33', invoice_date: '2026-10-22', sub_total: null };
+const BILL_ZERO = { id: 'q-zero', status: 'open', xero_invoice_id: 'x-zero', contact_name: 'Credit Supplies', invoice_number: 'CS-44', invoice_date: '2026-10-23', sub_total: 0 };
+test('TP-11: a bill with no known amount makes the bill total a floor that says so, never a whole total', async ({ page }) => {
+  await openRecon(page, { bills: { ...BILLS, rows: [...BILLS.rows, BILL_NO_AMOUNT] }, ai: AI_LEFT });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await expect(summary).toContainText('3 bills to place (at least $1,100.50 ex GST; 1 amount not known)');
+  await expect(page.locator('#viewRecon [data-np-bill="q-none"]')).toContainText('Amount not known');
+});
+test('TP-11: when no bill amount is known the head line says so and shows no $0.00; a known $0.00 bill stays $0.00', async ({ page }) => {
+  await openRecon(page, { bills: { ...BILLS, rows: [BILL_NO_AMOUNT, { ...BILL_NO_AMOUNT, id: 'q-none2', xero_invoice_id: 'x-none2', invoice_number: 'UA-34' }] }, ai: AI_LEFT });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await expect(summary).toContainText('2 bills to place (amounts not known)');
+  await expect(summary).not.toContainText('$0.00');
+  await openRecon(page, { bills: { ...BILLS, rows: [BILL_ZERO] }, ai: AI_LEFT });
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('1 bill to place ($0.00 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-bill="q-zero"]')).toContainText('$0.00 ex GST');
+});
+
 test('TP-11: Decide in Bills to place opens that bill in Bill Reconciliation with its lines', async ({ page }) => {
   await openRecon(page, { bills: BILLS, ai: AI_LEFT });
   await page.locator('#viewRecon [data-np-bill="q-small"] [data-np-open]').click();

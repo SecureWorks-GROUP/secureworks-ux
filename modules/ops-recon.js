@@ -152,10 +152,14 @@ var ReconCore = (function () {
     });
     return rows;
   }
+  // The known amounts only; billUnknownCount says how many bills it leaves out, so a total is never read as whole.
   function billTotalEx(rows) {
     var c = 0;
     (rows || []).forEach(function (r) { if (r.amountEx != null) c += Math.round(r.amountEx * 100); });
     return c / 100;
+  }
+  function billUnknownCount(rows) {
+    return (rows || []).filter(function (r) { return r.amountEx == null; }).length;
   }
   // The head line. A side that could not be read says so and is never counted as none.
   function needsWords(o) {
@@ -163,7 +167,15 @@ var ReconCore = (function () {
     if (o.matchErr) parts.push('Messages and invoices to match not known: the list could not be read');
     else if (o.matchCount != null) parts.push((o.matchMore ? 'at least ' : '') + o.matchCount + ' message' + (o.matchCount === 1 && !o.matchMore ? '' : 's') + ' or invoice' + (o.matchCount === 1 && !o.matchMore ? '' : 's') + ' to match');
     if (o.billsErr) parts.push('Bills to place not known: the bill list could not be read');
-    else if (o.billCount != null) parts.push((o.billsFull ? 'at least ' : '') + o.billCount + ' bill' + (o.billCount === 1 ? '' : 's') + ' to place (' + (o.billsFull ? 'at least ' : '') + money(o.billEx) + ' ex GST)');
+    else if (o.billCount != null) {
+      // A bill whose amount is not known is never counted as $0: all unknown says so, some unknown makes the
+      // total a floor and names how many it leaves out. A known $0 bill is a known amount.
+      var unk = Math.max(0, Math.min(Number(o.billUnknown) || 0, o.billCount));
+      var head = (o.billsFull ? 'at least ' : '') + o.billCount + ' bill' + (o.billCount === 1 ? '' : 's') + ' to place (';
+      if (o.billCount > 0 && unk === o.billCount) parts.push(head + (unk === 1 ? 'amount' : 'amounts') + ' not known)');
+      else parts.push(head + (o.billsFull || unk ? 'at least ' : '') + money(o.billEx) + ' ex GST' +
+        (unk ? '; ' + unk + (unk === 1 ? ' amount' : ' amounts') + ' not known' : '') + ')');
+    }
     return parts.join(' · ');
   }
   function bandOf(item) { return BANDS[item && item.band] || { title: 'Other', note: '' }; }
@@ -447,7 +459,7 @@ var ReconCore = (function () {
   return {
     tabVisible: tabVisible, tabSwitch: tabSwitch, probeAnswer: probeAnswer,
     billGuess: billGuess, billGuessWords: billGuessWords, billReason: billReason, billKeys: billKeys, billRows: billRows,
-    billTotalEx: billTotalEx, needsWords: needsWords, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
+    billTotalEx: billTotalEx, billUnknownCount: billUnknownCount, needsWords: needsWords, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
     refusalWords: refusalWords, mustReread: mustReread, grouped: grouped, escalateTo: escalateTo,
     passTargets: passTargets, teamWords: teamWords,
@@ -643,7 +655,8 @@ function npSummaryHtml() {
   var st = npState();
   return rcEsc(ReconCore.needsWords({
     matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
-    billsErr: !!st.err, billCount: st.rows ? st.rows.length : null, billEx: st.rows ? ReconCore.billTotalEx(st.rows) : 0, billsFull: st.full
+    billsErr: !!st.err, billCount: st.rows ? st.rows.length : null, billEx: st.rows ? ReconCore.billTotalEx(st.rows) : null,
+    billUnknown: st.rows ? ReconCore.billUnknownCount(st.rows) : 0, billsFull: st.full
   })) + (st.rows && st.rows.length ? ' <a href="#" data-np-jump>Go to bills</a>' : '');
 }
 

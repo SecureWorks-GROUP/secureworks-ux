@@ -87,6 +87,7 @@ check('TP-11: bills to place are the open rows only, largest first, an unknown a
   assert.strictEqual(rows[2].amountEx, null);
   assert.strictEqual(rows[2].supplier, 'Supplier not named');
   assert.strictEqual(C.billTotalEx(rows), 1100.5);
+  assert.strictEqual(C.billUnknownCount(rows), 1);
 });
 check('TP-11: each bill carries the best guess, its reason and which keys agreed or disagreed', () => {
   const rows = C.billRows(Q, AI, LABELS);
@@ -112,6 +113,17 @@ check('TP-11: the head line never counts an unread side as none', () => {
   assert.strictEqual(C.needsWords({ matchCount: 3, billCount: 2, billEx: 1100.5 }), '3 messages or invoices to match · 2 bills to place ($1,100.50 ex GST)');
   assert.strictEqual(C.needsWords({ matchCount: 1, billCount: 1, billEx: 5 }), '1 message or invoice to match · 1 bill to place ($5.00 ex GST)');
   assert.strictEqual(C.needsWords({ matchCount: 50, matchMore: true, billCount: 1000, billEx: 9, billsFull: true }), 'at least 50 messages or invoices to match · at least 1000 bills to place (at least $9.00 ex GST)');
+  // A bill with no known amount is never $0: some unknown is a floor naming how many; all unknown says so.
+  assert.strictEqual(C.needsWords({ billCount: 3, billEx: 1100.5, billUnknown: 1 }), '3 bills to place (at least $1,100.50 ex GST; 1 amount not known)');
+  assert.strictEqual(C.needsWords({ billCount: 2, billEx: 0, billUnknown: 2 }), '2 bills to place (amounts not known)');
+  assert.strictEqual(C.needsWords({ billCount: 1, billEx: 0, billUnknown: 1 }), '1 bill to place (amount not known)');
+  assert.strictEqual(C.needsWords({ billCount: 1000, billEx: 9, billUnknown: 4, billsFull: true }), 'at least 1000 bills to place (at least $9.00 ex GST; 4 amounts not known)');
+  // A known $0.00 bill is a known amount, and no bills is a known none.
+  assert.strictEqual(C.needsWords({ billCount: 1, billEx: 0, billUnknown: 0 }), '1 bill to place ($0.00 ex GST)');
+  assert.strictEqual(C.needsWords({ billCount: 0, billEx: 0, billUnknown: 0 }), '0 bills to place ($0.00 ex GST)');
+  const unk = C.billRows([{ id: 'u1', status: 'open', sub_total: null }, { id: 'u2', status: 'open', sub_total: 'n/a' }], [], LABELS);
+  assert.strictEqual(C.billUnknownCount(unk), 2);
+  assert.strictEqual(C.needsWords({ billCount: unk.length, billEx: C.billTotalEx(unk), billUnknown: C.billUnknownCount(unk) }), '2 bills to place (amounts not known)');
   const e = C.needsWords({ matchErr: true, billsErr: true });
   assert(/not known/.test(e) && !/\b0\b/.test(e));
 });
@@ -148,9 +160,10 @@ check('TP-11: no AI pick is offered on a card the AI made no job guess for, or o
 });
 check('TP-11: after a bill is cleared the head line counts drop in place; done lines show', () => {
   const before = withBills(fakeBills(Q), [], () => ctx.npSummaryHtml());
-  assert(/3 bills to place \(\$1,100\.50 ex GST\)/.test(before), before);
+  // Q holds one bill with no known amount (q3), so the total is a floor that says so.
+  assert(/3 bills to place \(at least \$1,100\.50 ex GST; 1 amount not known\)/.test(before), before);
   const after = withBills(fakeBills(Q.filter((r) => r.id !== 'q2'), { done: ['$980.00 Timber Co B-2 placed on SWF-1001'] }), [], () => [ctx.npSummaryHtml(), ctx.npSectionInner()]);
-  assert(/2 bills to place \(\$120\.50 ex GST\)/.test(after[0]), after[0]);
+  assert(/2 bills to place \(at least \$120\.50 ex GST; 1 amount not known\)/.test(after[0]), after[0]);
   assert(/data-np-done>\$980\.00 Timber Co B-2 placed on SWF-1001</.test(after[1]));
   const none = withBills(fakeBills([]), [], () => ctx.npSectionInner());
   assert(/data-np-empty/.test(none));

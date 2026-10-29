@@ -85,13 +85,19 @@ test('Save and reload retains selected group identity and rechecks the server sh
 
 
 test('all-inclusive group shows cash and super and submits one separate share from the normal invoice', async ({appPage:page}) => {
-  let phase='ready'; const posts=[];
+  let phase='ready'; const posts=[], offsets=[];
   await page.route('**/functions/v1/ops-api?**', async route => {
     const req=route.request(),action=new URL(req.url()).searchParams.get('action');
     const reply=body=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
     const share={...base,pot_total:2720,pay_basis:'all_in_12_6_v1',budget_includes_super:true,client_signed:true,awaiting:phase,
       projected_my_share:859.96,projected_my_budget:911.56,projected_cash_pay:808.36,projected_super:103.20,
       my_share:phase==='frozen'?859.96:null,my_budget:phase==='frozen'?911.56:null,my_cash_pay:phase==='frozen'?808.36:null,my_super:phase==='frozen'?103.20:null};
+    if(action==='my_work_orders') {
+      const q=new URL(req.url()).searchParams; expect(q.get('status')).toBe('complete'); expect(q.get('page_size')).toBe('500');
+      const offset=Number(q.get('offset')); offsets.push(offset);
+      const normal={id:'wo-fence-authorised',wo_number:'WO-FENCE-001',job_id:'fence-job-henry',job_number:'FENCE-HENRY-001',client_name:'Henry Client',job_type:'fencing',status:'complete',scheduled_date:addIsoDays(perthWeekMonday(),1),subtotal:100,scope_items:[{description:'Install fencing',quantity:10,rate:10,total:100}],negative_charges:[{line_id:'wo-fence-charge-israel',trade_name:'Israel',description:'Work Order - Israel',amount_ex:-40}],already_invoiced:false,can_invoice:true};
+      return reply({work_orders:offset===0?[normal]:[{id:'old-claimed',already_invoiced:true,can_invoice:false,job_type:'fencing'}],total:2,truncated:offset===0,next_offset:offset===0?1:null});
+    }
     if(action==='my_group_work_orders')return reply({enabled:true,group_job_ids:[groupJob],groups:[share]});
     if(action==='freeze_group_work_order'){phase='frozen';return reply({...share,awaiting:'frozen',my_share:859.96});}
     if(action==='generate_trade_invoice'){posts.push(req.postDataJSON());return reply({success:true,invoice_id:'all-in-group-invoice',office_review:'held',xero_bill_id:null});}
@@ -99,6 +105,8 @@ test('all-inclusive group shows cash and super and submits one separate share fr
   });
   await open(page);
   const card=page.locator('[data-invoice-group]');
+  expect(offsets).toEqual([0,1]);
+  await expect(page.locator('[data-pm-wo-hydrate="error"]')).toHaveCount(0);
   await expect(card).toContainText('pay + super pool: $2,720.00');
   await expect(card).toContainText('allocation: $911.56 including pay and super');
   await expect(card).toContainText('Your pay: $808.36 · Your super: $103.20');

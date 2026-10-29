@@ -568,7 +568,7 @@ assert(html.includes('_jobCentricWorkOrdersStillExclusive') &&
   html.includes('_confirmJobCentricWorkOrdersExclusive') &&
   html.includes('_refreshJobCentricPostedWorkOrderMoney') &&
   /function _jobCentricWorkOrdersStillExclusive[\s\S]*?_workOrderDirectInvoiceAllowed/.test(html) &&
-  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?api\('my_work_orders', \{ mode: 'all' \}\)[\s\S]*?_jobCentricWorkOrdersStillExclusive[\s\S]*?_refreshJobCentricPostedWorkOrderMoney/.test(html) &&
+  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?readAllInvoiceWorkOrders\(\)[\s\S]*?_jobCentricWorkOrdersStillExclusive[\s\S]*?_refreshJobCentricPostedWorkOrderMoney/.test(html) &&
   !html.includes('claim_work_order') &&
   !html.includes('exclusive_claim'),
   'job-centric generate re-reads WO can_invoice under the financial fence, rebuilds deduction money from that listing, and does not add a claim API');

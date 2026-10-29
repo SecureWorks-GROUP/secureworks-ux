@@ -133,19 +133,22 @@ function fakeV2(seed = {}) {
           approved_email: s.approved, send_blocked: s.approved ? null : { code: 'no_approved_email', message: BLOCK_MSG },
           lines: j.lines.filter((l) => l.supplier_id === sid).map(lineOut), photos: j.photos.filter((p) => p.supplier_id === sid),
           open_email: open ? emailOut(open) : null, sent_emails: j.emails.filter((m) => m.supplier_id === sid && m.status === 'sent').map(emailOut),
+          // Delivery or pickup: the open email's, else the newest sent one's.
+          fulfilment: open ? open.fulfilment : (j.emails.filter((m) => m.supplier_id === sid && m.status === 'sent').pop() || {}).fulfilment || null,
           material_stage: stageOut(j, sid),
         };
       }),
     };
   };
-  const bodyOf = (j, sid, lines, date) => {
+  const bodyOf = (j, sid, lines, date, fulfilment) => {
+    const pickup = fulfilment === 'pickup';
     const main = j.work_type === 'fencing' && mainOf(j) === sid;
     const items = lines.map((l) => [`${l.quantity != null ? l.quantity + (l.unit ? ' ' + l.unit : '') + ' x ' : ''}${l.description}`]
       .concat(l.detail ? [l.detail] : [], l.profile ? ['Profile: ' + l.profile] : [], l.colour ? ['Colour: ' + l.colour] : []).join('\n'));
     if (main) items.push('4 x bags of quickset', 'Fixings, Post Caps and Screws as necessary');
     return {
       main, count: items.length,
-      text: 'Hi Team, could we please order the following for delivery:\n\nDate: ' + longDate(date) + '\nAddress: 12 Example Street, Gwelup\nContact: 0400 000 000 (Jane)\n\nMaterials Needed:\n\n' +
+      text: 'Hi Team, could we please order the following for ' + (pickup ? 'pickup' : 'delivery') + ':\n\nDate: ' + longDate(date) + (pickup ? '' : '\nAddress: 12 Example Street, Gwelup') + '\nContact: 0400 000 000 (Jane)\n\nMaterials Needed:\n\n' +
         items.map((t, i) => `${i + 1}. ${t}`).join('\n\n') + '\n\n\nPlease confirm when you can, thank you.',
     };
   };
@@ -296,13 +299,16 @@ function fakeV2(seed = {}) {
       if (!s.approved) return no(409, 'no_approved_email');
       const lines = j.lines.filter((l) => l.supplier_id === b.supplier_id && !l.sent_on_email_id && l.status !== 'in_stock');
       if (!lines.length) return no(409, 'no_lines_to_order');
+      if (b.fulfilment !== undefined && b.fulfilment !== null && !['delivery', 'pickup'].includes(b.fulfilment)) return no(400, 'invalid_request');
       const date = b.delivery_date || null;
-      const built = bodyOf(j, b.supplier_id, lines, date);
+      // A rebuild without a choice keeps the held email's own.
+      const fulfilment = b.fulfilment || (open && open.fulfilment) || 'delivery';
+      const built = bodyOf(j, b.supplier_id, lines, date, fulfilment);
       const team = TEAM[j.work_type] || null;
       const m = open || { id: EID(++fake.n.email), job_id: b.job_id, supplier_id: b.supplier_id, supplier_name: s.name, from: ADMIN, test: null, sent: null };
       Object.assign(m, {
         status: 'draft', to: s.approved.to.slice(), cc: s.approved.cc.concat(team ? [team] : []), team_cc: team,
-        subject: 'Material Order Ref ' + j.job_number, body_text: built.text, edited: false, delivery_date: date,
+        subject: 'Material Order Ref ' + j.job_number, body_text: built.text, edited: false, delivery_date: date, fulfilment,
         is_main_supplier: built.main, standing_lines_included: built.main, line_count: built.count, line_ids: lines.map((l) => l.id),
         photo_ids: j.photos.filter((p) => p.supplier_id === b.supplier_id).slice(0, 3).map((p) => p.id),
         empty_detail_lines: date ? [] : ['date'], last_error: null, updated_at: stamp(),
@@ -769,7 +775,7 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     const acacia = boxOf(mat, 'Acacia Steel');
     await expect(acacia).toContainText('1 line to order. The email is held for you to check; nothing is sent until you press Send now and confirm.');
     await makeHeld(mat, 'Acacia Steel', '2026-11-04');
-    expect(writes().map((c) => [c.action, c.body])).toEqual([['dispatch_v2_make_email', { job_id: 'job-f1', supplier_id: SID(1), delivery_date: '2026-11-04', rebuild: false, operator_email: expect.any(String) }]]);
+    expect(writes().map((c) => [c.action, c.body])).toEqual([['dispatch_v2_make_email', { job_id: 'job-f1', supplier_id: SID(1), delivery_date: '2026-11-04', rebuild: false, fulfilment: 'delivery', operator_email: expect.any(String) }]]);
     const mail = acacia.locator('.dpc-v2-mail');
     await expect(acacia).toContainText('Held email made. Nothing has been sent. Check it, then send.');
     await expect(mail.locator('.dpc-v2-mailhead')).toContainText('Held email, nothing sent yet');
@@ -800,6 +806,45 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     await expect(mail).toContainText('Not saved: not-an-address is not an email address.');
     expect(writes()).toHaveLength(2);
     expect(writes().filter((c) => c.action === 'dispatch_v2_send_email')).toEqual([]);
+  });
+
+  test('Delivery or pickup: Pickup flips the date label, sends fulfilment pickup, and a rebuild keeps it', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat, writes } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    const choice = acacia.locator('[data-dpc-v2-fulfil]');
+    await expect(choice).toHaveValue('delivery');
+    await expect(acacia.locator('.dpc-v2-date span').nth(1)).toHaveText('Delivery date');
+    await choice.selectOption('pickup');
+    await expect(acacia.locator('.dpc-v2-date span').nth(1)).toHaveText('Pickup date');
+    // Picking sends nothing.
+    expect(writes()).toHaveLength(0);
+    await makeHeld(mat, 'Acacia Steel', '2026-11-02');
+    expect(writes().map((c) => [c.action, c.body])).toEqual([['dispatch_v2_make_email', { job_id: 'job-f1', supplier_id: SID(1), delivery_date: '2026-11-02', rebuild: false, fulfilment: 'pickup', operator_email: expect.any(String) }]]);
+    const body = await acacia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(body).toContain('Hi Team, could we please order the following for pickup:');
+    expect(body).not.toContain('Address:');
+    // Rebuild keeps pickup.
+    await acacia.locator('[data-dpc-v2="rebuild"]').click();
+    await acacia.locator('[data-dpc-v2="rebuild-go"]').click();
+    await expect(acacia).toContainText('Rebuilt from the lines. Your edits to it were lost.');
+    expect(writes()[1].body).toMatchObject({ supplier_id: SID(1), rebuild: true, fulfilment: 'pickup' });
+    // Discarded, the box keeps Pickup from the server's read.
+    await acacia.locator('[data-dpc-v2="discard"]').click();
+    await acacia.locator('[data-dpc-v2="discard-go"]').click();
+    await expect(acacia).toContainText('Email discarded. Nothing was sent.');
+    await expect(acacia.locator('[data-dpc-v2-fulfil]')).toHaveValue('pickup');
+  });
+
+  test('Delivery or pickup: a box the server says is a pickup opens on Pickup', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    // An earlier pickup order went to Acacia.
+    await fake.api.dispatch_v2_make_email(null, { job_id: 'job-f1', supplier_id: SID(1), delivery_date: '2026-11-02', rebuild: false, fulfilment: 'pickup' });
+    Object.assign(fake.jobs['job-f1'].emails[0], { status: 'sent', sent: { sent_at: '2026-10-28T01:00:00.000Z', sent_by_email: 'shaun@example.test', from: ADMIN, to: ['orders@acacia.example'], cc: [] } });
+    const { mat } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    await expect(acacia.locator('[data-dpc-v2-fulfil]')).toHaveValue('pickup');
+    await expect(acacia.locator('.dpc-v2-date span').nth(1)).toHaveText('Pickup date');
   });
 
   test('one open email per box: a second Make email is explained plainly and shows the email already waiting', async ({ page }) => {

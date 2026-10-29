@@ -701,8 +701,8 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-make { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .dpc-v2-date { display: flex; flex-direction: column; gap: 3px; }
 .dpc-v2-date span { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
-.dpc-v2-date input { font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-.dpc-v2-date input:focus { border-color: var(--signal); outline: none; }
+.dpc-v2-date input, .dpc-v2-date select { font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.dpc-v2-date input:focus, .dpc-v2-date select:focus { border-color: var(--signal); outline: none; }
 .dpc-v2-callout { padding: 10px 12px; border: 1px solid #C3D8EA; border-radius: 8px; background: #E7F0F7; color: #2C5D86; font-size: 13px; overflow-wrap: anywhere; }
 .dpc-v2-callout.dpc-v2-bad { border-color: #F0C2BD; background: #FBEAE8; color: #8C1D16; }
 .dpc-v2-callout .dpc-actions { margin-top: 8px; }
@@ -774,7 +774,7 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
   .dpc .dpc-v2-photo select.dpc-v2-move { flex: 1 1 auto; max-width: none; min-height: 44px; }
   .dpc .dpc-v2-photo .dpc-x { min-width: 44px; min-height: 44px; }
   .dpc-v2-make > * { flex: 1 1 100%; }
-  .dpc-v2-date input { min-height: 44px; }
+  .dpc-v2-date input, .dpc-v2-date select { min-height: 44px; }
   .dpc .dpc-v2-order button, .dpc .dpc-v2-mail button, .dpc .dpc-v2-modal button, .dpc .dpc-v2-find button, .dpc .dpc-v2-box .dpc-suphead .dpc-x, .dpc .dpc-card-foot .dpc-addline { min-height: 44px; }
   .dpc-v2-sendrow > button { flex: 1 1 100%; }
   .dpc-v2-main { min-height: 44px; }

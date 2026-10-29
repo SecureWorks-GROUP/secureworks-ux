@@ -854,8 +854,23 @@ var JobWorkOrderOps = (function () {
       var status = (res && res.office_review_status) || '';
       if (status) stampOfficeStatus(lineId, status);
       if (res && res.ready_for_xero_push) {
-        _state.message = 'This invoice is ready for Xero.';
-        _state.level = 'ok';
+        var pushed = res.xero_push;
+        if (pushed && pushed.success === true && pushed.xero_bill_id) {
+          _state.message = 'Office review saved. The draft bill is saved in Xero.';
+          _state.level = 'ok';
+        } else {
+          _state.message = 'Office review saved. The Xero result is unconfirmed. Check this invoice before retrying.';
+          _state.level = 'error';
+        }
+      } else if (status === 'queried') {
+        _state.message = 'Your query is saved. This invoice remains held from Xero.';
+        _state.level = 'info';
+      } else if (status === 'rejected') {
+        _state.message = 'The line is rejected. This invoice remains held from Xero.';
+        _state.level = 'info';
+      } else if (status === 'approved') {
+        _state.message = 'Line approved. This invoice remains held until its other lines are approved.';
+        _state.level = 'info';
       }
       repaint();
     }).catch(function (e) {

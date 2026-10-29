@@ -443,6 +443,22 @@ test.describe('Dispatch v2 rail', () => {
 // ── Slice 7: the Arrival line ─────────────────────────────────────────────────
 
 test.describe('Dispatch v2 Arrival line', () => {
+  test('a pickup order says Pickup on the Arrival line', async ({ page }) => {
+    const orders = [
+      { supplier_name: 'Lysaght', delivery_date: dayFrom(4), mark: 'ring', flag: null, fulfilment: 'pickup' },
+      { supplier_name: 'Metroll', delivery_date: dayFrom(6), mark: 'solid', flag: null, fulfilment: 'delivery' },
+      { supplier_name: 'Twinside', delivery_date: null, mark: 'ring', flag: 'no_date', fulfilment: 'pickup' },
+    ];
+    const { root } = await boot(page, {
+      dispatch_arrival: (url) => ({ job_id: url.searchParams.get('job_id'), arrival: ARRIVAL(dayFrom(10), orders), arrival_read: 'ok' }),
+    });
+    const arr = root.locator('[data-dpc-region="arrival"]');
+    await expect(arr.locator('.dpc-arr-mk.wait small')).toHaveText(`Pickup ${words(dayFrom(4))}, not confirmed`);
+    await expect(arr.locator('.dpc-arr-mk.ok small')).toHaveText(words(dayFrom(6)));
+    await expect(arr.locator('.dpc-arr-out small')).toHaveText('Pickup, no date yet');
+    await expect(arr.locator('.dpc-arr-list')).toContainText(`Lysaght Pickup ${words(dayFrom(4))}, not confirmed`);
+  });
+
   test('a thin line on the card and the full line in the open job, from dispatch_arrival', async ({ page }) => {
     const { root, of } = await boot(page, {
       dispatch_arrival: (url) => ({ job_id: url.searchParams.get('job_id'), arrival: ARRIVAL(dayFrom(10), F1_ORDERS), arrival_read: 'ok' }),

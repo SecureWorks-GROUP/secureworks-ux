@@ -102,6 +102,16 @@
  * waiting on us ("On us ..."), an order made on or after the install day is
  * tagged Extra, and the Waiting on us button keeps only those jobs.
  *
+ * Delivery or pickup (Shaun, 29 Oct 2026): each supplier box picks Delivery
+ * or Pickup next to its date by Make email (the box's own value, else
+ * Delivery). It goes to dispatch_v2_make_email as fulfilment, on a rebuild
+ * too; a pickup email opens "for pickup:" and has no Address line. The
+ * server reads it back from the email's opening line, so the date reads
+ * "Pickup date", the Arrival line says "Pickup Mon 2/11" and the boxes under
+ * Deliveries say Pickup date. A reply suggestion shows the server's own
+ * label ("Lysaght: pickup Mon 2 Nov"). With a server that does not send
+ * fulfilment yet, everything reads Delivery as before.
+ *
  * The Install section (v2 slice 7) shows the install day from the board and
  * who is booked from the list row's dispatch_install. It has no write: Mark
  * confirmed is gone. It makes, moves, locks or confirms no booking (never
@@ -484,7 +494,14 @@
   function arrivalLate(o) { return !!o && (o.flag === 'no_date' || o.flag === 'after_install'); }
 
   // One order's words: "Tue 27/10", "Mon 2/11, not confirmed", "no date yet".
+  // A pickup says so first: "Pickup Mon 2/11", "Pickup, no date yet".
   function arrivalWords(o) {
+    var words = arrivalDateWords(o);
+    if (o.fulfilment !== 'pickup') return words;
+    return /^[A-Z]/.test(words) ? 'Pickup ' + words : 'Pickup, ' + words;
+  }
+
+  function arrivalDateWords(o) {
     var d = parseDay(o.delivery_date);
     if (o.flag === 'no_date') return 'no date yet';
     if (o.flag === 'after_install') return (d ? dayText(d) + ', ' : '') + 'after the install';
@@ -3102,6 +3119,7 @@
       // own). Sent only when the Arrival answer carries it.
       guard: Object.prototype.hasOwnProperty.call(o, 'box_date_set_at') ? { set_at: own ? (text(o.box_date_set_at) || null) : null } : null,
       fromReply: own && o.box_date_source === 'supplier_reply',
+      dateWord: o.fulfilment === 'pickup' ? 'Pickup date' : 'Delivery date',
       busy: false, fail: false, last: null
     };
     state.deliv.boxMsg = null;
@@ -3133,8 +3151,9 @@
     if (resp && resp.unchanged) return 'No change: ' + ed.name + ' already had that date.';
     var b = resp && resp.box;
     var d = b && parseDay(b.delivery_date);
-    if (!d) return 'Delivery date cleared: ' + ed.name + '.';
-    return 'Delivery date saved: ' + ed.name + ', ' + dayText(d) + (b.confirmed ? ', confirmed.' : ', not confirmed yet.');
+    var word = ed.dateWord || 'Delivery date';
+    if (!d) return word + ' cleared: ' + ed.name + '.';
+    return word + ' saved: ' + ed.name + ', ' + dayText(d) + (b.confirmed ? ', confirmed.' : ', not confirmed yet.');
   }
 
   // Save (value: a date) or Clear (value: null). The line stays open with
@@ -3174,17 +3193,18 @@
     });
   }
 
-  // The inline delivery date line under a box.
+  // The inline delivery (or pickup) date line under a box.
   function boxEditHtml(ed) {
     var off = ed.busy ? ' disabled' : '';
-    var h = '<div class="dpc-deliv-edit" role="group" aria-label="Delivery date for ' + esc(ed.name) + '"><p class="dpc-empty dpc-empty-tight">Delivery date for ' + esc(ed.name) + ', set by hand:</p><div class="dpc-actions">';
-    h += dateBoxHtml(ed.date, 'data-dpc-box-date', 'Delivery date for ' + ed.name, ed.busy, true);
+    var word = ed.dateWord || 'Delivery date';
+    var h = '<div class="dpc-deliv-edit" role="group" aria-label="' + esc(word) + ' for ' + esc(ed.name) + '"><p class="dpc-empty dpc-empty-tight">' + esc(word) + ' for ' + esc(ed.name) + ', set by hand:</p><div class="dpc-actions">';
+    h += dateBoxHtml(ed.date, 'data-dpc-box-date', word + ' for ' + ed.name, ed.busy, true);
     h += '<label class="dpc-v2-main dpc-box-tick"><input type="checkbox" data-dpc-box-confirmed' + (ed.confirmed ? ' checked' : '') + off + '> Confirmed by the supplier</label>';
     h += '<button type="button" class="dpc-primary" data-dpc-box-edit="save"' + (ed.busy || !wholeDay(ed.date) ? ' disabled' : '') + '>' + (ed.busy && ed.last !== null ? 'Saving...' : 'Save') + '</button>';
     if (ed.own) h += '<button type="button" class="dpc-primary" data-dpc-box-edit="clear"' + off + '>' + (ed.busy && ed.last === null ? 'Clearing...' : 'Clear') + '</button>';
     h += '<button type="button" data-dpc-box-edit="cancel"' + off + '>Cancel</button></div>';
     if (ed.fromReply) h += '<p class="dpc-empty dpc-empty-tight">A date saved here replaces the date from the supplier\'s reply.</p>';
-    if (ed.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">Delivery date not saved. <button type="button" class="dpc-retry" data-dpc-box-edit="retry"' + off + '>Retry</button></p>';
+    if (ed.fail) h += '<p class="dpc-empty dpc-empty-tight dpc-mat-fail" role="alert">' + esc(word) + ' not saved. <button type="button" class="dpc-retry" data-dpc-box-edit="retry"' + off + '>Retry</button></p>';
     return h + '</div>';
   }
 
@@ -3200,9 +3220,10 @@
       var from = boxDateFrom(o);
       var small = from ? '<small>' + esc(from) + '</small>' : '';
       var off = ed && ed.busy ? ' disabled' : '';
-      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the delivery date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
+      var pickup = o.fulfilment === 'pickup';
+      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
       h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
-      h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + '</small></span>';
+      h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + (pickup ? ', pickup' : '') + '</small></span>';
       // Expected: the date while it is not confirmed.
       if (!day) h += '<span class="dpc-dstate"><em>No date yet</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
       else if (!o.date_confirmed) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
@@ -3709,7 +3730,7 @@
     var facts = [v2Count(m.line_count, 'line', 'lines')];
     if (m.photo_ids.length) facts.push(v2Count(m.photo_ids.length, 'photo', 'photos'));
     var day = parseDay(m.delivery_date);
-    if (day) facts.push('delivery asked for ' + dayText(day));
+    if (day) facts.push((m.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' asked for ' + dayText(day));
     h += '<p class="dpc-mail-msg">' + esc(facts.join(', ') + '.') + '</p>';
     if (m.test) h += '<p class="dpc-mail-msg">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';
     h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre>';
@@ -4006,7 +4027,7 @@
       id: String(m.id), supplier_id: m.supplier_id == null ? null : String(m.supplier_id), supplier_name: text(m.supplier_name),
       status: text(m.status), from: text(m.from) || V2_FROM, to: v2Arr(m.to), cc: v2Arr(m.cc), team_cc: text(m.team_cc),
       subject: m.subject == null ? '' : String(m.subject), body: m.body_text == null ? '' : String(m.body_text), edited: m.edited === true,
-      delivery_date: text(m.delivery_date), is_main: m.is_main_supplier === true, standing: m.standing_lines_included === true,
+      delivery_date: text(m.delivery_date), fulfilment: v2Fulfil(m.fulfilment), is_main: m.is_main_supplier === true, standing: m.standing_lines_included === true,
       line_count: Number(m.line_count) || 0, photo_ids: v2Arr(m.photo_ids), missing: v2Arr(m.empty_detail_lines),
       test: isObj(m.test) && m.test.sent_at ? m.test : null, sent: isObj(m.sent) && m.sent.sent_at ? m.sent : null,
       last_error: text(m.last_error), updated_at: m.updated_at || null
@@ -4014,6 +4035,13 @@
   }
 
   function v2ByPos(a, b) { return a.position - b.position; }
+
+  // Delivery or pickup as the server says it, else null (an older server).
+  function v2Fulfil(v) { return v === 'pickup' || v === 'delivery' ? v : null; }
+
+  // The box's choice by Make email: picked here, else the box's own, else
+  // Delivery.
+  function v2FulfilOf(e, b) { return v2Fulfil((e.fulfil || {})[b.supplier_id]) || b.fulfilment || 'delivery'; }
 
   function v2BoxFrom(s) {
     var ap = isObj(s.approved_email) ? s.approved_email : null;
@@ -4026,6 +4054,7 @@
       photos: (Array.isArray(s.photos) ? s.photos : []).filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom),
       open: v2EmailFrom(s.open_email),
       sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean),
+      fulfilment: v2Fulfil(s.fulfilment),
       stage: v2StageFrom(s.material_stage)
     };
   }
@@ -4083,7 +4112,7 @@
       // and typedAt[id] is the line's stamp when the typing began.
       local: [], typed: {}, typedAt: {}, again: {}, more: {},
       mailTyped: {}, mailAt: {}, mailAgain: {},
-      dates: {}, busy: {}, msg: {}, notice: '', ask: null
+      dates: {}, fulfil: {}, busy: {}, msg: {}, notice: '', ask: null
     };
   }
 
@@ -4764,12 +4793,14 @@
     var key = 'make:' + sid;
     if (!box || e.busy[key]) return;
     var date = wholeDay(e.dates[sid] || '') || null;
-    if (!rebuild && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That delivery date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
+    // A rebuild keeps the held email's own delivery or pickup.
+    var fulfilment = rebuild ? (box.open && box.open.fulfilment) || v2FulfilOf(e, box) : v2FulfilOf(e, box);
+    if (!rebuild && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That ' + fulfilment + ' date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
     e.busy[key] = true;
     delete e.msg[key];
     e.ask = null;
     paintV2();
-    var body = { job_id: jobId, supplier_id: sid, delivery_date: rebuild ? (box.open && box.open.delivery_date) || null : date, rebuild: !!rebuild };
+    var body = { job_id: jobId, supplier_id: sid, delivery_date: rebuild ? (box.open && box.open.delivery_date) || null : date, rebuild: !!rebuild, fulfilment: fulfilment };
     if (rebuild && box.open) body.expected_updated_at = box.open.updated_at;
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_make_email', body); }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
@@ -5224,7 +5255,10 @@
     if (!m) {
       var n = v2Orderable(b).length;
       var off = !!b.blocked || !n || !!e.busy[mkey];
-      h += '<div class="dpc-v2-make"><label class="dpc-v2-date"><span>Delivery date</span><input type="date" data-dpc-v2-date="' + esc(sid) + '" value="' + esc(e.dates[sid] || '') + '"' + (b.blocked ? ' disabled' : '') + '></label>';
+      var pick = v2FulfilOf(e, b) === 'pickup';
+      h += '<div class="dpc-v2-make"><label class="dpc-v2-date dpc-v2-fulfil"><span>Delivery or pickup</span><select data-dpc-v2-fulfil="' + esc(sid) + '"' + (b.blocked ? ' disabled' : '') + '>' +
+        '<option value="delivery"' + (pick ? '' : ' selected') + '>Delivery</option><option value="pickup"' + (pick ? ' selected' : '') + '>Pickup</option></select></label>';
+      h += '<label class="dpc-v2-date"><span>' + (pick ? 'Pickup date' : 'Delivery date') + '</span><input type="date" data-dpc-v2-date="' + esc(sid) + '" value="' + esc(e.dates[sid] || '') + '"' + (b.blocked ? ' disabled' : '') + '></label>';
       h += '<button type="button" class="dpc-primary" data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' + (e.busy[mkey] ? 'Making the email...' : 'Make email') + '</button></div>';
       if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
       else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
@@ -5415,7 +5449,7 @@
 
   // Where the keyboard was inside the section, to put it back after a repaint.
   var V2_FOCUS_KEYS = ['data-dpc-v2-cell', 'data-dpc-v2-id', 'data-dpc-v2-mf', 'data-dpc-v2-mid', 'data-dpc-v2', 'data-dpc-v2-sid', 'data-dpc-v2-status',
-    'data-dpc-v2-move', 'data-dpc-v2-pmove', 'data-dpc-v2-main', 'data-dpc-v2-date', 'data-dpc-v2-attach', 'data-dpc-v2-q', 'data-dpc-v2-stage'];
+    'data-dpc-v2-move', 'data-dpc-v2-pmove', 'data-dpc-v2-main', 'data-dpc-v2-date', 'data-dpc-v2-attach', 'data-dpc-v2-q', 'data-dpc-v2-stage', 'data-dpc-v2-fulfil'];
   function v2Focus(el) {
     var a = document.activeElement;
     if (!a || !el.contains(a)) return null;
@@ -5518,6 +5552,8 @@
     if (t.hasAttribute('data-dpc-v2-main')) { v2SetMain(jobId, t.getAttribute('data-dpc-v2-main'), !!t.checked); return true; }
     if (t.hasAttribute('data-dpc-v2-stage')) { v2SetStage(jobId, t.getAttribute('data-dpc-v2-stage'), t.value); return true; }
     if (t.hasAttribute('data-dpc-v2-date')) { e.dates[t.getAttribute('data-dpc-v2-date')] = t.value; return true; }
+    // Delivery or pickup: kept on the screen until Make email; nothing is sent.
+    if (t.hasAttribute('data-dpc-v2-fulfil')) { e.fulfil[t.getAttribute('data-dpc-v2-fulfil')] = t.value === 'pickup' ? 'pickup' : 'delivery'; paintV2(); return true; }
     if (t.hasAttribute('data-dpc-v2-file')) {
       var file = t.files && t.files[0];
       var where = v2Key(t.getAttribute('data-dpc-v2-file'));

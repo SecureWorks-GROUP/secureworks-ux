@@ -438,6 +438,17 @@ test.describe('Dispatch v2: Deliveries and install, kept from v1', () => {
     expect(await sched.innerText()).not.toMatch(/[–—]/);
   });
 
+  test('a box ordered for pickup says so, and its line says Pickup date', async ({ page }) => {
+    const dv = delivApi();
+    dv.box.fulfilment = 'pickup';
+    const { root, writes } = await boot(page, { api: dv.api });
+    const box = root.locator('[data-dpc-region="sched"]').locator(`[data-dpc-deliv-box="${SID(2)}"]`);
+    await expect(box).toContainText('Order email sent, pickup');
+    await box.locator('[data-dpc-box-open][data-dpc-box-tick]').click();
+    await expect(box.locator('.dpc-deliv-edit')).toContainText('Pickup date for Banksia Roofing, set by hand:');
+    expect(writes()).toHaveLength(0);
+  });
+
   test('a box ordered by email shows where its date came from; a date set by hand is sent once, on Save, onto the Arrival line', async ({ page }) => {
     const dv = delivApi();
     const { root, of, calls, writes } = await boot(page, { api: dv.api });

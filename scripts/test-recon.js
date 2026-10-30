@@ -375,5 +375,16 @@ check('AC-M6: a text original shows the whole text; a bad answer and errors are 
   assert(/Only an admin/.test(C.originalErrorWords({ code: 'operator_access_required' })));
 });
 
+check('message card shows unknown source time rather than omitting it', () => {
+  const row = Object.assign({}, message, { summary: { channel: 'sms', occurred_at: null } });
+  assert.ok(ctx.rcCard(row).includes('Message time unknown'));
+});
+check('message card renders the supplied original time in Perth', () => {
+  const row = Object.assign({}, message, { summary: { channel: 'sms', occurred_at: '2026-09-17T04:43:15.377Z' } });
+  const html = ctx.rcCard(row);
+  assert.ok(html.includes('17 Sep 2026, 12:43pm'));
+  assert.ok(!html.includes('Message time unknown'));
+});
+
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
 console.log('PASS recon: tab flag, default-on probe, bills to place rows and cards, actions, body, escalate, split, find by job, refusals, words, open the original');

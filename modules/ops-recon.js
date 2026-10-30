@@ -741,7 +741,7 @@ function rcCard(item) {
     h += '<div class="rc-top"><span>' + rcEsc((s.channel || 'Message') + (s.from ? ' from ' + s.from : '')) +
       (held ? '<span class="rc-held">' + rcEsc(held) + '</span>' : '') + '</span>' +
       (band === 2 ? '<span>They owe ' + rcEsc(ReconCore.money(item.amount)) + '</span>' : '') + '</div>';
-    h += '<div class="rc-meta">' + rcEsc([ReconCore.senderWords(s.counterpart_role), ReconCore.perthWhen(s.occurred_at), item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
+    h += '<div class="rc-meta">' + rcEsc([ReconCore.senderWords(s.counterpart_role), (ReconCore.perthWhen(s.occurred_at) || 'Message time unknown'), item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
       item.band == null ? ReconCore.causeWords(item.cause) : ''].filter(Boolean).join(' · ')) + '</div>';
     if (s.subject) h += '<div class="rc-preview"><strong>' + rcEsc(s.subject) + '</strong></div>';
     if (s.preview) h += '<div class="rc-preview">' + rcEsc(s.preview) + '</div>';

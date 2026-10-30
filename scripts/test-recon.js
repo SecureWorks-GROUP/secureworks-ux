@@ -375,6 +375,12 @@ check('AC-M6: a text original shows the whole text; a bad answer and errors are 
   assert(/Only an admin/.test(C.originalErrorWords({ code: 'operator_access_required' })));
 });
 
+check('original viewer distinguishes unknown and capture-only message time', () => {
+  const missing = C.originalView({ kind: 'text', at: null, at_source: 'unknown', text: { body: 'Synthetic' } });
+  assert(missing.rows.some((r) => r[1].includes('Message time unknown')));
+  const captured = C.originalView({ kind: 'text', at: '2026-09-17T04:43:15.377Z', at_source: 'captured', text: {} });
+  assert(captured.rows.some((r) => r[1].includes('Captured 17 Sep 2026, 12:43pm')));
+});
 check('message card shows unknown source time rather than omitting it', () => {
   const row = Object.assign({}, message, { summary: { channel: 'sms', occurred_at: null } });
   assert.ok(ctx.rcCard(row).includes('Message time unknown'));

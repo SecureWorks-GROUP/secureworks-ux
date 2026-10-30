@@ -411,6 +411,8 @@ var ReconCore = (function () {
     if (!res || typeof res !== 'object' || !res.kind) return { error: 'The original could not be read just now.' };
     var v = { kind: res.kind, rows: [], body: null, bodyNote: '', files: null, filesNote: '', callNote: '', listen: '' };
     var at = perthWhen(res.at);
+    if (res.at_source === 'unknown') at = 'Message time unknown';
+    else if (res.at_source === 'captured' && at) at = 'Captured ' + at;
     if (res.kind === 'call') {
       var c = res.call || {};
       var mins = typeof c.duration_seconds === 'number' && isFinite(c.duration_seconds) ? c.duration_seconds : null;

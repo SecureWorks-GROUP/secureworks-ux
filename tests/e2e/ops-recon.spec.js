@@ -3,7 +3,10 @@
 // Offline: opsFetch and opsPost are replaced in the page. Names are made up.
 //
 // Contract under guard:
-//  - The Matching tab is hidden unless ?recon=1 or localStorage sw_recon = '1'.
+//  - TP-11: the tab is on by default for whoever the server lets read recon_daily_list, hidden
+//    when the server refuses, off with ?recon=0 and forced on with ?recon=1.
+//  - TP-11: Needs a person lists Bills to place below the daily list with the best guess, its
+//    reason and which keys agreed or disagreed; Decide opens that bill in Bill Reconciliation.
 //  - The list shows the three bands in order with their counts; an invoice card shows the
 //    invoice, the contact, the amount owed and the wait; a message card shows its preview.
 //  - A tap asks once, in words, then posts recon_record_decision with the hash and cause the
@@ -14,7 +17,8 @@
 //  - Find by job reads recon_job_items for a typed job number, shows rows the list leaves
 //    out, and a message with two suggested jobs can be recorded on both (split).
 const { test, expect } = require('@playwright/test');
-const { revealOpsStaticFixture } = require('../helpers/ops-auth');
+const path = require('node:path');
+const { installOpsSessionStub, revealOpsStaticFixture } = require('../helpers/ops-auth');
 
 const JOB_A = { job_id: 'aaaaaaaa-0000-4000-8000-000000000001', job_number: 'SWF-1001', type: 'fencing', status: 'accepted', suburb: 'Sampleton', live: true };
 const JOB_B = { job_id: 'bbbbbbbb-0000-4000-8000-000000000002', job_number: 'SWP-2002', type: 'patio', status: 'complete', suburb: 'Exampleby', live: false };
@@ -46,16 +50,33 @@ const JOB_ITEMS = {
     shown_hash: '00112233445566778899aabbccddeeff', offered: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001' }, { job_id: JOB_B.job_id, job_number: 'SWP-2002' }] }],
 };
 
-async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS, data = list() } = {}) {
+const BILLS = {
+  ok: true, status: 'open', proposals: 'ok', stats: { open: 3 },
+  rows: [
+    { id: 'q-small', status: 'open', xero_invoice_id: 'x-small', contact_name: 'Sample Steel', invoice_number: 'SS-11', invoice_date: '2026-10-20', sub_total: 120.5, suggestion_reason: 'no_ref_no_po' },
+    { id: 'q-big', status: 'open', xero_invoice_id: 'x-big', contact_name: 'Example Timber', invoice_number: 'ET-22', invoice_date: '2026-10-21', sub_total: 980,
+      proposal: { kind: 'review', rule: 'several_candidates', outcome: 'queued_for_review', candidates: [{ job_id: JOB_A.job_id, job_number: 'SWF-1001', signals: ['po_number'] }, { job_id: JOB_B.job_id, job_number: 'SWP-2002', signals: ['site_suburb'] }] } },
+  ],
+};
+const AI_LEFT = { ok: true, view: 'left', placements: [
+  { id: 'p1', xero_invoice_id: 'x-small', decision: 'job', job_number: 'SWF-1001', confidence: 0.72, reason: 'Delivery address matches the job site', outcome: 'left_for_person', second_check_status: 'disagreed', second_check: { decision: 'job', job_number: 'SWP-2002' } },
+] };
+
+async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = true, jobItems = JOB_ITEMS, data = list(), bills = null, ai = null, billsReject = null, jobs = {}, postRejectFor = {} } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
-  await page.evaluate(({ data, jobItems, fetchAnswer, post, show }) => {
+  await page.evaluate(({ data, jobItems, fetchAnswer, post, show, bills, ai, billsReject, jobs, postRejectFor }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
     window.__rcFetches = []; window.__rcPosts = [];
     window.opsFetch = (action, params) => {
       window.__rcFetches.push({ action, params });
       if (action === 'recon_job_items') return Promise.resolve(JSON.parse(JSON.stringify(jobItems)));
+      if (action === 'materials_recon_queue' && billsReject) return Promise.reject(Object.assign(new Error(billsReject.message || ''), billsReject));
+      if (action === 'materials_recon_queue' && bills) return Promise.resolve(JSON.parse(JSON.stringify(bills)));
+      if (action === 'materials_ai_placements' && ai) return Promise.resolve(JSON.parse(JSON.stringify(ai)));
+      if (action === 'job_detail' && jobs[params.jobId]) return Promise.resolve(JSON.parse(JSON.stringify(jobs[params.jobId])));
+      if (action === 'get_xero_invoice') return Promise.resolve({ invoice: { invoice_number: params.xero_invoice_id, line_items: [{ description: 'Posts', account_code: '310', line_amount: 120.5 }] } });
       if (action !== 'recon_daily_list') return Promise.reject(Object.assign(new Error('Unknown action'), { status: 400 }));
       if (fetchAnswer && fetchAnswer.reject) return Promise.reject(Object.assign(new Error(fetchAnswer.reject.message || ''), fetchAnswer.reject));
       return Promise.resolve(JSON.parse(JSON.stringify(data)));
@@ -63,23 +84,133 @@ async function openRecon(page, { fetchAnswer, post, url = '/ops.html', show = tr
     window.opsPost = (action, body) => {
       window.__rcPosts.push({ action, body });
       if (post && post.reject) return Promise.reject(Object.assign(new Error(post.reject.message || ''), post.reject));
+      if (postRejectFor[action]) return Promise.reject(Object.assign(new Error(postRejectFor[action].message || ''), postRejectFor[action]));
+      if (/^materials_recon_/.test(action)) return Promise.resolve({ ok: true });
       return Promise.resolve({ recorded: true, decision_id: 1 });
     };
     if (show) showView('recon');
-  }, { data, jobItems, fetchAnswer, post, show });
+  }, { data, jobItems, fetchAnswer, post, show, bills, ai, billsReject, jobs, postRejectFor });
   if (show) await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const posts = (page) => page.evaluate(() => window.__rcPosts);
 const reads = (page) => page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'recon_daily_list').length);
 const card = (page, id) => page.locator(`#viewRecon [data-rc-subject="${id}"]`);
 
-test('the Matching tab is hidden until it is switched on', async ({ page }) => {
+test('signed out, the tab stays hidden; ?recon=1 forces it on and ?recon=0 keeps it off', async ({ page }) => {
   await openRecon(page, { show: false });
   await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
   await page.goto('/ops.html?recon=1');
   await revealOpsStaticFixture(page);
   await page.evaluate(() => { document.getElementById('mainApp').style.display = ''; });
   await expect(page.locator('.header-nav [data-view="recon"]')).toBeVisible();
+  await page.evaluate(() => localStorage.setItem('sw_recon_seen', '1'));
+  await page.goto('/ops.html?recon=0');
+  await revealOpsStaticFixture(page);
+  await page.evaluate(() => { document.getElementById('mainApp').style.display = ''; });
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+});
+
+// TP-11: a signed-in boot of ops.html, every ops-api call answered here.
+const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
+async function bootSignedIn(page, { query = '', daily = { status: 200, body: { items: [] } } } = {}) {
+  const calls = [];
+  await installOpsSessionStub(page);
+  await page.route('**/*', async (route) => {
+    const u = route.request().url();
+    if (u.startsWith('file://')) return route.continue();
+    const m = u.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
+    if (m) calls.push(u);
+    if (m && m[1] === 'recon_daily_list') return route.fulfill({ status: daily.status, contentType: 'application/json', body: JSON.stringify(daily.body) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(m && m[1] === 'pipeline' ? { columns: {} } : {}) });
+  });
+  await page.goto(OPS_FILE + query);
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  return calls;
+}
+const dailyReads = (calls) => calls.filter((u) => /action=recon_daily_list/.test(u));
+
+test('TP-11: signed in as someone the server lets match, the tab is on by default', async ({ page }) => {
+  const calls = await bootSignedIn(page);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeVisible();
+  expect(dailyReads(calls).length).toBeGreaterThanOrEqual(1);
+  expect(dailyReads(calls)[0]).toContain('limit=1');
+});
+
+test('TP-11: when the server refuses the person, the tab stays hidden', async ({ page }) => {
+  const calls = await bootSignedIn(page, { daily: { status: 403, body: { error: 'forbidden', code: 'operator_access_required' } } });
+  await expect.poll(() => dailyReads(calls).length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(200);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem('sw_recon_seen'))).toBe(null);
+});
+
+test('TP-11: ?recon=0 keeps the tab off and reads nothing to decide it', async ({ page }) => {
+  const calls = await bootSignedIn(page, { query: '?recon=0' });
+  await page.waitForTimeout(300);
+  await expect(page.locator('.header-nav [data-view="recon"]')).toBeHidden();
+  expect(dailyReads(calls).length).toBe(0);
+});
+
+test('TP-11: Needs a person lists bills to place with the best guess, its reason and the keys, largest first', async ({ page }) => {
+  await openRecon(page, { bills: BILLS, ai: AI_LEFT });
+  await expect(page.locator('#viewRecon h2')).toHaveText('Needs a person');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('3 messages or invoices to match');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('2 bills to place ($1,100.50 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-band]')).toContainText('Bills to place (2)');
+  await expect(page.locator('#viewRecon [data-np-bill]')).toHaveCount(2);
+  const ids = await page.locator('#viewRecon [data-np-bill]').evaluateAll((els) => els.map((e) => e.getAttribute('data-np-bill')));
+  expect(ids).toEqual(['q-big', 'q-small']);
+  const small = page.locator('#viewRecon [data-np-bill="q-small"]');
+  await expect(small).toContainText('Sample Steel');
+  await expect(small).toContainText('$120.50 ex GST');
+  await expect(small.locator('[data-np-guess]')).toContainText('SWF-1001 (AI, sure 72%)');
+  await expect(small.locator('[data-np-reason]')).toContainText('Delivery address matches the job site');
+  await expect(small.locator('[data-np-keys]')).toContainText('Disagrees: Second check disagreed: says SWP-2002');
+  const big = page.locator('#viewRecon [data-np-bill="q-big"]');
+  await expect(big.locator('[data-np-guess]')).toContainText('No pick: 2 possible jobs (Bill agent)');
+  await expect(big.locator('[data-np-reason]')).toContainText('more than one job fits');
+  await expect(big.locator('[data-np-keys]')).toContainText('SWF-1001: po number');
+  // The daily list and its decision controls are still there, above the bills.
+  await expect(page.locator('#viewRecon [data-rc-band]')).toHaveCount(3);
+  expect(await page.evaluate(() => window.__rcPosts.length)).toBe(0);
+});
+
+// A bill whose amount is not known (the queue allows a null subtotal) is never counted as $0 in the head line.
+const BILL_NO_AMOUNT = { id: 'q-none', status: 'open', xero_invoice_id: 'x-none', contact_name: 'Unknown Amount Pty', invoice_number: 'UA-33', invoice_date: '2026-10-22', sub_total: null };
+const BILL_ZERO = { id: 'q-zero', status: 'open', xero_invoice_id: 'x-zero', contact_name: 'Credit Supplies', invoice_number: 'CS-44', invoice_date: '2026-10-23', sub_total: 0 };
+test('TP-11: a bill with no known amount makes the bill total a floor that says so, never a whole total', async ({ page }) => {
+  await openRecon(page, { bills: { ...BILLS, rows: [...BILLS.rows, BILL_NO_AMOUNT] }, ai: AI_LEFT });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await expect(summary).toContainText('3 bills to place (at least $1,100.50 ex GST; 1 amount not known)');
+  await expect(page.locator('#viewRecon [data-np-bill="q-none"]')).toContainText('Amount not known');
+});
+test('TP-11: when no bill amount is known the head line says so and shows no $0.00; a known $0.00 bill stays $0.00', async ({ page }) => {
+  await openRecon(page, { bills: { ...BILLS, rows: [BILL_NO_AMOUNT, { ...BILL_NO_AMOUNT, id: 'q-none2', xero_invoice_id: 'x-none2', invoice_number: 'UA-34' }] }, ai: AI_LEFT });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await expect(summary).toContainText('2 bills to place (amounts not known)');
+  await expect(summary).not.toContainText('$0.00');
+  await openRecon(page, { bills: { ...BILLS, rows: [BILL_ZERO] }, ai: AI_LEFT });
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('1 bill to place ($0.00 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-bill="q-zero"]')).toContainText('$0.00 ex GST');
+});
+
+test('TP-11: Decide in Bills to place opens that bill in Bill Reconciliation with its lines', async ({ page }) => {
+  await openRecon(page, { bills: BILLS, ai: AI_LEFT });
+  await page.locator('#viewRecon [data-np-bill="q-small"] [data-np-open]').click();
+  await expect(page.locator('#subBillrecon')).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-small"]')).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-small"]')).toContainText('Posts');
+  const lineReads = await page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'get_xero_invoice').map((f) => f.params.xero_invoice_id));
+  expect(lineReads).toEqual(['x-small']);
+  expect(await page.evaluate(() => window.__rcPosts.length)).toBe(0);
+});
+
+test('TP-11: a failed bill read says so and is never counted as none', async ({ page }) => {
+  await openRecon(page, { billsReject: { status: 500, message: 'boom' } });
+  await expect(page.locator('#viewRecon [data-np-err]')).toContainText('could not be read');
+  await expect(page.locator('#viewRecon [data-np-summary]')).toContainText('Bills to place not known');
+  await expect(page.locator('#viewRecon [data-np-bill]')).toHaveCount(0);
+  await expect(page.locator('#viewRecon [data-np-empty]')).toHaveCount(0);
 });
 
 test('the list shows the three bands, most at stake first', async ({ page }) => {
@@ -296,4 +427,147 @@ test('AC-M6: Open the original shows an email with its files, a call with no wor
   await call.getByRole('button', { name: 'Open the original' }).click();
   await expect(call.locator('[data-rc-orig-err]')).toHaveText('Only an admin, owner or ops manager can use this list.');
   expect(await posts(page)).toEqual([]);
+});
+
+// TP-11 slice 2: bills are decided on their card, with Bill Reconciliation's own panel and checks.
+const JOB_C = { job_id: 'cccccccc-0000-4000-8000-000000000003', job_number: 'SWP-3003' };
+const FOUR_BILLS = {
+  ok: true, status: 'open', proposals: 'ok', stats: { open: 4, open_total_ex: 2600, assigned: 0, not_job_related: 0 },
+  rows: [
+    { id: 'q-sugg', status: 'open', xero_invoice_id: 'x-sugg', contact_name: 'Sample Steel', invoice_number: 'SS-1', invoice_date: '2026-10-20', sub_total: 1000,
+      suggested_job_id: JOB_A.job_id, suggested_job_number: 'SWF-1001', suggestion_reason: 'no_po_match' },
+    { id: 'q-ai', status: 'open', xero_invoice_id: 'x-ai', contact_name: 'Example Timber', invoice_number: 'ET-2', invoice_date: '2026-10-21', sub_total: 800 },
+    { id: 'q-file', status: 'open', xero_invoice_id: 'x-file', contact_name: 'Office Supplies Co', invoice_number: 'OS-3', invoice_date: '2026-10-22', sub_total: 500 },
+    { id: 'q-keep', status: 'open', xero_invoice_id: 'x-keep', contact_name: 'Later Bills Ltd', invoice_number: 'LB-4', invoice_date: '2026-10-23', sub_total: 300 },
+  ],
+};
+const FOUR_AI = { ok: true, view: 'left', placements: [
+  { id: 'p-ai', xero_invoice_id: 'x-ai', decision: 'job', job_id: JOB_C.job_id, job_number: 'SWP-3003', confidence: 0.81, reason: 'Delivery address is the job site', outcome: 'left_for_person' },
+] };
+const JOBS = {
+  [JOB_A.job_id]: { job: { id: JOB_A.job_id, job_number: 'SWF-1001', client_name: 'Pat Example', type: 'fencing', status: 'accepted' }, xero_project: { project_name: 'SWF-1001', total_expenses: 0 } },
+  [JOB_C.job_id]: { job: { id: JOB_C.job_id, job_number: 'SWP-3003', client_name: 'Lee Sample', type: 'patio', status: 'accepted' }, xero_project: null },
+};
+const billCard = (page, id) => page.locator(`#viewRecon [data-np-bill="${id}"]`);
+async function decide(page, id) {
+  await billCard(page, id).locator('[data-np-decide]').click();
+  // The bill's lines are read before anything can be placed, as in Bill Reconciliation.
+  await expect(billCard(page, id).locator('[data-np-detail] [data-mrq-line]')).toHaveCount(1);
+}
+const billPosts = (page) => page.evaluate(() => window.__rcPosts.filter((p) => /^materials_recon_/.test(p.action)).map((p) => ({ action: p.action, body: p.body })));
+
+test('TP-11: the bookkeeper clears several bills in a row on the list, with the same checks as Bill Reconciliation', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await expect(summary).toContainText('4 bills to place ($2,600.00 ex GST)');
+
+  // 1. Use the suggestion: an empty Xero Project, so one press places it.
+  await decide(page, 'q-sugg');
+  await billCard(page, 'q-sugg').locator('[data-mrq-act="usesuggest"]').click();
+  await expect(billCard(page, 'q-sugg').locator('[data-mrq-project="empty"]')).toBeVisible();
+  await billCard(page, 'q-sugg').locator('[data-mrq-act="place"]').click();
+  await expect(billCard(page, 'q-sugg')).toHaveCount(0);
+  await expect(summary).toContainText('3 bills to place ($1,600.00 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-done]').first()).toContainText('placed on SWF-1001');
+
+  // 2. Pick the AI's guess: its Xero Project cannot be confirmed, so Place takes two presses.
+  await decide(page, 'q-ai');
+  await billCard(page, 'q-ai').locator('[data-np-aipick]').click();
+  await expect(billCard(page, 'q-ai').locator('[data-mrq-project="unconfirmed"]')).toBeVisible();
+  const place = billCard(page, 'q-ai').locator('[data-mrq-act="place"]');
+  await place.click();
+  await expect(place).toContainText('Confirm: place on SWP-3003 without Xero Projects');
+  expect((await billPosts(page)).length).toBe(1);
+  await page.waitForTimeout(750);
+  await place.click();
+  await expect(billCard(page, 'q-ai')).toHaveCount(0);
+  await expect(summary).toContainText('2 bills to place ($800.00 ex GST)');
+
+  // 3. Not job related: the first press arms, a second press after the gap files it.
+  await decide(page, 'q-file');
+  const notjob = billCard(page, 'q-file').locator('[data-mrq-act="notjob"]');
+  // A double-click (two presses inside the gap) only arms, so it never files.
+  await page.evaluate(() => {
+    const q = () => document.querySelector('#viewRecon [data-np-bill="q-file"] [data-mrq-act="notjob"]');
+    q().click(); q().click();
+  });
+  await expect(billCard(page, 'q-file').locator('[data-mrq-notjob-armed]')).toBeVisible();
+  expect((await billPosts(page)).length).toBe(2);
+  await page.waitForTimeout(750);
+  await notjob.click();
+  await expect(billCard(page, 'q-file')).toHaveCount(0);
+  await expect(summary).toContainText('1 bill to place ($300.00 ex GST)');
+
+  expect(await billPosts(page)).toEqual([
+    { action: 'materials_recon_assign', body: { queue_id: 'q-sugg', use_suggestion: true } },
+    { action: 'materials_recon_assign', body: { queue_id: 'q-ai', job_id: JOB_C.job_id } },
+    { action: 'materials_recon_not_job_related', body: { queue_id: 'q-file' } },
+  ]);
+  // Never left the list: the Matching view is still the one on screen.
+  await expect(page.locator('#viewRecon')).toBeVisible();
+  await expect(page.locator('#subBillrecon')).toBeHidden();
+  await expect(billCard(page, 'q-keep')).toBeVisible();
+  // The message cards are still there, untouched.
+  await expect(page.locator('#viewRecon [data-rc-band]')).toHaveCount(3);
+  expect(await page.evaluate(() => window.__rcPosts.filter((p) => p.action === 'recon_record_decision').length)).toBe(0);
+});
+
+test('TP-11: a refused bill write is shown as refused on its card, and the bill stays', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS,
+    postRejectFor: { materials_recon_assign: { status: 409, message: 'bill x-sugg is split across jobs; change it with Split, not a single placement' } } });
+  const summary = page.locator('#viewRecon [data-np-summary]');
+  await decide(page, 'q-sugg');
+  await billCard(page, 'q-sugg').locator('[data-mrq-act="usesuggest"]').click();
+  await expect(billCard(page, 'q-sugg').locator('[data-mrq-project="empty"]')).toBeVisible();
+  await billCard(page, 'q-sugg').locator('[data-mrq-act="place"]').click();
+  await expect(billCard(page, 'q-sugg').locator('[data-mrq-err]')).toContainText('Not placed: bill x-sugg is split across jobs');
+  await expect(billCard(page, 'q-sugg').locator('[data-mrq-err-next]')).toContainText('still on this list');
+  await expect(billCard(page, 'q-sugg')).toHaveCount(1);
+  await expect(summary).toContainText('4 bills to place ($2,600.00 ex GST)');
+  await expect(page.locator('#viewRecon [data-np-done]')).toHaveCount(0);
+});
+
+test('TP-11: a bill job search typed on the card is the one searched', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  await page.evaluate(() => {
+    const prev = window.opsFetch;
+    window.opsFetch = (action, params) => {
+      if (action === 'search_jobs') { window.__rcFetches.push({ action, params }); return Promise.resolve({ results: [{ id: 'cccccccc-0000-4000-8000-000000000003', job_number: 'SWP-3003', client_name: 'Lee Sample' }] }); }
+      return prev(action, params);
+    };
+  });
+  await decide(page, 'q-keep');
+  const box = billCard(page, 'q-keep').locator('[data-mrq-q="q-keep"]');
+  await box.fill('SWP-3003');
+  await billCard(page, 'q-keep').locator('[data-mrq-act="find"]').click();
+  await expect(billCard(page, 'q-keep').locator('[data-mrq-act="pick"]')).toContainText('SWP-3003');
+  const q = await page.evaluate(() => window.__rcFetches.filter((f) => f.action === 'search_jobs').map((f) => f.params.q));
+  expect(q).toEqual(['SWP-3003']);
+  await expect(box).toHaveValue('SWP-3003');
+});
+
+test('TP-11: an armed Not job related never carries from the card into Bill Reconciliation', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  await decide(page, 'q-file');
+  await billCard(page, 'q-file').locator('[data-mrq-act="notjob"]').click();
+  await expect(billCard(page, 'q-file').locator('[data-mrq-notjob-armed]')).toBeVisible();
+  await page.waitForTimeout(750);
+  await billCard(page, 'q-file').locator('[data-np-open]').click();
+  await expect(page.locator('#subBillrecon')).toBeVisible();
+  const notjob = page.locator('#matReconBody [data-mrq-detail="q-file"] [data-mrq-act="notjob"]');
+  await expect(notjob).toBeVisible();
+  await expect(page.locator('#matReconBody [data-mrq-detail="q-file"] [data-mrq-notjob-armed]')).toHaveCount(0);
+  // One press here only arms it again; nothing is filed.
+  await notjob.click();
+  expect(await billPosts(page)).toEqual([]);
+});
+
+test('TP-11: a repaint of the bill section keeps a job search being typed on the card', async ({ page }) => {
+  await openRecon(page, { bills: FOUR_BILLS, ai: FOUR_AI, jobs: JOBS });
+  await decide(page, 'q-keep');
+  const box = billCard(page, 'q-keep').locator('[data-mrq-q="q-keep"]');
+  await box.fill('SWP-30');
+  await page.evaluate(() => window.npRepaint());
+  await expect(box).toHaveValue('SWP-30');
+  expect(await billPosts(page)).toEqual([]);
 });

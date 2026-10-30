@@ -42,7 +42,8 @@
       '[data-office-group-wo-card] .gwo-title{font-size:13px;font-weight:700;margin-bottom:6px}' +
       '[data-office-group-wo-card] li{font-size:13px;margin:2px 0}' +
       '[data-office-signoff-form] textarea{display:block;width:100%;max-width:40rem;min-height:5rem;margin:8px 0;padding:8px;font:inherit}' +
-      '[data-office-signoff-form] button{min-height:44px;padding:8px 16px}';
+      '[data-office-signoff-form] button,[data-office-hours-form] button{min-height:44px;padding:8px 16px}' +
+      '[data-office-hours-form] textarea{display:block;width:100%;max-width:40rem;min-height:5rem;margin:8px 0;padding:8px;font:inherit}';
     document.head.appendChild(style);
   }
 
@@ -87,7 +88,32 @@
     }).catch(function () { if (currentJob(jobId)) box.innerHTML = ''; });
   }
 
+  function onHoursSubmit(ev, form) {
+    ev.preventDefault();
+    var box = form.closest('[data-office-group-wo]');
+    if (!box || typeof opsPost !== 'function') return;
+    var jobId = box.getAttribute('data-job-id');
+    if (!currentJob(jobId)) return;
+    var reason = (form.querySelector('[data-office-hours-reason]').value || '').trim();
+    var msg = box.querySelector('[data-office-group-message]');
+    var btn = form.querySelector('button');
+    if (reason.length < 3) { msg.textContent = 'Record who confirmed the hours and why the office is approving them.'; return; }
+    btn.disabled = true;
+    msg.textContent = 'Approving the crew\'s hours...';
+    opsPost('office_approve_group_hours', { group_id: box.getAttribute('data-group-id') || '', reason: reason }).then(function () {
+      if (!currentJob(jobId)) return;
+      paint((typeof _currentJobData !== 'undefined' && _currentJobData) || null);
+    }).catch(function (err) {
+      if (!currentJob(jobId)) return;
+      btn.disabled = false;
+      var text = err && err.body && err.body.error;
+      msg.textContent = text || 'The approval could not be confirmed. Refresh the job to check before trying again.';
+    });
+  }
+
   function onSubmit(ev) {
+    var hoursForm = ev.target && ev.target.closest && ev.target.closest('[data-office-hours-form]');
+    if (hoursForm) { onHoursSubmit(ev, hoursForm); return; }
     var form = ev.target && ev.target.closest && ev.target.closest('[data-office-signoff-form]');
     if (!form) return;
     ev.preventDefault();

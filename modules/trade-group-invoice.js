@@ -203,7 +203,7 @@
     var h = '<div data-group-crew-hours>';
     crew.forEach(function(c) {
       var tag = '';
-      if (ask) tag = approvedRow(g, c) ? pill('✓ Approved','ok') : c.me ? pill('Your turn','wait') : pill('Waiting','no');
+      if (ask) tag = approvedRow(g, c) ? pill(c.approved_by_office ? '✓ Office approved' : '✓ Approved','ok') : c.me ? pill('Your turn','wait') : pill('Waiting','no');
       h += '<div class="gw-crewrow'+(ask ? '' : ' plain')+'" data-group-crew-row'+(c.me ? ' data-me' : '')+'><span class="gw-name"><b>'+esc(c.name)+'</b>'+(c.me ? ' <small>(you)</small>' : '')+'</span>'
         + '<span class="gw-hrs">'+esc(hrs(c.hours))+'</span>'+(ask ? '<span class="gw-tag">'+tag+'</span>' : '')+'</div>';
     });

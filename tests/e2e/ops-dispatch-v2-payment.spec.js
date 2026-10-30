@@ -145,31 +145,26 @@ test.describe('Dispatch v2 payment step: Mark paid and Undo paid', () => {
 });
 
 test.describe('Dispatch v2 payment step: the Not paid yet pill', () => {
-  test('an unpaid pay-first order says Not paid yet on its box, its Deliveries row and the Arrival line; Paid once marked', async ({ page }) => {
+  test('an unpaid pay-first order says Not paid yet on its box and its Deliveries row, and Pay on the Materials panel; Paid once marked', async ({ page }) => {
     const fake = fakePayment({ onAccount: true });
     const { root, mat } = await boot(page, fake);
     const box = boxOf(mat, 'Lysaght');
     const deliv = root.locator('[data-dpc-deliv-box="' + SID(1) + '"]');
-    const arr = root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' });
+    // Piece D: the Materials panel takes the Arrival line's place; its dot says Pay.
+    const lab = root.locator('[data-dpc-region="arrival"] .dpc-mp-lab', { hasText: 'Lysaght' });
     await expect(box.locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Not paid yet');
     await expect(deliv.locator('.dpc-paypill')).toHaveText('Not paid yet');
-    await expect(arr.locator('.dpc-paypill')).toHaveText('Not paid yet');
-    // On the line itself, under the order's marker (the list is for narrow screens).
-    const mark = root.locator('[data-dpc-region="arrival"] .dpc-arr-mk', { hasText: 'Lysaght' });
-    await expect(mark.locator('.dpc-paypill')).toBeVisible();
-    await expect(mark.locator('.dpc-paypill')).toHaveText('Not paid yet');
+    await expect(lab.locator('.dpc-mp-t')).toHaveText('Awaiting payment');
     // Twinside has no date yet: the pill sits beside "No date yet".
     await expect(root.locator('[data-dpc-deliv-box="' + SID(2) + '"] .dpc-paypill')).toHaveText('Not paid yet');
     // On account: no pill anywhere.
     await expect(boxOf(mat, 'Stratco WA').locator('.dpc-paypill')).toHaveCount(0);
     await expect(root.locator('[data-dpc-deliv-box="' + SID(3) + '"] .dpc-paypill')).toHaveCount(0);
-    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Stratco WA' }).locator('.dpc-paypill')).toHaveCount(0);
 
     await box.locator('.dpc-v2-paybtn').click();
     await expect(box.locator('.dpc-v2-stage .dpc-paypill')).toHaveText('Paid');
     await expect(deliv.locator('.dpc-paypill')).toHaveText('Paid');
-    await expect(arr.locator('.dpc-paypill')).toHaveText('Paid');
-    await expect(mark.locator('.dpc-paypill')).toHaveText('Paid');
+    await expect(lab.locator('.dpc-mp-t')).toHaveText('Paid');
     await expect(root.locator('[data-dpc-deliv-box="' + SID(2) + '"] .dpc-paypill')).toHaveText('Not paid yet');
   });
 
@@ -195,10 +190,10 @@ test.describe('Dispatch v2 payment step: Pay on pickup or delivery', () => {
     await expect(tag.locator('.dpc-flag-payon')).toHaveText('Pay on pickup');
     await expect(tag).toContainText('Set by shaun@ops.test');
     // The tag shows once on the box (its own row, no pill beside the stage);
-    // Deliveries and the Arrival line show it as their pill.
+    // Deliveries shows it as its pill, and the Materials panel row says so too.
     await expect(box.locator('.dpc-flag-payon')).toHaveCount(1);
     await expect(root.locator('[data-dpc-deliv-box="' + SID(1) + '"] .dpc-paypill')).toHaveText('Pay on pickup');
-    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' }).locator('.dpc-paypill')).toHaveText('Pay on pickup');
+    await expect(root.locator('[data-dpc-region="arrival"] .dpc-mp-r', { hasText: 'Lysaght' })).toContainText('Pay on pickup');
     // Mark paid can still be pressed on the day they pay.
     await expect(box.locator('.dpc-v2-paybtn')).toHaveText('Mark paid');
     await expect(box.locator('.dpc-v2-pay [data-dpc-v2="payon"][data-dpc-v2-payon="pickup"]')).toHaveCount(0);
@@ -313,10 +308,11 @@ test.describe('Dispatch v2 payment step: stage wording', () => {
     await expect(pick(box).locator('option[value="delivered"]')).toHaveText('Picked up');
     await expect(pick(boxOf(mat, 'Stratco WA')).locator('option[value="delivered"]')).toHaveText('Delivered');
     await expect(box.locator('.dpc-v2-stage-next')).toHaveText('Next: Materials ready to be picked up, ' + dayWords(dayFrom(4)));
-    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' })).toContainText('Materials ready, on us: Materials ready to be picked up, ' + dayWords(dayFrom(4)));
+    const row = root.locator('[data-dpc-region="arrival"] .dpc-mp-r', { hasText: 'Lysaght' });
+    await expect(row.locator('.dpc-mp-onus')).toHaveText('On usMaterials ready to be picked up, ' + dayWords(dayFrom(4)));
     await pick(box).selectOption('delivered');
     await expect(box).toContainText('Stage saved: Lysaght, Picked up.');
-    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: 'Lysaght' })).toContainText('Picked up');
+    await expect(row.locator('.dpc-mp-done')).toHaveText('Picked up');
     expect(of('dispatch_v2_set_material_stage').map((c) => c.body.material_stage)).toEqual(['delivered']);
   });
 
@@ -400,7 +396,8 @@ test.describe('Dispatch v2 payment step: Not paid yet only while the order is to
   const pills = async (root, mat, name, n) => {
     await expect(boxOf(mat, name).locator('.dpc-v2-stage .dpc-paypill')).toHaveCount(n);
     await expect(root.locator('[data-dpc-deliv-box="' + SID(name === 'Lysaght' ? 1 : 2) + '"] .dpc-paypill')).toHaveCount(n);
-    await expect(root.locator('[data-dpc-region="arrival"] .dpc-arr-list li', { hasText: name }).locator('.dpc-paypill')).toHaveCount(n);
+    // Piece D: the Materials panel takes the Arrival line's place; its "to
+    // pay" count is checked in the panel's own spec.
   };
 
   test('an unpaid order past Awaiting payment shows no Not paid yet pill anywhere; one to pay still does', async ({ page }) => {

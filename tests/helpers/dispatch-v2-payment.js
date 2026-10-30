@@ -11,7 +11,12 @@
  *
  * The job number and the client are made up.
  */
-const { PERTH_TODAY } = require('./dispatch-v2-board');
+const path = require('node:path');
+const { expect } = require('@playwright/test');
+const { installOpsSessionStub } = require('./ops-auth');
+const { PERTH_TODAY, V2_ANSWER, V2_EMPTY_READS } = require('./dispatch-v2-board');
+
+const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
 const JOB_ID = 'job-pay1';
 const JOB_NUMBER = 'SWR-930001';
@@ -47,6 +52,13 @@ function seedBoxes(opts = {}) {
       reply: { email_id: EID(92), received_at: '2026-10-29T06:16:00Z', rung: 'thread' }, paid: null, payOn: null,
     },
   ];
+  // A box with a line still to order and no email yet (Make email).
+  if (opts.fresh) {
+    boxes.push({
+      n: 4, name: 'Metroll', terms: 'on_account', fulfilment: 'delivery', date: null, confirmed: false, dateMode: 'asap', unsent: true,
+      stage: 'order_materials', stageSource: 'worked_out', stageAt: null, stageBy: null, reply: null, paid: null, payOn: null,
+    });
+  }
   if (opts.onAccount) {
     boxes.push({
       n: 3, name: 'Stratco WA', terms: 'on_account', fulfilment: 'delivery', date: dayFrom(6), confirmed: true, dateMode: 'date',
@@ -63,9 +75,15 @@ function fakePayment(opts = {}) {
   const stamp = () => new Date((clock += 60000)).toISOString();
   // work: 'repair' (the default, the job that started it) or 'fencing' (a
   // pipeline job, where Accept can offer the job-wide stage move).
-  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair' };
+  const fake = { boxes: seedBoxes(opts), fail: {}, install: opts.install || null, work: opts.work || 'repair', earliest: opts.earliest || null };
   Object.assign(fake.boxes[0], opts.lysaght || {});
   if (opts.twinside) Object.assign(fake.boxes[1], opts.twinside);
+  // The mode each sent order went out with (date_mode.sent_mode); the box's
+  // dateMode is then the choice for the next email. noSentMode is a server
+  // from before sent_mode.
+  const noSentMode = opts.noSentMode === true;
+  fake.boxes.forEach((bx) => { if (!bx.unsent && bx.sentMode === undefined) bx.sentMode = bx.dateMode; });
+  const sentModeOf = (bx) => (bx.unsent ? bx.dateMode : bx.sentMode);
   const forced = (action) => { const q = fake.fail[action]; return q && q.length ? q.shift() : null; };
   const no = (status, code, extra) => ({ status, body: Object.assign({ error: 'e2e refusal: ' + code, code }, extra) });
   const boxBy = (b) => fake.boxes.find((x) => (b.box_id && BOX(x.n) === b.box_id) || (!b.box_id && SID(x.n) === b.supplier_id));
@@ -121,11 +139,11 @@ function fakePayment(opts = {}) {
   const order = (bx) => {
     const st = stageOf(bx);
     const o = {
-      key: 'box:' + SID(bx.n), source: 'supplier_box', supplier_id: SID(bx.n), supplier_name: bx.name, order_sent: true, sent_at: '2026-10-29T04:28:00Z',
+      key: 'box:' + SID(bx.n), source: 'supplier_box', supplier_id: SID(bx.n), supplier_name: bx.name, order_sent: !bx.unsent, sent_at: bx.unsent ? null : '2026-10-29T04:28:00Z',
       delivery_date: bx.date, date_source: bx.date ? 'box' : null, date_confirmed: bx.confirmed, box_id: BOX(bx.n),
       box_date_source: bx.date ? 'supplier_reply' : null, box_date_set_at: bx.date ? '2026-10-29T05:26:00Z' : null, box_date_set_by_email: bx.date ? 'shaun@ops.test' : null,
       fulfilment: bx.fulfilment, mark: bx.confirmed ? 'solid' : bx.date ? 'ring' : 'none',
-      flag: bx.date ? null : old || bx.dateMode !== 'asap' ? 'no_date' : 'asap',
+      flag: bx.unsent ? 'not_sent' : bx.date ? (fake.install && bx.date > fake.install ? 'after_install' : null) : old || sentModeOf(bx) !== 'asap' ? 'no_date' : 'asap',
       material_stage: st.key, material_stage_label: labelOf(bx, st.key), material_stage_source: st.source,
       material_stage_set_at: st.set_at, material_stage_set_by_email: st.set_by_email,
       waiting_on: waitingOf(bx, st.key), todo: waitingOf(bx, st.key) === 'us' || !old ? todoOf(bx, st.key) : null, extra: false,
@@ -161,7 +179,13 @@ function fakePayment(opts = {}) {
       asap_waiting: orders.filter((o) => o.flag === 'asap').length,
     });
     a.payment = { any_unpaid: unpaid.length > 0, unpaid_suppliers: toPay };
-    a.earliest_install = null;
+    // Piece C: the earliest install, given as { day, after_day } by the test.
+    // With no install booked it takes the place of each "Book the install".
+    a.earliest_install = fake.earliest;
+    if (fake.earliest && !fake.install) {
+      const line = 'All materials by ' + dayWords(fake.earliest.after_day) + '. Book the install from ' + dayWords(fake.earliest.day) + ' and tell the client';
+      a.waiting_on_us = a.waiting_on_us.filter((t) => t !== 'Book the install and tell the client').concat([line]);
+    }
     return a;
   };
   const waiting = () => { const a = arrival(); return { on_us: a.waiting_on_us.length > 0, todo: a.waiting_on_us }; };
@@ -198,10 +222,10 @@ function fakePayment(opts = {}) {
         supplier_id: SID(bx.n), name: bx.name, active: true, position: i + 1, is_main: false,
         approved_email: { id: 'ap-' + bx.n, name: bx.name, used_for: 'fencing', to: ['orders@' + bx.name.split(' ')[0].toLowerCase() + '.example'], cc: ['ses@secureworkswa.com.au'] },
         send_blocked: null,
-        lines: [{ id: LID(bx.n), supplier_id: SID(bx.n), description: bx.n === 1 ? '1800H standard width panels' : 'Sleepers 200 x 75', quantity: 2, unit: null, detail: null, profile: null, colour: null,
-          status: 'to_order', source: 'manual', sent_on_email_id: EID(bx.n), locked: true, position: 0, updated_at: '2026-10-29T04:00:00Z' }],
-        photos: [], open_email: null,
-        sent_emails: [{ id: EID(bx.n), supplier_id: SID(bx.n), supplier_name: bx.name, status: 'sent', from: 'admin@secureworkswa.com.au', to: ['orders@example.test'], cc: [],
+        lines: [{ id: LID(bx.n), supplier_id: SID(bx.n), description: bx.n === 1 ? '1800H standard width panels' : bx.n === 4 ? 'Colorbond sheets 3.6m' : 'Sleepers 200 x 75', quantity: 2, unit: null, detail: null, profile: null, colour: null,
+          status: 'to_order', source: 'manual', sent_on_email_id: bx.unsent ? null : EID(bx.n), locked: !bx.unsent, position: 0, updated_at: '2026-10-29T04:00:00Z' }],
+        photos: [], open_email: bx.open || null,
+        sent_emails: bx.unsent ? [] : [{ id: EID(bx.n), supplier_id: SID(bx.n), supplier_name: bx.name, status: 'sent', from: 'admin@secureworkswa.com.au', to: ['orders@example.test'], cc: [],
           subject: 'Material Order Ref ' + JOB_NUMBER, body_text: 'Hi Team, could we please order the following for ' + bx.fulfilment + ':', delivery_date: null, fulfilment: bx.fulfilment,
           line_count: 1, photo_ids: [], empty_detail_lines: [], sent: { sent_at: '2026-10-29T04:28:00Z', sent_by_email: 'shaun@ops.test' }, updated_at: '2026-10-29T04:28:00Z' }],
         fulfilment: bx.fulfilment, material_stage: stageObj(bx),
@@ -209,6 +233,8 @@ function fakePayment(opts = {}) {
       if (!old) {
         s.payment = payment(bx);
         s.approved_email.on_account = bx.terms === 'on_account';
+        s.date_mode = { mode: bx.dateMode, set_at: bx.dateModeAt || null, set_by_email: bx.dateModeAt ? 'shaun@ops.test' : null, derived: false };
+        if (!noSentMode) s.date_mode.sent_mode = bx.unsent ? null : bx.sentMode;
       }
       return s;
     }),
@@ -309,11 +335,70 @@ function fakePayment(opts = {}) {
       if (!['asap', 'date'].includes(b.date_mode)) return no(400, 'invalid_request');
       if (bx.dateMode === b.date_mode) return boxAnswer(bx, true);
       bx.dateMode = b.date_mode;
+      bx.dateModeAt = stamp();
       return boxAnswer(bx);
+    },
+    // A held email from the box's line. ASAP needs no date and writes "Date: ASAP".
+    dispatch_v2_make_email: (url, b) => {
+      const bx = boxBy(b);
+      if (!bx) return no(404, 'supplier_not_on_job');
+      if (b.date_mode === 'asap' && b.delivery_date) return no(400, 'invalid_request');
+      const asap = b.date_mode === 'asap';
+      if (b.date_mode) bx.dateMode = b.date_mode;
+      bx.open = {
+        id: EID(40 + bx.n), supplier_id: SID(bx.n), supplier_name: bx.name, status: 'draft', from: 'admin@secureworkswa.com.au', to: ['orders@metroll.example'], cc: [],
+        subject: 'Material Order Ref ' + JOB_NUMBER, body_text: 'Hi Team, could we please order the following for ' + (b.fulfilment || 'delivery') + ':\n\nDate: ' + (asap ? 'ASAP' : b.delivery_date || ''),
+        delivery_date: asap ? null : b.delivery_date || null, fulfilment: b.fulfilment || 'delivery', line_count: 1, photo_ids: [],
+        empty_detail_lines: asap || b.delivery_date ? [] : ['date'], updated_at: stamp(),
+      };
+      return { success: true, unchanged: false, email: bx.open };
     },
   };
   fake.payment = payment;
   return fake;
 }
 
-module.exports = { JOB_ID, JOB_NUMBER, SID, BOX, EID, dayFrom, dayWords, fakePayment };
+// Boots Ops on Dispatch with ops-api stubbed; the one job opens on its own.
+async function boot(page, fake, { viewport = { width: 1440, height: 900 }, api = {} } = {}) {
+  const calls = [];
+  const handlers = Object.assign({
+    job_detail: () => ({ job: { id: JOB_ID, job_number: JOB_NUMBER, type: 'repair', scope_json: null, ghl_contact_id: null }, media: [], documents: [], invoices: [] }),
+    job_notes: () => ({ job_id: JOB_ID, total: 0, notes: [] }),
+    list_pos: () => ({ purchase_orders: [] }),
+    ...V2_EMPTY_READS,
+  }, fake.api, api);
+  await page.setViewportSize(viewport);
+  await installOpsSessionStub(page);
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const raw = request.url();
+    if (raw.startsWith('file://')) return route.continue();
+    const url = new URL(raw);
+    const action = /\/functions\/v1\/ops-api$/.test(url.pathname) ? url.searchParams.get('action') : null;
+    if (!action) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    const body = request.method() === 'POST' ? JSON.parse(request.postData() || '{}') : null;
+    calls.push({ action, method: request.method(), url, body });
+    const view = url.searchParams.get('view') || 'active';
+    const key = action === 'pipeline' && view === 'archive' ? 'archive' : action;
+    const out = key === 'archive' ? { columns: {}, total: 0 } : handlers[key] ? await handlers[key](url, body) : {};
+    const wrapped = out && typeof out === 'object' && typeof out.status === 'number' && 'body' in out;
+    let reply = wrapped ? out.body : out;
+    if (action === 'pipeline' && (!wrapped || out.status < 300)) reply = V2_ANSWER(reply, view);
+    return route.fulfill({ status: wrapped ? out.status : 200, contentType: 'application/json', body: JSON.stringify(reply) });
+  });
+  await page.goto(OPS_FILE + '#dispatch');
+  await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
+  const root = page.locator('#dispatchRoot');
+  const mat = root.locator('[data-dpc-region="v2mat"]');
+  await expect(mat.locator('.dpc-v2-box').first()).toBeVisible();
+  const of = (action) => calls.filter((c) => c.action === action);
+  const writes = () => calls.filter((c) => c.method === 'POST' && /^dispatch_/.test(c.action));
+  return { calls, of, root, mat, writes };
+}
+
+// The supplier box in Materials, by its name.
+const boxOf = (mat, name) => mat.locator('.dpc-v2-box', { has: mat.page().locator('.dpc-suphead strong', { hasText: name }) });
+// The body a write sent, without the operator stamp opsPost adds itself.
+const sent = (c) => { const b = Object.assign({}, c.body); delete b.operator_email; return b; };
+
+module.exports = { JOB_ID, JOB_NUMBER, SID, BOX, EID, dayFrom, dayWords, fakePayment, boot, boxOf, sent };

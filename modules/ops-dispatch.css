@@ -540,9 +540,89 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 /* Pay on pickup / Pay on delivery (piece B): confirmed now, paid on the day. */
 .dpc-flag-payon { background: transparent; color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
 .dpc-v2-payon-set .dpc-v2-stage-who { flex: 1; }
+/* ASAP or Pick a date (piece C): a two-way choice beside the calendar, which ASAP greys out. */
+.dpc-v2-date .dpc-v2-datepick { display: inline-flex; align-items: center; gap: 8px; font: inherit; text-transform: none; letter-spacing: normal; color: inherit; }
+.dpc .dpc-v2-date .dpc-v2-seg { font: inherit; text-transform: none; letter-spacing: normal; }
+.dpc .dpc-v2-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.dpc .dpc-v2-seg button { border: 0; border-radius: 0; padding: 6px 12px; font-size: 13px; background: #fff; color: var(--mute); }
+.dpc .dpc-v2-seg button + button { border-left: 1px solid var(--line); }
+.dpc .dpc-v2-seg button[aria-pressed="true"] { background: var(--ink); color: #fff; font-weight: 600; }
+.dpc .dpc-v2-datepick input[type="date"]:disabled { opacity: .45; }
+/* The Arrival line: an ASAP order waiting on its date is an amber dashed ring, not red. */
+.dpc-arr-mk.asap i { background: #fff; border: 3px dashed #9A6200; }
+.dpc-arr-dot.asap, .dpc-arrthin-dot.asap { background: #fff; border: 2px dashed #9A6200; }
+.dpc-arr-mk.asap small { color: #9A6200; }
+.dpc-arr-legend b.asap { color: #9A6200; }
+/* The Materials panel (piece D): every order on one line, in the Arrival
+   line's place. Orange = needs us, blue = waiting on the supplier, green =
+   confirmed and paid, red = not in time; solid = date confirmed, ring = not. */
+.dpc-mp-wrap { overflow-x: auto; }
+.dpc-mp-rail { position: relative; height: 150px; min-width: 600px; margin-top: 6px; }
+.dpc-mp-rail.dpc-mp-two { height: 190px; }
+.dpc-mp-ln { position: absolute; top: 53px; left: 3%; right: 20%; height: 4px; background: #d6dde2; border-radius: 2px; }
+.dpc-mp-tick { position: absolute; top: 47px; width: 2px; height: 16px; background: #9fb0ba; transform: translateX(-50%); }
+.dpc-mp-tl { position: absolute; top: 2px; font-size: 11px; color: var(--mute); white-space: nowrap; }
+.dpc-mp-bay { position: absolute; top: 34px; left: 82%; right: 0; height: 42px; border: 1.5px dashed #c5d0d6; border-radius: 8px; background: repeating-linear-gradient(135deg, #f6f8f9 0 6px, #fff 6px 12px); }
+.dpc-mp-bayl { position: absolute; top: 2px; left: 82%; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--mute); }
+.dpc-mp-inst { position: absolute; top: 22px; height: 56px; width: 0; border-left: 2px solid var(--ink); }
+.dpc-mp-instl { position: absolute; top: 2px; transform: translateX(-50%); font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--ink); }
+.dpc-mp-noinst { color: #9a6200; transform: translateX(-100%); }
+/* The earliest install: a dashed green line, a suggestion only. */
+.dpc-mp-inst.dpc-mp-early { border-left: 2px dashed #2f7d4f; }
+.dpc-mp-earlyl { color: #2f7d4f; }
+.dpc-mp-dot { position: absolute; top: 44px; width: 22px; height: 22px; border-radius: 50%; transform: translateX(-50%); border: 3px solid #c5d0d6; background: #fff; z-index: 1; box-sizing: border-box; }
+.dpc-mp-dot.us { border-color: #A83C16; } .dpc-mp-dot.us.s { background: #A83C16; }
+.dpc-mp-dot.sp { border-color: #2c5d86; } .dpc-mp-dot.sp.s { background: #2c5d86; }
+.dpc-mp-dot.ok { border-color: #2f7d4f; } .dpc-mp-dot.ok.s { background: #2f7d4f; }
+.dpc-mp-dot.late { border-color: #b3261e; } .dpc-mp-dot.late.s { background: #b3261e; }
+.dpc-mp-dot.asap { border-style: dashed; }
+.dpc-mp-dot.asap:not(.us) { border-color: #9A6200; }
+.dpc-mp-bdg { position: absolute; top: 20px; transform: translateX(-50%); font: 700 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; color: #fff; white-space: nowrap; background: #9fb0ba; }
+.dpc-mp-bdg.us { background: #A83C16; } .dpc-mp-bdg.sp { background: #2c5d86; } .dpc-mp-bdg.ok { background: #2f7d4f; } .dpc-mp-bdg.late { background: #b3261e; }
+.dpc-mp-lab { position: absolute; top: 72px; transform: translateX(-50%); text-align: center; font-size: 12px; line-height: 1.35; white-space: nowrap; }
+.dpc-mp-lab.dpc-mp-r1 { top: 114px; }
+/* A label in the bay wraps inside its share of the bay. */
+.dpc-mp-lab.dpc-mp-inbay { transform: none; white-space: normal; padding: 0 4px; box-sizing: border-box; }
+.dpc-mp-lab b { display: block; font-weight: 600; color: var(--ink); }
+.dpc-mp-lab small { display: block; color: var(--mute); font-size: 11.5px; }
+.dpc-mp-t { display: block; font-weight: 600; font-size: 11.5px; }
+.dpc-mp-t.us { color: #A83C16; } .dpc-mp-t.sp { color: #2c5d86; } .dpc-mp-t.ok { color: #2f7d4f; } .dpc-mp-t.late { color: #b3261e; }
+.dpc-mp-rows { border-top: 1px solid #eef1f3; margin-top: 4px; }
+.dpc-mp-r { display: grid; grid-template-columns: 150px 200px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 9px 0; border-bottom: 1px solid #f1f4f6; font-size: 12.5px; }
+.dpc-mp-r:last-child { border-bottom: 0; }
+.dpc-mp-name { font-size: 13px; overflow-wrap: anywhere; }
+.dpc-mp-na { min-width: 0; }
+/* The order strip: eight steps, done green, the current one taller in its colour. */
+.dpc-mp-strip { display: flex; gap: 3px; align-items: center; height: 12px; }
+.dpc-mp-strip i { flex: 1; height: 8px; border-radius: 2px; background: #e3e8eb; }
+.dpc-mp-strip i.d { background: #2f7d4f; }
+.dpc-mp-strip i.k { background: repeating-linear-gradient(90deg, #9fcfb1 0 3px, #fff 3px 5px); }
+.dpc-mp-strip i.cu, .dpc-mp-strip i.cs, .dpc-mp-strip i.ck { height: 12px; }
+.dpc-mp-strip i.cu { background: #A83C16; } .dpc-mp-strip i.cs { background: #2c5d86; } .dpc-mp-strip i.ck { background: #2f7d4f; }
+.dpc-mp-stripc { font-size: 11px; color: var(--mute); margin-top: 3px; }
+.dpc-mp-na small { display: block; color: var(--mute); }
+.dpc-mp-act { justify-self: end; }
+.dpc-mp-onus, .dpc-mp-supw, .dpc-mp-done { font-weight: 600; }
+.dpc-mp-onus { color: #A83C16; } .dpc-mp-supw { color: #2c5d86; } .dpc-mp-done { color: #2f7d4f; }
+.dpc-mp-onus b, .dpc-mp-supw b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; }
+/* The On us bar: everything on the job's materials waiting on us, in one line. */
+.dpc-mp-sumbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff4ee; border-radius: 8px; padding: 9px 12px; margin: 8px 0 10px; font-size: 13px; color: var(--ink); }
+.dpc-mp-sumbar b { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: #A83C16; margin-right: 6px; }
+.dpc-mp-legend b.us { color: #A83C16; } .dpc-mp-legend b.sp { color: #2c5d86; } .dpc-mp-legend b.ok { color: #2f7d4f; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */
+/* Job card dots (piece D): the Materials panel's dots, small, with name and badge. */
+.dpc-minidots { display: flex !important; gap: 4px 12px; flex-wrap: wrap; margin-top: 8px; font-size: 11.5px; color: var(--ink); }
+.dpc-minidot { display: inline-flex; align-items: center; gap: 5px; }
+.dpc-minidot i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 2.5px solid #c5d0d6; background: #fff; box-sizing: border-box; font-style: normal; }
+.dpc-minidot i.us { border-color: #A83C16; } .dpc-minidot i.us.s { background: #A83C16; }
+.dpc-minidot i.sp { border-color: #2c5d86; } .dpc-minidot i.sp.s { background: #2c5d86; }
+.dpc-minidot i.ok { border-color: #2f7d4f; } .dpc-minidot i.ok.s { background: #2f7d4f; }
+.dpc-minidot i.late { border-color: #b3261e; } .dpc-minidot i.late.s { background: #b3261e; }
+.dpc-minidot i.asap { border-style: dashed; }
+.dpc-minidot b { font: 700 9.5px var(--mono); text-transform: uppercase; color: #fff; border-radius: 3px; padding: 1px 4px; background: #9fb0ba; }
+.dpc-minidot b.us { background: #A83C16; } .dpc-minidot b.sp { background: #2c5d86; } .dpc-minidot b.ok { background: #2f7d4f; } .dpc-minidot b.late { background: #b3261e; }
 .dpc-arrthin { display: block !important; position: relative; height: 10px; margin: 8px 2px 0; }
 .dpc-arrthin-rail { position: absolute; left: 0; right: 20%; top: 4px; height: 2px; border-radius: 1px; background: #CFD9DE; }
 .dpc-arrthin-inst { position: absolute; left: 80%; top: 0; height: 10px; border-left: 2px solid var(--steel); }

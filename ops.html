@@ -19553,12 +19553,12 @@ var JP_FLAG_LABELS = {
   installer_bill_unconfirmed: 'Labour waiting for a person to confirm it (not counted as cost yet)'
 };
 var JP_KIND_LABELS = {
-  trade_charge: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials',
+  trade_charge: 'Trade charge', employer_super: 'Employer super', supplier_bill: 'Supplier bill', materials_fact: 'Materials',
   purchase_order: 'Purchase order', sales_invoice: 'Client invoice', variation: 'Variation',
   sales_invoice_paid: 'Client paid', cost_paid: 'Cost paid'
 };
 var JP_SOURCE_LABELS = {
-  trade_line: 'Trade charge', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)',
+  trade_line: 'Trade charge', trade_employer_super: 'Employer super', supplier_bill: 'Supplier bill', materials_fact: 'Materials record', po_committed: 'Open PO (committed)',
   supplier_credit: 'Supplier credit', installer_bill_unconfirmed: 'Labour on this bill waiting for a person to confirm it (not counted)'
 };
 // Where the quoted and expected figures came from, in staff words (the engine's
@@ -19600,7 +19600,7 @@ function _jpCostDescription(text) {
 // label for the same key says (job_profit labels); the engine stays the source
 // of truth, so a key with no staff text here shows the engine's words.
 var JP_LABEL_TEXT = {
-  profit: 'Gross profit counts direct costs only: trade labour, materials, commission and other direct lines, ex GST. No share of overheads. Trade labour is what the trade charged; the company\'s share of super is not added.',
+  profit: 'Gross profit counts direct costs only: trade labour, materials, commission and other direct lines, ex GST. No share of overheads. Trade charges and recorded employer super are separate cost records. Only records marked actual count; missing on-cost evidence does not establish zero or cost-close.',
   quoted_ex: 'Quoted is the value of a sent or accepted quote, ex GST. It is blank when no quote was sent and is never the live price. The Quoted card says which quote it came from.',
   expected_cost_ex: 'Expected cost is the cost fixed at the quote, ex GST, split into labour, materials and commission. It comes from the figures fixed when the quote was accepted, from the accepted quote, or from a sent quote; the Expected cost card says which. It is blank when no cost was fixed at a quote (including a quote sent with no cost figures) and is never a live pricing estimate.',
   committed_open_ex: 'Committed is priced open purchase orders with no supplier invoice emailed and no bill placed yet, ex GST. It is not actual cost. An order with no price is never counted here as $0.00.',
@@ -20140,6 +20140,7 @@ function _jpRenderDetail(data) {
 
   // Trades who charged
   h += '<div class="jp-sec">Trades who charged</div>';
+  h += '<div class="jp-sub" data-jp-oncost>Trade totals show their charges only. Recorded employer super appears separately below; paying a trade invoice does not prove payment to the super fund. Missing super records do not mean zero or verified cost-close.</div>';
   if (!trades.length) h += '<div class="jp-sub">No trade charges linked to this job.</div>';
   else {
     // Each trade's own lines open under its row (L7), so a line such as
@@ -20225,9 +20226,9 @@ function _jpRenderDetail(data) {
   h += '<div class="jp-sec">Materials and other costs</div>';
   if (!other.length) h += '<div class="jp-sub">No supplier bills, materials records or purchase orders linked.</div>';
   else {
-    h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th>Document</th><th>Lane</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
+    h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Party</th><th>Source</th><th>Document</th><th>Lane</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
     other.forEach(function(c) {
-      h += '<tr><td>' + _jpDate(c.event_date) + '</td><td data-label="Supplier">' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(c.description)) + '</div>' : '') + '</td>'
+      h += '<tr><td>' + _jpDate(c.event_date) + '</td><td data-label="Party">' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(c.description)) + '</div>' : '') + '</td>'
         + '<td data-label="Source">' + _jpEsc(JP_SOURCE_LABELS[c.source] || c.source || '') + (c.is_actual === false ? ' <span class="jp-tag mute">not actual</span>' : '') + '</td>'
         + '<td data-label="Document"' + (c.source === 'materials_fact' ? ' class="jp-order-document"' : '') + '>' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + _jpOrderEvidence(c, data.material_order_sources) + '</td>'
         + '<td data-label="Lane">' + _jpEsc(c.lane || '') + '</td><td class="num" data-label="Amount">' + _jpMoney(c.amount_ex) + '</td><td data-label="Paid">' + _jpPaid(c.paid, c.paid_on) + '</td></tr>';

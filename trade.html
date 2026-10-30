@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=all-in-group-20261029"></script>
-  <script src="modules/trade-group-work-order.js?v=zoo-integration-20261029"></script>
-  <script src="modules/trade-group-invoice.js?v=allocated-group-20261029"></script>
+  <script src="shared/group-work-order.js?v=crew-approval-20261030"></script>
+  <script src="modules/trade-group-work-order.js?v=crew-approval-20261030"></script>
+  <script src="modules/trade-group-invoice.js?v=group-in-card-20261030"></script>
   <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -14289,7 +14289,7 @@
   function renderGroupWorkOrderSlot(data) {
     if (!window.GroupWorkOrderTrade || !data || !data.job || isForeignCrewJob(data)) return '';
     if (!GroupWorkOrderTrade.arm(data)) return '';
-    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); }, { gstOn: _invoiceGstDefault(_hoursData || _user) });
+    GroupWorkOrderTrade.use(function (action, params, body) { return api(action, params, body); }, { gstOn: _invoiceGstDefault(_hoursData || _user), userName: (_user && _user.name) || '' });
     return GroupWorkOrderTrade.slotHtml(data.job.id);
   }
 
@@ -23817,7 +23817,7 @@
 
   function _applyInvDraft(draft) {
     if (window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }, userName:function() { return (_user && _user.name) || ''; }, toast:toast});
       GroupWorkOrderInvoice.restore(draft.groupIds || []);
     }
     _invRows = draft.rows || [];
@@ -25633,6 +25633,19 @@
     _syncJobCardsFromDOM(); _syncRowsFromDOM(); _syncInvLumpLinesFromDOM();
     renderInvoiceBuilder();
   }
+  // A group job's card: its work-order choice is the group, paid from the pool,
+  // so Hours and Commission are off. The panel itself is the group module's.
+  function _groupJobCardHtml(c) {
+    var seg = 'font-size:11px;font-weight:600;padding:5px 11px;border:none;outline:none;';
+    var off = 'background:var(--sw-card);color:var(--sw-text-sec);opacity:0.45;cursor:not-allowed;';
+    var toggle = '<div data-group-mode style="display:flex;margin-top:10px;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;width:fit-content">'
+      + '<button type="button" disabled aria-disabled="true" title="Paid from the group pool" style="' + seg + off + '">Hours</button>'
+      + '<button type="button" aria-pressed="true" style="' + seg + 'border-left:1px solid var(--sw-border);background:var(--sw-dark);color:#fff;cursor:default">Group work order</button>'
+      + '<button type="button" disabled aria-disabled="true" title="Paid from the group pool" style="' + seg + 'border-left:1px solid var(--sw-border);' + off + '">Commission</button>'
+      + '</div>';
+    return '<div class="jc-card" data-card="' + c._idx + '" data-group-job-card="' + esc(c.job_id) + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:12px;margin-bottom:8px;background:var(--sw-card)">'
+      + GroupWorkOrderInvoice.jobCardHtml(c, toggle) + '</div>';
+  }
   function renderJobCardsHtml() {
     _pinAssignedCardRates();
     var data = _hoursData || {};
@@ -25666,7 +25679,13 @@
 
     // Group cards by scheduled_date
     var byDay = {};
-    _jobCards.forEach(function(c, i) { c._idx = i; if (invoiceGroupJob(c)) return; (byDay[c.scheduled_date] = byDay[c.scheduled_date] || []).push(c); });
+    // A group job gets one card (its first day), with the group as its work order.
+    var groupCardJobs = {};
+    _jobCards.forEach(function(c, i) {
+      c._idx = i;
+      if (invoiceGroupJob(c)) { if (groupCardJobs[c.job_id]) return; groupCardJobs[c.job_id] = true; }
+      (byDay[c.scheduled_date] = byDay[c.scheduled_date] || []).push(c);
+    });
 
     // Render every Mon–Sun day of the week (so "+ Add job" is reachable even on
     // days with nothing assigned), plus any extra keys (e.g. unscheduled ''). [Q15]
@@ -25709,6 +25728,7 @@
       html += _jcSearchPanelHtml(dk, di);
 
       dayCards.forEach(function(c) {
+        if (invoiceGroupJob(c)) { html += _groupJobCardHtml(c); return; }
         var rowRate = Number(c.rate || rate || 0);
         var lineAmt = (c.included && c.hours != null && rowRate > 0) ? Math.round(c.hours * rowRate * 100) / 100 : 0;
         html += '<div class="jc-card" data-card="' + c._idx + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--sw-card);' + (c.included ? '' : 'opacity:0.5') + '">';
@@ -27758,9 +27778,10 @@
     });
 
     if (!isExpense && jobCentricEnabled() && window.GroupWorkOrderInvoice) {
-      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }});
+      GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }, userName:function() { return (_user && _user.name) || ''; }, toast:toast});
       GroupWorkOrderInvoice.load();
-      html += GroupWorkOrderInvoice.html();
+      // A group job's panel sits in its own job card; the section keeps the rest.
+      html += GroupWorkOrderInvoice.html(_jobCards.map(function(c) { return c.job_id; }));
     }
 
     // ── Job-centric cards (cutover path) vs legacy 7-day clock-row timesheet ──

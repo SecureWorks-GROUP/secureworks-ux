@@ -63,20 +63,28 @@ var GroupWorkOrderCore = (function () {
     return String(err.code || (err.body && err.body.code) || '');
   }
 
+  function allInBasis(basis) { return basis === 'all_in_12_6_v1' || basis === 'all_in_12_v2'; }
+
   // The only fields a trade card may use. Anything else on the payload,
   // including another person's share or agreed labour, is dropped.
   function closedShare(raw) {
     var src = raw && typeof raw === 'object' ? raw : {};
     var needs = src.needs_hours === true;
     return {
-      ...(src.pay_basis === 'all_in_12_6_v1' ? {pay_basis: src.pay_basis, my_budget:finiteOrNull(src.my_budget), my_cash_pay:finiteOrNull(src.my_cash_pay), my_super:finiteOrNull(src.my_super)} : {}),
+      ...(allInBasis(src.pay_basis) ? {pay_basis: src.pay_basis, my_budget:finiteOrNull(src.my_budget), my_cash_pay:finiteOrNull(src.my_cash_pay), my_super:finiteOrNull(src.my_super)} : {}),
       pot_total: needs ? null : finiteOrNull(src.pot_total),
       my_share: needs ? null : finiteOrNull(src.my_share),
       needs_hours: needs,
       client_signed: src.client_signed === true,
       awaiting: String(src.awaiting || ""),
+      my_hours_approved: src.my_hours_approved === true,
       group_id: src.group_id == null ? '' : String(src.group_id)
     };
+  }
+
+  // The crew approve each other's hours before any share is final.
+  function needsMyApproval(view) {
+    return view.awaiting === 'awaiting_crew_approval' && view.my_hours_approved !== true;
   }
 
   function finiteOrNull(v) {
@@ -110,18 +118,20 @@ var GroupWorkOrderCore = (function () {
     } else {
       var view = closedShare(raw);
       h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
-      if (view.pot_total != null) h += '<p data-group-wo-total>' + (view.pay_basis === 'all_in_12_6_v1' ? 'Pay + super pool ' : 'Total ') + esc(money(view.pot_total)) + '</p>';
-      if (view.my_budget != null) h += '<p data-group-wo-share>Your allocation including pay and super ' + esc(money(view.my_budget)) + '</p><p>Pay ' + esc(money(view.my_cash_pay)) + ' · Super ' + esc(money(view.my_super)) + '</p>';
+      if (view.pot_total != null) h += '<p data-group-wo-total>' + (allInBasis(view.pay_basis) ? 'Pay + super pool ' : 'Total ') + esc(money(view.pot_total)) + '</p>';
+      if (view.my_budget != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_budget)) + '</p><p data-group-wo-split>Pay ' + esc(money(view.my_cash_pay)) + ' · ' + (view.pay_basis === 'all_in_12_v2' ? 'Super 12% ' : 'Super ') + esc(money(view.my_super)) + '</p>';
       else if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
       if (view.needs_hours) h += '<p data-group-wo-needs-hours>Save your hours to see your share.</p>';
       var waiting = {
         awaiting_signoff: 'The office needs to record client sign-off before your share can be finalised.',
         awaiting_others: 'Waiting for the remaining crew hours.',
         awaiting_rate: 'The office needs to confirm crew rates.',
+        awaiting_crew_approval: view.my_hours_approved ? 'Waiting for the rest of the crew to approve the hours.' : 'Approve everyone’s hours to unlock the shares.',
         ready: 'Hours and sign-off are ready. Your share has not been finalised yet.',
         frozen: 'Your share is finalised.'
       };
       if (waiting[view.awaiting]) h += '<p data-group-wo-status>' + esc(waiting[view.awaiting]) + '</p>';
+      if (needsMyApproval(view)) h += '<button type="button" data-group-wo-action="approve-hours">Approve everyone’s hours</button>';
       if (view.awaiting !== 'frozen') h += hoursForm();
     }
     if (message && mode !== 'error') h += '<p data-group-wo-msg>' + esc(message) + '</p>';
@@ -275,6 +285,7 @@ var GroupWorkOrderCore = (function () {
     tradeMode: tradeMode,
     errCode: errCode,
     closedShare: closedShare,
+    needsMyApproval: needsMyApproval,
     tradeHtml: tradeHtml,
     parseHours: parseHours,
     hoursBody: hoursBody,

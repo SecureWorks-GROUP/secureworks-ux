@@ -1,4 +1,5 @@
-// Trade group work order: create, join, save hours, see Total and Your share.
+// Trade group work order: create, join, save hours, approve the crew's hours,
+// see Total and Your share.
 // Paints nothing on any error, or until the server has said the switch is on.
 // The share read is not requested on a job open unless that switch is on.
 // Never posts a client send. Loaded by trade.html.
@@ -74,6 +75,7 @@
     var groupId = res.group_id;
     if (submitted[groupId]) { showMsg(el, submitted[groupId]); return; }
     var controls = document.createElement('div');
+    var twelve = res.pay_basis === 'all_in_12_v2';
     if (res.awaiting === 'ready' && res.client_signed === true) {
       var pot = res.pot_total;
       var poolLabel = typeof pot === 'number' && Number.isFinite(pot) && pot >= 0
@@ -81,7 +83,9 @@
         : '';
       controls.innerHTML = '<p>' + poolLabel + 'The approved work-order pool is split between the crew using hours × agreed rates as weights. These rates do not guarantee hourly payment. Finalising locks the hours, rates and shares before invoicing.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
     } else if (res.awaiting === 'frozen' && Number(res.my_share) > 0) {
-      controls.innerHTML = '<p>Submit your share as a separate invoice for office review.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my share for office review</button>';
+      controls.innerHTML = twelve
+        ? '<p>Submit your share. The whole crew is sent for payment together.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my group share</button>'
+        : '<p>Submit your share as a separate invoice for office review.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my share for office review</button>';
       controls.querySelector('[data-group-wo-gst]').checked = options.gstOn === true;
     }
     card.appendChild(controls);
@@ -129,16 +133,37 @@
           if (!res || res.awaiting !== 'frozen') throw new Error('The split was not confirmed. Refresh before continuing.');
           return paint(jobId);
         }
-        var confirmed = res && res.success === true && res.invoice_id && res.office_review === 'held' && !res.xero_bill_id;
-        submitted[share.group_id] = confirmed
-          ? 'Your share invoice is saved for office review. No Xero bill has been created.'
-          : 'Submission outcome needs an office check. Do not submit this share again.';
+        if (share.pay_basis === 'all_in_12_v2') {
+          submitted[share.group_id] = !(res && res.success === true && res.invoice_id)
+            ? 'Submission outcome needs an office check. Do not submit this share again.'
+            : res.group_release && res.group_release.released === true
+              ? 'Sent for payment with the whole crew.'
+              : 'Saved. Paid together once the whole crew is in.';
+        } else {
+          var confirmed = res && res.success === true && res.invoice_id && res.office_review === 'held' && !res.xero_bill_id;
+          submitted[share.group_id] = confirmed
+            ? 'Your share invoice is saved for office review. No Xero bill has been created.'
+            : 'Submission outcome needs an office check. Do not submit this share again.';
+        }
         if (slot(jobId) === el) { render(el, core.tradeMode(share), share); }
       }).catch(function (e) {
         // A lost response can follow a committed invoice. Never invite a blind retry.
         if (action === 'invoice') submitted[share.group_id] = 'Submission outcome needs an office check. Do not submit this share again.';
         if (slot(jobId) === el) showMsg(el, action === 'invoice' ? submitted[share.group_id] : (e.message || 'Could not finalise the split.'));
       }).finally(function () { el._groupBusy = false; btn.disabled = !!submitted[share.group_id]; });
+      return;
+    }
+    if (action === 'approve-hours') {
+      var mine = el._groupShare;
+      if (el._groupBusy || !mine || !core.needsMyApproval(core.closedShare(mine))) return;
+      el._groupBusy = true;
+      btn.disabled = true;
+      call('sign_group_work_order_crew', null, { group_id: mine.group_id, signer_name: String(options.userName || '') }).then(function (res) {
+        if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
+        return paint(jobId);
+      }).catch(function (e) {
+        if (slot(jobId) === el) showMsg(el, e.message || 'Your approval was not saved. Try again.');
+      }).finally(function () { el._groupBusy = false; btn.disabled = false; });
       return;
     }
     if (action === 'create') {

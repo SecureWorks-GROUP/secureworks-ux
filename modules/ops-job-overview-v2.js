@@ -1778,7 +1778,7 @@ var JobOverviewV2 = (function () {
     h += nextHtml(m);
     h += storyMomentsHtml(m) + storyMoneyHtml(m) + storyBookHtml(m) + storyBillsHtml(m);
     h += openItemsHtml(m, true);
-    h += heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
+    h += ledgerHistoryHtml(m) + heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
     if (sec) {
       var more = [['the_job', 'The job'], ['how_we_got_here', 'How we got here'], ['watch_out', 'Watch out']]
         .filter(function (p) { return !!sec[p[0]]; });
@@ -1855,6 +1855,42 @@ var JobOverviewV2 = (function () {
       return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(words) + '</p>' + then + '</div>';
     }
     return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told the customer', m.lastUs) + '</div>';
+  }
+  // These are the reader's recorded states, not new decisions or money signoff.
+  // Keep reference identities, but never render raw citation excerpts or fetch originals.
+  function ledgerHistoryHtml(m) {
+    var story = m.story || {};
+    var labels = { closed: 'Closed in AI notes', declined: 'Declined', superseded: 'Replaced', disputed: 'Disputed' };
+    function references(item) {
+      var seen = {}, refs = C.arr(item.cites).concat(C.arr(item.closed_by)).filter(function (c) {
+        if (!c || typeof c !== 'object') return false;
+        var key = C.str(c.t || c.table) + ':' + C.str(c.id);
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      return '<details><summary>Source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>' +
+        (refs.length ? refs.map(function (c) { return '<li>' + esc(C.str(c.t || c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; }).join('') : '<li>Source references unavailable.</li>') + '</ul></details>';
+    }
+    function list(key) {
+      if (!Array.isArray(story[key])) return '<p>' + (key === 'disputed' ? 'Disputed' : 'Settled and replaced') + ' notes were not returned in this read.</p>';
+      if (!story[key].length) return '<p>No ' + (key === 'disputed' ? 'disputed' : 'settled or replaced') + ' notes were returned by the reader.</p>';
+      return story[key].map(function (raw) {
+        var item = C.obj(raw) || {}, status = C.lower(item.status);
+        var valid = key === 'disputed' ? status === 'disputed' : ['closed', 'declined', 'superseded'].indexOf(status) >= 0;
+        var at = valid ? (key === 'disputed' ? item.disputed_at : item.closed_at) : null;
+        var date = at && isFinite(C.toMs(at)) ? C.longDate(at, m.now) : 'Status date not recorded';
+        return '<article class="ov2-held-item" data-ov2-ledger-key="' + esc(item.key || '') + '"><strong>' + esc(valid ? labels[status] : 'Note status unavailable') + '</strong>' +
+          '<div class="ov2-im">' + esc(date) + '</div>' +
+          (item.job_certain === false ? '<p><strong>Job not certain: may belong to another job.</strong></p>' : '') +
+          (item.customer_reported === true ? '<p>Customer-reported claim; not independently confirmed.</p>' : '') +
+          '<p>' + esc(C.clean(item.what) || 'Note wording unavailable') + '</p>' + references(item) + '</article>';
+      }).join('');
+    }
+    return '<section class="ov2-story-block" id="ov2LedgerHistory" aria-label="Disputed and historical AI notes">' +
+      '<h3>Disputed notes</h3><p>These disagreements remain recorded. They are not settled facts or a new instruction to chase payment.</p>' + list('disputed') +
+      '<details><summary>Settled and replaced notes' + (Array.isArray(story.settled) ? ' (' + story.settled.length + ')' : '') + '</summary>' +
+      '<p>These are the AI reader\'s recorded decisions, true as at their dates. Closed does not prove payment, cost completeness or bank settlement.</p>' + list('settled') + '</details></section>';
   }
   function heldMessagesHtml(m) {
     var held = C.obj(m.story && m.story.held_messages);

@@ -1376,6 +1376,8 @@
     .jp-table tr.jp-row:hover td { background: rgba(241,90,41,0.04); }
     .jp-table tr.jp-total td { font-weight: 700; border-top: 2px solid var(--sw-border, #eee); }
     .jp-sub { font-size: 11px; color: var(--sw-text-sec); }
+    .jp-sub.jp-order-evidence { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--sw-text, #24343b); overflow-wrap: anywhere; }
+    .jp-order-evidence summary { cursor: pointer; padding: 6px 0; }
     .jp-unk { color: var(--sw-text-sec); font-style: italic; font-size: 11px; }
     .jp-pos { color: var(--sw-green, #27ae60); }
     .jp-neg { color: var(--sw-red, #e74c3c); }
@@ -1416,6 +1418,7 @@
       .jp-table.jp-stack tr[hidden] { display: none; }
       .jp-table.jp-stack td { border: none; padding: 0; text-align: left; white-space: normal; }
       .jp-table.jp-stack td:first-child { grid-column: 1 / -1; font-weight: 700; }
+      .jp-table.jp-stack td.jp-order-document { grid-column: 1 / -1; }
       .jp-table.jp-stack tr.jp-total td { border-top: none; }
       .jp-table.jp-stack td[data-label]:empty { display: none; }
       .jp-table.jp-stack td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); }
@@ -20003,6 +20006,53 @@ async function _jpFillTypeAverage(seq, workType) {
   if (el) el.innerHTML = text;
 }
 
+// INT-23 / INT-25: display recorded order evidence, never divide bill money
+// between Scope demands or promote a matching manifest to cost completeness.
+function _jpOrderEvidence(c, packet) {
+  if (!c || c.source !== 'materials_fact') return '';
+  var unknown = function(text) {
+    return '<div class="jp-sub jp-order-evidence" data-jp-order-evidence="unknown"><span class="jp-tag mute">Order evidence unknown</span> ' + _jpEsc(text) + '</div>';
+  };
+  if (!packet) return unknown('This read does not include the recorded order evidence.');
+  if (packet.status !== 'ok' || !Array.isArray(packet.links)) {
+    return unknown(packet.reason === 'fact_coverage_limit' || packet.reason === 'order_coverage_limit'
+      ? 'The evidence exceeds this read\'s coverage.'
+      : 'The evidence could not be read. Use Reread profit to try again.');
+  }
+  var matches = packet.links.filter(function(x) { return x && x.fact_id === c.source_id && x.invoice_id === c.document_id; });
+  if (matches.length !== 1) return unknown('This bill has no single verified order link in this read.');
+  var link = matches[0], lines = link.scope_lines;
+  if (link.status !== 'verified_order_manifest' || !link.purchase_order_id || !Array.isArray(lines) || !lines.length) {
+    return unknown(link.reason === 'order_link_not_recorded'
+      ? 'No purchase-order link is recorded for this bill.'
+      : 'The recorded bill, order and frozen scope could not be verified together.');
+  }
+  var seen = {}, valid = lines.every(function(line) {
+    if (!line || typeof line.scope_revision_id !== 'string' || !line.scope_revision_id ||
+      typeof line.scope_line_id !== 'string' || !line.scope_line_id ||
+      typeof line.scope_hash !== 'string' || !line.scope_hash ||
+      ['frozen', 'superseded'].indexOf(line.scope_revision_status) === -1) return false;
+    var key = JSON.stringify([line.scope_revision_id, line.scope_line_id]);
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+  if (!valid) return unknown('The order\'s frozen scope details are incomplete or ambiguous.');
+  var h = '<div class="jp-sub jp-order-evidence" data-jp-order-evidence="recorded"><b>Recorded order: ' + _jpEsc(link.po_number || 'number not recorded') + '</b>'
+    + '<div>Invoice amounts by scope line: <span class="jp-unk">Unknown</span>.</div>'
+    + '<details style="overflow-wrap:anywhere;"><summary>Order and scope evidence</summary>'
+    + '<p>The bill is linked to this order. Its items name the frozen scope below. This does not show how the bill total is divided between items or prove all job costs are in.</p>'
+    + '<div>Order record: ' + _jpEsc(link.purchase_order_id) + '</div>'
+    + '<div>Bill record: ' + _jpEsc(link.invoice_id) + '</div><ul>';
+  lines.forEach(function(line) {
+    h += '<li>Scope item ' + _jpEsc(line.scope_line_id)
+      + '<div>Frozen revision: ' + _jpEsc(line.scope_revision_id)
+      + (line.scope_revision_status === 'superseded' ? ' (earlier revision, retained on this order)' : '') + '</div>'
+      + '<div>Stored source fingerprint: ' + _jpEsc(line.scope_hash) + '</div></li>';
+  });
+  return h + '</ul></details></div>';
+}
+
 function _jpRenderDetail(data) {
   var j = data.job || {};
   var trades = Array.isArray(data.trades) ? data.trades : [];
@@ -20179,7 +20229,7 @@ function _jpRenderDetail(data) {
     other.forEach(function(c) {
       h += '<tr><td>' + _jpDate(c.event_date) + '</td><td data-label="Supplier">' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(c.description)) + '</div>' : '') + '</td>'
         + '<td data-label="Source">' + _jpEsc(JP_SOURCE_LABELS[c.source] || c.source || '') + (c.is_actual === false ? ' <span class="jp-tag mute">not actual</span>' : '') + '</td>'
-        + '<td data-label="Document">' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + '</td>'
+        + '<td data-label="Document"' + (c.source === 'materials_fact' ? ' class="jp-order-document"' : '') + '>' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + _jpOrderEvidence(c, data.material_order_sources) + '</td>'
         + '<td data-label="Lane">' + _jpEsc(c.lane || '') + '</td><td class="num" data-label="Amount">' + _jpMoney(c.amount_ex) + '</td><td data-label="Paid">' + _jpPaid(c.paid, c.paid_on) + '</td></tr>';
     });
     h += '</tbody></table></div>';

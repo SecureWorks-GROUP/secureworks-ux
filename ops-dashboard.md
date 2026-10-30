@@ -64,6 +64,7 @@ See edge-functions.md for full list. Key ones:
 - `complete_and_invoice` — compound action (mark complete + Xero invoice)
 - `scope_to_po` — extract materials from scope_json into PO line items
 - `job_profit_list` (+ `view=rollup`), `job_profit` — read-only profit engine behind Financials > Job profit (owner/admin only)
+  - Materials rows display `material_order_sources` when supplied: recorded bill/order identity and the named frozen Scope items. Expand **Order and scope evidence** for exact IDs. This is not per-item allocation or cost-close; invoice amounts by Scope line remain Unknown. Missing, conflicting or unreadable evidence is labelled Unknown while the engine's cost stays visible. Older server responses remain usable without claiming that a source link was verified. No additional request or write occurs on expansion.
 
 ## Data Quality Issues (audit 3 March 2026)
 - **site_suburb/site_address**: NULL on 100% of jobs — location features non-functional

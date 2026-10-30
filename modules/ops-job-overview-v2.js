@@ -313,6 +313,7 @@ var JobOverviewV2Core = (function () {
       evidence_until: src.evidence_until || r.evidence_until || null,
       request_open: !!(r.request_open || src.request_open || writer.open_request || (req.requested_at && !req.done_at)),
       requested_at: r.requested_at || req.requested_at || null,
+      last_failure: obj(writer.last_failure),
       writer_on: writer.on == null ? (r.writer_on == null ? null : !!r.writer_on) : !!writer.on
     };
   }
@@ -1988,18 +1989,36 @@ var JobOverviewV2 = (function () {
   }
   function stampHtml(m) {
     var t = m.text, u = m.u, parts = [];
+    var failure = t && t.last_failure;
+    var failedAt = C.toMs(failure && failure.at);
+    var writtenAt = C.toMs(t && t.sections && t.written_at);
+    var askedAt = C.toMs(u.asked && u.asked.at);
+    // A terminal server receipt supersedes the local request acknowledgement.
+    // An older failure cannot cancel a newer request; an old cache is not a receipt.
+    var localPending = !!(u.asked && u.asked.ok &&
+      !(isFinite(askedAt) && ((isFinite(failedAt) && failedAt >= askedAt) ||
+        (isFinite(writtenAt) && writtenAt >= askedAt))));
+    var pending = !!((t && t.request_open) || localPending);
     if (t && t.sections) {
-      parts.push((t.written_at ? 'Story as of ' + C.stamp(t.written_at, m.now) : 'Story written') + ', rewritten when something new happens');
+      parts.push(t.written_at ? 'Story as of ' + C.stamp(t.written_at, m.now) : 'Story written');
       if (t.state === 'stale') parts.push('Something newer has happened since it was written');
     }
     parts.push(C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
     var h = '<div class="ov2-stamp" id="ov2Stamp"><p>' + esc(parts.join('. ') + '.') + '</p>';
+    if (failure && !(isFinite(failedAt) && isFinite(writtenAt) && writtenAt > failedAt)) {
+      var failedWords = failure.error === 'fact_check_failed'
+        ? 'The last rewrite did not pass its source checks.' : 'The last rewrite failed.';
+      failedWords += ' No replacement story was saved.';
+      if (isFinite(failedAt)) failedWords += ' Last attempt: ' + C.stamp(failure.at, m.now) + '.';
+      if (!pending) failedWords += ' No rewrite is queued.';
+      h += '<p class="ov2-bad" id="ov2WriterFailure" role="status">' + esc(failedWords) + '</p>';
+    }
     if (t && t.writer_on === false) {
       h += '<p id="ov2WriterOff">Written stories and rewriting are not switched on yet.</p>';
-    } else if (u.asked && u.asked.ok) {
-      h += '<p class="ov2-asked" id="ov2Asked">' + esc('Asked at ' + C.timeWords(u.asked.at) + '.' + (u.asked.words ? ' ' + u.asked.words : '')) + '</p>';
     } else if (t && t.request_open) {
       h += '<p class="ov2-asked" id="ov2Asked">A rewrite has been asked for.</p>';
+    } else if (localPending) {
+      h += '<p class="ov2-asked" id="ov2Asked">' + esc('Asked at ' + C.timeWords(u.asked.at) + '.' + (u.asked.words ? ' ' + u.asked.words : '')) + '</p>';
     } else {
       if (u.asked && !u.asked.ok) h += '<p class="ov2-asked ov2-bad" id="ov2Asked">' + esc(u.asked.words) + '</p>';
       h += '<button type="button" class="ov2-linkbtn" id="ov2Rewrite" data-ov2-act="rewrite" aria-label="Ask for the story to be rewritten">Rewrite</button>';

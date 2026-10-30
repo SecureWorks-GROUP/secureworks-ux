@@ -111,6 +111,7 @@ descriptive only, so they wait on a field that says a placement is confirmed.
 - **Partial read or refresh failure**: a notice names each unavailable source. A failed refresh explicitly says that the previous read is still shown, with **Try again**. A partial response never claims all other sections are current.
 - **Writer switched off**: `story_text.writer.on: false` says "Written stories and rewriting are not switched on yet" and offers no Rewrite action.
 - **No written story** (the story writer starts switched off): the headline is the card's own first sentences, "Where it is at" the rest of that line, "Watch out" the good-to-know items, and a quiet "No written story yet".
+- **Rewrite failed**: the server's `writer.last_failure` is visible, with its recorded time when known. A failed source check says no replacement story was saved; a terminal failure with no pending request says no rewrite is queued. Existing record-derived content and any previous saved story remain available. A later successful saved story supersedes the old failure. A newer pending request is not cancelled by an older failure, and terminal server evidence replaces the browser's older "Asked" acknowledgement. Raw provider errors are never printed. The story timestamp does not promise automatic correction or complete source capture.
 
 ## Tests
 

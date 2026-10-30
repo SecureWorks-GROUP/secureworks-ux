@@ -1550,6 +1550,84 @@
     return 'Delivery date saved' + (o && text(o.supplier_name) ? ': ' + text(o.supplier_name) : '') + (d ? ', ' + dayText(d) : '') + '.';
   }
 
+  // ── The payment hold on Accept (backend contract section 3c, piece B) ──
+  // Accept saves a supplier's date, but a pay-first box stays at Awaiting
+  // payment until someone presses Mark paid, and the job-wide "Move to Order
+  // Confirmed?" offer is withheld while any pay-first box on the job is
+  // unpaid. An older server sends none of these fields: today's behaviour.
+
+  // True when the job's move must not be offered after an Accept: the answer
+  // says so, or the job's own reads already did.
+  function acceptHeld(jobId, resp) {
+    if (resp && (resp.payment_hold === true || isObj(resp.stage_move_held))) return true;
+    return jobPayHold(jobId);
+  }
+
+  // Whether the job is held by an unpaid pay-first box, from its Arrival read
+  // or its list row. False when the server does not say (an older server).
+  function jobPayHold(jobId) {
+    var e = state.arrival[jobId];
+    if (e && e.status === 'ok' && e.data && e.data.payment_hold === true) return true;
+    var b = boardOf(rowById(jobId));
+    if (b && b.payment_hold === true) return true;
+    var a = b && isObj(b.arrival) ? b.arrival : null;
+    return !!(a && isObj(a.payment) && a.payment.any_unpaid === true);
+  }
+
+  // The payment words after an Accept's "Delivery date saved" line.
+  function acceptPayWords(resp) {
+    if (!isObj(resp)) return '';
+    var out = '';
+    var name = (isObj(resp.order) && text(resp.order.supplier_name)) || 'This supplier';
+    if (isObj(resp.box_payment) && resp.box_payment.holds_stage === true) out += ' ' + name + ' stays at Awaiting payment until someone presses Mark paid.';
+    var held = resp.stage_move_held;
+    if (isObj(held)) {
+      var names = Array.isArray(held.suppliers) ? held.suppliers.map(text).filter(Boolean) : [];
+      if (held.reason === 'payment_unknown') out += ' The job is not offered a move to Order Confirmed: the payments could not be checked.';
+      else out += ' The job is not offered a move to Order Confirmed while ' + (names.length ? listWords(names) + (names.length === 1 ? ' is' : ' are') : 'a supplier is') + ' not paid.';
+    }
+    return out;
+  }
+
+  // "A", "A and B", "A, B and C".
+  function listWords(names) {
+    if (names.length < 2) return names.join('');
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+
+  // The supplier box a suggested date is for, as its Arrival line order: by
+  // the suggestion's order (or the order picked, or the email's), through the
+  // replies read's orders, else by the supplier's name. Null when unknown.
+  function sugBoxOrder(e, s) {
+    var a = state.row ? arrivalFor(state.row).arrival : null;
+    if (!a) return null;
+    var oid = text(s.order_id) || text(e.pick[s.id]);
+    if (!oid) {
+      var m = e.data.emails.filter(function (x) { return x.id === s.email_id; })[0];
+      oid = m ? text(m.order_id) : '';
+    }
+    var ro = oid ? e.data.orders.filter(function (o) { return o.order_id === oid; })[0] : null;
+    var sid = ro ? text(ro.supplier_id) : '';
+    var name = (ro && text(ro.supplier_name)) || text(s.supplier_name);
+    for (var i = 0; i < a.orders.length; i++) {
+      var o = a.orders[i];
+      if (!o || o.source !== 'supplier_box') continue;
+      if (sid ? String(o.supplier_id) === sid : name && text(o.supplier_name) === name) return o;
+    }
+    return null;
+  }
+
+  // The note under Accept: as today, unless the box is pay first, unpaid and
+  // still before Order confirmed (a later stage set by hand keeps today's).
+  function sugFootWords(e, s) {
+    var o = sugBoxOrder(e, s);
+    var p = o ? v2PayFrom(o.payment, o.material_stage) : null;
+    var at = o ? v2StageAt(o.material_stage) : -1;
+    if (!p || p.state !== 'unpaid' || at < 0 || at >= v2StageAt('order_confirmed')) return 'Accept saves this date on the supplier box. It does not move the job.';
+    return 'Accept saves this ' + (o.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' date. ' + (text(o.supplier_name) || 'This supplier') +
+      ' stays at Awaiting payment until someone presses Mark paid.';
+  }
+
   var REP_NOT_DONE = {
     confirm: 'Not put on the job.', reject: 'Not sent back.', hide: 'Not hidden.',
     dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.'
@@ -1575,15 +1653,19 @@
     Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
       if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
       delete e.busy[id];
-      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) };
+      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) + (kind === 'accept' ? acceptPayWords(resp) : '') };
       readReplies(jobId, true);
       if (kind === 'confirm' || kind === 'reject') trayReread();
       if (kind !== 'accept') return;
+      // Read before the Arrival line is read again below.
+      var held = acceptHeld(jobId, resp);
       // The date is on the supplier box now: redraw the Arrival line and the list.
       if (state.row && state.row.id === jobId) loadArrival(state.row);
       loadBase();
       var offer = resp.stage_move_offer;
-      if (isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
+      // Never offered while a pay-first box is unpaid (piece B): that move
+      // texts the fencing or patio manager, so it must wait for the payment.
+      if (!held && isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
         state.stage.confirm = { jobId: jobId, to: text(offer.to_status), label: pipelineLabel(text(offer.to_status)), offer: { from_status: text(offer.from_status) } };
         state.stage.msg = null;
         paintTape();
@@ -2022,20 +2104,22 @@
     if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
     var p = arrivalPlot(a);
     var two = p.marks.some(function (m) { return m.row === 1; });
-    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + '"><span class="dpc-arr-rail"></span>';
+    // A payment pill under a marker needs a little more room below the line.
+    var pays = a.orders.some(function (o) { return !!arrMarkPayHtml(o); });
+    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + (pays ? ' dpc-arr-pays' : '') + '"><span class="dpc-arr-rail"></span>';
     h += '<span class="dpc-arr-tod">Today ' + esc(dayText(p.today)) + '</span>';
     h += p.inst ? '<span class="dpc-arr-inst"><span>Install ' + esc(dayText(p.inst)) + '</span></span>' : '<span class="dpc-arr-noinst">No install booked</span>';
     p.marks.forEach(function (m) {
       var edge = m.pct < 7 ? ' dpc-arr-edge' : '';
-      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small></span>';
+      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small>' + arrMarkPayHtml(m.order) + '</span>';
     });
     if (p.outs.length) {
       var one = p.outs.length === 1 ? p.outs[0] : null;
-      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small></span>';
+      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small>' + (one ? arrMarkPayHtml(one.order) : '') + '</span>';
     }
     h += '</div><ul class="dpc-arr-list' + (p.outs.length > 1 ? ' dpc-arr-list-outs' : '') + '">';
     p.marks.concat(p.outs).forEach(function (m) {
-      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + '</li>';
+      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + arrPayHtml(m.order) + '</li>';
     });
     h += '</ul></div>';
     h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
@@ -2051,6 +2135,19 @@
     h += '</span>';
     if (o.extra === true) h += ' <span class="dpc-flag dpc-flag-extra">Extra</span>';
     return h;
+  }
+
+  // An order's payment pill on the full Arrival line (piece B).
+  function arrPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
+    return pill ? ' ' + pill : '';
+  }
+
+  // The payment pill under an order's marker on the Arrival line itself
+  // (the list under the line is for narrow screens).
+  function arrMarkPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
+    return pill ? '<span class="dpc-arr-pay">' + pill + '</span>' : '';
   }
 
   function paintArrival() {
@@ -3221,11 +3318,13 @@
       var small = from ? '<small>' + esc(from) + '</small>' : '';
       var off = ed && ed.busy ? ' disabled' : '';
       var pickup = o.fulfilment === 'pickup';
-      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
+      // Not paid yet or Paid, beside the date (piece B; nothing from an older server).
+      var pill = payPillHtml(v2PayFrom(o.payment, o.material_stage));
+      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>' + pill;
       h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
       h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + (pickup ? ', pickup' : '') + '</small></span>';
       // Expected: the date while it is not confirmed.
-      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
+      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em>' + pill + '<button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
       else if (!o.date_confirmed) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
       else h += '<span class="dpc-dstate"><em>-</em></span>';
       // Confirmed by supplier: the date once it is.
@@ -3599,7 +3698,7 @@
       var canAccept = s.can_accept !== false && (!s.needs_order_pick || !!e.pick[s.id]);
       h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-sug-accept="' + esc(s.id) + '"' + (busy || !canAccept ? ' disabled' : '') + '>' + (busy === 'accept' ? 'Saving...' : 'Accept') + '</button>';
       h += '<button type="button" data-dpc-sug-dismiss="' + esc(s.id) + '"' + off + '>' + (busy === 'dismiss' ? 'Dismissing...' : 'Dismiss') + '</button></div>';
-      h += '<p class="dpc-sug-foot">Accept saves this date on the supplier box. It does not move the job.</p>';
+      h += '<p class="dpc-sug-foot">' + esc(sugFootWords(e, s)) + '</p>';
     } else {
       var who = text(s.acted_by_email);
       h += '<p class="dpc-sug-state">' + esc((SUG_STATE[s.state] || 'Done') + (who ? ' by ' + who : '') + (parseStamp(s.acted_at) ? ', ' + stampText(s.acted_at) : '') + '.') + '</p>';
@@ -4055,7 +4154,9 @@
       open: v2EmailFrom(s.open_email),
       sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean),
       fulfilment: v2Fulfil(s.fulfilment),
-      stage: v2StageFrom(s.material_stage)
+      stage: v2StageFrom(s.material_stage),
+      // The payment step (section 3c): null from an older server.
+      payment: v2PayFrom(s.payment, s.material_stage)
     };
   }
 
@@ -4076,12 +4177,36 @@
     for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return V2_STAGES[i].label;
     return null;
   }
+  // A stage's place in the list (0 to 7), or -1 when unknown.
+  function v2StageAt(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return i;
+    return -1;
+  }
+  // Where a stage came from: picked by a person (set), moved by a matched
+  // supplier reply (reply) or by Mark paid / Pay on (payment), else worked
+  // out. An unknown value reads as worked out.
+  var V2_STAGE_SOURCES = ['set', 'reply', 'payment'];
   function v2StageFrom(m) {
     if (!isObj(m) || !v2StageLabel(m.key)) return null;
+    var r = isObj(m.reply) ? m.reply : null;
     return {
       box_id: text(m.box_id) || null, key: m.key, label: text(m.label) || v2StageLabel(m.key),
-      source: m.source === 'set' ? 'set' : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null
+      source: V2_STAGE_SOURCES.indexOf(m.source) >= 0 ? m.source : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null,
+      // Piece B (section 3c): the reply that moved it, a confirmed date the
+      // payment step is holding, and a pickup on the install's first day that
+      // skips Materials ready. All absent from an older server.
+      reply: r ? { email_id: text(r.email_id) || null, received_at: text(r.received_at) || null } : null,
+      held_by_payment: m.held_by_payment === true, skips_ready: m.skips_ready === true
     };
+  }
+
+  // A stage's word on this box: a pickup's last stage is Picked up. Only from
+  // a server that knows the payment step (it sends the payment object, or
+  // says Picked up itself); an older one keeps Delivered, as today.
+  function v2StageWord(b, key) {
+    var knows = b && (b.payment || (b.stage && b.stage.key === 'delivered' && b.stage.label === 'Picked up'));
+    if (key === 'delivered' && knows && b.fulfilment === 'pickup') return 'Picked up';
+    return v2StageLabel(key);
   }
 
   // A dispatch_v2_materials answer missing its draft list or its boxes is a
@@ -4567,7 +4692,7 @@
       return global.opsPost('dispatch_v2_set_material_stage', body);
     }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
-      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + label + '.' };
+      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + (v2StageWord(b, value) || label) + '.' };
       if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
       if (state.jobId === jobId) paintArrival();
       paintList(true);
@@ -4601,19 +4726,244 @@
     var h = '<div class="dpc-v2-stage"><label class="dpc-v2-stage-pick"><span>Materials stage</span><select data-dpc-v2-stage="' + esc(b.supplier_id) + '"' +
       ' aria-label="Materials stage for ' + esc(b.name) + '"' + (busy ? ' disabled' : '') + '>';
     V2_STAGES.forEach(function (st) {
-      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+      // A pickup collected on the install's first day skips Materials ready.
+      if (st.key === 'ready' && s.skips_ready && s.key !== 'ready') return;
+      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(v2StageWord(b, st.key)) + '</option>';
     });
     h += '</select></label>';
     var o = v2ArrivalOrder(b.supplier_id);
     if (o && o.waiting_on === 'us') h += '<span class="dpc-status dpc-tone-warn">On us</span>';
     else if (o && o.waiting_on === 'supplier') h += '<span class="dpc-status dpc-tone-muted">Waiting on the supplier</span>';
     if (o && o.extra === true) h += '<span class="dpc-flag dpc-flag-extra">Extra order</span>';
-    h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : s.source === 'set'
-      ? 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '')
-      : 'Worked out from the emails and lines') + '</span>';
+    // A counting Pay on tag shows once, on its own row under the stage.
+    var bp = v2BoxPay(b);
+    if (!(bp && bp.pay_on)) h += payPillHtml(bp);
+    h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : v2StageWho(b, s)) + '</span>';
     if (o && text(o.todo)) h += '<p class="dpc-v2-hint dpc-v2-stage-next">Next: ' + esc(o.todo) + '</p>';
+    if (s.held_by_payment) h += '<p class="dpc-v2-hint">The supplier\'s date is saved. This order stays at Awaiting payment until someone presses Mark paid.</p>';
     h += '</div>';
-    return h + v2MsgHtml(e.msg[key]);
+    return h + v2MsgHtml(e.msg[key]) + v2PayHtml(e, b);
+  }
+
+  // Who or what put the box at its stage.
+  function v2StageWho(b, s) {
+    if (s.source === 'set') return 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '');
+    if (s.source === 'reply') return 'Moved here by their reply' + (s.reply && s.reply.received_at ? ', ' + stampText(s.reply.received_at) : '');
+    if (s.source === 'payment') {
+      var p = v2BoxPay(b);
+      if (p && p.paid) return 'Moved here when marked paid' + (p.paid_at ? ', ' + stampText(p.paid_at) : '');
+      if (p && p.pay_on) return 'Moved here by ' + payOnWord(p.pay_on) + (p.pay_on_set_at ? ', ' + stampText(p.pay_on_set_at) : '');
+      return 'Moved here by the payment';
+    }
+    return 'Worked out from the emails and lines';
+  }
+
+  // ── The payment step (backend contract section 3c, piece B) ──
+  // A supplier we have no account with is paid first: once their quote is in,
+  // the order waits on us until someone records here that we paid. Mark paid
+  // and Undo paid are records only: they pay nobody, touch no Xero, send
+  // nothing and never move the job. Each is one press, sent once, guarded on
+  // the paid stamp the box showed (compare and set). An ops-api that does not
+  // send the payment object yet shows no payment buttons at all.
+
+  var PAY_STATES = ['not_needed', 'unpaid', 'paid', 'pay_on_pickup', 'pay_on_delivery', 'unknown'];
+
+  // The box's payment as the server says it, or null (an older server, or a
+  // purchase order with no box). stage is the order's material stage as
+  // shown (its key, or the stage object), for working out to_pay below.
+  function v2PayFrom(p, stage) {
+    if (!isObj(p) || PAY_STATES.indexOf(p.state) < 0) return null;
+    var g = isObj(p.guard) ? p.guard : {};
+    var key = text(isObj(stage) ? stage.key : stage);
+    return {
+      terms: text(p.terms) || 'unknown', state: p.state, paid: p.paid === true,
+      // To pay now: unpaid and the order's stage shown is Awaiting payment.
+      // The server says so in to_pay; a server from before that field is
+      // worked out the same way from the state and the stage.
+      to_pay: typeof p.to_pay === 'boolean' ? p.to_pay : p.state === 'unpaid' && key === 'awaiting_payment',
+      paid_at: text(p.paid_at) || null, paid_by_email: text(p.paid_by_email) || null,
+      pay_on: p.pay_on === 'pickup' || p.pay_on === 'delivery' ? p.pay_on : null,
+      pay_on_set_at: text(p.pay_on_set_at) || null, pay_on_set_by_email: text(p.pay_on_set_by_email) || null,
+      earlier_order_paid_at: text(p.earlier_order_paid_at) || null,
+      holds_stage: p.holds_stage === true, blocks_job_move: p.blocks_job_move === true,
+      can_mark_paid: p.can_mark_paid === true, can_undo_paid: p.can_undo_paid === true, can_set_pay_on: p.can_set_pay_on === true,
+      // The stored stamps the presses guard on (null = never set).
+      guard: { paid_at: text(g.paid_at) || null, pay_on_set_at: text(g.pay_on_set_at) || null }
+    };
+  }
+
+  // A box's payment: the materials read's own, else the Arrival line's.
+  function v2BoxPay(b) {
+    if (!b) return null;
+    if (b.payment) return b.payment;
+    var o = v2ArrivalOrder(b.supplier_id);
+    return o ? v2PayFrom(o.payment, o.material_stage) : null;
+  }
+
+  // Which box a press is for: its id when the screen knows it, else the job
+  // and the supplier (one box per supplier per job).
+  function v2BoxRef(jobId, b) {
+    var o = v2ArrivalOrder(b.supplier_id);
+    var id = (b.stage && b.stage.box_id) || (o && text(o.box_id)) || null;
+    return id ? { box_id: id } : { job_id: jobId, supplier_id: b.supplier_id };
+  }
+
+  var PAY_ACTIONS = { paid: 'dispatch_v2_mark_paid', unpaid: 'dispatch_v2_undo_paid', payon: 'dispatch_v2_set_pay_on' };
+
+  // "Pay on pickup" or "Pay on delivery".
+  function payOnWord(v) { return v === 'pickup' ? 'Pay on pickup' : 'Pay on delivery'; }
+
+  function v2PayDoneWords(kind, b, resp, payOn) {
+    var name = v2SupWord(b);
+    if (kind === 'payon' && payOn) return resp.unchanged ? 'No change: ' + name + ' was already set to ' + payOnWord(payOn).toLowerCase() + '.' : payOnWord(payOn) + ' set: ' + name + '. The order counts as confirmed. Nothing was paid or sent.';
+    if (kind === 'payon') return resp.unchanged ? 'No change: ' + name + ' had no pay on tag.' : 'Pay on tag taken off: ' + name + '.';
+    if (kind === 'paid') return resp.unchanged ? 'No change: ' + name + ' was already marked paid.' : 'Marked paid: ' + name + '. This is a record only: nobody was paid and nothing was sent.';
+    return resp.unchanged ? 'No change: ' + name + ' had no paid mark.' : 'Paid mark taken off: ' + name + '.';
+  }
+
+  // A payment press refused: what to say, and whether the box was out of date.
+  function v2PayWords(err, b) {
+    var code = err && err.code;
+    var name = v2SupWord(b);
+    if (code === 'paid_changed') return { changed: true, text: 'The paid mark on ' + name + ' was changed somewhere else. Showing the latest.' };
+    if (code === 'pay_on_changed') return { changed: true, text: 'The pay on tag on ' + name + ' was changed somewhere else. Showing the latest.' };
+    if (code === 'on_account') return { changed: true, text: name + ' is on account, so there is no payment to mark. Showing the latest.' };
+    if (code === 'box_not_found') return { changed: true, text: 'That supplier order is no longer on this job. Showing the latest.' };
+    if (code === 'not_dispatch_work') return { text: 'Payments are not recorded on this job in Dispatch.' };
+    if (code === 'dispatch_read_failed') return { text: 'Could not check ' + name + "'s account terms, so nothing was saved.", retry: true };
+    return null;
+  }
+
+  // One press on a box's payment: Mark paid, Undo paid, or (kind payon)
+  // Pay on pickup / Pay on delivery, payOn 'pickup' or 'delivery' to set the
+  // tag and 'off' to take it off.
+  function v2PayPress(jobId, sid, kind, payOn) {
+    var e = v2Entry(jobId);
+    var b = v2Box(e, sid);
+    var p = v2BoxPay(b);
+    var key = 'pay:' + sid;
+    if (!e || e.status !== 'ok' || !b || !p || e.busy[key] || !PAY_ACTIONS[kind]) return;
+    // Undo needs the stamp it takes off.
+    if (kind === 'unpaid' && !p.guard.paid_at) return;
+    // The tag to set (null = take it off); anything else is not a press.
+    var tag = kind === 'payon' ? (payOn === 'pickup' || payOn === 'delivery' ? payOn : null) : undefined;
+    if (kind === 'payon' && tag === null && payOn !== 'off') return;
+    e.busy[key] = kind;
+    delete e.msg[key];
+    paintV2();
+    var body = v2BoxRef(jobId, b);
+    if (kind === 'payon') { body.pay_on = tag; body.expected_set_at = p.guard.pay_on_set_at; } else body.expected_paid_at = p.guard.paid_at;
+    Promise.resolve().then(function () { return global.opsPost(PAY_ACTIONS[kind], body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      var fresh = isObj(resp.box) ? v2PayFrom(resp.box.payment, resp.box.material_stage) : null;
+      if (fresh) b.payment = fresh;
+      e.msg[key] = { text: v2PayDoneWords(kind, b, resp, tag) };
+      v2PayAfter(jobId, resp);
+    }, function (err) {
+      delete e.busy[key];
+      var fallback = kind === 'paid' ? 'Not marked paid.' : kind === 'unpaid' ? 'The paid mark was not taken off.' : tag ? payOnWord(tag) + ' was not set.' : 'The pay on tag was not taken off.';
+      v2PayFail(jobId, key, err, b, { kind: kind, payOn: payOn }, fallback);
+    });
+  }
+
+  // After a payment press: the answer's Arrival line onto the job and its
+  // list row, then the list and the boxes read again from the server.
+  function v2PayAfter(jobId, resp) {
+    if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
+    if (state.jobId === jobId) paintArrival();
+    paintList(true);
+    loadBase();
+    readV2(jobId, true);
+  }
+
+  // A refusal under the box. Out of date: say so, then the box, the Arrival
+  // line and the list are read again. press ({ kind }) is what Retry sends again.
+  function v2PayFail(jobId, key, err, b, press, fallback) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    var w = v2PayWords(err, b);
+    if (w && w.changed) {
+      e.msg[key] = { bad: true, text: w.text };
+      v2Changed409(jobId, w.text);
+      var r = rowById(jobId) || state.row;
+      if (r && state.jobId === jobId) loadArrival(r);
+      loadBase();
+      return;
+    }
+    if (!w) w = v2Words(err, fallback) || { text: fallback, retry: true };
+    e.msg[key] = { bad: true, text: w.text, retry: !!w.retry, press: press };
+    paintV2If(jobId);
+  }
+
+  // Retry on a refused payment press: the same press again.
+  function v2PayRetryAttrs(m, sid) {
+    if (!m || !m.press) return null;
+    return 'data-dpc-v2="' + esc(m.press.kind) + '" data-dpc-v2-sid="' + esc(sid) + '"' + (m.press.payOn ? ' data-dpc-v2-payon="' + esc(m.press.payOn) + '"' : '');
+  }
+
+  // The payment pill beside an order: Not paid yet (amber) on a pay-first
+  // order that is to pay now (unpaid at Awaiting payment), Paid (green) once
+  // someone has marked it. Nothing on an unpaid order at any other stage, on
+  // an on-account order, or from an older server (p is null).
+  function payPillHtml(p) {
+    if (!p) return '';
+    if (p.to_pay) return '<span class="dpc-flag dpc-flag-amber dpc-paypill">Not paid yet</span>';
+    if (p.state === 'paid') return '<span class="dpc-flag dpc-flag-paid dpc-paypill">Paid</span>';
+    // Pay on pickup / delivery: confirmed without paying yet.
+    if (p.state === 'pay_on_pickup' || p.state === 'pay_on_delivery') return '<span class="dpc-flag dpc-flag-payon dpc-paypill">' + payOnWord(p.state === 'pay_on_pickup' ? 'pickup' : 'delivery') + '</span>';
+    return '';
+  }
+
+  // Mark paid (and what it does) on a pay-first box not paid for this order;
+  // who marked it paid, with Undo paid, once it is.
+  function v2PayHtml(e, b) {
+    var p = v2BoxPay(b);
+    if (!p) return '';
+    var sid = esc(b.supplier_id);
+    var key = 'pay:' + b.supplier_id;
+    var busy = e.busy[key];
+    var off = busy ? ' disabled' : '';
+    var h = '';
+    var payOn = v2PayOnBtnHtml(b, p, busy);
+    if (p.can_mark_paid) {
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">';
+      h += '<button type="button" class="dpc-v2-paybtn" data-dpc-v2="paid" data-dpc-v2-sid="' + sid + '"' + off + '>' + (busy === 'paid' ? 'Saving...' : 'Mark paid') + '</button>';
+      h += payOn;
+      h += '<small>Moves it to Order confirmed and records who paid and when. A record only: it pays nobody and sends nothing.</small></div>';
+      if (p.earlier_order_paid_at) h += '<p class="dpc-v2-hint">An earlier order to ' + esc(v2SupWord(b)) + ' was marked paid ' + esc(stampText(p.earlier_order_paid_at)) + '. This order is not paid yet.</p>';
+    } else if (p.paid && p.can_undo_paid) {
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">';
+      h += '<span class="dpc-v2-paid">Paid, marked' + (p.paid_by_email ? ' by ' + esc(p.paid_by_email) : '') + (p.paid_at ? ', ' + esc(stampText(p.paid_at)) : '') + '</span>';
+      h += '<button type="button" data-dpc-v2="unpaid" data-dpc-v2-sid="' + sid + '"' + off + '>' + (busy === 'unpaid' ? 'Saving...' : 'Undo paid') + '</button></div>';
+    } else if (payOn) {
+      // Pay on alone: an on-account box, or one with no Mark paid on offer.
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">' + payOn +
+        '<small>Confirms the order now and records who set it. A record only: it pays nobody and sends nothing.</small></div>';
+    }
+    h += v2PayOnTagHtml(b, p, busy);
+    return h + v2MsgHtml(e.msg[key], v2PayRetryAttrs(e.msg[key], b.supplier_id));
+  }
+
+  // Pay on pickup (or delivery, as the box goes out): the order is confirmed
+  // now and paid on the day. Offered on any box the server allows it on
+  // (on-account ones too, contract rule 6) that is not paid and has no tag.
+  function v2PayOnBtnHtml(b, p, busy) {
+    if (!p.can_set_pay_on || p.paid || p.pay_on) return '';
+    var v = b.fulfilment === 'pickup' ? 'pickup' : 'delivery';
+    return '<button type="button" class="dpc-v2-payon" data-dpc-v2="payon" data-dpc-v2-payon="' + v + '" data-dpc-v2-sid="' + esc(b.supplier_id) + '"' +
+      (busy ? ' disabled' : '') + ' title="Confirms the order without paying now">' + (busy === 'payon' ? 'Saving...' : esc(payOnWord(v))) + '</button>';
+  }
+
+  // A pay on tag that counts: the tag, who set it, and Take off.
+  function v2PayOnTagHtml(b, p, busy) {
+    if (!p.pay_on) return '';
+    var h = '<div class="dpc-v2-pay dpc-v2-payon-set" role="group" aria-label="' + esc(payOnWord(p.pay_on)) + ' for ' + esc(b.name) + '">';
+    h += '<span class="dpc-flag dpc-flag-payon">' + esc(payOnWord(p.pay_on)) + '</span>';
+    h += '<span class="dpc-v2-stage-who">Set' + (p.pay_on_set_by_email ? ' by ' + esc(p.pay_on_set_by_email) : '') + (p.pay_on_set_at ? ', ' + esc(stampText(p.pay_on_set_at)) : '') +
+      '. The order counts as confirmed.</span>';
+    h += '<button type="button" class="dpc-textbtn" data-dpc-v2="payon" data-dpc-v2-payon="off" data-dpc-v2-sid="' + esc(b.supplier_id) + '"' + (busy ? ' disabled' : '') + '>' +
+      (busy === 'payon' ? 'Saving...' : 'Take off') + '</button></div>';
+    return h;
   }
 
   function v2SetMain(jobId, sid, on) {
@@ -5531,6 +5881,8 @@
     else if (verb === 'photo-view') v2ViewPhoto(jobId, id);
     else if (verb === 'photo-del') v2DeletePhoto(jobId, id);
     else if (verb === 'make') v2MakeEmail(jobId, sid, false);
+    else if (verb === 'paid' || verb === 'unpaid') v2PayPress(jobId, sid, verb);
+    else if (verb === 'payon') v2PayPress(jobId, sid, verb, t.getAttribute('data-dpc-v2-payon'));
     else if (verb === 'test') v2AskSend(jobId, id, 'test');
     else if (verb === 'send') v2AskSend(jobId, id, 'real');
     else if (verb === 'resend') v2AskSend(jobId, id, 'resend');

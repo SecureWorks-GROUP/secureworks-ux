@@ -524,6 +524,22 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-stage-pick select { max-width: 100%; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
 .dpc-v2-stage-who { font-size: 12px; color: var(--mute); padding-bottom: 7px; }
 .dpc .dpc-v2-stage .dpc-v2-stage-next { flex-basis: 100%; margin: 0; }
+/* The payment step (piece B): Mark paid on a pay-first box, who marked it paid with Undo paid. */
+.dpc-v2-pay { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px 0; }
+.dpc-v2-pay small { flex: 1; min-width: 200px; font-size: 12px; color: var(--mute); }
+.dpc .dpc-v2-paybtn { background: var(--sage); border-color: var(--sage); color: #fff; font-weight: 600; }
+.dpc .dpc-v2-paybtn:hover:not(:disabled) { background: #3B5E48; border-color: #3B5E48; }
+.dpc-v2-paid { font-size: 12.5px; color: var(--sage); font-weight: 600; }
+/* The payment pill (piece B): Not paid yet is amber (dpc-flag-amber), Paid is green. */
+.dpc-flag-paid { background: #E4EFE6; color: var(--sage); }
+.dpc-paypill { white-space: nowrap; }
+.dpc-dstate .dpc-paypill { margin-left: 6px; font-family: var(--body); }
+.dpc-arr-pay { display: block; margin-top: 3px; }
+.dpc-arr.dpc-arr-pays { height: 100px; }
+.dpc-arr.dpc-arr-two.dpc-arr-pays { height: 136px; }
+/* Pay on pickup / Pay on delivery (piece B): confirmed now, paid on the day. */
+.dpc-flag-payon { background: transparent; color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
+.dpc-v2-payon-set .dpc-v2-stage-who { flex: 1; }
 .dpc-arr-stage { color: var(--mute); }
 
 /* the card's thin Arrival line: the install line at 80%, a dot per order */
@@ -582,8 +598,8 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-arr-legend .late { color: #b3261e; }
 /* A narrow line keeps the dots and the two day labels, and lists the orders under it. */
 @container (max-width: 459px) {
-  .dpc-arr, .dpc-arr-two { height: 50px; }
-  .dpc-arr-mk b, .dpc-arr-mk small { display: none; }
+  .dpc-arr, .dpc-arr-two, .dpc-arr.dpc-arr-pays, .dpc-arr.dpc-arr-two.dpc-arr-pays { height: 50px; }
+  .dpc-arr-mk b, .dpc-arr-mk small, .dpc-arr-mk .dpc-arr-pay { display: none; }
   .dpc-arr-list, .dpc-arr-list-outs { display: block; }
   .dpc-arr-list li.on { display: flex; }
 }

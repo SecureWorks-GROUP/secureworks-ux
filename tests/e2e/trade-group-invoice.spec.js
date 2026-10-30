@@ -38,8 +38,8 @@ test('Henry finalises an older group inline and submits its own share with an or
   await open(page);
   const group = page.locator('[data-invoice-group]');
   await expect(group).toContainText('2,160.00');
-  await expect(group).toContainText('estimated share: $723.89');
-  await expect(group).toContainText('Sign-off accepted');
+  await expect(group.locator('[data-group-estimate]')).toHaveText(/Your estimated share\s*\$723.89/);
+  await expect(group.locator('[data-group-pill]')).toHaveText('Ready to finalise');
   await expect(group.locator('[data-invoice-group-select]')).toHaveCount(0);
   page.once('dialog', dialog => dialog.accept());
   await group.getByRole('button',{name:'Finalise group shares',exact:true}).click();
@@ -63,7 +63,7 @@ test('unsigned group appears in the normal invoice but cannot be finalised or se
   const f=await fixtures(page,'awaiting_signoff');
   await open(page);
   const group=page.locator('[data-invoice-group]');
-  await expect(group).toContainText('Waiting for client sign-off');
+  await expect(group.locator('[data-group-pill]')).toHaveText('Needs sign-off');
   await expect(group.locator('[data-invoice-group-finalise]')).toHaveCount(0);
   await expect(group.locator('[data-invoice-group-select]')).toHaveCount(0);
   expect(f.posts).toEqual([]);
@@ -107,9 +107,10 @@ test('all-inclusive group shows cash and super and submits one separate share fr
   const card=page.locator('[data-invoice-group]');
   expect(offsets).toEqual([0,1]);
   await expect(page.locator('[data-pm-wo-hydrate="error"]')).toHaveCount(0);
-  await expect(card).toContainText('pay + super pool: $2,720.00');
-  await expect(card).toContainText('allocation: $911.56 including pay and super');
-  await expect(card).toContainText('Your pay: $808.36 · Your super: $103.20');
+  await expect(card).toContainText('pool $2,720.00');
+  await expect(card.locator('[data-group-allocation]')).toHaveText(/Your share\s*\$911.56/);
+  await expect(card.locator('[data-group-pay]')).toHaveText(/Pay\s*\$808.36/);
+  await expect(card.locator('[data-group-super]')).toHaveText(/Super\s*\$103.20/);
   page.once('dialog',d=>d.accept()); await card.getByRole('button',{name:'Finalise group shares',exact:true}).click();
   await expect(card.locator('[data-invoice-group-select]')).toHaveCount(0);
   await expect(card.getByRole('button',{name:'Submit my group share',exact:true})).toBeVisible();

@@ -121,6 +121,28 @@ test('an awaiting line can be approved, and the review block has no send and no 
   await expect(block).toContainText('Approved for the bill');
 });
 
+test('approving a group share that waits on its crew says held, not a Xero failure', async ({ page }) => {
+  await page.goto('/ops.html');
+  const data = job();
+  delete data._lines;
+  await openOverview(page, data, {
+    job_work_order: data.job_work_order,
+    list_trade_invoice_lines: {
+      lines: [
+        { id: 'line-1', trade_name: 'Henry', description: 'Group work order share', line_type: 'group share', line_total_ex: 813.89, office_review_status: 'awaiting', trade_invoices: { status: 'pending_acknowledgment' } },
+      ],
+    },
+    review_crew_invoice_line: {
+      line_id: 'line-1', office_review_status: 'approved', invoice_status: 'approved', ready_for_xero_push: true,
+      xero_push: 'held', group_hold: ['Waiting on Ryan to invoice.'],
+    },
+  });
+  const block = page.locator('[data-office-line-review="line-1"]');
+  await block.getByRole('button', { name: 'Approve' }).click();
+  await expect(page.locator('#jdOverview')).toContainText('Approved. Held for the whole crew: Waiting on Ryan to invoice.');
+  await expect(page.locator('#jdOverview')).not.toContainText('unconfirmed');
+});
+
 test('an unknown review action removes the controls', async ({ page }) => {
   await page.goto('/ops.html');
   const data = job();

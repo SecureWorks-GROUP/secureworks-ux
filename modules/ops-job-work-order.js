@@ -855,9 +855,17 @@ var JobWorkOrderOps = (function () {
       if (status) stampOfficeStatus(lineId, status);
       if (res && res.ready_for_xero_push) {
         var pushed = res.xero_push;
-        if (pushed && pushed.success === true && pushed.xero_bill_id) {
-          _state.message = 'Office review saved. The draft bill is saved in Xero.';
-          _state.level = 'ok';
+        var crewBills = res.group_release && Array.isArray(res.group_release.crew_bills) ? res.group_release.crew_bills : [];
+        if (pushed === 'held') {
+          // A group share waits for its whole crew; nothing went to Xero.
+          _state.message = 'Approved. Held for the whole crew' + (res.group_hold && res.group_hold.length ? ': ' + res.group_hold.join(' ') : '.');
+          _state.level = 'info';
+        } else if (pushed && pushed.success === true && pushed.xero_bill_id) {
+          var unsure = crewBills.filter(function (b) { return !(b.xero_push && b.xero_push.success === true); }).length;
+          _state.message = crewBills.length
+            ? 'Crew released together. ' + (crewBills.length + 1) + ' draft bills sent to Xero' + (unsure ? '; ' + unsure + ' unconfirmed, check before retrying.' : '.')
+            : 'Office review saved. The draft bill is saved in Xero.';
+          _state.level = unsure ? 'error' : 'ok';
         } else {
           _state.message = 'Office review saved. The Xero result is unconfirmed. Check this invoice before retrying.';
           _state.level = 'error';

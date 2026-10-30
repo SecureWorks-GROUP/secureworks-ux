@@ -503,6 +503,8 @@
 
   function arrivalDateWords(o) {
     var d = parseDay(o.delivery_date);
+    // Piece C: sent ASAP, no supplier date yet. Not late.
+    if (o.flag === 'asap' && !d) return 'ASAP, waiting on their date';
     if (o.flag === 'no_date') return 'no date yet';
     if (o.flag === 'after_install') return (d ? dayText(d) + ', ' : '') + 'after the install';
     if (o.flag === 'not_sent') return d ? dayText(d) + ', not sent yet' : 'not sent yet';
@@ -513,6 +515,7 @@
   // solid (ok), ring (wait), red (late), grey ring (draft: not sent, or no date).
   function arrivalClass(o) {
     if (arrivalLate(o)) return 'late';
+    if (o.flag === 'asap' && !parseDay(o.delivery_date)) return 'asap';
     if (o.flag === 'not_sent' || !parseDay(o.delivery_date)) return 'draft';
     return o.mark === 'solid' ? 'ok' : 'wait';
   }
@@ -546,7 +549,8 @@
       m.row = row;
       last[row] = m.pct;
     });
-    return { today: today, inst: inst, marks: marks, outs: outs, outCls: outs.some(function (m) { return m.cls === 'late'; }) ? 'late' : 'draft' };
+    var outCls = outs.some(function (m) { return m.cls === 'late'; }) ? 'late' : outs.length && outs.every(function (m) { return m.cls === 'asap'; }) ? 'asap' : 'draft';
+    return { today: today, inst: inst, marks: marks, outs: outs, outCls: outCls };
   }
 
   // "2 orders: 1 confirmed, 1 not in time", or "All 3 confirmed in time".
@@ -556,7 +560,9 @@
     if (a.all_confirmed_in_time === true) return n === 1 ? 'Confirmed in time' : 'All ' + n + ' confirmed in time';
     var conf = a.orders.filter(function (o) { return o && o.mark === 'solid' && !arrivalLate(o); }).length;
     var late = a.orders.filter(arrivalLate).length;
+    var asap = a.orders.filter(function (o) { return o && arrivalClass(o) === 'asap'; }).length;
     var parts = [conf + ' confirmed'];
+    if (asap) parts.push(asap + ' ASAP waiting');
     if (late) parts.push(late + ' not in time');
     return n + (n === 1 ? ' order: ' : ' orders: ') + parts.join(', ');
   }
@@ -1550,6 +1556,84 @@
     return 'Delivery date saved' + (o && text(o.supplier_name) ? ': ' + text(o.supplier_name) : '') + (d ? ', ' + dayText(d) : '') + '.';
   }
 
+  // ── The payment hold on Accept (backend contract section 3c, piece B) ──
+  // Accept saves a supplier's date, but a pay-first box stays at Awaiting
+  // payment until someone presses Mark paid, and the job-wide "Move to Order
+  // Confirmed?" offer is withheld while any pay-first box on the job is
+  // unpaid. An older server sends none of these fields: today's behaviour.
+
+  // True when the job's move must not be offered after an Accept: the answer
+  // says so, or the job's own reads already did.
+  function acceptHeld(jobId, resp) {
+    if (resp && (resp.payment_hold === true || isObj(resp.stage_move_held))) return true;
+    return jobPayHold(jobId);
+  }
+
+  // Whether the job is held by an unpaid pay-first box, from its Arrival read
+  // or its list row. False when the server does not say (an older server).
+  function jobPayHold(jobId) {
+    var e = state.arrival[jobId];
+    if (e && e.status === 'ok' && e.data && e.data.payment_hold === true) return true;
+    var b = boardOf(rowById(jobId));
+    if (b && b.payment_hold === true) return true;
+    var a = b && isObj(b.arrival) ? b.arrival : null;
+    return !!(a && isObj(a.payment) && a.payment.any_unpaid === true);
+  }
+
+  // The payment words after an Accept's "Delivery date saved" line.
+  function acceptPayWords(resp) {
+    if (!isObj(resp)) return '';
+    var out = '';
+    var name = (isObj(resp.order) && text(resp.order.supplier_name)) || 'This supplier';
+    if (isObj(resp.box_payment) && resp.box_payment.holds_stage === true) out += ' ' + name + ' stays at Awaiting payment until someone presses Mark paid.';
+    var held = resp.stage_move_held;
+    if (isObj(held)) {
+      var names = Array.isArray(held.suppliers) ? held.suppliers.map(text).filter(Boolean) : [];
+      if (held.reason === 'payment_unknown') out += ' The job is not offered a move to Order Confirmed: the payments could not be checked.';
+      else out += ' The job is not offered a move to Order Confirmed while ' + (names.length ? listWords(names) + (names.length === 1 ? ' is' : ' are') : 'a supplier is') + ' not paid.';
+    }
+    return out;
+  }
+
+  // "A", "A and B", "A, B and C".
+  function listWords(names) {
+    if (names.length < 2) return names.join('');
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+
+  // The supplier box a suggested date is for, as its Arrival line order: by
+  // the suggestion's order (or the order picked, or the email's), through the
+  // replies read's orders, else by the supplier's name. Null when unknown.
+  function sugBoxOrder(e, s) {
+    var a = state.row ? arrivalFor(state.row).arrival : null;
+    if (!a) return null;
+    var oid = text(s.order_id) || text(e.pick[s.id]);
+    if (!oid) {
+      var m = e.data.emails.filter(function (x) { return x.id === s.email_id; })[0];
+      oid = m ? text(m.order_id) : '';
+    }
+    var ro = oid ? e.data.orders.filter(function (o) { return o.order_id === oid; })[0] : null;
+    var sid = ro ? text(ro.supplier_id) : '';
+    var name = (ro && text(ro.supplier_name)) || text(s.supplier_name);
+    for (var i = 0; i < a.orders.length; i++) {
+      var o = a.orders[i];
+      if (!o || o.source !== 'supplier_box') continue;
+      if (sid ? String(o.supplier_id) === sid : name && text(o.supplier_name) === name) return o;
+    }
+    return null;
+  }
+
+  // The note under Accept: as today, unless the box is pay first, unpaid and
+  // still before Order confirmed (a later stage set by hand keeps today's).
+  function sugFootWords(e, s) {
+    var o = sugBoxOrder(e, s);
+    var p = o ? v2PayFrom(o.payment, o.material_stage) : null;
+    var at = o ? v2StageAt(o.material_stage) : -1;
+    if (!p || p.state !== 'unpaid' || at < 0 || at >= v2StageAt('order_confirmed')) return 'Accept saves this date on the supplier box. It does not move the job.';
+    return 'Accept saves this ' + (o.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' date. ' + (text(o.supplier_name) || 'This supplier') +
+      ' stays at Awaiting payment until someone presses Mark paid.';
+  }
+
   var REP_NOT_DONE = {
     confirm: 'Not put on the job.', reject: 'Not sent back.', hide: 'Not hidden.',
     dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.'
@@ -1575,15 +1659,19 @@
     Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
       if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
       delete e.busy[id];
-      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) };
+      e.msg[id] = { ok: true, text: repDoneWords(kind, resp) + (kind === 'accept' ? acceptPayWords(resp) : '') };
       readReplies(jobId, true);
       if (kind === 'confirm' || kind === 'reject') trayReread();
       if (kind !== 'accept') return;
+      // Read before the Arrival line is read again below.
+      var held = acceptHeld(jobId, resp);
       // The date is on the supplier box now: redraw the Arrival line and the list.
       if (state.row && state.row.id === jobId) loadArrival(state.row);
       loadBase();
       var offer = resp.stage_move_offer;
-      if (isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
+      // Never offered while a pay-first box is unpaid (piece B): that move
+      // texts the fencing or patio manager, so it must wait for the payment.
+      if (!held && isObj(offer) && offer.job_id === jobId && text(offer.to_status) && text(offer.from_status) && state.jobId === jobId) {
         state.stage.confirm = { jobId: jobId, to: text(offer.to_status), label: pipelineLabel(text(offer.to_status)), offer: { from_status: text(offer.from_status) } };
         state.stage.msg = null;
         paintTape();
@@ -1694,8 +1782,30 @@
     if (extra) flags.push(extra);
     if (flags.length) h += '<span class="dpc-flags">' + flags.map(flagHtml).join('') + '</span>';
     h += onUsHtml(todo);
-    if (b && !archived) h += arrivalThinHtml(b.arrival);
+    if (b && !archived) h += cardArrivalHtml(b.arrival);
     return h + '</button>';
+  }
+
+  // The card's orders: the Materials panel's dots, small, when the server
+  // sends the new fields (piece D); else today's thin Arrival line.
+  function cardArrivalHtml(a) {
+    if (arrivalOk(a) && a.orders.length && mpOn(a)) return cardDotsHtml(a);
+    return arrivalThinHtml(a);
+  }
+
+  // ── Job card dots (piece D) ──
+  // One small dot per order in the panel's colours (solid = date confirmed,
+  // ring = not, dashed = ordered ASAP), the supplier's name and the badge,
+  // so the board shows where each order is without opening the job.
+  function cardDotsHtml(a) {
+    var h = '<span class="dpc-minidots">';
+    a.orders.filter(isObj).forEach(function (o) {
+      var tone = mpTone(o);
+      var badge = mpBadge(o);
+      h += '<span class="dpc-minidot"><i class="' + tone + (o.mark === 'solid' ? ' s' : '') + (o.flag === 'asap' ? ' asap' : '') + '" aria-hidden="true"></i>' +
+        esc(text(o.supplier_name) || 'Supplier') + (badge ? ' <b class="' + tone + '">' + esc(badge) + '</b>' : '') + '</span>';
+    });
+    return h + '</span><span class="dpc-vh">Materials: ' + esc(mpSummary(a).text) + '.</span>';
   }
 
   // The card's Arrival line: one thin line, a dot per order. Its words are for
@@ -2012,6 +2122,9 @@
     if (!row || isMakesafe(row)) return '';
     var got = arrivalFor(row);
     var a = got.arrival;
+    // A server that sends the payment step or the date choice gets the merged
+    // Materials panel in the Arrival line's place (piece D).
+    if (a && mpOn(a)) return mpHtml(row, a);
     var h = '<div class="dpc-arrival" data-dpc-region="arrival"><div class="dpc-arr-head"><span class="dpc-arr-title">Arrival line</span>' +
       '<span class="dpc-arr-q">Will it all be on site before the install?</span>';
     if (a && a.orders.length) h += '<span class="dpc-arr-count' + (a.all_confirmed_in_time === true ? ' ok' : a.orders.some(arrivalLate) ? ' late' : '') + '">' + esc(arrivalSummary(a)) + '</span>';
@@ -2022,24 +2135,349 @@
     if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
     var p = arrivalPlot(a);
     var two = p.marks.some(function (m) { return m.row === 1; });
-    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + '"><span class="dpc-arr-rail"></span>';
+    // A payment pill under a marker needs a little more room below the line.
+    var pays = a.orders.some(function (o) { return !!arrMarkPayHtml(o); });
+    h += '<div class="dpc-arr-wrap"><div class="dpc-arr' + (two ? ' dpc-arr-two' : '') + (pays ? ' dpc-arr-pays' : '') + '"><span class="dpc-arr-rail"></span>';
     h += '<span class="dpc-arr-tod">Today ' + esc(dayText(p.today)) + '</span>';
     h += p.inst ? '<span class="dpc-arr-inst"><span>Install ' + esc(dayText(p.inst)) + '</span></span>' : '<span class="dpc-arr-noinst">No install booked</span>';
     p.marks.forEach(function (m) {
       var edge = m.pct < 7 ? ' dpc-arr-edge' : '';
-      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small></span>';
+      h += '<span class="dpc-arr-mk ' + m.cls + (m.row ? ' dpc-arr-r1' : '') + edge + '" style="left:' + m.pct.toFixed(1) + '%"><i></i><b>' + esc(m.name) + '</b><small>' + esc(m.words) + '</small>' + arrMarkPayHtml(m.order) + '</span>';
     });
     if (p.outs.length) {
       var one = p.outs.length === 1 ? p.outs[0] : null;
-      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small></span>';
+      h += '<span class="dpc-arr-mk dpc-arr-out ' + p.outCls + '"><i></i><b>' + esc(one ? one.name : p.outs.length + ' orders') + '</b><small>' + esc(one ? one.words : 'not on the line') + '</small>' + (one ? arrMarkPayHtml(one.order) : '') + '</span>';
     }
     h += '</div><ul class="dpc-arr-list' + (p.outs.length > 1 ? ' dpc-arr-list-outs' : '') + '">';
     p.marks.concat(p.outs).forEach(function (m) {
-      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + '</li>';
+      h += '<li class="' + (p.outs.indexOf(m) >= 0 ? 'out' : 'on') + '"><i class="dpc-arr-dot ' + m.cls + '"></i><b>' + esc(m.name) + '</b> ' + esc(m.words) + arrStageHtml(m.order) + arrPayHtml(m.order) + '</li>';
     });
     h += '</ul></div>';
-    h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.</p>';
+    h += '<p class="dpc-arr-legend"><b class="ok">Solid</b> = supplier confirmed the date. <b class="wait">Ring</b> = date expected, not confirmed. <b class="late">Past the install line</b> = no date, or arriving too late.' +
+      (a.orders.some(function (o) { return o && arrivalClass(o) === 'asap'; }) ? ' <b class="asap">Dashed</b> = ordered ASAP, waiting on their date.' : '') + '</p>';
     return h + '</div>';
+  }
+
+  // ── The Materials panel (piece D, design section 10) ──
+  // One view of every supplier order on the job, in the Arrival line's place.
+  // Where a dot sits is its delivery or pickup date (orders with no date wait
+  // in the bay on the right). What the dot looks like is where the order is
+  // up to: orange = it needs us, blue = waiting on the supplier, green =
+  // confirmed and paid, red = not in time; solid = date confirmed, ring = no
+  // confirmed date, dashed = ordered ASAP and waiting on their date. Under
+  // the line, one row per order with its next step (Mark paid lives here
+  // too). Only drawn for a server that sends the new fields: an older one
+  // keeps today's Arrival line.
+
+  var MP_START = 3;  // today
+  var MP_END = 76;   // the far end of the line
+  var MP_BAY = 82;   // the "No date yet" bay starts here
+
+  // True when the Arrival read carries the payment step or the date choice.
+  function mpOn(a) {
+    if (isObj(a.payment) || (isObj(a.counts) && a.counts.asap_waiting != null) || a.earliest_install !== undefined) return true;
+    return a.orders.some(function (o) { return isObj(o) && (isObj(o.payment) || o.date_mode === 'asap' || o.date_mode === 'date'); });
+  }
+
+  // The stages where an order needs us (its own next step, not the job's).
+  var MP_US = ['order_materials', 'quote_received', 'awaiting_payment', 'ready'];
+
+  // An order's colour: us, sp (waiting on the supplier), ok or late.
+  function mpTone(o) {
+    if (arrivalLate(o)) return 'late';
+    var st = text(o.material_stage);
+    if (st === 'delivered') return 'ok';
+    if (o.waiting_on === 'supplier') return 'sp';
+    if (o.waiting_on === 'us' && MP_US.indexOf(st) >= 0) return 'us';
+    if (o.flag === 'not_sent') return 'us';
+    return st ? 'ok' : 'sp';
+  }
+
+  // The short word over a dot.
+  var MP_BADGE = {
+    order_materials: 'Order', sent: 'Sent', quote_received: 'Quote', awaiting_payment: 'Pay',
+    order_confirmed: 'Confirmed', manufacturing: 'Making', ready: 'Ready', delivered: 'Delivered'
+  };
+  function mpBadge(o) {
+    var st = text(o.material_stage);
+    if (st === 'delivered' && text(o.material_stage_label) === 'Picked up') return 'Picked up';
+    return MP_BADGE[st] || '';
+  }
+
+  // Whether an order sits in the bay: no date yet (or an ASAP order waiting on one).
+  function mpInBay(o) { return !parseDay(o.delivery_date); }
+
+  // The last day the line has to reach (the earliest install too, when no
+  // install is booked).
+  function mpEnd(a, t0) {
+    var inst = parseDay(a.install_day);
+    var early = inst ? null : mpEarliest(a);
+    var days = [inst ? dayNum(inst) : early ? dayNum(early) : t0 + 7];
+    a.orders.forEach(function (o) { var d = isObj(o) && parseDay(o.delivery_date); if (d) days.push(dayNum(d)); });
+    return Math.max.apply(null, days);
+  }
+
+  // Where each order sits, and which label row it takes.
+  function mpPlot(a) {
+    var today = parseDay(a.today);
+    var t0 = dayNum(today);
+    var span = Math.max(1, mpEnd(a, t0) - t0);
+    var pct = function (p) { return Math.max(MP_START, Math.min(MP_END, MP_START + (dayNum(p) - t0) / span * (MP_END - MP_START))); };
+    var inst = parseDay(a.install_day);
+    var orders = a.orders.filter(isObj);
+    var bay = orders.filter(mpInBay);
+    var marks = orders.map(function (o) {
+      var b = bay.indexOf(o);
+      // An order in the bay gets an even share of it, its label wrapped inside.
+      var w = (100 - MP_BAY) / (bay.length || 1);
+      return {
+        order: o, tone: mpTone(o), solid: o.mark === 'solid', asap: o.flag === 'asap', bay: b >= 0,
+        pct: b >= 0 ? MP_BAY + (b + 0.5) * w : pct(parseDay(o.delivery_date)),
+        labLeft: b >= 0 ? MP_BAY + b * w : null, labWidth: b >= 0 ? w : null, row: 0
+      };
+    });
+    marks.sort(function (x, y) { return x.pct - y.pct; });
+    // A label too close to the one before drops to the second row (a bay
+    // label is measured from its left edge, where its words start).
+    var last = [-100, -100];
+    marks.forEach(function (m) {
+      var at = m.bay ? m.labLeft + 7 : m.pct;
+      m.row = at - last[0] >= 15 ? 0 : at - last[1] >= 15 ? 1 : 0;
+      last[m.row] = at;
+    });
+    var early = inst ? null : mpEarliest(a);
+    return { today: today, inst: inst, instPct: inst ? pct(inst) : null, early: early, earlyPct: early ? pct(early) : null, marks: marks, bay: bay.length, pct: pct };
+  }
+
+  // An order to pay now (payment.to_pay: unpaid and at Awaiting payment): the
+  // only one counted "to pay" and given Mark paid on its row. Unpaid at any
+  // other stage (Sent before a quote, or a stage set by hand) counts by its
+  // colour.
+  function mpToPay(o) {
+    var p = v2PayFrom(o.payment, o.material_stage);
+    return !!p && p.to_pay;
+  }
+
+  // The pill in the head: "1 to pay · 1 waiting on supplier", or all good.
+  function mpSummary(a) {
+    var orders = a.orders.filter(isObj);
+    var n = { pay: 0, us: 0, sp: 0, ok: 0, late: 0 };
+    orders.forEach(function (o) {
+      var tone = mpTone(o);
+      if (tone === 'late') n.late++;
+      else if (mpToPay(o)) n.pay++;
+      else n[tone]++;
+    });
+    if (!orders.length) return { text: 'No orders yet', cls: '' };
+    if (n.ok === orders.length) {
+      // "and paid" only when something was paid (or tagged) and nothing is unpaid.
+      var pays = orders.map(function (o) { return v2PayFrom(o.payment, o.material_stage); }).filter(Boolean);
+      var paid = pays.some(function (p) { return p.paid || p.pay_on; }) && !pays.some(function (p) { return p.state === 'unpaid'; });
+      return { text: 'All confirmed' + (paid ? ' and paid' : ''), cls: ' ok' };
+    }
+    var parts = [];
+    if (n.late) parts.push(n.late + ' not in time');
+    if (n.pay) parts.push(n.pay + ' to pay');
+    if (n.us) parts.push(n.us + ' on us');
+    if (n.sp) parts.push(n.sp + ' waiting on supplier');
+    if (n.ok) parts.push(n.ok + ' all good');
+    return { text: parts.join(' · '), cls: n.late ? ' late' : '' };
+  }
+
+  // The words under a dot: the name, the date, and where the order is up to.
+  function mpLabelHtml(m) {
+    var o = m.order;
+    var p = v2PayFrom(o.payment, o.material_stage);
+    var stage = p && p.state === 'paid' && text(o.material_stage) === 'order_confirmed' ? 'Paid'
+      : text(o.material_stage_label) + (o.material_stage_source === 'set' ? ' (set by hand)' : '');
+    var at = m.bay ? 'left:' + m.labLeft.toFixed(1) + '%;width:' + m.labWidth.toFixed(1) + '%' : 'left:' + m.pct.toFixed(1) + '%';
+    return '<span class="dpc-mp-lab' + (m.row ? ' dpc-mp-r1' : '') + (m.bay ? ' dpc-mp-inbay' : '') + '" style="' + at + '"><b>' + esc(text(o.supplier_name) || 'Supplier') + '</b>' +
+      '<small>' + esc(arrivalWords(o)) + '</small>' + (stage ? '<span class="dpc-mp-t ' + m.tone + '">' + esc(stage) + '</span>' : '') + '</span>';
+  }
+
+  // Who or what put the order where it is, for the row's small line.
+  function mpWho(o) {
+    var p = v2PayFrom(o.payment, o.material_stage);
+    var src = o.material_stage_source;
+    if (src === 'payment' && p && p.paid) return 'Paid, marked' + (p.paid_by_email ? ' by ' + p.paid_by_email : '') + (p.paid_at ? ' ' + stampText(p.paid_at) : '');
+    if (src === 'payment' && p && p.pay_on) return payOnWord(p.pay_on) + (p.pay_on_set_at ? ', set ' + stampText(p.pay_on_set_at) : '');
+    if (src === 'reply') return 'Replied' + (isObj(o.material_stage_reply) && parseStamp(o.material_stage_reply.received_at) ? ' ' + stampText(o.material_stage_reply.received_at) : '');
+    if (src === 'set') return 'Set by hand' + (o.material_stage_set_at ? ' ' + stampText(o.material_stage_set_at) : '');
+    return '';
+  }
+
+  // The row's next step: on us, waiting on the supplier, or done.
+  function mpNextHtml(o) {
+    var name = text(o.supplier_name) || 'the supplier';
+    var todo = text(o.todo);
+    var h;
+    if (text(o.material_stage) === 'delivered') h = '<span class="dpc-mp-done">' + esc(text(o.material_stage_label) || 'Delivered') + '</span>';
+    else if (o.waiting_on === 'us' && todo) h = '<span class="dpc-mp-onus"><b>On us</b>' + esc(todo) + '</span>';
+    else if (o.waiting_on === 'supplier') h = '<span class="dpc-mp-supw"><b>Waiting on</b>' + esc(todo && /^Waiting on /.test(todo) ? todo.replace(/^Waiting on /, '') : name) + '</span>';
+    else h = '<span class="dpc-mp-done">' + esc(todo || text(o.material_stage_label) || arrivalWords(o)) + '</span>';
+    var small = [mpWho(o), arrivalWords(o)].filter(Boolean).join(' · ');
+    return h + (small ? '<small>' + esc(small) + '</small>' : '');
+  }
+
+  // Mark paid on the row, only while the order is at Awaiting payment and the
+  // open job's supplier box can take it (the box keeps its own Mark paid).
+  function mpPayBtnHtml(jobId, o) {
+    var p = v2PayFrom(o.payment, o.material_stage);
+    var sid = text(o.supplier_id);
+    if (!p || !p.can_mark_paid || !mpToPay(o) || !sid || state.jobId !== jobId) return '';
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || !v2Box(e, sid)) return '';
+    var busy = e.busy['pay:' + sid];
+    return '<button type="button" class="dpc-v2-paybtn" data-dpc-v2="paid" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Mark paid: ' + esc(text(o.supplier_name)) + '"' +
+      (busy ? ' disabled' : '') + '>' + (busy === 'paid' ? 'Saving...' : 'Mark paid') + '</button>';
+  }
+
+  // ── The order strip (piece D): the eight material stages as one bar ──
+  // Done steps are green, the step the order is on stands taller in its
+  // colour (orange on us, blue on the supplier, green confirmed), and the
+  // steps still to come are grey. A pickup collected on the install's first
+  // day skips Materials ready: that step is hatched.
+  function mpStepAt(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return i;
+    return -1;
+  }
+
+  // The class of the step the order is on. Order confirmed and Delivered
+  // are green whoever the job then waits on: the order itself is settled.
+  function mpStepNowCls(o) {
+    var key = text(o.material_stage);
+    if (key === 'delivered' || key === 'order_confirmed') return 'ck';
+    var tone = mpTone(o);
+    if (tone === 'us') return 'cu';
+    if (tone === 'sp') return 'cs';
+    if (tone === 'ok') return 'ck';
+    return o.waiting_on === 'us' ? 'cu' : 'cs';
+  }
+
+  // The words under the strip: "Manufacturing · step 6 of 8", or for a
+  // confirmed order that is settled, "Order confirmed · paid".
+  function mpStripWords(o, at) {
+    var key = text(o.material_stage);
+    var p = v2PayFrom(o.payment, o.material_stage);
+    if (key === 'order_confirmed' && p && p.paid) return 'Order confirmed · paid';
+    if (key === 'order_confirmed' && p && p.pay_on) return 'Order confirmed · ' + payOnWord(p.pay_on).toLowerCase();
+    var word = key === 'awaiting_payment' ? 'Payment' : text(o.material_stage_label) || v2StageLabel(key);
+    return word + ' · step ' + (at + 1) + ' of ' + V2_STAGES.length;
+  }
+
+  function mpStripHtml(o) {
+    var at = mpStepAt(text(o.material_stage));
+    if (at < 0) return '<div class="dpc-mp-st"></div>';
+    var now = mpStepNowCls(o);
+    var h = '<div class="dpc-mp-st"><div class="dpc-mp-strip" aria-hidden="true">';
+    V2_STAGES.forEach(function (st, i) {
+      var cls = st.key === 'ready' && o.skips_ready === true && i !== at ? 'k' : i < at ? 'd' : i === at ? now : '';
+      h += '<i' + (cls ? ' class="' + cls + '"' : '') + '></i>';
+    });
+    return h + '</div><div class="dpc-mp-stripc">' + esc(mpStripWords(o, at)) + '</div></div>';
+  }
+
+  // One row per order: the name, its strip, the next step, and its button.
+  function mpRowHtml(jobId, o) {
+    return '<div class="dpc-mp-r" data-dpc-mp-order="' + esc(text(o.supplier_id) || text(o.key)) + '"><b class="dpc-mp-name">' + esc(text(o.supplier_name) || 'Supplier') + '</b>' +
+      mpStripHtml(o) + '<div class="dpc-mp-na">' + mpNextHtml(o) + '</div><span class="dpc-mp-act">' + mpPayBtnHtml(jobId, o) + '</span></div>';
+  }
+
+  function mpHtml(row, a) {
+    var h = '<div class="dpc-arrival dpc-mp" data-dpc-region="arrival"><div class="dpc-arr-head"><span class="dpc-arr-title">Materials</span>' +
+      '<span class="dpc-arr-q">Where every order is, and will it all be on site before the install?</span>';
+    var sum = mpSummary(a);
+    if (a.orders.length) h += '<span class="dpc-arr-count' + sum.cls + '">' + esc(sum.text) + '</span>';
+    h += '</div>';
+    if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
+    var p = mpPlot(a);
+    var two = p.marks.some(function (m) { return m.row === 1; });
+    h += '<div class="dpc-mp-wrap"><div class="dpc-mp-rail' + (two ? ' dpc-mp-two' : '') + '"><span class="dpc-mp-ln"></span>';
+    h += '<span class="dpc-mp-tick" style="left:' + MP_START + '%"></span><span class="dpc-mp-tl" style="left:' + MP_START + '%">Today ' + esc(dayText(p.today)) + '</span>';
+    if (p.bay) h += '<span class="dpc-mp-bayl">No date yet</span><span class="dpc-mp-bay"></span>';
+    if (p.inst) h += '<span class="dpc-mp-inst" style="left:' + p.instPct.toFixed(1) + '%"></span><span class="dpc-mp-instl" style="left:' + p.instPct.toFixed(1) + '%">Install ' + esc(dayText(p.inst)) + '</span>';
+    else h += mpNoInstallHtml(a, p);
+    p.marks.forEach(function (m) {
+      var at = 'left:' + m.pct.toFixed(1) + '%';
+      var badge = mpBadge(m.order);
+      if (badge) h += '<span class="dpc-mp-bdg ' + m.tone + '" style="' + at + '">' + esc(badge) + '</span>';
+      h += '<i class="dpc-mp-dot ' + m.tone + (m.solid ? ' s' : '') + (m.asap ? ' asap' : '') + '" style="' + at + '" aria-hidden="true"></i>';
+      h += mpLabelHtml(m);
+    });
+    h += '</div></div>';
+    h += '<div class="dpc-mp-rows">' + a.orders.filter(isObj).map(function (o) { return mpRowHtml(row.id, o); }).join('') + '</div>';
+    h += mpOnUsHtml(a);
+    h += '<p class="dpc-arr-legend dpc-mp-legend"><b class="us">Orange</b> = needs us. <b class="sp">Blue</b> = waiting on the supplier. <b class="ok">Green</b> = confirmed and paid. ' +
+      'Solid = date confirmed. Ring = no confirmed date yet. Dashed = ordered ASAP, waiting on their date.</p>';
+    return h + '</div>';
+  }
+
+  // ── The On us bar (piece D) ──
+  // Everything on the job's materials that waits on us, in one line under the
+  // rows: the server's own list (arrival.waiting_on_us, in box order). When
+  // every order has a confirmed date and no install is booked, the server
+  // puts "All materials by Wed 4/11. Book the install from Thu 5/11 and tell
+  // the client" in that list instead. Nothing on us: no bar.
+  function mpOnUsHtml(a) {
+    var lines = (Array.isArray(a.waiting_on_us) ? a.waiting_on_us : []).map(text).filter(Boolean);
+    if (!lines.length) return '';
+    var words = lines.map(function (l) { return /[.!?]$/.test(l) ? l : l + '.'; }).join(' ');
+    return '<div class="dpc-mp-sumbar" role="note"><span><b>On us</b> ' + esc(words) + '</span></div>';
+  }
+
+  // Draws the Materials panel again when it is the one on the job (its Mark
+  // paid buttons follow the supplier boxes, Saving... included). The Arrival
+  // line is left alone.
+  function paintMp() {
+    var el = region('arrival');
+    if (el && state.row && el.classList.contains('dpc-mp')) arrivalRepaint(el);
+  }
+
+  // Redraws the Arrival line or Materials panel in place, keeping the
+  // keyboard focus on the row button it was on.
+  function arrivalRepaint(el) {
+    var f = mpFocusGet();
+    el.outerHTML = arrivalHtml(state.row);
+    mpFocusPut(f);
+  }
+
+  // The Materials panel button the keyboard is on (a row's Mark paid), so a
+  // repaint of the panel or the job's head can put the focus back on it:
+  // { verb, sid }, or null.
+  function mpFocusGet() {
+    var el = region('arrival');
+    var a = document.activeElement;
+    if (!el || !a || !el.contains(a) || !a.hasAttribute('data-dpc-v2')) return null;
+    return { verb: a.getAttribute('data-dpc-v2'), sid: a.getAttribute('data-dpc-v2-sid') };
+  }
+
+  // Puts the focus back on that button when it is still there and can take it.
+  function mpFocusPut(f) {
+    var el = f ? region('arrival') : null;
+    if (!el) return;
+    var btns = el.querySelectorAll('[data-dpc-v2]');
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      if (b.getAttribute('data-dpc-v2') === f.verb && b.getAttribute('data-dpc-v2-sid') === f.sid && !b.disabled) { b.focus({ preventScroll: true }); return; }
+    }
+  }
+
+  // ── The earliest install line (piece D) ──
+  // No install booked and every open order has a confirmed date: the server
+  // works out the earliest install (the next working day after the last
+  // order arrives, Monday to Friday, skipping WA public holidays) and the
+  // panel draws it as a dashed green line. A suggestion only: it never books.
+  // Before that, the end of the line says No install booked.
+  function mpEarliest(a) {
+    return isObj(a.earliest_install) ? parseDay(a.earliest_install.day) : null;
+  }
+
+  function mpNoInstallHtml(a, p) {
+    if (p.early) {
+      var at = 'left:' + p.earlyPct.toFixed(1) + '%';
+      return '<span class="dpc-mp-inst dpc-mp-early" style="' + at + '"></span><span class="dpc-mp-instl dpc-mp-earlyl" style="' + at + '">Earliest install ' + esc(dayText(p.early)) + '</span>';
+    }
+    return '<span class="dpc-mp-instl dpc-mp-noinst" style="left:' + MP_END + '%">No install booked</span>';
   }
 
   // An order's material stage on the full Arrival line: "· Awaiting payment,
@@ -2053,9 +2491,22 @@
     return h;
   }
 
+  // An order's payment pill on the full Arrival line (piece B).
+  function arrPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
+    return pill ? ' ' + pill : '';
+  }
+
+  // The payment pill under an order's marker on the Arrival line itself
+  // (the list under the line is for narrow screens).
+  function arrMarkPayHtml(o) {
+    var pill = o ? payPillHtml(v2PayFrom(o.payment, o.material_stage)) : '';
+    return pill ? '<span class="dpc-arr-pay">' + pill + '</span>' : '';
+  }
+
   function paintArrival() {
     var el = region('arrival');
-    if (el && state.row) el.outerHTML = arrivalHtml(state.row);
+    if (el && state.row) arrivalRepaint(el);
     // The Deliveries table lists the supplier boxes from the same answer.
     var sched = region('sched');
     if (sched && state.row && !sched.contains(document.activeElement)) paintSched();
@@ -2093,7 +2544,10 @@
     var a = document.activeElement;
     var had = a && a.hasAttribute && a.hasAttribute('data-dpc-next') && root().contains(a);
     var at = had ? [a.selectionStart, a.selectionEnd] : null;
+    // The head holds the Materials panel too: keep a row button's focus.
+    var mf = mpFocusGet();
     paint();
+    mpFocusPut(mf);
     if (!had) return;
     var box = root().querySelector('[data-dpc-next]');
     if (box && !box.disabled) { box.focus(); try { box.setSelectionRange(at[0], at[1]); } catch (e) { /* not a text box */ } }
@@ -3221,11 +3675,13 @@
       var small = from ? '<small>' + esc(from) + '</small>' : '';
       var off = ed && ed.busy ? ' disabled' : '';
       var pickup = o.fulfilment === 'pickup';
-      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>';
+      // Not paid yet or Paid, beside the date (piece B; nothing from an older server).
+      var pill = payPillHtml(v2PayFrom(o.payment, o.material_stage));
+      var dayBtn = '<button type="button" class="dpc-deliv-daybtn" data-dpc-box-open="' + esc(sid) + '" aria-label="Change the ' + (pickup ? 'pickup' : 'delivery') + ' date for ' + esc(name) + '"' + off + '>' + esc(dayText(day)) + '</button>' + pill;
       h += '<div class="dpc-deliv-item" data-dpc-deliv-box="' + esc(sid) + '"><div class="dpc-deliv-row" data-step="' + (o.date_confirmed ? 2 : day ? 1 : 0) + '">';
       h += '<span><strong>' + esc(name) + '</strong><small>' + (o.order_sent ? 'Order email sent' : 'Order email not sent yet') + (pickup ? ', pickup' : '') + '</small></span>';
       // Expected: the date while it is not confirmed.
-      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em><button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
+      if (!day) h += '<span class="dpc-dstate"><em>No date yet</em>' + pill + '<button type="button" class="dpc-textbtn" data-dpc-box-open="' + esc(sid) + '"' + off + '>Set date</button></span>';
       else if (!o.date_confirmed) h += '<span class="dpc-dstate on">' + dayBtn + small + '</span>';
       else h += '<span class="dpc-dstate"><em>-</em></span>';
       // Confirmed by supplier: the date once it is.
@@ -3599,7 +4055,7 @@
       var canAccept = s.can_accept !== false && (!s.needs_order_pick || !!e.pick[s.id]);
       h += '<div class="dpc-actions"><button type="button" class="dpc-primary" data-dpc-sug-accept="' + esc(s.id) + '"' + (busy || !canAccept ? ' disabled' : '') + '>' + (busy === 'accept' ? 'Saving...' : 'Accept') + '</button>';
       h += '<button type="button" data-dpc-sug-dismiss="' + esc(s.id) + '"' + off + '>' + (busy === 'dismiss' ? 'Dismissing...' : 'Dismiss') + '</button></div>';
-      h += '<p class="dpc-sug-foot">Accept saves this date on the supplier box. It does not move the job.</p>';
+      h += '<p class="dpc-sug-foot">' + esc(sugFootWords(e, s)) + '</p>';
     } else {
       var who = text(s.acted_by_email);
       h += '<p class="dpc-sug-state">' + esc((SUG_STATE[s.state] || 'Done') + (who ? ' by ' + who : '') + (parseStamp(s.acted_at) ? ', ' + stampText(s.acted_at) : '') + '.') + '</p>';
@@ -4043,6 +4499,26 @@
   // Delivery.
   function v2FulfilOf(e, b) { return v2Fulfil((e.fulfil || {})[b.supplier_id]) || b.fulfilment || 'delivery'; }
 
+  // The box's date choice (backend contract section 3c, piece C): ASAP or
+  // Pick a date, or null from an older server (the calendar only, as today).
+  // mode is the choice for the next order email (the box's own choice wins
+  // after a send); sent_mode is what the order already sent asked for, and
+  // falls back to mode for a server that does not send it.
+  function v2DateModeFrom(m) {
+    if (!isObj(m) || (m.mode !== 'asap' && m.mode !== 'date')) return null;
+    return {
+      mode: m.mode, sent_mode: m.sent_mode === 'asap' || m.sent_mode === 'date' ? m.sent_mode : m.mode,
+      set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null, derived: m.derived === true
+    };
+  }
+
+  // The choice shown: the one pressed on this screen while it saves, else the box's.
+  function v2DateModeOf(e, b) {
+    if (!b.date_mode) return null;
+    var picked = (e.dmode || {})[b.supplier_id];
+    return picked === 'asap' || picked === 'date' ? picked : b.date_mode.mode;
+  }
+
   function v2BoxFrom(s) {
     var ap = isObj(s.approved_email) ? s.approved_email : null;
     return {
@@ -4055,7 +4531,11 @@
       open: v2EmailFrom(s.open_email),
       sent: (Array.isArray(s.sent_emails) ? s.sent_emails : []).map(v2EmailFrom).filter(Boolean),
       fulfilment: v2Fulfil(s.fulfilment),
-      stage: v2StageFrom(s.material_stage)
+      // Piece C: ASAP or Pick a date. Null from an older server.
+      date_mode: v2DateModeFrom(s.date_mode),
+      stage: v2StageFrom(s.material_stage),
+      // The payment step (section 3c): null from an older server.
+      payment: v2PayFrom(s.payment, s.material_stage)
     };
   }
 
@@ -4076,12 +4556,36 @@
     for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return V2_STAGES[i].label;
     return null;
   }
+  // A stage's place in the list (0 to 7), or -1 when unknown.
+  function v2StageAt(key) {
+    for (var i = 0; i < V2_STAGES.length; i++) if (V2_STAGES[i].key === key) return i;
+    return -1;
+  }
+  // Where a stage came from: picked by a person (set), moved by a matched
+  // supplier reply (reply) or by Mark paid / Pay on (payment), else worked
+  // out. An unknown value reads as worked out.
+  var V2_STAGE_SOURCES = ['set', 'reply', 'payment'];
   function v2StageFrom(m) {
     if (!isObj(m) || !v2StageLabel(m.key)) return null;
+    var r = isObj(m.reply) ? m.reply : null;
     return {
       box_id: text(m.box_id) || null, key: m.key, label: text(m.label) || v2StageLabel(m.key),
-      source: m.source === 'set' ? 'set' : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null
+      source: V2_STAGE_SOURCES.indexOf(m.source) >= 0 ? m.source : 'worked_out', set_at: text(m.set_at) || null, set_by_email: text(m.set_by_email) || null,
+      // Piece B (section 3c): the reply that moved it, a confirmed date the
+      // payment step is holding, and a pickup on the install's first day that
+      // skips Materials ready. All absent from an older server.
+      reply: r ? { email_id: text(r.email_id) || null, received_at: text(r.received_at) || null } : null,
+      held_by_payment: m.held_by_payment === true, skips_ready: m.skips_ready === true
     };
+  }
+
+  // A stage's word on this box: a pickup's last stage is Picked up. Only from
+  // a server that knows the payment step (it sends the payment object, or
+  // says Picked up itself); an older one keeps Delivered, as today.
+  function v2StageWord(b, key) {
+    var knows = b && (b.payment || (b.stage && b.stage.key === 'delivered' && b.stage.label === 'Picked up'));
+    if (key === 'delivered' && knows && b.fulfilment === 'pickup') return 'Picked up';
+    return v2StageLabel(key);
   }
 
   // A dispatch_v2_materials answer missing its draft list or its boxes is a
@@ -4285,6 +4789,7 @@
     var code = err && err.code;
     if (code === 'line_locked') return { changed: true, text: 'That line went out on a sent order, so it cannot be changed.' };
     if (code === 'stage_changed') return { changed: true, text: 'This order\'s stage was changed somewhere else. Showing the latest.' };
+    if (code === 'date_mode_changed') return { changed: true, text: 'This order\'s date choice was changed somewhere else. Showing the latest.' };
     if (V2_CHANGED.indexOf(code) >= 0) return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
     if (code === 'too_many_lines') return { text: 'A job can hold 500 lines at most.' };
     if (code === 'too_many_photos') return { text: 'A job can hold 20 photos at most. Delete one first.' };
@@ -4567,7 +5072,7 @@
       return global.opsPost('dispatch_v2_set_material_stage', body);
     }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
-      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + label + '.' };
+      e.msg[key] = { text: 'Stage saved: ' + v2SupWord(b) + ', ' + (v2StageWord(b, value) || label) + '.' };
       if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
       if (state.jobId === jobId) paintArrival();
       paintList(true);
@@ -4601,19 +5106,244 @@
     var h = '<div class="dpc-v2-stage"><label class="dpc-v2-stage-pick"><span>Materials stage</span><select data-dpc-v2-stage="' + esc(b.supplier_id) + '"' +
       ' aria-label="Materials stage for ' + esc(b.name) + '"' + (busy ? ' disabled' : '') + '>';
     V2_STAGES.forEach(function (st) {
-      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+      // A pickup collected on the install's first day skips Materials ready.
+      if (st.key === 'ready' && s.skips_ready && s.key !== 'ready') return;
+      h += '<option value="' + st.key + '"' + (st.key === s.key ? ' selected' : '') + '>' + esc(v2StageWord(b, st.key)) + '</option>';
     });
     h += '</select></label>';
     var o = v2ArrivalOrder(b.supplier_id);
     if (o && o.waiting_on === 'us') h += '<span class="dpc-status dpc-tone-warn">On us</span>';
     else if (o && o.waiting_on === 'supplier') h += '<span class="dpc-status dpc-tone-muted">Waiting on the supplier</span>';
     if (o && o.extra === true) h += '<span class="dpc-flag dpc-flag-extra">Extra order</span>';
-    h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : s.source === 'set'
-      ? 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '')
-      : 'Worked out from the emails and lines') + '</span>';
+    // A counting Pay on tag shows once, on its own row under the stage.
+    var bp = v2BoxPay(b);
+    if (!(bp && bp.pay_on)) h += payPillHtml(bp);
+    h += '<span class="dpc-v2-stage-who">' + esc(busy ? 'Saving...' : v2StageWho(b, s)) + '</span>';
     if (o && text(o.todo)) h += '<p class="dpc-v2-hint dpc-v2-stage-next">Next: ' + esc(o.todo) + '</p>';
+    if (s.held_by_payment) h += '<p class="dpc-v2-hint">The supplier\'s date is saved. This order stays at Awaiting payment until someone presses Mark paid.</p>';
     h += '</div>';
-    return h + v2MsgHtml(e.msg[key]);
+    return h + v2MsgHtml(e.msg[key]) + v2PayHtml(e, b);
+  }
+
+  // Who or what put the box at its stage.
+  function v2StageWho(b, s) {
+    if (s.source === 'set') return 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '');
+    if (s.source === 'reply') return 'Moved here by their reply' + (s.reply && s.reply.received_at ? ', ' + stampText(s.reply.received_at) : '');
+    if (s.source === 'payment') {
+      var p = v2BoxPay(b);
+      if (p && p.paid) return 'Moved here when marked paid' + (p.paid_at ? ', ' + stampText(p.paid_at) : '');
+      if (p && p.pay_on) return 'Moved here by ' + payOnWord(p.pay_on) + (p.pay_on_set_at ? ', ' + stampText(p.pay_on_set_at) : '');
+      return 'Moved here by the payment';
+    }
+    return 'Worked out from the emails and lines';
+  }
+
+  // ── The payment step (backend contract section 3c, piece B) ──
+  // A supplier we have no account with is paid first: once their quote is in,
+  // the order waits on us until someone records here that we paid. Mark paid
+  // and Undo paid are records only: they pay nobody, touch no Xero, send
+  // nothing and never move the job. Each is one press, sent once, guarded on
+  // the paid stamp the box showed (compare and set). An ops-api that does not
+  // send the payment object yet shows no payment buttons at all.
+
+  var PAY_STATES = ['not_needed', 'unpaid', 'paid', 'pay_on_pickup', 'pay_on_delivery', 'unknown'];
+
+  // The box's payment as the server says it, or null (an older server, or a
+  // purchase order with no box). stage is the order's material stage as
+  // shown (its key, or the stage object), for working out to_pay below.
+  function v2PayFrom(p, stage) {
+    if (!isObj(p) || PAY_STATES.indexOf(p.state) < 0) return null;
+    var g = isObj(p.guard) ? p.guard : {};
+    var key = text(isObj(stage) ? stage.key : stage);
+    return {
+      terms: text(p.terms) || 'unknown', state: p.state, paid: p.paid === true,
+      // To pay now: unpaid and the order's stage shown is Awaiting payment.
+      // The server says so in to_pay; a server from before that field is
+      // worked out the same way from the state and the stage.
+      to_pay: typeof p.to_pay === 'boolean' ? p.to_pay : p.state === 'unpaid' && key === 'awaiting_payment',
+      paid_at: text(p.paid_at) || null, paid_by_email: text(p.paid_by_email) || null,
+      pay_on: p.pay_on === 'pickup' || p.pay_on === 'delivery' ? p.pay_on : null,
+      pay_on_set_at: text(p.pay_on_set_at) || null, pay_on_set_by_email: text(p.pay_on_set_by_email) || null,
+      earlier_order_paid_at: text(p.earlier_order_paid_at) || null,
+      holds_stage: p.holds_stage === true, blocks_job_move: p.blocks_job_move === true,
+      can_mark_paid: p.can_mark_paid === true, can_undo_paid: p.can_undo_paid === true, can_set_pay_on: p.can_set_pay_on === true,
+      // The stored stamps the presses guard on (null = never set).
+      guard: { paid_at: text(g.paid_at) || null, pay_on_set_at: text(g.pay_on_set_at) || null }
+    };
+  }
+
+  // A box's payment: the materials read's own, else the Arrival line's.
+  function v2BoxPay(b) {
+    if (!b) return null;
+    if (b.payment) return b.payment;
+    var o = v2ArrivalOrder(b.supplier_id);
+    return o ? v2PayFrom(o.payment, o.material_stage) : null;
+  }
+
+  // Which box a press is for: its id when the screen knows it, else the job
+  // and the supplier (one box per supplier per job).
+  function v2BoxRef(jobId, b) {
+    var o = v2ArrivalOrder(b.supplier_id);
+    var id = (b.stage && b.stage.box_id) || (o && text(o.box_id)) || null;
+    return id ? { box_id: id } : { job_id: jobId, supplier_id: b.supplier_id };
+  }
+
+  var PAY_ACTIONS = { paid: 'dispatch_v2_mark_paid', unpaid: 'dispatch_v2_undo_paid', payon: 'dispatch_v2_set_pay_on' };
+
+  // "Pay on pickup" or "Pay on delivery".
+  function payOnWord(v) { return v === 'pickup' ? 'Pay on pickup' : 'Pay on delivery'; }
+
+  function v2PayDoneWords(kind, b, resp, payOn) {
+    var name = v2SupWord(b);
+    if (kind === 'payon' && payOn) return resp.unchanged ? 'No change: ' + name + ' was already set to ' + payOnWord(payOn).toLowerCase() + '.' : payOnWord(payOn) + ' set: ' + name + '. The order counts as confirmed. Nothing was paid or sent.';
+    if (kind === 'payon') return resp.unchanged ? 'No change: ' + name + ' had no pay on tag.' : 'Pay on tag taken off: ' + name + '.';
+    if (kind === 'paid') return resp.unchanged ? 'No change: ' + name + ' was already marked paid.' : 'Marked paid: ' + name + '. This is a record only: nobody was paid and nothing was sent.';
+    return resp.unchanged ? 'No change: ' + name + ' had no paid mark.' : 'Paid mark taken off: ' + name + '.';
+  }
+
+  // A payment press refused: what to say, and whether the box was out of date.
+  function v2PayWords(err, b) {
+    var code = err && err.code;
+    var name = v2SupWord(b);
+    if (code === 'paid_changed') return { changed: true, text: 'The paid mark on ' + name + ' was changed somewhere else. Showing the latest.' };
+    if (code === 'pay_on_changed') return { changed: true, text: 'The pay on tag on ' + name + ' was changed somewhere else. Showing the latest.' };
+    if (code === 'on_account') return { changed: true, text: name + ' is on account, so there is no payment to mark. Showing the latest.' };
+    if (code === 'box_not_found') return { changed: true, text: 'That supplier order is no longer on this job. Showing the latest.' };
+    if (code === 'not_dispatch_work') return { text: 'Payments are not recorded on this job in Dispatch.' };
+    if (code === 'dispatch_read_failed') return { text: 'Could not check ' + name + "'s account terms, so nothing was saved.", retry: true };
+    return null;
+  }
+
+  // One press on a box's payment: Mark paid, Undo paid, or (kind payon)
+  // Pay on pickup / Pay on delivery, payOn 'pickup' or 'delivery' to set the
+  // tag and 'off' to take it off.
+  function v2PayPress(jobId, sid, kind, payOn) {
+    var e = v2Entry(jobId);
+    var b = v2Box(e, sid);
+    var p = v2BoxPay(b);
+    var key = 'pay:' + sid;
+    if (!e || e.status !== 'ok' || !b || !p || e.busy[key] || !PAY_ACTIONS[kind]) return;
+    // Undo needs the stamp it takes off.
+    if (kind === 'unpaid' && !p.guard.paid_at) return;
+    // The tag to set (null = take it off); anything else is not a press.
+    var tag = kind === 'payon' ? (payOn === 'pickup' || payOn === 'delivery' ? payOn : null) : undefined;
+    if (kind === 'payon' && tag === null && payOn !== 'off') return;
+    e.busy[key] = kind;
+    delete e.msg[key];
+    paintV2();
+    var body = v2BoxRef(jobId, b);
+    if (kind === 'payon') { body.pay_on = tag; body.expected_set_at = p.guard.pay_on_set_at; } else body.expected_paid_at = p.guard.paid_at;
+    Promise.resolve().then(function () { return global.opsPost(PAY_ACTIONS[kind], body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      var fresh = isObj(resp.box) ? v2PayFrom(resp.box.payment, resp.box.material_stage) : null;
+      if (fresh) b.payment = fresh;
+      e.msg[key] = { text: v2PayDoneWords(kind, b, resp, tag) };
+      v2PayAfter(jobId, resp);
+    }, function (err) {
+      delete e.busy[key];
+      var fallback = kind === 'paid' ? 'Not marked paid.' : kind === 'unpaid' ? 'The paid mark was not taken off.' : tag ? payOnWord(tag) + ' was not set.' : 'The pay on tag was not taken off.';
+      v2PayFail(jobId, key, err, b, { kind: kind, payOn: payOn }, fallback);
+    });
+  }
+
+  // After a payment press: the answer's Arrival line onto the job and its
+  // list row, then the list and the boxes read again from the server.
+  function v2PayAfter(jobId, resp) {
+    if (!applyBoxArrival(jobId, resp)) { var r = rowById(jobId) || state.row; if (r) loadArrival(r); }
+    if (state.jobId === jobId) paintArrival();
+    paintList(true);
+    loadBase();
+    readV2(jobId, true);
+  }
+
+  // A refusal under the box. Out of date: say so, then the box, the Arrival
+  // line and the list are read again. press ({ kind }) is what Retry sends again.
+  function v2PayFail(jobId, key, err, b, press, fallback) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    var w = v2PayWords(err, b);
+    if (w && w.changed) {
+      e.msg[key] = { bad: true, text: w.text };
+      v2Changed409(jobId, w.text);
+      var r = rowById(jobId) || state.row;
+      if (r && state.jobId === jobId) loadArrival(r);
+      loadBase();
+      return;
+    }
+    if (!w) w = v2Words(err, fallback) || { text: fallback, retry: true };
+    e.msg[key] = { bad: true, text: w.text, retry: !!w.retry, press: press };
+    paintV2If(jobId);
+  }
+
+  // Retry on a refused payment press: the same press again.
+  function v2PayRetryAttrs(m, sid) {
+    if (!m || !m.press) return null;
+    return 'data-dpc-v2="' + esc(m.press.kind) + '" data-dpc-v2-sid="' + esc(sid) + '"' + (m.press.payOn ? ' data-dpc-v2-payon="' + esc(m.press.payOn) + '"' : '');
+  }
+
+  // The payment pill beside an order: Not paid yet (amber) on a pay-first
+  // order that is to pay now (unpaid at Awaiting payment), Paid (green) once
+  // someone has marked it. Nothing on an unpaid order at any other stage, on
+  // an on-account order, or from an older server (p is null).
+  function payPillHtml(p) {
+    if (!p) return '';
+    if (p.to_pay) return '<span class="dpc-flag dpc-flag-amber dpc-paypill">Not paid yet</span>';
+    if (p.state === 'paid') return '<span class="dpc-flag dpc-flag-paid dpc-paypill">Paid</span>';
+    // Pay on pickup / delivery: confirmed without paying yet.
+    if (p.state === 'pay_on_pickup' || p.state === 'pay_on_delivery') return '<span class="dpc-flag dpc-flag-payon dpc-paypill">' + payOnWord(p.state === 'pay_on_pickup' ? 'pickup' : 'delivery') + '</span>';
+    return '';
+  }
+
+  // Mark paid (and what it does) on a pay-first box not paid for this order;
+  // who marked it paid, with Undo paid, once it is.
+  function v2PayHtml(e, b) {
+    var p = v2BoxPay(b);
+    if (!p) return '';
+    var sid = esc(b.supplier_id);
+    var key = 'pay:' + b.supplier_id;
+    var busy = e.busy[key];
+    var off = busy ? ' disabled' : '';
+    var h = '';
+    var payOn = v2PayOnBtnHtml(b, p, busy);
+    if (p.can_mark_paid) {
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">';
+      h += '<button type="button" class="dpc-v2-paybtn" data-dpc-v2="paid" data-dpc-v2-sid="' + sid + '"' + off + '>' + (busy === 'paid' ? 'Saving...' : 'Mark paid') + '</button>';
+      h += payOn;
+      h += '<small>Moves it to Order confirmed and records who paid and when. A record only: it pays nobody and sends nothing.</small></div>';
+      if (p.earlier_order_paid_at) h += '<p class="dpc-v2-hint">An earlier order to ' + esc(v2SupWord(b)) + ' was marked paid ' + esc(stampText(p.earlier_order_paid_at)) + '. This order is not paid yet.</p>';
+    } else if (p.paid && p.can_undo_paid) {
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">';
+      h += '<span class="dpc-v2-paid">Paid, marked' + (p.paid_by_email ? ' by ' + esc(p.paid_by_email) : '') + (p.paid_at ? ', ' + esc(stampText(p.paid_at)) : '') + '</span>';
+      h += '<button type="button" data-dpc-v2="unpaid" data-dpc-v2-sid="' + sid + '"' + off + '>' + (busy === 'unpaid' ? 'Saving...' : 'Undo paid') + '</button></div>';
+    } else if (payOn) {
+      // Pay on alone: an on-account box, or one with no Mark paid on offer.
+      h += '<div class="dpc-v2-pay" role="group" aria-label="Payment for ' + esc(b.name) + '">' + payOn +
+        '<small>Confirms the order now and records who set it. A record only: it pays nobody and sends nothing.</small></div>';
+    }
+    h += v2PayOnTagHtml(b, p, busy);
+    return h + v2MsgHtml(e.msg[key], v2PayRetryAttrs(e.msg[key], b.supplier_id));
+  }
+
+  // Pay on pickup (or delivery, as the box goes out): the order is confirmed
+  // now and paid on the day. Offered on any box the server allows it on
+  // (on-account ones too, contract rule 6) that is not paid and has no tag.
+  function v2PayOnBtnHtml(b, p, busy) {
+    if (!p.can_set_pay_on || p.paid || p.pay_on) return '';
+    var v = b.fulfilment === 'pickup' ? 'pickup' : 'delivery';
+    return '<button type="button" class="dpc-v2-payon" data-dpc-v2="payon" data-dpc-v2-payon="' + v + '" data-dpc-v2-sid="' + esc(b.supplier_id) + '"' +
+      (busy ? ' disabled' : '') + ' title="Confirms the order without paying now">' + (busy === 'payon' ? 'Saving...' : esc(payOnWord(v))) + '</button>';
+  }
+
+  // A pay on tag that counts: the tag, who set it, and Take off.
+  function v2PayOnTagHtml(b, p, busy) {
+    if (!p.pay_on) return '';
+    var h = '<div class="dpc-v2-pay dpc-v2-payon-set" role="group" aria-label="' + esc(payOnWord(p.pay_on)) + ' for ' + esc(b.name) + '">';
+    h += '<span class="dpc-flag dpc-flag-payon">' + esc(payOnWord(p.pay_on)) + '</span>';
+    h += '<span class="dpc-v2-stage-who">Set' + (p.pay_on_set_by_email ? ' by ' + esc(p.pay_on_set_by_email) : '') + (p.pay_on_set_at ? ', ' + esc(stampText(p.pay_on_set_at)) : '') +
+      '. The order counts as confirmed.</span>';
+    h += '<button type="button" class="dpc-textbtn" data-dpc-v2="payon" data-dpc-v2-payon="off" data-dpc-v2-sid="' + esc(b.supplier_id) + '"' + (busy ? ' disabled' : '') + '>' +
+      (busy === 'payon' ? 'Saving...' : 'Take off') + '</button></div>';
+    return h;
   }
 
   function v2SetMain(jobId, sid, on) {
@@ -4792,16 +5522,20 @@
     var box = v2Box(e, sid);
     var key = 'make:' + sid;
     if (!box || e.busy[key]) return;
-    var date = wholeDay(e.dates[sid] || '') || null;
+    var mode = v2DateModeOf(e, box);
+    var date = mode === 'asap' ? null : wholeDay(e.dates[sid] || '') || null;
     // A rebuild keeps the held email's own delivery or pickup.
     var fulfilment = rebuild ? (box.open && box.open.fulfilment) || v2FulfilOf(e, box) : v2FulfilOf(e, box);
-    if (!rebuild && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That ' + fulfilment + ' date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
+    if (!rebuild && mode !== 'asap' && text(e.dates[sid]) && !date) { e.msg[key] = { bad: true, text: 'That ' + fulfilment + ' date is not a whole date. Pick it again, or leave it empty.' }; paintV2(); return; }
     e.busy[key] = true;
     delete e.msg[key];
     e.ask = null;
     paintV2();
     var body = { job_id: jobId, supplier_id: sid, delivery_date: rebuild ? (box.open && box.open.delivery_date) || null : date, rebuild: !!rebuild, fulfilment: fulfilment };
     if (rebuild && box.open) body.expected_updated_at = box.open.updated_at;
+    // Piece C: the date choice goes with it (only to a server that sent one).
+    // A rebuild keeps the held email's own: a date on it means Pick a date.
+    if (mode) body.date_mode = body.delivery_date ? 'date' : mode;
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_make_email', body); }).then(v2Ok).then(function (resp) {
       delete e.busy[key];
       var m = v2EmailFrom(resp.email);
@@ -4819,6 +5553,58 @@
       delete e.busy[key];
       v2Fail(jobId, key, err, 'The email was not made.');
     });
+  }
+
+  // ── ASAP or Pick a date (backend contract section 3c, piece C) ──
+  // Most orders go out with no date in mind. ASAP greys the calendar out and
+  // the order email says "Date: ASAP"; Pick a date works as today. The choice
+  // is saved on the box (dispatch_v2_set_date_mode) and the next Make email
+  // uses it. It never touches a held or sent email.
+
+  function v2DateModeHtml(e, b, mode) {
+    if (!mode) return '';
+    var sid = esc(b.supplier_id);
+    var busy = !!e.busy['dmode:' + b.supplier_id];
+    var off = busy || b.blocked ? ' disabled' : '';
+    var btn = function (v, words) {
+      return '<button type="button" data-dpc-v2="datemode" data-dpc-v2-mode="' + v + '" data-dpc-v2-sid="' + sid + '" aria-pressed="' + (mode === v) + '"' + off + '>' + words + '</button>';
+    };
+    return '<span class="dpc-v2-seg" role="group" aria-label="Date for ' + esc(b.name) + '">' + btn('asap', 'ASAP') + btn('date', 'Pick a date') + '</span>';
+  }
+
+  function v2SetDateMode(jobId, sid, mode) {
+    var e = v2Entry(jobId);
+    var b = v2Box(e, sid);
+    var key = 'dmode:' + sid;
+    if (!e || e.status !== 'ok' || !b || !b.date_mode || e.busy[key] || (mode !== 'asap' && mode !== 'date')) return;
+    if (v2DateModeOf(e, b) === mode) return;
+    if (!e.dmode) e.dmode = {};
+    // Shown at once; put back if the save is refused.
+    e.dmode[sid] = mode;
+    e.busy[key] = true;
+    delete e.msg[key];
+    paintV2();
+    var body = v2BoxRef(jobId, b);
+    body.date_mode = mode;
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_set_date_mode', body); }).then(v2Ok).then(function (resp) {
+      delete e.busy[key];
+      b.date_mode.mode = mode;
+      delete e.dmode[sid];
+      if (applyBoxArrival(jobId, resp) && state.jobId === jobId) paintArrival();
+      paintV2If(jobId);
+      readV2(jobId, true);
+    }, function (err) {
+      delete e.busy[key];
+      delete e.dmode[sid];
+      v2Fail(jobId, key, err, 'The date choice was not saved.');
+      if (e.msg[key] && e.msg[key].retry) e.msg[key].mode = mode;
+      paintV2If(jobId);
+    });
+  }
+
+  function v2DateModeRetryAttrs(m, sid) {
+    if (!m || !m.mode) return null;
+    return 'data-dpc-v2="datemode" data-dpc-v2-mode="' + esc(m.mode) + '" data-dpc-v2-sid="' + esc(sid) + '"';
   }
 
   function v2AddrText(list) { return list.join(', '); }
@@ -5258,12 +6044,24 @@
       var pick = v2FulfilOf(e, b) === 'pickup';
       h += '<div class="dpc-v2-make"><label class="dpc-v2-date dpc-v2-fulfil"><span>Delivery or pickup</span><select data-dpc-v2-fulfil="' + esc(sid) + '"' + (b.blocked ? ' disabled' : '') + '>' +
         '<option value="delivery"' + (pick ? '' : ' selected') + '>Delivery</option><option value="pickup"' + (pick ? ' selected' : '') + '>Pickup</option></select></label>';
-      h += '<label class="dpc-v2-date"><span>' + (pick ? 'Pickup date' : 'Delivery date') + '</span><input type="date" data-dpc-v2-date="' + esc(sid) + '" value="' + esc(e.dates[sid] || '') + '"' + (b.blocked ? ' disabled' : '') + '></label>';
+      var mode = v2DateModeOf(e, b);
+      var asap = mode === 'asap';
+      h += '<div class="dpc-v2-date"><span>' + (pick ? 'Pickup date' : 'Delivery date') + '</span><span class="dpc-v2-datepick">' + v2DateModeHtml(e, b, mode) +
+        '<input type="date" data-dpc-v2-date="' + esc(sid) + '" aria-label="' + (pick ? 'Pickup date' : 'Delivery date') + ' for ' + esc(b.name) + '" value="' + esc(asap ? '' : e.dates[sid] || '') + '"' + (b.blocked || asap ? ' disabled' : '') + '></span></div>';
       h += '<button type="button" class="dpc-primary" data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' + (e.busy[mkey] ? 'Making the email...' : 'Make email') + '</button></div>';
       if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
       else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
-      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.</p>';
+      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.' +
+        (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
+      // The order already sent keeps the date choice it went out with: say
+      // so when the next email's choice is different.
+      var sentMode = b.sent.length && b.date_mode ? b.date_mode.sent_mode : null;
+      if (mode && sentMode && sentMode !== mode) {
+        h += '<p class="dpc-v2-hint dpc-v2-sentmode">The order already sent asked for ' + (sentMode === 'asap' ? 'ASAP' : 'a date') +
+          '. The next email will ' + (mode === 'asap' ? 'say ASAP' : 'ask for the date picked here') + '.</p>';
+      }
       h += v2MsgHtml(e.msg[mkey], 'data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"');
+      h += v2MsgHtml(e.msg['dmode:' + sid], v2DateModeRetryAttrs(e.msg['dmode:' + sid], sid));
       return h + '</div>';
     }
     h += v2MsgHtml(e.msg[mkey]);
@@ -5470,6 +6268,8 @@
     try { el.outerHTML = v2Html(); } finally { painting = false; }
     // The order emails are also listed in the Emails panel.
     paintMail();
+    // The Materials panel's buttons follow the boxes (piece D).
+    paintMp();
     var now = f && region('v2mat') ? region('v2mat').querySelector(f.sel) : null;
     if (!now || now.disabled) return;
     now.focus({ preventScroll: true });
@@ -5531,6 +6331,9 @@
     else if (verb === 'photo-view') v2ViewPhoto(jobId, id);
     else if (verb === 'photo-del') v2DeletePhoto(jobId, id);
     else if (verb === 'make') v2MakeEmail(jobId, sid, false);
+    else if (verb === 'paid' || verb === 'unpaid') v2PayPress(jobId, sid, verb);
+    else if (verb === 'payon') v2PayPress(jobId, sid, verb, t.getAttribute('data-dpc-v2-payon'));
+    else if (verb === 'datemode') v2SetDateMode(jobId, sid, t.getAttribute('data-dpc-v2-mode'));
     else if (verb === 'test') v2AskSend(jobId, id, 'test');
     else if (verb === 'send') v2AskSend(jobId, id, 'real');
     else if (verb === 'resend') v2AskSend(jobId, id, 'resend');

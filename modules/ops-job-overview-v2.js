@@ -470,7 +470,7 @@ var JobOverviewV2Core = (function () {
     if (unread > 0) return 'AI notes have not read the newest ' + plural(unread, 'record') + ' yet';
     if (l.stale === true || l.needs_rebuild === true) return 'AI notes are due for a fresh read';
     var until = l.evidence_until ? stamp(l.evidence_until, now) : '';
-    return until ? 'AI notes have read everything up to ' + until : 'AI notes are up to date';
+    return until ? 'AI notes have read captured records placed on this job up to ' + until : 'AI notes are current for captured records placed on this job';
   }
 
   // ── Money ──

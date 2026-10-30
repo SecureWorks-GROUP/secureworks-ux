@@ -323,7 +323,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
   test('AI notes status line and the headline when no story is written', () => {
     expect(C.ledgerWords(null, NOW)).toBe('AI notes not built yet');
     expect(C.ledgerWords({ status: 'live', unread_rows: 3 }, NOW)).toBe('AI notes have not read the newest 3 records yet');
-    expect(C.ledgerWords({ status: 'live', unread_rows: 0, evidence_until: '2026-10-09T01:33:03Z' }, NOW)).toBe('AI notes have read everything up to Fri 9 Oct, 9:33am');
+    expect(C.ledgerWords({ status: 'live', unread_rows: 0, evidence_until: '2026-10-09T01:33:03Z' }, NOW)).toBe('AI notes have read captured records placed on this job up to Fri 9 Oct, 9:33am');
+    expect(C.ledgerWords({ status: 'live', unread_rows: 0 }, NOW)).toBe('AI notes are current for captured records placed on this job');
     const h = C.headlineFrom('Deposit stage since today. 1 draft invoice not issued. Our move, we owe: a payment link.');
     expect(h).toEqual({ headline: 'Deposit stage since today. 1 draft invoice not issued.', rest: 'Our move, we owe: a payment link.' });
   });

@@ -429,3 +429,45 @@ test('office records existing client approval without creating a signature or su
   await expect(page.locator('[data-office-signoff-form]')).toHaveCount(0);
   expect(await page.evaluate(()=>window.__officeWrites)).toEqual([{action:'waive_client_signoff',body:{job_id:'job-office',reason:'Owner confirmed prior approval'}}]);
 });
+
+test('office approves the crew’s hours for them with a reason, and a refusal is shown in words', async ({ page }) => {
+  await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
+  await page.evaluate(() => {
+    _currentJobId = 'job-office';
+    _currentJobData = {job:{id:'job-office'},group_work_order_enabled:true};
+    document.getElementById('jobDetailView').classList.add('active');
+    window.SECUREWORKS_CLOUD = {auth:{getRole:()=> 'owner'}};
+    window.__officeWrites = [];
+    window.__hoursApproved = false;
+    window.__refuseOnce = true;
+    window.opsFetch = async () => ({group_id:'group-office',pot_total:2720,pay_basis:'all_in_12_v2',split_frozen:false,
+      participants:[{user_id:'henry',name:'Henry'},{user_id:'ryan',name:'Ryan'}],
+      hours:[{user_id:'henry',hours:18},{user_id:'ryan',hours:18.5}],
+      needs_approval: window.__hoursApproved ? [] : ['ryan'], hours_office_approved: window.__hoursApproved,
+      client_signed:true,client_signoff_method:'office_waiver',client_signoff_reason:'Client happy, signed by phone',shares:[]});
+    window.opsPost = async (action,body) => {
+      window.__officeWrites.push({action,body});
+      if (window.__refuseOnce) { window.__refuseOnce = false; const e = new Error('refused'); e.body = {error:'You are on this crew, so someone else in the office has to approve its hours.'}; throw e; }
+      window.__hoursApproved = true; return {ok:true};
+    };
+    GroupWorkOrderOffice.paint(_currentJobData);
+  });
+  const card = page.locator('[data-office-group-wo-card]');
+  await expect(card).toContainText('Henry: 18 hours saved · approved');
+  await expect(card).toContainText('Ryan: 18.5 hours saved · not approved yet');
+  await page.getByRole('button',{name:'Approve hours for the crew'}).click();
+  // An empty reason is stopped by the form itself: nothing is sent.
+  expect(await page.evaluate(()=>window.__officeWrites.length)).toBe(0);
+  await page.locator('[data-office-hours-reason]').fill('Ryan confirmed his hours by phone');
+  await page.getByRole('button',{name:'Approve hours for the crew'}).click();
+  await expect(card).toContainText('someone else in the office has to approve');
+  await page.getByRole('button',{name:'Approve hours for the crew'}).click();
+  await expect(page.locator('[data-office-hours-approved]')).toContainText('Hours approved by the office for the crew.');
+  await expect(card).toContainText('Ryan: 18.5 hours saved · approved by the office');
+  await expect(page.locator('[data-office-hours-form]')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.__officeWrites)).toEqual([
+    {action:'office_approve_group_hours',body:{group_id:'group-office',reason:'Ryan confirmed his hours by phone'}},
+    {action:'office_approve_group_hours',body:{group_id:'group-office',reason:'Ryan confirmed his hours by phone'}},
+  ]);
+});

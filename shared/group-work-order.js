@@ -237,9 +237,21 @@ var GroupWorkOrderCore = (function () {
       h += '<ul aria-label="Crew hours">';
       people.forEach(function (person) {
         var total = hours.filter(function (row) { return row.user_id === person.user_id; }).reduce(function (sum, row) { return sum + (Number(row.hours) || 0); }, 0);
-        h += '<li>' + esc(shareName(read, person)) + ': ' + esc(total) + ' hours saved</li>';
+        var line = esc(shareName(read, person)) + ': ' + esc(total) + ' hours saved';
+        if (Array.isArray(read.needs_approval) && !read.split_frozen && total > 0) {
+          line += read.needs_approval.indexOf(person.user_id) >= 0 ? ' · not approved yet' : (read.hours_office_approved ? ' · approved by the office' : ' · approved');
+        }
+        h += '<li>' + line + '</li>';
       });
       h += '</ul>';
+    }
+    // Owner, 30 Oct 2026: the office can approve the crew's hours for them.
+    if (read.hours_office_approved && !read.split_frozen) h += '<p data-office-hours-approved>Hours approved by the office for the crew.</p>';
+    if (!read.split_frozen && Array.isArray(read.needs_approval) && read.needs_approval.length) {
+      h += '<form data-office-hours-form>';
+      h += '<label>Reason for approving the crew\'s hours <textarea data-office-hours-reason required minlength="3" maxlength="2000" placeholder="Who confirmed the hours, and why the office is approving them?"></textarea></label>';
+      h += '<p>This approves everyone\'s hours on behalf of the crew. It is not a crew signature. Anyone on this crew cannot approve it.</p>';
+      h += '<button type="submit">Approve hours for the crew</button></form>';
     }
     if (!read.client_signed) {
       h += '<form data-office-signoff-form>';

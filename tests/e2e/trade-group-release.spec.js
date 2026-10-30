@@ -40,6 +40,8 @@ const PHASES = {
   ready: { ...base, awaiting: 'ready', client_signed: true, client_signoff: byClive, my_hours_approved: true, crew_hours: hours(true),
     crew_status: crew('not_invoiced', 'not_invoiced', 'not_invoiced'), release: release({ signoff: 'client', hold: ['Waiting on the crew to submit.'] }) },
 };
+PHASES.officeHours = { ...PHASES.unsigned, hours_office_approved: true,
+  crew_hours: hours(true).map(row => ({ ...row, approved_by_office: true })) };
 PHASES.frozen = { ...PHASES.ready, ...frozenMoney, awaiting: 'frozen', crew_status: crew('not_invoiced', 'submitted', 'not_invoiced'), release: release({ signoff: 'client', invoiced: 1, hold: ['Waiting on Henry and Ryan to submit.'] }) };
 PHASES.submitted = { ...PHASES.frozen, submitted: invoice, crew_status: crew('submitted', 'approved', 'not_invoiced'), release: release({ signoff: 'client', invoiced: 2, approved: 1, hold: ['Waiting on Ryan to submit.'] }) };
 PHASES.released = { ...PHASES.submitted, client_signoff: byOffice, submitted: { ...invoice, status: 'draft_in_xero' },
@@ -256,4 +258,14 @@ test('once the whole crew is in, the card says sent for payment, never paid', as
   await expect(dialog.locator('[data-group-crew]')).toHaveText([/Henry \(you\)\s*Sent for payment/, /Isaac\s*Sent for payment/, /Ryan\s*Sent for payment/]);
   await expect(dialog).toContainText('Office signed off');
   await expect(dialog.locator('[data-group-released]')).toContainText('Sent for payment.');
+});
+
+test('when the office approves the hours for the crew, each row says so and Henry has nothing to approve', async ({ appPage: page }) => {
+  await fixtures(page, 'officeHours');
+  const card = await open(page);
+  const rows = card.locator('[data-group-crew-row]');
+  await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h\s*✓ Office approved/, /Isaac\s*18h\s*✓ Office approved/, /Ryan\s*18\.5h\s*✓ Office approved/]);
+  await expect(card.getByRole('button', { name: /Approve everyone/ })).toHaveCount(0);
+  await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the client has signed.');
+  await noOtherPay(card);
 });

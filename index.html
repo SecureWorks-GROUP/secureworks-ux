@@ -4388,11 +4388,11 @@ function jplProfitLine(summary, fmt) {
     var n = summary.jobs_margin_known;
     var unknown = summary.jobs_margin_unknown || 0;
     var tail = unknown ? ' (' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' Unknown, not counted)' : '';
-    if (!n || summary.total_margin == null) return 'No job has complete costs yet' + tail;
+    if (!n || summary.total_margin == null) return 'No job has a calculated margin yet' + tail;
     if (jplIsNum(summary.margin_known_invoiced)) {
-      return fmt(summary.total_margin) + ' profit on ' + fmt(summary.margin_known_invoiced) + ' invoiced, ' + n + ' job' + (n === 1 ? '' : 's') + ' with complete costs' + tail;
+      return fmt(summary.total_margin) + ' profit on ' + fmt(summary.margin_known_invoiced) + ' invoiced, ' + n + ' job' + (n === 1 ? '' : 's') + ' with calculated margins' + tail;
     }
-    return fmt(summary.total_margin) + ' profit on ' + n + ' job' + (n === 1 ? '' : 's') + ' with complete costs' + tail;
+    return fmt(summary.total_margin) + ' profit on ' + n + ' job' + (n === 1 ? '' : 's') + ' with calculated margins' + tail;
   }
   if (summary.total_invoiced > 0) return fmt(summary.total_margin) + ' profit on ' + fmt(summary.total_invoiced) + ' invoiced';
   return '';
@@ -4407,7 +4407,7 @@ function jplCostsCard(summary, fmt) {
       value: fmt(s.total_bills),
       sub: s.costs_complete === false
         ? 'Not complete: ' + unknown + ' job' + (unknown === 1 ? '' : 's') + ' with margin Unknown'
-        : 'Costs complete',
+        : 'Placed costs only; cost-close not verified',
       complete: s.costs_complete !== false,
     };
   }

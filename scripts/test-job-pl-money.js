@@ -45,7 +45,7 @@ const fullSummary = {
 eq(ctx.jplAvgMarginText(fullSummary), '26.7%', 'avg margin');
 eq(
   ctx.jplProfitLine(fullSummary, fmt),
-  '$4,000 profit on $15,000 invoiced, 2 jobs with complete costs (2 jobs Unknown, not counted)',
+  '$4,000 profit on $15,000 invoiced, 2 jobs with calculated margins (2 jobs Unknown, not counted)',
   'profit line uses margin_known_invoiced',
 );
 let c = ctx.jplCostsCard(fullSummary, fmt);
@@ -54,21 +54,21 @@ eq(c.value, '$12,500', 'placed costs value');
 eq(c.sub, 'Not complete: 2 jobs with margin Unknown', 'costs_complete false shown');
 eq(c.complete, false, 'complete flag');
 c = ctx.jplCostsCard(Object.assign({}, fullSummary, { costs_complete: true, jobs_margin_unknown: 0 }), fmt);
-eq(c.sub, 'Costs complete', 'costs_complete true shown');
+eq(c.sub, 'Placed costs only; cost-close not verified', 'costs_complete true shown');
 
 // ── new response, basic detail (no margin_known_invoiced) ──
 const basicSummary = Object.assign({}, fullSummary);
 delete basicSummary.margin_known_invoiced;
 eq(
   ctx.jplProfitLine(basicSummary, fmt),
-  '$4,000 profit on 2 jobs with complete costs (2 jobs Unknown, not counted)',
+  '$4,000 profit on 2 jobs with calculated margins (2 jobs Unknown, not counted)',
   'basic profit line never divides by all invoiced',
 );
 
 // ── new response, nothing known ──
 const none = { total_invoiced: 8000, total_bills: 0, total_margin: null, avg_margin_pct: null, jobs_margin_known: 0, jobs_margin_unknown: 1, costs_complete: false, total_bills_basis: 'placed_costs_only' };
 eq(ctx.jplAvgMarginText(none), 'Unknown', 'avg Unknown, never null% or 0%');
-eq(ctx.jplProfitLine(none, fmt), 'No job has complete costs yet (1 job Unknown, not counted)', 'nothing known');
+eq(ctx.jplProfitLine(none, fmt), 'No job has a calculated margin yet (1 job Unknown, not counted)', 'nothing known');
 
 // ── old response: renders as before ──
 const old = { total_jobs: 3, total_invoiced: 10000, total_bills: 3400, total_margin: 6600, avg_margin_pct: 66, data_sources: {}, xero_projects_matched: 0 };

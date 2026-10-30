@@ -48,6 +48,143 @@ check('the tab shows only with ?recon=1 or the browser flag', () => {
   assert.strictEqual(C.tabVisible('?recon=10', null), false);
   assert.strictEqual(C.tabVisible('', '1'), true);
 });
+check('TP-11: on by default (ask the server); ?recon=0 or sw_recon 0 turns it off; 1 forces it on', () => {
+  assert.strictEqual(C.tabSwitch('', null), 'ask');
+  assert.strictEqual(C.tabSwitch('?recon=1', null), 'on');
+  assert.strictEqual(C.tabSwitch('?a=1&recon=0', null), 'off');
+  assert.strictEqual(C.tabSwitch('?recon=10', null), 'ask');
+  assert.strictEqual(C.tabSwitch('', '1'), 'on');
+  assert.strictEqual(C.tabSwitch('', '0'), 'off');
+  assert.strictEqual(C.tabSwitch('?recon=1', '0'), 'on');
+  assert.strictEqual(C.tabSwitch('?recon=0', '1'), 'off');
+});
+check('TP-11: the probe shows the tab on a list, hides it on a refusal, and an unknown read stays unknown', () => {
+  assert.strictEqual(C.probeAnswer({ items: [] }, null), true);
+  assert.strictEqual(C.probeAnswer({}, null), null);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, code: 'operator_access_required' }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, code: 'operator_org_required' }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403, body: { code: 'not_staff' } }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 403 }), false);
+  assert.strictEqual(C.probeAnswer(null, { status: 401, code: 'user_jwt_required' }), null);
+  assert.strictEqual(C.probeAnswer(null, new Error('Sign in required')), null);
+  assert.strictEqual(C.probeAnswer(null, { status: 500 }), null);
+});
+const LABELS = { reasons: { no_ref_no_po: 'No reference, no matching PO' }, rules: { several_candidates: 'more than one job fits' } };
+const Q = [
+  { id: 'q1', status: 'open', xero_invoice_id: 'x1', contact_name: 'Steel Co', invoice_number: 'B-1', invoice_date: '2026-10-20', sub_total: 120.5, suggestion_reason: 'no_ref_no_po' },
+  { id: 'q2', status: 'open', xero_invoice_id: 'x2', contact_name: 'Timber Co', invoice_number: 'B-2', invoice_date: '2026-10-21', sub_total: 980,
+    proposal: { kind: 'review', rule: 'several_candidates', outcome: 'queued_for_review', candidates: [{ job_id: 'j1', job_number: 'SWF-1001', signals: ['po_number', 'site_suburb'] }, { job_id: 'j2', job_number: 'SWP-2002', signals: [] }] } },
+  { id: 'q3', status: 'open', xero_invoice_id: 'x3', contact_name: null, invoice_number: 'B-3', sub_total: null },
+  { id: 'q4', status: 'assigned', xero_invoice_id: 'x4', sub_total: 5000 },
+];
+const AI = [
+  { xero_invoice_id: 'x1', decision: 'job', job_number: 'SWP-3003', confidence: 0.72, reason: 'Delivery address matches the job site', second_check_status: 'disagreed', second_check: { decision: 'job', job_number: 'SWP-3004' } },
+  { xero_invoice_id: 'x1', decision: 'job', job_number: 'OLD-1', confidence: 0.4, reason: 'older row' },
+];
+check('TP-11: bills to place are the open rows only, largest first, an unknown amount last', () => {
+  const rows = C.billRows(Q, AI, LABELS);
+  assert.deepStrictEqual(rows.map((r) => r.id), ['q2', 'q1', 'q3']);
+  assert.strictEqual(rows[2].amountEx, null);
+  assert.strictEqual(rows[2].supplier, 'Supplier not named');
+  assert.strictEqual(C.billTotalEx(rows), 1100.5);
+  assert.strictEqual(C.billUnknownCount(rows), 1);
+});
+check('TP-11: each bill carries the best guess, its reason and which keys agreed or disagreed', () => {
+  const rows = C.billRows(Q, AI, LABELS);
+  const b1 = rows.find((r) => r.id === 'q1');
+  assert.strictEqual(C.billGuessWords(b1.guess), 'SWP-3003 (AI, sure 72%)');
+  assert.strictEqual(b1.reason, 'Delivery address matches the job site');
+  assert.deepStrictEqual(b1.keys, [{ agree: false, words: 'Second check disagreed: says SWP-3004' }]);
+  const b2 = rows.find((r) => r.id === 'q2');
+  assert.strictEqual(C.billGuessWords(b2.guess), 'No pick: 2 possible jobs (Bill agent)');
+  assert.strictEqual(b2.reason, 'more than one job fits');
+  assert.deepStrictEqual(b2.keys, [{ agree: null, words: 'SWF-1001: po number, site suburb' }]);
+  const b3 = rows.find((r) => r.id === 'q3');
+  assert.strictEqual(C.billGuessWords(b3.guess), 'No guess');
+  assert.strictEqual(b3.reason, '');
+  const noAi = C.billRows(Q, [], LABELS).find((r) => r.id === 'q1');
+  assert.strictEqual(noAi.reason, 'No reference, no matching PO');
+  assert.strictEqual(C.billGuessWords(C.billGuess({ suggested_job_number: 'SWF-9', suggestion_source: 'agent_prematch' }, null)), 'SWF-9 (Bill agent)');
+  assert.strictEqual(C.billGuessWords(C.billGuess({ proposal: { kind: 'job', job_number: 'SWF-8', confidence: 'high' } }, null)), 'SWF-8 (Bill agent, strong)');
+  assert.strictEqual(C.billGuessWords(C.billGuess({}, { decision: 'not_job_related', confidence: 0.6 })), 'Not job related? (AI, sure 60%)');
+  assert.deepStrictEqual(C.billKeys({}, { second_check_status: 'agreed' }), [{ agree: true, words: 'Second check agreed' }]);
+});
+check('TP-11: the head line never counts an unread side as none', () => {
+  assert.strictEqual(C.needsWords({ matchCount: 3, billCount: 2, billEx: 1100.5 }), '3 messages or invoices to match · 2 bills to place ($1,100.50 ex GST)');
+  assert.strictEqual(C.needsWords({ matchCount: 1, billCount: 1, billEx: 5 }), '1 message or invoice to match · 1 bill to place ($5.00 ex GST)');
+  assert.strictEqual(C.needsWords({ matchCount: 50, matchMore: true, billCount: 1000, billEx: 9, billsFull: true }), 'at least 50 messages or invoices to match · at least 1000 bills to place (at least $9.00 ex GST)');
+  // A bill with no known amount is never $0: some unknown is a floor naming how many; all unknown says so.
+  assert.strictEqual(C.needsWords({ billCount: 3, billEx: 1100.5, billUnknown: 1 }), '3 bills to place (at least $1,100.50 ex GST; 1 amount not known)');
+  assert.strictEqual(C.needsWords({ billCount: 2, billEx: 0, billUnknown: 2 }), '2 bills to place (amounts not known)');
+  assert.strictEqual(C.needsWords({ billCount: 1, billEx: 0, billUnknown: 1 }), '1 bill to place (amount not known)');
+  assert.strictEqual(C.needsWords({ billCount: 1000, billEx: 9, billUnknown: 4, billsFull: true }), 'at least 1000 bills to place (at least $9.00 ex GST; 4 amounts not known)');
+  // A known $0.00 bill is a known amount, and no bills is a known none.
+  assert.strictEqual(C.needsWords({ billCount: 1, billEx: 0, billUnknown: 0 }), '1 bill to place ($0.00 ex GST)');
+  assert.strictEqual(C.needsWords({ billCount: 0, billEx: 0, billUnknown: 0 }), '0 bills to place ($0.00 ex GST)');
+  const unk = C.billRows([{ id: 'u1', status: 'open', sub_total: null }, { id: 'u2', status: 'open', sub_total: 'n/a' }], [], LABELS);
+  assert.strictEqual(C.billUnknownCount(unk), 2);
+  assert.strictEqual(C.needsWords({ billCount: unk.length, billEx: C.billTotalEx(unk), billUnknown: C.billUnknownCount(unk) }), '2 bills to place (amounts not known)');
+  const e = C.needsWords({ matchErr: true, billsErr: true });
+  assert(/not known/.test(e) && !/\b0\b/.test(e));
+});
+// TP-11 slice 2: the bill cards on Needs a person, drawn from a stand-in for ops.html's BillsToPlace.
+function fakeBills(rows, opts) {
+  opts = opts || {};
+  return {
+    loaded: () => !opts.err, loadErr: () => opts.err || null, rows: () => rows, listFull: () => !!opts.full,
+    openId: () => opts.openId || null, done: () => opts.done || [],
+    detailHtml: (id) => '<i data-fake-detail="' + id + '"></i>',
+  };
+}
+function withBills(bills, ai, fn) {
+  const prevB = ctx.window.BillsToPlace, prevAi = ctx.NP.ai, prevErr = ctx.NP.aiErr;
+  ctx.window.BillsToPlace = bills; ctx.NP.ai = ai || []; ctx.NP.aiErr = null;
+  try { return fn(); } finally { ctx.window.BillsToPlace = prevB; ctx.NP.ai = prevAi; ctx.NP.aiErr = prevErr; }
+}
+const AI_JOB = [{ xero_invoice_id: 'x1', decision: 'job', job_id: 'jjjjjjjj-0000-4000-8000-000000000009', job_number: 'SWP-3003', confidence: 0.72, reason: 'Delivery address matches the job site' }];
+check('TP-11: a closed bill card offers Decide here; the open one carries Bill Reconciliation\'s own panel', () => {
+  const h = withBills(fakeBills(Q, { openId: 'q1' }), AI_JOB, () => ctx.npSectionInner());
+  assert((h.match(/data-np-bill=/g) || []).length === 3, 'three open bills drawn');
+  assert(/data-np-bill="q2"[\s\S]*?Decide here/.test(h));
+  assert(/data-np-bill="q1"[\s\S]*?>Close</.test(h));
+  assert(h.includes('<i data-fake-detail="q1"></i>'), 'the open card shows the shared decision panel');
+  assert(!h.includes('data-fake-detail="q2"'), 'only one bill is open at a time');
+  // The toggle is Bill Reconciliation's own act, so opening reads the lines the same way.
+  assert(/data-mrq-act="toggle" data-mrq-id="q2"/.test(h));
+  // The AI's guess is a one-press pick of that job, through the same pick handler.
+  assert(/data-mrq-act="pickcand" data-mrq-id="q1" data-mrq-job="jjjjjjjj-0000-4000-8000-000000000009" data-mrq-jobnum="SWP-3003"/.test(h));
+});
+check('TP-11: no AI pick is offered on a card the AI made no job guess for, or on a closed card', () => {
+  const h = withBills(fakeBills(Q, { openId: 'q2' }), AI_JOB, () => ctx.npSectionInner());
+  assert(!/data-np-aipick/.test(h));
+});
+check('TP-11: after a bill is cleared the head line counts drop in place; done lines show', () => {
+  const before = withBills(fakeBills(Q), [], () => ctx.npSummaryHtml());
+  // Q holds one bill with no known amount (q3), so the total is a floor that says so.
+  assert(/3 bills to place \(at least \$1,100\.50 ex GST; 1 amount not known\)/.test(before), before);
+  const after = withBills(fakeBills(Q.filter((r) => r.id !== 'q2'), { done: ['$980.00 Timber Co B-2 placed on SWF-1001'] }), [], () => [ctx.npSummaryHtml(), ctx.npSectionInner()]);
+  assert(/2 bills to place \(at least \$120\.50 ex GST; 1 amount not known\)/.test(after[0]), after[0]);
+  assert(/data-np-done>\$980\.00 Timber Co B-2 placed on SWF-1001</.test(after[1]));
+  const none = withBills(fakeBills([]), [], () => ctx.npSectionInner());
+  assert(/data-np-empty/.test(none));
+});
+check('TP-11: a failed bill read is said in words, with no cards and no empty state', () => {
+  const h = withBills(fakeBills(Q, { err: 'API error: 500' }), [], () => [ctx.npSectionInner(), ctx.npSummaryHtml()]);
+  assert(/data-np-err/.test(h[0]) && /could not be read/.test(h[0]));
+  assert(!/data-np-bill=|data-np-empty/.test(h[0]));
+  assert(/Bills to place not known/.test(h[1]));
+});
+check('TP-11: the module never writes a bill itself; ops.html has one bill writer', () => {
+  assert(!/opsPost\(\s*['"]materials_recon_/.test(src), 'ops-recon.js posts no materials_recon_ write');
+  const html = fs.readFileSync('ops.html', 'utf8');
+  assert(/var BillsToPlace = \{/.test(html) && /window\.BillsToPlace = BillsToPlace/.test(html), 'ops.html exposes BillsToPlace');
+  for (const action of ['materials_recon_assign', 'materials_recon_not_job_related']) {
+    const posts = html.match(new RegExp("opsPost\\(\\s*'" + action + "'", 'g')) || [];
+    assert.strictEqual(posts.length, 0, action + ' is posted only through _matReconAction');
+    const viaAction = html.match(new RegExp("_matReconAction\\(id, '" + action + "'", 'g')) || [];
+    assert.strictEqual(viaAction.length, 1, action + ' has one press');
+  }
+});
 check('a suggested job on a message is confirm; another job is correct', () => {
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_A.job_id }), 'confirm');
   assert.strictEqual(C.actionFor(message, { kind: 'job', job_id: JOB_B.job_id }), 'correct');
@@ -239,4 +376,4 @@ check('AC-M6: a text original shows the whole text; a bad answer and errors are 
 });
 
 if (failed) { console.error(failed + ' recon check(s) failed'); process.exit(1); }
-console.log('PASS recon: tab flag, actions, body, escalate, split, find by job, refusals, words, open the original');
+console.log('PASS recon: tab flag, default-on probe, bills to place rows and cards, actions, body, escalate, split, find by job, refusals, words, open the original');

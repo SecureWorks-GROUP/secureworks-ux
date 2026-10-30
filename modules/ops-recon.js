@@ -12,8 +12,16 @@
 // evidence the card was shown with (shown_hash). A choice says which job something belongs
 // to. It never moves money, sends anything, changes an invoice or writes a job.
 //
-// The tab is hidden unless ?recon=1 or localStorage sw_recon = '1'. The server decides who
-// may use it (admin, owner, ops manager); anyone else gets the refusal in words.
+// TP-11 (R-19): the tab is on by default and headed Needs a person. After sign in one
+// recon_daily_list read decides: the tab shows when the server answers it (admin, owner, ops
+// manager) and hides when it refuses. ?recon=0 or localStorage sw_recon = '0' turns it off;
+// ?recon=1 or sw_recon = '1' still forces it on, and anyone not allowed gets the refusal in words.
+// Below the daily list it shows Bills to place: the open supplier bills (materials_recon_queue)
+// with the AI reader's best guess, its reason and which keys agreed or disagreed
+// (materials_ai_placements view=left). Decide here opens Bill Reconciliation's own decision
+// panel inside the card (ops.html BillsToPlace: the same state, checks and writes, never a copy),
+// so a bill is placed, split or filed without leaving the list. The message cards above still
+// only say which job something belongs to.
 // Every rule the screen applies lives in the pure ReconCore between the sentinels below.
 // Guards: npm run test:recon (in test:e2e) and tests/e2e/ops-recon.spec.js.
 
@@ -41,9 +49,134 @@ var ReconCore = (function () {
     read_failed: 'That job could not be read just now.'
   };
 
+  // Forced on: ?recon=1 or localStorage sw_recon = '1' (kept from before TP-11).
   function tabVisible(search, stored) {
     if (/[?&]recon=1(&|$)/.test(String(search || ''))) return true;
     return stored === '1';
+  }
+  // TP-11: the tab is on by default for the people the server lets use it. 'on' and 'off'
+  // are the switches (?recon=1 / ?recon=0, or sw_recon '1' / '0'); 'ask' means read the
+  // list once and show the tab only when the server answers it.
+  function tabSwitch(search, stored) {
+    var q = String(search || '');
+    if (/[?&]recon=1(&|$)/.test(q)) return 'on';
+    if (/[?&]recon=0(&|$)/.test(q)) return 'off';
+    if (stored === '1') return 'on';
+    if (stored === '0') return 'off';
+    return 'ask';
+  }
+  // What the probe read says: true (a list came back), false (the server says this person
+  // may not use it), null (not known: offline, signed out, not deployed).
+  var NOT_ALLOWED = { operator_access_required: true, not_staff: true, operator_org_required: true };
+  function probeAnswer(res, err) {
+    if (err) {
+      var code = err.code || (err.body && err.body.code);
+      if (code && NOT_ALLOWED[code]) return false;
+      if (err.status === 403 && !code) return false;
+      return null;
+    }
+    return res && Array.isArray(res.items) ? true : null;
+  }
+
+  // TP-11 Bills to place on the Needs a person list (Financials > Bill Reconciliation rows,
+  // ops-api materials_recon_queue status=open, joined by xero_invoice_id to the AI bill
+  // reader's left-for-a-person rows, materials_ai_placements view=left). Largest first.
+  // Every word comes from what the server sent; nothing here guesses a job.
+  function billGuess(row, ai) {
+    if (ai && ai.decision === 'job' && ai.job_number) return { job: ai.job_number, by: 'AI', sure: ai.confidence };
+    if (ai && ai.decision === 'not_job_related') return { job: null, words: 'Not job related?', by: 'AI', sure: ai.confidence };
+    var pr = row && row.proposal;
+    if (pr && pr.kind === 'job' && pr.job_number) return { job: pr.job_number, by: 'Bill agent', strong: pr.confidence === 'high' };
+    if (pr && pr.kind === 'not_job_related') return { job: null, words: 'Not job related?', by: 'Bill agent' };
+    if (row && row.suggested_job_number) return { job: row.suggested_job_number, by: row.suggestion_source === 'agent_prematch' ? 'Bill agent' : 'Matcher' };
+    if (pr && pr.kind === 'review') {
+      var n = (pr.candidates || []).filter(function (c) { return c && c.job_id; }).length;
+      return { job: null, words: n ? 'No pick: ' + n + ' possible job' + (n === 1 ? '' : 's') : 'No pick', by: 'Bill agent' };
+    }
+    return { job: null, words: 'No guess', by: null };
+  }
+  function billGuessWords(g) {
+    if (!g) return 'No guess';
+    var w = g.job ? g.job : (g.words || 'No guess');
+    var sure = g.sure != null && isFinite(Number(g.sure)) ? ', sure ' + Math.round(Number(g.sure) * 100) + '%' : (g.strong ? ', strong' : '');
+    return g.by ? w + ' (' + g.by + sure + ')' : w;
+  }
+  function billReason(row, ai, labels) {
+    labels = labels || {};
+    if (ai && ai.reason) return String(ai.reason);
+    var pr = row && row.proposal;
+    if (pr && (!pr.outcome || pr.outcome === 'queued_for_review')) {
+      if (pr.reason) return String(pr.reason);
+      if (pr.rule) return (labels.rules && labels.rules[pr.rule]) || plainWord(pr.rule);
+    }
+    var sr = row && row.suggestion_reason;
+    if (sr) return (labels.reasons && labels.reasons[sr]) || plainWord(sr);
+    return '';
+  }
+  // Which keys agreed or disagreed: the AI reader's second check, and the signals the bill
+  // agent saw on each possible job.
+  function billKeys(row, ai) {
+    var out = [];
+    if (ai && ai.second_check_status === 'agreed') out.push({ agree: true, words: 'Second check agreed' });
+    if (ai && ai.second_check_status === 'disagreed') {
+      var c = ai.second_check || {};
+      out.push({ agree: false, words: 'Second check disagreed' + (c.decision === 'job' && c.job_number ? ': says ' + c.job_number : c.decision ? ': says ' + plainWord(c.decision) : '') });
+    }
+    if (ai && ai.second_check_status === 'due') out.push({ agree: null, words: 'Second check waiting' });
+    var pr = row && row.proposal;
+    if (pr && pr.rule === 'job_disagrees') out.push({ agree: false, words: 'Its signals disagree' });
+    ((pr && pr.candidates) || []).forEach(function (cd) {
+      if (!cd || !cd.job_id) return;
+      var sig = (cd.signals || []).map(plainWord).filter(Boolean);
+      if (sig.length) out.push({ agree: null, words: (cd.job_number || 'A job') + ': ' + sig.join(', ') });
+    });
+    return out;
+  }
+  function billRows(queueRows, aiLeft, labels) {
+    var byInv = {};
+    (aiLeft || []).forEach(function (p) {
+      if (p && p.xero_invoice_id && !p.undone_at && !byInv[p.xero_invoice_id]) byInv[p.xero_invoice_id] = p;
+    });
+    var rows = (queueRows || []).filter(function (r) { return r && r.status === 'open'; }).map(function (r) {
+      var ai = byInv[r.xero_invoice_id] || null;
+      var ex = r.sub_total != null && isFinite(Number(r.sub_total)) ? Number(r.sub_total) : null;
+      return {
+        id: r.id, xero_invoice_id: r.xero_invoice_id, supplier: r.contact_name || 'Supplier not named',
+        number: r.invoice_number || '', date: r.invoice_date || '', amountEx: ex,
+        guess: billGuess(r, ai), reason: billReason(r, ai, labels), keys: billKeys(r, ai), ai: !!ai
+      };
+    });
+    rows.sort(function (a, b) {
+      var x = a.amountEx == null ? -Infinity : a.amountEx, y = b.amountEx == null ? -Infinity : b.amountEx;
+      return y - x || String(b.date).localeCompare(String(a.date));
+    });
+    return rows;
+  }
+  // The known amounts only; billUnknownCount says how many bills it leaves out, so a total is never read as whole.
+  function billTotalEx(rows) {
+    var c = 0;
+    (rows || []).forEach(function (r) { if (r.amountEx != null) c += Math.round(r.amountEx * 100); });
+    return c / 100;
+  }
+  function billUnknownCount(rows) {
+    return (rows || []).filter(function (r) { return r.amountEx == null; }).length;
+  }
+  // The head line. A side that could not be read says so and is never counted as none.
+  function needsWords(o) {
+    var parts = [];
+    if (o.matchErr) parts.push('Messages and invoices to match not known: the list could not be read');
+    else if (o.matchCount != null) parts.push((o.matchMore ? 'at least ' : '') + o.matchCount + ' message' + (o.matchCount === 1 && !o.matchMore ? '' : 's') + ' or invoice' + (o.matchCount === 1 && !o.matchMore ? '' : 's') + ' to match');
+    if (o.billsErr) parts.push('Bills to place not known: the bill list could not be read');
+    else if (o.billCount != null) {
+      // A bill whose amount is not known is never counted as $0: all unknown says so, some unknown makes the
+      // total a floor and names how many it leaves out. A known $0 bill is a known amount.
+      var unk = Math.max(0, Math.min(Number(o.billUnknown) || 0, o.billCount));
+      var head = (o.billsFull ? 'at least ' : '') + o.billCount + ' bill' + (o.billCount === 1 ? '' : 's') + ' to place (';
+      if (o.billCount > 0 && unk === o.billCount) parts.push(head + (unk === 1 ? 'amount' : 'amounts') + ' not known)');
+      else parts.push(head + (o.billsFull || unk ? 'at least ' : '') + money(o.billEx) + ' ex GST' +
+        (unk ? '; ' + unk + (unk === 1 ? ' amount' : ' amounts') + ' not known' : '') + ')');
+    }
+    return parts.join(' · ');
   }
   function bandOf(item) { return BANDS[item && item.band] || { title: 'Other', note: '' }; }
   function money(n) {
@@ -324,7 +457,9 @@ var ReconCore = (function () {
     return v;
   }
   return {
-    tabVisible: tabVisible, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
+    tabVisible: tabVisible, tabSwitch: tabSwitch, probeAnswer: probeAnswer,
+    billGuess: billGuess, billGuessWords: billGuessWords, billReason: billReason, billKeys: billKeys, billRows: billRows,
+    billTotalEx: billTotalEx, billUnknownCount: billUnknownCount, needsWords: needsWords, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
     refusalWords: refusalWords, mustReread: mustReread, grouped: grouped, escalateTo: escalateTo,
     passTargets: passTargets, teamWords: teamWords,
@@ -348,12 +483,37 @@ function rcToast(msg, type) { if (typeof showToast === 'function') showToast(rcE
 function reconReveal(on) {
   document.querySelectorAll('[data-recon-nav]').forEach(function (b) { b.style.display = on ? '' : 'none'; });
 }
+// TP-11: on by default. ?recon=0 (or sw_recon '0') turns it off, ?recon=1 (or '1') forces it
+// on. Otherwise one small recon_daily_list read after sign in decides: the tab shows when the
+// server answers it (admin, owner, ops manager) and hides when the server says no. A read that
+// fails for another reason keeps what this browser last saw (sw_recon_seen), so a known user
+// still gets the tab and the tab itself says the list could not be read.
+var RC_PROBE = { inflight: null, answered: false };
+function rcSeen(v) {
+  try {
+    if (v === undefined) return localStorage.getItem('sw_recon_seen');
+    if (v === null) localStorage.removeItem('sw_recon_seen'); else localStorage.setItem('sw_recon_seen', v);
+  } catch (e) {}
+  return null;
+}
 function reconProbeVisibility() {
   var stored = null;
   try { stored = localStorage.getItem('sw_recon'); } catch (e) {}
-  var on = ReconCore.tabVisible(window.location ? window.location.search : '', stored);
-  reconReveal(on);
-  return on;
+  var sw = ReconCore.tabSwitch(window.location ? window.location.search : '', stored);
+  if (sw !== 'ask') { reconReveal(sw === 'on'); return Promise.resolve(sw === 'on'); }
+  if (!RC_PROBE.answered) reconReveal(rcSeen() === '1');
+  if (typeof window === 'undefined' || !window._opsAppStarted || typeof opsFetch !== 'function') return Promise.resolve(rcSeen() === '1');
+  if (RC_PROBE.inflight) return RC_PROBE.inflight;
+  var p = RC_PROBE.inflight = (async function () {
+    var res = null, err = null;
+    try { res = await opsFetch('recon_daily_list', { limit: 1 }); } catch (e) { err = e; }
+    var answer = ReconCore.probeAnswer(res, err);
+    if (answer === true) { RC_PROBE.answered = true; rcSeen('1'); reconReveal(true); return true; }
+    if (answer === false) { RC_PROBE.answered = true; rcSeen(null); reconReveal(false); return false; }
+    return rcSeen() === '1';
+  })();
+  p.then(function () { RC_PROBE.inflight = null; });
+  return p;
 }
 
 function rcCss() {
@@ -390,7 +550,14 @@ function rcCss() {
     '#viewRecon .rc-orig dd{margin:0;overflow-wrap:anywhere;}',
     '#viewRecon .rc-orig-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;background:var(--sw-card,#fff);border-radius:6px;padding:8px;}',
     '#viewRecon .rc-orig ul{margin:6px 0 0;padding-left:18px;}',
-    '#viewRecon .rc-orig-note{color:var(--sw-text-sec);margin-top:6px;}'
+    '#viewRecon .rc-orig-note{color:var(--sw-text-sec);margin-top:6px;}',
+    '#viewRecon .np-summary{margin:-8px 0 12px;font-size:13px;}',
+    '#viewRecon .np-line{font-size:13px;margin-top:4px;overflow-wrap:anywhere;}',
+    '#viewRecon .np-k{display:inline-block;min-width:72px;color:var(--sw-text-sec);font-size:12px;}',
+    '#viewRecon .np-agree,#viewRecon .np-disagree,#viewRecon .np-seen{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin:0 4px 2px 0;}',
+    '#viewRecon .np-agree{background:#eaf6ee;color:#1d5b33;}',
+    '#viewRecon .np-disagree{background:#fdecec;color:#8a1c1c;}',
+    '#viewRecon .np-seen{background:var(--sw-bg,#f3f3f3);color:var(--sw-text-sec);}'
   ].join('\n');
   document.head.appendChild(st);
 }
@@ -401,6 +568,142 @@ function loadRecon() {
   if (!rcRoot()) return;
   rcBind();
   rcRead(!!RC.items);
+  npRead(NP.read);
+}
+
+// TP-11 Needs a person: the Bills to place side. Bills come from Financials > Bill
+// Reconciliation's own state (window.BillsToPlace in ops.html: the materials_recon_queue read,
+// status open, its cap of 1000), joined to the AI reader's left-for-a-person rows
+// (materials_ai_placements view=left). A card opens on Decide here and shows Bill
+// Reconciliation's own decision panel, pressed through BillsToPlace.wire: the two-press confirm,
+// the Xero Projects checks, Split and the writes are that code, never a copy. A write repaints
+// this section and the head line through BillsToPlace.onChange.
+var NP_PAGE = 25;
+var NP = { ai: [], aiErr: null, loading: false, read: false, gen: 0, shown: NP_PAGE };
+function npBills() { return typeof window !== 'undefined' && window.BillsToPlace ? window.BillsToPlace : null; }
+function npLabels() {
+  return {
+    reasons: typeof MAT_RECON_REASON_LABELS !== 'undefined' ? MAT_RECON_REASON_LABELS : null,
+    rules: typeof MAT_RECON_PROPOSAL_RULES !== 'undefined' ? MAT_RECON_PROPOSAL_RULES : null
+  };
+}
+// What the bill side knows right now: rows (null until read), err (a failed read), full (cut at the cap).
+function npState() {
+  var B = npBills();
+  if (!B) return { rows: null, err: NP.read ? new Error('Bills to place is not on this page') : null, full: false };
+  if (B.loadErr()) return { rows: null, err: new Error(B.loadErr()), full: false };
+  if (!B.loaded()) return { rows: null, err: null, full: false };
+  var aiAt = {};
+  (NP.ai || []).forEach(function (p) { if (p && p.xero_invoice_id && !p.undone_at && !aiAt[p.xero_invoice_id]) aiAt[p.xero_invoice_id] = p; });
+  var rows = ReconCore.billRows(B.rows(), NP.ai, npLabels());
+  rows.forEach(function (b) { b.aiRow = aiAt[b.xero_invoice_id] || null; });
+  return { rows: rows, err: null, full: B.listFull() };
+}
+async function npRead(quiet) {
+  var gen = ++NP.gen;
+  var B = npBills();
+  NP.read = true;
+  if (!quiet) { NP.loading = true; npRepaint(); }
+  var a = opsFetch('materials_ai_placements', { view: 'left', limit: 500 }).then(function (r) { return { ok: r }; }, function (e) { return { err: e }; });
+  if (B) { try { await B.load(); } catch (e) { /* loadMaterialsRecon keeps its own error */ } }
+  var ar = await a;
+  if (gen !== NP.gen) return;
+  NP.loading = false;
+  NP.ai = ar.ok && Array.isArray(ar.ok.placements) ? ar.ok.placements : [];
+  NP.aiErr = ar.err ? ar.err : (Array.isArray(ar.ok && ar.ok.placements) ? null : new Error('Unexpected answer'));
+  npRepaint();
+}
+
+function npErrWords(e) {
+  var code = e && (e.code || (e.body && e.body.code));
+  if (code === 'operator_access_required') return 'Only staff who may place bills can see them here.';
+  return 'The bill list could not be read just now' + (e && e.message ? ': ' + e.message : '') + '. The bills waiting are not known, so nothing here means none.';
+}
+
+function npBillCard(b, open) {
+  var id = rcEsc(b.id);
+  var h = '<div class="rc-card np-bill' + (open ? ' np-open' : '') + '" data-np-bill="' + id + '">';
+  h += '<div class="rc-top"><span>' + rcEsc(b.supplier) + (b.number ? ' &middot; ' + rcEsc(b.number) : '') + '</span>' +
+    '<span>' + (b.amountEx == null ? 'Amount not known' : rcEsc(ReconCore.money(b.amountEx)) + ' ex GST') + '</span></div>';
+  h += '<div class="rc-meta">' + rcEsc(['Bill to place', b.date ? 'Dated ' + b.date : ''].filter(Boolean).join(' · ')) + '</div>';
+  h += '<div class="np-line" data-np-guess><span class="np-k">Best guess</span> ' + rcEsc(ReconCore.billGuessWords(b.guess)) + '</div>';
+  if (b.reason) h += '<div class="np-line" data-np-reason><span class="np-k">Why</span> ' + rcEsc(b.reason) + '</div>';
+  if (b.keys.length) {
+    h += '<div class="np-line" data-np-keys><span class="np-k">Keys</span> ' + b.keys.map(function (k) {
+      var cls = k.agree === true ? 'np-agree' : k.agree === false ? 'np-disagree' : 'np-seen';
+      var tag = k.agree === true ? 'Agrees: ' : k.agree === false ? 'Disagrees: ' : '';
+      return '<span class="' + cls + '">' + rcEsc(tag + k.words) + '</span>';
+    }).join(' ') + '</div>';
+  }
+  h += '<div class="rc-acts">' +
+    '<button type="button" class="rc-job" data-mrq-act="toggle" data-mrq-id="' + id + '" data-np-decide aria-expanded="' + (open ? 'true' : 'false') + '">' + (open ? 'Close' : 'Decide here') + '</button>' +
+    '<button type="button" data-np-open="' + id + '">Open in Bill Reconciliation</button></div>';
+  if (open) {
+    // The AI reader's guess is a job a person can pick in one press (the same pick as a
+    // suggested candidate); placing it still takes Place and its checks below.
+    var ai = b.aiRow;
+    if (ai && ai.decision === 'job' && ai.job_id && ai.job_number) {
+      h += '<div class="np-line"><button type="button" class="mrq-pickbtn" data-mrq-act="pickcand" data-mrq-id="' + id + '" data-mrq-job="' + rcEsc(ai.job_id) +
+        '" data-mrq-jobnum="' + rcEsc(ai.job_number) + '" data-np-aipick>Pick the AI\'s guess, <b>' + rcEsc(ai.job_number) + '</b></button></div>';
+    }
+    h += '<div class="np-detail" data-np-detail="' + id + '">' + npBills().detailHtml(b.id) + '</div>';
+  }
+  return h + '</div>';
+}
+
+function npSummaryHtml() {
+  var st = npState();
+  return rcEsc(ReconCore.needsWords({
+    matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
+    billsErr: !!st.err, billCount: st.rows ? st.rows.length : null, billEx: st.rows ? ReconCore.billTotalEx(st.rows) : null,
+    billUnknown: st.rows ? ReconCore.billUnknownCount(st.rows) : 0, billsFull: st.full
+  })) + (st.rows && st.rows.length ? ' <a href="#" data-np-jump>Go to bills</a>' : '');
+}
+
+function npSectionInner() {
+  var st = npState();
+  var B = npBills();
+  var h = '<div class="rc-band" data-np-band>Bills to place' + (st.rows ? ' (' + (st.full ? 'at least ' : '') + st.rows.length + ')' : '') +
+    '<small>Supplier bills on no job that the AI left for a person, largest first. Decide here to confirm, change the job, split or file one as not job related.</small></div>';
+  var done = B ? B.done() : [];
+  done.slice(0, 5).forEach(function (line) { h += '<div class="rc-done" data-np-done>' + rcEsc(line) + '</div>'; });
+  if (NP.loading && !st.rows && !st.err) return h + '<div class="rc-empty">Reading the bills...</div>';
+  if (st.err) return h + '<div class="rc-msg" data-np-err>' + rcEsc(npErrWords(st.err)) + '</div>';
+  if (!st.rows) return h;
+  if (NP.aiErr) h += '<div class="rc-msg" data-np-aierr>The AI reader\'s guesses could not be read just now, so a bill may have one that is not shown.</div>';
+  if (!st.rows.length) return h + '<div class="rc-empty" data-np-empty>No bill is waiting to be placed.</div>';
+  var openId = B.openId();
+  st.rows.slice(0, NP.shown).forEach(function (b) { h += npBillCard(b, openId === b.id); });
+  // A bill opened past the page is still drawn, so a decision never vanishes off the end.
+  var past = st.rows.slice(NP.shown).filter(function (b) { return b.id === openId; })[0];
+  if (past) h += npBillCard(past, true);
+  var left = st.rows.length - NP.shown;
+  if (left > 0) h += '<div class="rc-empty"><button type="button" data-np-more>Show ' + Math.min(NP_PAGE, left) + ' more of ' + left + '</button></div>';
+  if (st.full) h += '<div class="rc-empty" data-np-full>This holds the ' + st.rows.length + ' newest open bills. There may be more; older ones come in as these are placed.</div>';
+  return h;
+}
+
+function npSection() { return '<div id="npBills" data-np-bills>' + npSectionInner() + '</div>'; }
+
+// Repaint only the bill section and the head line, so a decision under way on a message card
+// and the page's scroll are left alone.
+function npRepaint() {
+  var root = rcRoot();
+  if (!root) return;
+  var sec = root.querySelector('[data-np-bills]');
+  var sum = root.querySelector('[data-np-summary]');
+  if (!sec || !sum) return;
+  // Keep a job search the person is typing on an open card (a slow AI read can land mid-word).
+  var B = npBills();
+  var typed = B ? B.keepTyped(sec) : null;
+  sec.innerHTML = npSectionInner();
+  sum.innerHTML = npSummaryHtml();
+  if (B) B.restoreFocus(sec, typed);
+}
+
+function npOpenBill(id) {
+  if (typeof mrqOpenBill === 'function') { mrqOpenBill(id); return; }
+  if (typeof jpOpenBillsToPlace === 'function') jpOpenBillsToPlace();
 }
 
 async function rcRead(quiet) {
@@ -515,10 +818,11 @@ async function rcToggleOriginal(id) {
 function rcRender() {
   var root = rcRoot();
   if (!root) return;
-  var h = '<div class="rc-wrap"><div class="rc-head"><h2>Matching</h2>' +
+  var h = '<div class="rc-wrap"><div class="rc-head"><h2>Needs a person</h2>' +
     '<button type="button" data-rc-reload class="btn btn-sm">Read again</button></div>' +
-    '<div class="rc-lede">What needs a person to say which job it belongs to, most at stake first. ' +
-    'A choice here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
+    '<div class="rc-lede">Everything waiting for a person to say which job it belongs to: messages and invoices to match, most at stake first, then supplier bills to place. ' +
+    'A match here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
+  h += '<div class="rc-meta np-summary" data-np-summary>' + npSummaryHtml() + '</div>';
   if (RC.msg) h += '<div class="rc-msg" data-rc-msg>' + rcEsc(RC.msg) + '</div>';
   RC.recorded.forEach(function (line) { h += '<div class="rc-done" data-rc-recorded>' + rcEsc(line) + '</div>'; });
   h += rcJobSection();
@@ -542,7 +846,11 @@ function rcRender() {
     var also = ReconCore.leftOutWords(lo, true);
     if (also) h += '<div class="rc-empty" data-rc-leftout>' + rcEsc(also) + '</div>';
   }
+  h += npSection();
+  var B = npBills();
+  var typed = B ? B.keepTyped(root) : null;
   root.innerHTML = h + '</div>';
+  if (B) B.restoreFocus(root, typed);
 }
 
 function rcJobSection() {
@@ -613,12 +921,23 @@ function rcBind() {
   var root = rcRoot();
   if (!root || root.__rcBound) return;
   root.__rcBound = true;
+  var B = npBills();
+  if (B) { B.wire(root); B.onChange(npRepaint); }
   root.addEventListener('click', function (ev) {
+    var jump = ev.target.closest('[data-np-jump]');
+    if (jump && root.contains(jump)) {
+      ev.preventDefault();
+      var band = root.querySelector('[data-np-band]');
+      if (band && band.scrollIntoView) band.scrollIntoView({ block: 'start' });
+      return;
+    }
     var t = ev.target.closest('button');
     if (!t || !root.contains(t)) return;
     var card = t.closest('[data-rc-subject]');
     var id = card && card.getAttribute('data-rc-subject');
-    if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); return; }
+    if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); npRead(false); return; }
+    if (t.hasAttribute('data-np-open')) { npOpenBill(t.getAttribute('data-np-open')); return; }
+    if (t.hasAttribute('data-np-more')) { NP.shown += NP_PAGE; npRepaint(); return; }
     if (t.hasAttribute('data-rc-yes')) { rcRecord(); return; }
     if (t.hasAttribute('data-rc-back')) { RC.pick = null; rcRender(); return; }
     if (t.hasAttribute('data-rc-clear')) { RC.job = null; RC.pick = null; rcRender(); return; }

@@ -1307,6 +1307,165 @@ var JobOverviewV2Core = (function () {
     return !!(st && st.decisions === 'unread');
   }
 
+  // Where each supplier bill on this job counts its cost (INT-10, H7): job_overview.bills, read
+  // from Context's context_job_bill_outcomes, which reads Finance's rule and carries no amount.
+  // The words are the CIO card display contract, revision 6 (21 Oct 2026, sha256 c317ed45...),
+  // row by row; a line r6 has no row for is marked fresh: true (proposed, not in r6). Rules kept:
+  // no amount and every line ends "See Money" (r6 rule 2); a missing, failed or unknown answer
+  // reads "not known here", never "counts here", never $0 and never an empty list (rule 4); a
+  // split is one line, never "also on" (rule 6); a held bill (F1, JP-21) says nothing about where
+  // it counts (row 1). Whether a placement is confirmed is not shown: Finance's placed_by is
+  // descriptive only, so r6's "not confirmed yet" variants wait on a field that says so.
+  var BILL_ROW = {
+    r1: "Where this bill's cost counts is not settled. It waits on an open money decision (JP-21). See Money.",
+    r3: 'Installer bill: confirmation is missing. Money does not count it on any job until then. See Money.',
+    r4: 'Xero voided this bill. Money counts it on no job. See Money.',
+    r5: "Money counts part of this bill's cost here. The rest is not placed yet. See Money.",
+    r8: "Money counts this bill's cost here. See Money.",
+    r8o: "Money counts part of this bill's cost here and part to overhead (no job). See Money.",
+    r14: "Where this bill's cost counts is not known here. See Money.",
+    r14hLabour: 'A labour part of this bill waits for a person to confirm it. Money does not count that part yet. See Money.',
+    r14hOverhead: 'An overhead part is recorded on this bill while Xero still links it here. Money does not count it on this job. See Money.',
+    r14hOther: "Where this bill's cost counts is not settled. See Money."
+  };
+  // Proposed lines for states r6 has no row for (marked on the card and in the PR, for design).
+  var BILL_FRESH = {
+    trade: "Trade app bill: Money counts its cost through the trade app's own lines, not as this bill. See Money.",
+    over: "Money counts more of this bill's cost than the bill itself. See Money.",
+    draft: 'Xero has not approved this bill yet. Money counts it on no job until then. See Money.',
+    noJob: 'Money counts this bill on no job. See Money.'
+  };
+  // Why a bill's place is not known, in words; an unrecognised code is shown as it is.
+  var BILL_WHY = {
+    bill_copy_missing: 'Our copy of this bill from Xero is missing.',
+    amount_unreadable: "The bill's amount cannot be read.",
+    engine_reason_unknown: 'Money gives no reason.',
+    bill_state_unknown: 'Money cannot say what state this bill is in.',
+    not_placed_here: 'This job holds no placement of the bill.',
+    where_counted_unknown: "Money's answer is not one this card knows.",
+    not_job_related: 'A person marked it not job related; that line waits on Money (CFO).',
+    overhead: 'It is recorded as overhead; that line waits on Money (CFO).',
+    rpc_failed: 'The read failed.',
+    invalid_shape: 'The answer was not in the shape this card reads.',
+    contract_mismatch: 'The answer was on another contract version.',
+    amount_present: 'The answer carried an amount, which this card never shows.',
+    not_deployed: 'This read is not switched on yet.',
+    no_answer: 'No answer came back.'
+  };
+  var BILL_WHERE = ['here', 'elsewhere', 'here_and_elsewhere', 'no_job', 'trade_app', 'held', 'unknown'];
+  function billWhy(code) {
+    code = str(code);
+    return BILL_WHY[code] || (code ? 'Reason code: ' + code + '.' : 'No reason given.');
+  }
+  function billStatusWords(status) {
+    var s = str(status).toUpperCase();
+    if (s === 'PAID') return 'Paid in Xero';
+    if (s === 'VOIDED') return 'Voided in Xero';
+    if (s === 'DELETED') return 'Deleted in Xero';
+    if (s === 'AUTHORISED') return 'Approved in Xero';
+    if (s === 'DRAFT') return 'Draft in Xero';
+    return s ? humanStatus(s) + ' in Xero' : 'Xero status not recorded';
+  }
+  function billLine(b) {
+    var here = obj(b.here);
+    var state = str(b.bill_state);
+    var where = BILL_WHERE.indexOf(b.where_counted) >= 0 ? b.where_counted : 'unknown';
+    // the ops-api reader's own guard, kept here too: "here" needs a counted placement here
+    if (!here || here.counts === 'unknown') where = 'unknown';
+    if ((where === 'here' || where === 'here_and_elsewhere') && (!here || here.counts !== 'counted')) where = 'unknown';
+    var reason = here ? str(here.reason) : '';
+    var others = arr(b.other_jobs).filter(function (o) { return obj(o) && o.counts === 'counted'; })
+      .map(function (o) { return clean(o.job_number); }).filter(Boolean);
+    var oh = b.overhead_part === true;
+    var status = str(b.bill_status).toUpperCase();
+    var r = { where: where, row: '', words: '', why: '', unknown: false, fresh: false };
+    if (where === 'held') {
+      r.unknown = true;
+      if (str(b.held_reason) === 'not_job_related_mark_on_counted_bill') { r.row = '1'; r.words = BILL_ROW.r1; }
+      else if (str(b.held_reason) === 'labour_part_unconfirmed') { r.row = '14h'; r.words = BILL_ROW.r14hLabour; }
+      else if (str(b.held_reason) === 'overhead_on_xero_linked_bill') { r.row = '14h'; r.words = BILL_ROW.r14hOverhead; }
+      else { r.row = '14h'; r.words = BILL_ROW.r14hOther; }
+      r.why = 'Held: ' + (str(b.held_reason) || 'no reason given') + '.';
+      return r;
+    }
+    if (where === 'unknown') {
+      var code = here && here.counts === 'unknown' ? (reason || 'engine_reason_unknown')
+        : state === 'unknown' ? 'bill_state_unknown' : !here ? 'not_placed_here' : 'where_counted_unknown';
+      r.row = '14'; r.words = BILL_ROW.r14; r.why = billWhy(code); r.unknown = true; r.code = code;
+      return r;
+    }
+    if (where === 'trade_app') { r.row = 'new'; r.fresh = true; r.words = BILL_FRESH.trade; return r; }
+    if (state === 'over_counted') { r.row = 'new'; r.fresh = true; r.words = BILL_FRESH.over; return r; }
+    if (where === 'here') {
+      if (oh && state === 'counted_in_part') {
+        r.row = '8o'; r.words = "Money counts part of this bill's cost here and part to overhead (no job). The rest is not placed yet. See Money.";
+      } else if (oh) { r.row = '8o'; r.words = BILL_ROW.r8o; }
+      else if (state === 'counted_in_part') { r.row = '5'; r.words = BILL_ROW.r5; }
+      else if (state === 'counted_in_full') { r.row = '8'; r.words = BILL_ROW.r8; }
+      else { r.row = '14'; r.words = BILL_ROW.r14; r.why = billWhy('where_counted_unknown'); r.unknown = true; }
+      return r;
+    }
+    if (where === 'elsewhere' || where === 'here_and_elsewhere') {
+      if (!others.length) { r.row = '14'; r.words = BILL_ROW.r14; r.why = billWhy('where_counted_unknown'); r.unknown = true; return r; }
+      var on = others.join(' and ');
+      // r6 row 5: a bill counted only in part keeps "The rest is not placed yet." wherever the parts are
+      var rest = state === 'counted_in_part' ? ' The rest is not placed yet.' : '';
+      if (where === 'elsewhere') {
+        r.row = rest ? '5' : '9A';
+        r.words = (oh ? "Money counts part of this bill's cost on " + on + ' and part to overhead (no job).'
+          : rest ? "Money counts part of this bill's cost on " + on + '.'
+          : "Money counts this bill's cost on " + on + '.') + rest + ' See Money.';
+      } else {
+        r.row = '10';
+        r.words = "Money counts part of this bill's cost here and part on " + on + (oh ? ', and part to overhead (no job)' : '') + '.' + rest + ' See Money.';
+      }
+      return r;
+    }
+    // no_job: counted on no job, by Finance's reason
+    if (reason === 'bill_voided' || state === 'voided') {
+      // r6 row 4 only when our copy says VOIDED or DELETED for that exact bill (M10)
+      if (status === 'VOIDED' || status === 'DELETED') { r.row = '4'; r.words = BILL_ROW.r4; }
+      else { r.row = '14'; r.words = BILL_ROW.r14; r.why = billWhy('bill_state_unknown'); r.unknown = true; }
+      return r;
+    }
+    if (reason === 'installer_unconfirmed') { r.row = '3'; r.words = BILL_ROW.r3; return r; }
+    // 14h lines are not settled: flagged so they are echoed in "What we don't know" (the line says why)
+    if (reason === 'labour_part_unconfirmed') { r.row = '14h'; r.words = BILL_ROW.r14hLabour; r.unknown = true; return r; }
+    if (reason === 'xero_link_read_through_overhead') { r.row = '14h'; r.words = BILL_ROW.r14hOverhead; r.unknown = true; return r; }
+    if (reason === 'xero_link_hidden_by_other_row') { r.row = '14h'; r.words = BILL_ROW.r14hOther; r.unknown = true; r.why = 'Money is to look at this bill.'; return r; }
+    // r6 row 7: CFO's hold, row 14, until F1 is settled
+    if (reason === 'installer_not_job_related' || state === 'not_job_related') {
+      r.row = '7'; r.words = BILL_ROW.r14; r.why = billWhy('not_job_related'); r.unknown = true; return r;
+    }
+    if (state === 'overhead') { r.row = '7'; r.words = BILL_ROW.r14; r.why = billWhy('overhead'); r.unknown = true; return r; }
+    if (reason === 'bill_not_approved') { r.row = 'new'; r.fresh = true; r.words = BILL_FRESH.draft; return r; }
+    r.row = 'new'; r.fresh = true; r.words = BILL_FRESH.noJob;
+    return r;
+  }
+  // The block: {state ok|none|failed|not_deployed, words, bills: [{id, title, meta, mirror, line}]}.
+  // Null only when there is no overview answer at all.
+  function billOutcomes(overview) {
+    if (!obj(overview)) return null;
+    var st = obj(obj(overview.sources) && overview.sources.bills) || {};
+    var data = obj(overview.bills);
+    var failed = function (code) {
+      return { state: code === 'not_deployed' ? 'not_deployed' : 'failed', code: code, bills: [],
+        words: "Where this job's bills count is not known here. " + billWhy(code) + ' See Money.' };
+    };
+    // a server that predates the read sends neither the part nor its status: not switched on yet
+    if (st.state === 'not_deployed' || (!obj(obj(overview.sources) && overview.sources.bills) && !('bills' in overview))) return failed('not_deployed');
+    if (st.ok === false || st.state === 'failed') return failed(str(st.code) || 'rpc_failed');
+    if (!data || !Array.isArray(data.bills)) return failed('no_answer');
+    var bills = data.bills.filter(obj).map(function (b) {
+      var line = billLine(b);
+      var mirror = b.mirror_bill === true || b.where_counted === 'trade_app';
+      var title = [clean(b.invoice_number) || 'Bill with no number', clean(b.supplier)].filter(Boolean).join(DOT);
+      return { id: str(b.xero_invoice_id), title: title, status: billStatusWords(b.bill_status), mirror: mirror, line: line };
+    });
+    if (!bills.length) return { state: 'none', bills: [], words: 'No supplier bill is placed on this job.' };
+    return { state: 'ok', bills: bills, words: '' };
+  }
+
   return {
     DOT: DOT, PHASE_WORDS: PHASE_WORDS, MACHINE_TYPES: MACHINE_TYPES,
     str: str, lower: lower, num: num, arr: arr, obj: obj, plural: plural, times: times, hash: hash,
@@ -1319,7 +1478,8 @@ var JobOverviewV2Core = (function () {
     invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation, heldList: heldList,
     callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange,
-    NOT_SEEN_STANDING: NOT_SEEN_STANDING, notSeen: notSeen, matchingWait: matchingWait, placedBy: placedBy, decisionsUnread: decisionsUnread
+    NOT_SEEN_STANDING: NOT_SEEN_STANDING, notSeen: notSeen, matchingWait: matchingWait, placedBy: placedBy, decisionsUnread: decisionsUnread,
+    BILL_ROW: BILL_ROW, BILL_FRESH: BILL_FRESH, billLine: billLine, billOutcomes: billOutcomes
   };
 })();
 // </job-overview-v2-core>
@@ -1422,6 +1582,7 @@ var JobOverviewV2 = (function () {
     m.quoted = C.quotedValue(detail, ov);
     m.text = C.storyText(ov && ov.story_text);
     m.book = C.storyBook(ov && ov.story_text);
+    m.bills = C.billOutcomes(ov);
     m.failures = C.sourceFailures(ov);
     m.refreshFailed = !!(e && e.refreshFailed);
     m.wm = story && C.obj(story.now) ? C.whoseMove(story.now.whose_move, job, story) : null;
@@ -1614,7 +1775,7 @@ var JobOverviewV2 = (function () {
       '</div><div class="ov2-lede" id="ov2Headline">' + esc(headline) + '</div>' +
       (sec && sec.where_it_is_at ? '<p class="ov2-p">' + esc(sec.where_it_is_at) + '</p>' : (hl.rest ? '<p class="ov2-p">' + esc(hl.rest) + '</p>' : '')) + '</div>';
     h += nextHtml(m);
-    h += storyMomentsHtml(m) + storyMoneyHtml(m) + storyBookHtml(m);
+    h += storyMomentsHtml(m) + storyMoneyHtml(m) + storyBookHtml(m) + storyBillsHtml(m);
     h += openItemsHtml(m, true);
     h += heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
     if (sec) {
@@ -1658,6 +1819,32 @@ var JobOverviewV2 = (function () {
         return '<li' + (b.incomplete && l === b.incomplete ? ' class="ov2-book-gap"' : '') + '>' + esc(l) + '</li>';
       }).join('') + '</ul>' +
       '<p class="ov2-im">' + esc(b.source === 'job_profit' ? 'From Job Profit, the same figures as its screen.' : 'Job Profit has no record of this job.') + '</p></div>';
+  }
+  // Where each supplier bill on the job counts its cost (INT-10): Finance's answer, no amount.
+  function storyBillsHtml(m) {
+    var b = m.bills;
+    if (!b) return '';
+    var h = '<div class="ov2-story-block ov2-bills" id="ov2Bills" aria-label="Where each bill counts" data-ov2-bills="' + esc(b.state) + '">' +
+      '<h3>Where each bill counts</h3>';
+    if (b.state !== 'ok') return h + '<p class="ov2-im" id="ov2BillsState">' + esc(b.words) + '</p></div>';
+    return h + '<ul class="ov2-bill-lines">' + b.bills.map(function (x) {
+      return '<li data-ov2-bill="' + esc(x.id) + '" data-ov2-bill-row="' + esc(x.line.row) + '"' +
+        (x.mirror ? ' data-ov2-mirror="1"' : '') + (x.line.fresh ? ' data-ov2-fresh="1"' : '') + '>' +
+        '<div class="ov2-bill-head"><strong>' + esc(x.title) + '</strong>' +
+        (x.mirror ? '<span class="ov2-chip ov2-bill-mirror">Trade app bill</span>' : '') +
+        '<span class="ov2-im">' + esc(x.status) + '</span></div>' +
+        '<p class="ov2-bill-where">' + esc(x.line.words) + '</p>' +
+        (x.line.why ? '<p class="ov2-im ov2-bill-why">' + esc(x.line.why) + '</p>' : '') + '</li>';
+    }).join('') + '</ul></div>';
+  }
+  // r6 rule 5: each not known or not settled bill line, echoed once in What we don't know.
+  function billGaps(m) {
+    var b = m.bills;
+    if (!b) return [];
+    if (b.state === 'failed' || b.state === 'not_deployed') return [b.words];
+    return b.bills.filter(function (x) { return x.line.unknown; }).map(function (x) {
+      return x.title + ': ' + x.line.words + (x.line.why ? ' ' + x.line.why : '');
+    });
   }
   function lastWordHtml(m) {
     function row(label, n) {
@@ -1706,6 +1893,7 @@ var JobOverviewV2 = (function () {
     var standing = C.notSeen(m.ov).filter(function (x) { return !seen[C.lower(x)]; });
     var h = '<div class="ov2-story-block ov2-story-unknown" id="ov2Unknown"><h3>What we don\'t know</h3>';
     var lines = gaps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') +
+      billGaps(m).map(function (x) { return '<li data-ov2-bill-gap="1">' + esc(x) + '</li>'; }).join('') +
       standing.map(function (x) { return '<li data-ov2-not-seen="1">' + esc(x) + '</li>'; }).join('');
     if (lines) h += '<ul>' + lines + '</ul>';
     h += matchingHtml(m);
@@ -2297,6 +2485,11 @@ var JobOverviewV2 = (function () {
     '.ov2-book-lines{list-style:none;margin:6px 0 0;padding:0;font-size:12px;line-height:1.45;font-variant-numeric:tabular-nums}',
     '.ov2-book-lines li{padding:3px 0;border-bottom:1px solid var(--sw-light,#EDF1F4);overflow-wrap:anywhere}',
     '.ov2-book-lines li.ov2-book-gap{color:var(--sw-red,#E74C3C);font-weight:700}',
+    '.ov2-bill-lines{list-style:none;margin:6px 0 0;padding:0;font-size:12px;line-height:1.45}',
+    '.ov2-bill-lines li{padding:5px 0;border-bottom:1px solid var(--sw-light,#EDF1F4);overflow-wrap:anywhere}',
+    '.ov2-bill-head{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}',
+    '.ov2-bill-where{margin:2px 0 0}',
+    '.ov2-bill-mirror{font-size:11px}',
     '.ov2-story-last{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}',
     '.ov2-story-last h3{grid-column:1/-1}',
     '.ov2-story-last>div{min-width:0;background:var(--sw-bg,#F8F6F3);padding:8px 10px}',

@@ -435,7 +435,7 @@ var JobOverviewV2Core = (function () {
     var loops = arr(story && story.loops).filter(function (l) {
       return l && l.what && ['closed', 'superseded', 'done', 'resolved'].indexOf(lower(l.status)) < 0;
     });
-    if (!loops.length) loops = loopsFromNotes(Array.isArray(notes) ? notes : (obj(notes) && notes.items));
+    if (!loops.length && !(story && story.placement_review && story.placement_review.state === 'needs_review')) loops = loopsFromNotes(Array.isArray(notes) ? notes : (obj(notes) && notes.items));
     var groups = { blocking: [], waiting: [], know: [] };
     loops.forEach(function (l, i) {
       var g = loopGroup(l);
@@ -1884,8 +1884,33 @@ var JobOverviewV2 = (function () {
     });
     return h + '</section>';
   }
+  // Historical review is read-only. Do not route to the unreleased original-message
+  // endpoint or display citation excerpts (which can include protected call words).
+  function placementReviewHtml(m) {
+    var review = C.obj(m.story && m.story.placement_review);
+    if (!review || review.state !== 'needs_review') return '';
+    var items = C.arr(review.items);
+    var h = '<section id="ov2PlacementReview" aria-label="Historical notes needing review"><h3>Historical notes needing review</h3>' +
+      '<p>The sources no longer support these notes on this job. The matters remain unresolved. They have not been settled or transferred and are not current debt claims.</p>';
+    if (!items.length) h += '<p>Review details could not be read. This does not mean nothing remains unresolved.</p>';
+    items.forEach(function (item) {
+      h += '<article data-ov2-review-key="' + esc(item.item_key || '') + '"><p>' + esc(C.clean(item.what) || 'Note wording unavailable') + '</p>' +
+        '<details><summary>Retained source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>';
+      var cites = C.arr(item.opened_by);
+      cites.forEach(function (c) { h += '<li>' + esc(C.str(c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; });
+      if (!cites.length) h += '<li>Source references unavailable.</li>';
+      h += '</ul></details></article>';
+    });
+    return h + '</section>';
+  }
   function unknownHtml(m) {
-    var gaps = C.arr(m.story && m.story.not_known).map(function (x) {
+    var review = C.obj(m.story && m.story.placement_review);
+    var reviewing = review && review.state === 'needs_review';
+    var gaps = C.arr(m.story && m.story.not_known).filter(function (x) {
+      // The full review below owns these exact notes, with references; unrelated gaps stay.
+      return !(reviewing && x && x.certainty === 'source_placement_review' && C.arr(review.items).some(function (i) { return i.item_key && i.item_key === x.item_key; }));
+    }).map(function (x) {
+      if (reviewing && x && /^\d+ reader items? (?:was|were) hidden because messages (?:it|they) cited moved off this job; the story needs a rebuild\.$/.test(C.clean(x.what))) return 'Some historical notes need source-placement review before the AI notes can be rebuilt. The unresolved matters remain listed below.';
       return C.clean(typeof x === 'string' ? x : (x && (x.what || x.line || x.text)));
     }).filter(Boolean);
     var seen = {};
@@ -1897,6 +1922,7 @@ var JobOverviewV2 = (function () {
       billGaps(m).map(function (x) { return '<li data-ov2-bill-gap="1">' + esc(x) + '</li>'; }).join('') +
       standing.map(function (x) { return '<li data-ov2-not-seen="1">' + esc(x) + '</li>'; }).join('');
     if (lines) h += '<ul>' + lines + '</ul>';
+    h += placementReviewHtml(m);
     h += matchingHtml(m);
     return h + '</div>';
   }
@@ -2003,7 +2029,9 @@ var JobOverviewV2 = (function () {
       parts.push(t.written_at ? 'Story as of ' + C.stamp(t.written_at, m.now) : 'Story written');
       if (t.state === 'stale') parts.push('Something newer has happened since it was written');
     }
-    parts.push(C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
+    parts.push(m.story.placement_review && m.story.placement_review.state === 'needs_review'
+      ? 'AI notes need source-placement review before a fresh reading; unresolved matters remain listed below'
+      : C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
     var h = '<div class="ov2-stamp" id="ov2Stamp"><p>' + esc(parts.join('. ') + '.') + '</p>';
     if (failure && !(isFinite(failedAt) && isFinite(writtenAt) && writtenAt > failedAt)) {
       var failedWords = failure.error === 'fact_check_failed'

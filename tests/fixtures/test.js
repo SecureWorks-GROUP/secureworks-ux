@@ -1,4 +1,5 @@
 const { test: base, expect } = require('@playwright/test');
+const DraftCore = require('../../modules/trade-invoice-running-draft.js');
 const { installSupabaseAuthStub } = require('../helpers/auth');
 const {
   installFeedStubs,
@@ -197,6 +198,19 @@ const test = base.extend({
         site_suburb: 'Perth',
         scheduled_date: addIsoDays(weekStart, 3),
         description: 'Already on last week',
+        included: true,
+        auto: true
+      },
+      {
+        source_key: 'as:e2e-wo-holder-assignment',
+        assignment_id: 'e2e-wo-holder-assignment',
+        job_id: 'e2e-wo-holder-job',
+        job_number: 'SWF-26767',
+        client_name: 'Kelvin Gillies',
+        site_suburb: 'Joondalup',
+        scheduled_date: addIsoDays(weekStart, 1),
+        description: 'Auto rebuilt this line',
+        hours: 9,
         included: true,
         auto: true
       }
@@ -1940,7 +1954,17 @@ const test = base.extend({
             return { status: 403, body: { error: 'Save does not send an invoice', code: 'agent_draft_only' } };
           }
           runningDraftStore.id = runningDraftStore.id || 'draft-running-e2e';
-          runningDraftStore.draft_builder = body.draft_builder || null;
+          const incoming = body.draft_builder && typeof body.draft_builder === 'object' ? body.draft_builder : {};
+          const merged = DraftCore.mergeApproved({
+            cards: Array.isArray(incoming.jobCards) ? incoming.jobCards : [],
+            dismissed: Array.isArray(incoming.dismissedKeys) ? incoming.dismissedKeys : (body.dismissed_source_keys || []),
+            claimed: runningDraftClaimed,
+            suggested: runningDraftSuggested
+          });
+          runningDraftStore.draft_builder = Object.assign({}, incoming, {
+            jobCards: merged.cards,
+            dismissedKeys: merged.dismissed
+          });
           return {
             ok: true,
             draft_id: runningDraftStore.id,

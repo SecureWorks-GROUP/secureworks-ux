@@ -132,4 +132,168 @@ refuses({ status: 'authorised', week_start: '2026-10-19', lines: [] });
 refuses({ action: 'generate_trade_invoice', week_start: '2026-10-19', lines: [] });
 refuses({ action: 'submit_work_order_invoice', week_start: '2026-10-19', lines: [] });
 
+// The owner can delete an auto line. The key stays dismissed, so the next
+// rebuild does not put it back, and an edit on another line is not replaced.
+const withAuto = Core.mergeApproved({
+  cards: entered.jobCards,
+  dismissed: [],
+  claimed: claimed,
+  suggested: suggested
+});
+const deleted = Core.applyOwnerCommand({
+  cards: withAuto.cards,
+  dismissed: withAuto.dismissed,
+  remove: ['wo:wo-this-week']
+});
+assert.deepStrictEqual(deleted.removed, ['wo:wo-this-week']);
+assert.ok(deleted.dismissed.indexOf('wo:wo-this-week') !== -1);
+assert.ok(!deleted.cards.some(function (card) { return card.source_key === 'wo:wo-this-week'; }));
+const edited = Core.applyOwnerCommand({
+  cards: deleted.cards,
+  dismissed: deleted.dismissed,
+  edits: [{ assignment_id: 'as-hugo-1', description: 'Hugo changed the auto line', hours: 4 }]
+});
+assert.deepStrictEqual(edited.edited, ['as:as-hugo-1']);
+assert.strictEqual(edited.cards[0].description, 'Hugo changed the auto line');
+assert.strictEqual(edited.cards[0].hours, 4);
+assert.strictEqual(edited.cards[0].owner_edited, true);
+assert.strictEqual(edited.locked, true);
+const rebuilt = Core.regenerate({
+  cards: edited.cards,
+  dismissed: edited.dismissed,
+  claimed: claimed,
+  suggested: suggested.concat([
+    { assignment_id: 'as-hugo-1', description: 'Auto rebuilt this line', hours: 9 },
+    { assignment_id: 'as-new-job', job_number: 'SWF-NEWJOB', description: 'A job added later' }
+  ])
+});
+assert.deepStrictEqual(rebuilt.added, ['as:as-new-job'], 'new work still comes in');
+assert.ok(rebuilt.added.indexOf('wo:wo-this-week') === -1, 'a removed line is not put back');
+const kept = rebuilt.cards.filter(function (card) { return card.assignment_id === 'as-hugo-1'; })[0];
+assert.strictEqual(kept.description, 'Hugo changed the auto line');
+assert.strictEqual(kept.hours, 4, 'an edit is not overwritten by the rebuild');
+const savedEdit = Core.snapshot({
+  jobCards: edited.cards,
+  dismissedKeys: edited.dismissed,
+  manualLock: edited.locked,
+  weekStart: '2026-10-19',
+  weekEnd: '2026-10-25'
+});
+const reloadedEdit = Core.snapshot(Core.saveBody(savedEdit).draft_builder);
+assert.strictEqual(reloadedEdit.manualLock, true);
+assert.strictEqual(reloadedEdit.jobCards[0].description, 'Hugo changed the auto line');
+assert.ok(reloadedEdit.dismissedKeys.indexOf('wo:wo-this-week') !== -1);
+
+// Putting removed lines back is explicit. Other edits stay.
+const restored = Core.regenerate({
+  cards: edited.cards,
+  dismissed: edited.dismissed,
+  claimed: claimed,
+  suggested: suggested,
+  restoreRemoved: true
+});
+assert.ok(restored.added.indexOf('wo:wo-this-week') !== -1);
+assert.strictEqual(
+  restored.cards.filter(function (card) { return card.assignment_id === 'as-hugo-1'; })[0].description,
+  'Hugo changed the auto line'
+);
+
+// The assistant can delete and edit a line that is already on the owner's draft.
+const agentEdit = Core.agentDraft({
+  user_id: 'hugo',
+  caller_kind: 'agent',
+  week_start: '2026-10-19',
+  week_end: '2026-10-25',
+  existing: {
+    status: 'draft',
+    jobCards: withAuto.cards,
+    dismissedKeys: withAuto.dismissed,
+    weekStart: '2026-10-19',
+    weekEnd: '2026-10-25'
+  },
+  remove: [{ work_order_id: 'wo-this-week' }],
+  edits: [{ assignment_id: 'as-hugo-1', description: 'Assistant edited this', amount: 55 }]
+});
+assert.strictEqual(agentEdit.status, 'draft');
+assert.strictEqual(agentEdit.xero, false);
+assert.strictEqual(agentEdit.submitted, false);
+assert.deepStrictEqual(agentEdit.removed, ['wo:wo-this-week']);
+assert.deepStrictEqual(agentEdit.edited, ['as:as-hugo-1']);
+assert.strictEqual(agentEdit.draft_builder.manualLock, true);
+assert.ok(!agentEdit.draft_builder.jobCards.some(function (card) { return card.work_order_id === 'wo-this-week'; }));
+const assistantLine = agentEdit.draft_builder.jobCards.filter(function (card) { return card.assignment_id === 'as-hugo-1'; })[0];
+assert.strictEqual(assistantLine.description, 'Assistant edited this');
+assert.strictEqual(assistantLine.rate, 55);
+const afterAgent = Core.regenerate({
+  cards: agentEdit.draft_builder.jobCards,
+  dismissed: agentEdit.draft_builder.dismissedKeys,
+  claimed: claimed,
+  suggested: suggested
+});
+assert.ok(afterAgent.added.indexOf('wo:wo-this-week') === -1);
+
+// A matching line is an edit only when the assistant says so. A plain add
+// still does not replace what is already there.
+const plainAdd = Core.agentDraft({
+  user_id: 'hugo',
+  week_start: '2026-10-19',
+  existing: entered,
+  lines: [{ assignment_id: 'as-hugo-1', description: 'Would replace Hugo', hours: 9, update: true }]
+});
+assert.strictEqual(plainAdd.draft_builder.jobCards[0].description, 'Would replace Hugo');
+assert.strictEqual(plainAdd.draft_builder.jobCards[0].hours, 9);
+const skippedAdd = Core.agentDraft({
+  user_id: 'hugo',
+  week_start: '2026-10-19',
+  existing: entered,
+  lines: [{ assignment_id: 'as-hugo-1', description: 'Would replace Hugo', hours: 9 }]
+});
+assert.strictEqual(skippedAdd.draft_builder.jobCards[0].description, 'Fence repair Tuesday');
+
+// Only the owner, the office, or that owner's assistant, and only on a draft.
+const office = Core.agentDraft({
+  user_id: 'hugo',
+  caller_kind: 'office',
+  caller_role: 'ops_manager',
+  week_start: '2026-10-19',
+  existing: entered,
+  lines: [{ update: true, assignment_id: 'as-hugo-1', description: 'Office edit' }]
+});
+assert.strictEqual(office.draft_builder.jobCards[0].description, 'Office edit');
+const owner = Core.agentDraft({
+  user_id: 'hugo',
+  caller_id: 'hugo',
+  caller_kind: 'owner',
+  week_start: '2026-10-19',
+  existing: entered,
+  remove: ['as:as-hugo-1']
+});
+assert.deepStrictEqual(owner.removed, ['as:as-hugo-1']);
+
+function refusesEdit(input, code) {
+  assert.throws(function () { Core.agentDraft(input); }, function (err) {
+    return err && err.code === code;
+  });
+}
+refusesEdit({
+  user_id: 'hugo',
+  caller_id: 'someone-else',
+  caller_kind: 'staff',
+  week_start: '2026-10-19',
+  existing: entered,
+  remove: ['as:as-hugo-1']
+}, 'not_draft_owner');
+refusesEdit({
+  user_id: 'hugo',
+  caller_kind: 'agent',
+  week_start: '2026-10-19',
+  existing: { status: 'submitted', jobCards: entered.jobCards },
+  remove: ['as:as-hugo-1']
+}, 'draft_locked');
+refusesEdit({
+  user_id: 'hugo',
+  existing: { status: 'authorised', jobCards: entered.jobCards },
+  edits: [{ assignment_id: 'as-hugo-1', description: 'Too late' }]
+}, 'draft_locked');
+
 console.log('trade invoice running draft: ok');

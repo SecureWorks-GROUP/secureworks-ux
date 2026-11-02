@@ -19571,7 +19571,7 @@ function _jpQuotedSourceText(src) {
 }
 function _jpExpectedSourceText(src) {
   return ({ frozen_at_acceptance: 'fixed when the quote was accepted', accepted_quote_revision: 'from the accepted quote',
-    sent_quote_revision: 'from a sent quote, not accepted' })[String(src || '')] || String(src || '').replace(/_/g, ' ');
+    sent_quote_revision: 'from a sent quote, not accepted', frozen_scope_revision: 'from the locked scope estimate, not a sent quote' })[String(src || '')] || String(src || '').replace(/_/g, ' ');
 }
 // A job status in staff words: the shared label when the state machine has one,
 // else the code with its underscores spaced and the first letter capitalised.

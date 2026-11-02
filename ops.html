@@ -7017,6 +7017,24 @@ function scopeToolUrlFor(jobType, job) {
     : 'https://marninms98-dotcom.github.io/patio/';
 }
 
+// Both tools side by side (T42; Marnin, 2 Nov 2026: "both tools to be live at the same time"). A fence or patio job
+// keeps its scope button as it is, opening the tool it opens today, and gains "Open in new tool" beside it: the
+// Scope Engine for the job's trade, by ?jobId= (as trade.html scoperJobUrl). Not on a patio job scoped in the older
+// patio page (the Scope Engine never writes over a scope it did not make), nor where the button beside it already
+// opens the Scope Engine.
+function scopeEngineUrlFor(jobType, job) {
+  var type = String(jobType || (job && job.type) || '').toLowerCase();
+  var base = type === 'fencing' ? 'https://marninms98-dotcom.github.io/fence-designer/scope-engine/'
+    : type === 'patio' ? 'https://marninms98-dotcom.github.io/patio/scope-engine/' : '';
+  if (!base) return '';
+  if (job && window.JobScopeRecord && JobScopeRecord.read(Object.assign({}, job, { type: type })).kind === 'old-patio') return '';
+  return scopeToolUrlFor(type, job) === base ? '' : base;
+}
+function scopeEngineLinkHtml(jobType, job, jobId, attrs) {
+  var u = jobId ? scopeEngineUrlFor(jobType, job) : '';
+  return u ? '<a href="' + u + '?jobId=' + encodeURIComponent(jobId) + '" target="_blank" rel="noopener" ' + attrs + '>Open in new tool &#8599;</a>' : '';
+}
+
 async function toggleFrozenRevisions(jobId, jobType, anchor) {
   var container = document.getElementById('frozenRevs_' + jobId);
   if (!container) return;
@@ -22260,6 +22278,7 @@ function renderJobPeek(data) {
   if (j.type !== 'miscellaneous') {
     var scopeToolUrl = scopeToolUrlFor(j.type, j);
     html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">Open Scope &#8599;</a>';
+    html += scopeEngineLinkHtml(j.type, j, j.id, 'class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;"');
   }
   html += '<button class="btn btn-primary btn-sm" style="font-size:11px; padding:3px 8px;" onclick="closeSlidePanel(); openJobDetail(\'' + j.id + '\')">Open Record</button>';
   html += '</div>';
@@ -22785,7 +22804,8 @@ function renderScopeSummary(scope_json, jobType, jobId) {
   var scopeToolUrl = scopeToolUrlFor(jobType, { type: jobType, scope_json: scope });
   var linkId = jobId || scope.jobId || '';
   if (linkId) {
-    html += '<div style="margin-top:6px;"><a href="' + scopeToolUrl + '?jobId=' + linkId + '" target="_blank" style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;">&#128279; Open in Scope Tool &#8599;</a></div>';
+    html += '<div style="margin-top:6px;"><a href="' + scopeToolUrl + '?jobId=' + linkId + '" target="_blank" style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;">&#128279; Open in Scope Tool &#8599;</a>' +
+      (scopeEngineUrlFor(jobType, { type: jobType, scope_json: scope }) ? ' &nbsp; ' + scopeEngineLinkHtml(jobType, { type: jobType, scope_json: scope }, linkId, 'style="font-size:11px;color:var(--sw-mid);font-weight:600;text-decoration:none;"') : '') + '</div>';
   }
 
   html += '</div>';
@@ -24859,6 +24879,7 @@ function renderOverviewView(data) {
   if (j.type !== 'miscellaneous') {
     var scopeUrl = scopeToolUrlFor(j.type, j);
     html += '<a href="' + scopeUrl + '?jobId=' + j.id + '" target="_blank" style="color:var(--sw-mid);">Open Scope &#8599;</a>';
+    html += scopeEngineLinkHtml(j.type, j, j.id, 'style="color:var(--sw-mid);"');
   }
   if (j.ghl_opportunity_id) html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" style="color:var(--sw-mid);">View in GHL &#8599;</a>';
   html += '</div></div>';

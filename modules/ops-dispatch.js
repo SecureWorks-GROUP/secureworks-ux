@@ -4801,6 +4801,10 @@
     if (code === 'no_suggestion_for_work_type') return { text: 'Fill from the scope works on fencing and patio jobs only. Type the lines in.' };
     if (code === 'lines_exist') return { changed: true, text: 'This job already has lines, so nothing was filled in. Showing the latest.' };
     if (code === 'scope_unreadable') return { text: 'The scope on this job could not be read, so nothing was filled in. Type the lines in.' };
+    // T20: Fill from the scope reads the job's frozen scope revision only.
+    if (code === 'no_frozen_scope') return { text: 'This job\'s scope is not frozen yet, so nothing was filled in. Freeze it in the scoping tool, then fill the list.' };
+    if (code === 'accepted_quote_unproven') return { text: 'The accepted quote\'s scope revision could not be confirmed, so nothing was filled in. Try again later, or type the lines in.', retry: true };
+    if (code === 'scope_identity_unverified') return { text: 'The frozen scope could not be checked against what was sealed, so nothing was filled in. Freeze the scope again in the scoping tool.' };
     if (code === 'no_approved_email') return { text: 'This supplier has no approved order email, so Dispatch cannot send to it. Ask Shaun to add one.' };
     if (code === 'no_lines_to_order') return { text: 'Nothing in this box to order. In stock lines and lines already sent are left off.' };
     if (code === 'not_dispatch_work') return { text: 'Make-safe jobs are not ordered from Dispatch.' };

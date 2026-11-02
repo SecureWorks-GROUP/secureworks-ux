@@ -20053,6 +20053,76 @@ function _jpOrderEvidence(c, packet) {
   return h + '</ul></details></div>';
 }
 
+// R57 line evidence (backend job_profit `line_evidence`, rule r57-v1). A job
+// reads Verified only when the server says every invoice and cost line on it
+// has Bookkeeping's evidence; otherwise Provisional with what is missing. A
+// missing or failed read is Unknown, never Verified. Display only.
+var JP_LE_KIND = {
+  invoice_line: 'Customer invoice line',
+  supplier_bill: 'Supplier bill line',
+  trade_line: 'Crew or trade line',
+  trade_employer_super: 'Employer super',
+  materials_fact: 'Materials (placed)',
+  not_in_job_profit: 'Bookkeeping line not counted here'
+};
+function _jpLeKind(k) { return JP_LE_KIND[k] || String(k || 'Line').replace(/_/g, ' '); }
+function _jpLeState(l) {
+  var st = l && l.state;
+  if (st === 'evidenced') return '<span class="jp-tag ok">Evidenced</span>';
+  if (st === 'evidence_says_elsewhere') {
+    var where = l.evidence_job_number ? 'job ' + l.evidence_job_number
+      : l.allocation === 'overhead' ? 'overhead' : l.allocation === 'not_job_cost' ? 'not a job cost' : 'another job';
+    return '<span class="jp-tag bad">Bookkeeping puts it on ' + _jpEsc(where) + '</span>';
+  }
+  if (st === 'not_in_job_profit') return '<span class="jp-tag bad">Evidenced to this job, not counted in Job Profit</span>';
+  return '<span class="jp-tag mute">No evidence yet</span>';
+}
+function _jpLineEvidence(data) {
+  var le = data && data.line_evidence;
+  var h = '<div class="jp-sec">Line evidence (Bookkeeping)</div>';
+  if (!le || typeof le !== 'object') {
+    return h + '<div class="jp-note" data-jp-line-evidence="absent"><span class="jp-tag mute">Unknown</span> Line evidence is not in this read, so this job is not verified.</div>';
+  }
+  var status = String(le.status || 'unknown');
+  if (status !== 'verified' && status !== 'provisional' && status !== 'no_lines') {
+    return h + '<div class="jp-note" data-jp-line-evidence="unknown"><span class="jp-tag mute">Unknown</span> ' + _jpEsc(le.reason || 'Line evidence could not be read') + '. This job is not verified.</div>';
+  }
+  if (status === 'no_lines') {
+    return h + '<div class="jp-note" data-jp-line-evidence="no_lines"><span class="jp-tag mute">No lines</span> No Xero invoice or cost lines were found for this job, so it cannot be verified.</div>';
+  }
+  var lines = Array.isArray(le.lines) ? le.lines : [];
+  var verified = status === 'verified';
+  h += '<div class="jp-note" data-jp-line-evidence="' + (verified ? 'verified' : 'provisional') + '">'
+    + (verified ? '<span class="jp-tag ok">Verified</span> Every invoice and cost line on this job has Bookkeeping\'s evidence.'
+      : '<span class="jp-tag inf">Provisional</span> Not every line on this job has evidence yet, so its profit is provisional.')
+    + '<div class="jp-sub" style="margin-top:4px;">Customer invoice lines evidenced: ' + _jpEsc(le.invoice_lines_evidenced) + ' of ' + _jpEsc(le.invoice_lines)
+    + ' &middot; cost items evidenced: ' + _jpEsc(le.cost_items_evidenced) + ' of ' + _jpEsc(le.cost_items)
+    + ' &middot; evidenced ' + _jpMoney(le.evidenced_ex) + ', without evidence ' + _jpMoney(le.not_evidenced_ex) + ' (ex GST)</div>';
+  var why = Array.isArray(le.why_not_verified) ? le.why_not_verified : [];
+  if (!verified && why.length) {
+    h += '<ul class="jp-sub" data-jp-why-not-verified style="margin:4px 0 0 18px;">';
+    why.forEach(function(w) { h += '<li>' + _jpEsc(w) + '</li>'; });
+    h += '</ul>';
+  }
+  h += '</div>';
+  if (lines.length) {
+    h += '<details data-jp-evidence-lines><summary>Show ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + '</summary>'
+      + '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Line</th><th>Document</th><th>Date</th><th>Description</th><th class="num">Amount</th><th>Evidence</th></tr></thead><tbody>';
+    lines.forEach(function(l) {
+      if (!l || typeof l !== 'object') return;
+      h += '<tr data-jp-evidence-state="' + _jpEsc(l.state || 'no_evidence') + '"><td data-label="Line">' + _jpEsc(_jpLeKind(l.kind)) + '</td>'
+        + '<td data-label="Document">' + _jpEsc(l.document || '') + '</td>'
+        + '<td data-label="Date">' + (l.date ? _jpDate(l.date) : '<span class="jp-unk">No date</span>') + '</td>'
+        + '<td data-label="Description">' + _jpEsc(l.description || 'No description') + '</td>'
+        + '<td class="num" data-label="Amount">' + _jpMoney(l.amount_ex) + '</td>'
+        + '<td data-label="Evidence">' + _jpLeState(l)
+        + (l.basis && l.state === 'evidenced' ? '<div class="jp-sub">' + _jpEsc(String(l.basis).replace(/_/g, ' ')) + '</div>' : '') + '</td></tr>';
+    });
+    h += '</tbody></table></div></details>';
+  }
+  if (le.read_at) h += '<div class="jp-sub" style="margin-top:4px;">Read ' + _jpEsc(String(le.read_at).slice(0, 16).replace('T', ' ')) + ' UTC &middot; rule ' + _jpEsc(le.rule || '') + '</div>';
+  return h;
+}
 function _jpRenderDetail(data) {
   var j = data.job || {};
   var trades = Array.isArray(data.trades) ? data.trades : [];
@@ -20095,6 +20165,8 @@ function _jpRenderDetail(data) {
     + _jpCard('Gross profit', _jpProfit(_jpProfitOf(j), _jpCostUnknown(j)), '')
     + _jpCard('Margin', _jpPct(_jpMarginOf(j), _jpCostUnknown(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
     + '</div>';
+
+  h += _jpLineEvidence(data);
 
   // Expected vs actual by lane
   var lanes = [

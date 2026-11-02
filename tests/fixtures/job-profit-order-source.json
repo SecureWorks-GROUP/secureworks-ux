@@ -1,0 +1,166 @@
+{
+  "provenance": {
+    "kind": "NEW synthetic local PostgreSQL/actual API capture, not a live job",
+    "source": "20261030-dispatch-bill-journey/source-fence.json",
+    "source_sha256": "14f8f6f5d6a079937e66a7bea7e41dae181b54669aabb6c037da9c6f4911b238",
+    "backend": "9af810cd666116a8b3abbd678410841f4324b4d5",
+    "checked_at": "2026-10-30T13:11:11.183Z",
+    "independent_fixture_materials_ex": 4150.5
+  },
+  "response": {
+    "job": {
+      "job_id": "800379c6-c0b2-48de-a1a9-e07def080910",
+      "org_id": "00000000-0000-0000-0000-000000000001",
+      "job_number": "SWP-D1-800379c6",
+      "client_name": "Synthetic D1 fixture",
+      "work_type": "fencing",
+      "work_subtype": null,
+      "status": "accepted",
+      "created_at": "2026-09-01T00:00:00+08:00",
+      "quoted_ex": 9000,
+      "quoted_source": "sent_quote:accepted:quote_revision",
+      "expected_source": "frozen_at_acceptance",
+      "expected_labour_ex": 2000,
+      "expected_materials_ex": 4000,
+      "expected_commission_ex": 450,
+      "expected_cost_ex": 6450,
+      "cost_basis": "line_level",
+      "actual_labour_ex": 0,
+      "actual_materials_ex": 4150.5,
+      "actual_commission_ex": 0,
+      "actual_other_ex": 0,
+      "actual_cost_ex": 4150.5,
+      "line_level_cost_ex": 4150.5,
+      "actual_cost_events": 1,
+      "trade_lines_ex": 0,
+      "committed_open_ex": 0,
+      "xero_project_expenses_ex": null,
+      "xero_project_invoiced_ex": null,
+      "xero_project_count": 0,
+      "invoiced_ex": 0,
+      "draft_revenue_ex": 0,
+      "variations_listed_ex": 0,
+      "collected_ex": 0,
+      "invoice_count": 0,
+      "profit_ex": null,
+      "margin_pct": null,
+      "profit_ex_unsuppressed": -4150.5,
+      "revenue_verified_paid": false,
+      "costs_verified_paid": false,
+      "revenue_last_paid_on": null,
+      "first_invoice_date": null,
+      "first_cost_date": "2026-10-30",
+      "last_cost_date": "2026-10-30",
+      "revenue_flag": "missing_client_invoice",
+      "cost_flag": "no_labour_linked",
+      "completeness": [
+        "missing_client_invoice",
+        "no_labour_linked"
+      ],
+      "margin_ok": false,
+      "holding_job": false,
+      "ordered_not_billed_count": 0,
+      "ordered_not_billed_over_30_count": 0,
+      "invoice_emailed_count": 0,
+      "invoice_emailed_ex": null
+    },
+    "trades": [],
+    "cost_events": [
+      {
+        "job_id": "800379c6-c0b2-48de-a1a9-e07def080910",
+        "event_date": "2026-10-30",
+        "lane": "materials",
+        "lane_detail": "materials",
+        "party_kind": "supplier",
+        "party_id": null,
+        "party": "Synthetic fixture supplier",
+        "amount_ex": 4150.5,
+        "source": "materials_fact",
+        "source_id": "8dce06a5-cd59-4f34-a759-e4fb1fd4b861",
+        "document_id": "fd6577d3-2f58-4531-85f8-1918f90dc7f1",
+        "document_number": "FIXTURE-BILL-800379c6",
+        "document_status": "AUTHORISED",
+        "paid": false,
+        "paid_on": null,
+        "confidence": "high",
+        "is_actual": true,
+        "description": "agent_prematch:po_job_number: SWP-D1-800379C6: job on the purchase order (PO-1000020 on reference); it names one live job and nothing points elsewhere.",
+        "hours": null,
+        "account_code": null,
+        "business_unit": null,
+        "match_method": "agent_prematch"
+      }
+    ],
+    "material_order_sources": {
+      "status": "ok",
+      "reason": null,
+      "basis": "returned_materials_fact_events",
+      "links": [
+        {
+          "fact_id": "8dce06a5-cd59-4f34-a759-e4fb1fd4b861",
+          "invoice_id": "fd6577d3-2f58-4531-85f8-1918f90dc7f1",
+          "purchase_order_id": "38d5523d-aa78-4a1e-9666-24f17cba5b00",
+          "po_number": "PO-1000020",
+          "line_allocation": {
+            "status": "unknown",
+            "reason": "invoice_line_allocation_not_recorded"
+          },
+          "status": "verified_order_manifest",
+          "reason": null,
+          "scope_lines": [
+            {
+              "material_line_id": "479ebe69-92e0-5734-a661-b736fd5200ce",
+              "scope_revision_id": "308ec33f-7115-4235-9f4c-0e6fe0f8e4a9",
+              "scope_revision_status": "superseded",
+              "scope_hash": "be9701768c5349efd8aa5c84bd4cc53ea4f8c2bb7d1e70698e3067b583012986",
+              "scope_line_id": "SL-95d233df5140f04b"
+            },
+            {
+              "material_line_id": "9412afba-cb64-55df-bfab-2c290eced894",
+              "scope_revision_id": "308ec33f-7115-4235-9f4c-0e6fe0f8e4a9",
+              "scope_revision_status": "superseded",
+              "scope_hash": "be9701768c5349efd8aa5c84bd4cc53ea4f8c2bb7d1e70698e3067b583012986",
+              "scope_line_id": "SL-c05102ebadb6aac8"
+            }
+          ]
+        }
+      ]
+    },
+    "revenue_events": [],
+    "timeline": [
+      {
+        "date": "2026-10-30",
+        "kind": "materials_fact",
+        "lane": "materials",
+        "party": "Synthetic fixture supplier",
+        "amount_ex": 4150.5,
+        "counts": true,
+        "paid": false,
+        "paid_on": null,
+        "source": "materials_fact",
+        "source_id": "8dce06a5-cd59-4f34-a759-e4fb1fd4b861",
+        "document_number": "FIXTURE-BILL-800379c6",
+        "document_status": "AUTHORISED",
+        "confidence": "high",
+        "description": "agent_prematch:po_job_number: SWP-D1-800379C6: job on the purchase order (PO-1000020 on reference); it names one live job and nothing points elsewhere.",
+        "hours": null
+      }
+    ],
+    "labels": {
+      "profit": "Gross profit on direct costs (trade labour, materials, commission and other direct lines), ex GST. No overhead share. Trade labour is the trade's charge; the company's super share is not added.",
+      "quoted_ex": "What was quoted: the value of a sent or accepted quote, ex GST. Null when no quote was sent. Never the live price. quoted_source names the quote it came from.",
+      "expected_cost_ex": "Expected cost fixed at the quote, ex GST, with expected_labour_ex, expected_materials_ex and expected_commission_ex. expected_source is frozen_at_acceptance, accepted_quote_revision or sent_quote_revision. Null when no cost was fixed at a quote, including a quote sent with no cost figures. Never a live pricing estimate.",
+      "actual_cost_ex": "Actual cost from the job's own lines only: trade charges, supplier bills and materials facts linked to the job (cost_basis is always line_level; line_level_cost_ex is the same figure). Never a Xero Project total.",
+      "xero_project_expenses_ex": "Expenses on record against the job's Xero Project. Evidence only, not the job's full cost: trade labour may sit outside it. Never part of actual cost, profit, margin or any company, work-type or month total. A Xero Project counts only when its name carries the job's own job number; one linked by contact only gives no figure and the job is flagged xero_project_linked_by_contact_only.",
+      "xero_project_exceeds_line_costs": "The Xero Project has more expenses on record than the costs linked to the job, so the job's full cost is unknown. Profit and margin are null until those expenses are linked to the job.",
+      "verified_paid": "Xero recorded the payment (status PAID; trade invoices paid). Not a bank reconciliation.",
+      "margin": "Null when job_financials would suppress it (no client invoice, no cost, no labour linked, incomplete trade invoice lines, unclassified lines), when the Xero Project total exceeds the costs linked to the job (xero_project_exceeds_line_costs), or when materials are owed but none is linked (labour-only cost).",
+      "profit_ex_unsuppressed": "Invoiced minus the costs linked so far, shown even where profit is suppressed. Not a profit figure. Null when the Xero Project total exceeds the costs linked to the job.",
+      "committed_open_ex": "Priced open purchase orders with no supplier invoice emailed and no bill placed, ex GST. Committed, not actual. An order with no price is never counted here as $0.00.",
+      "ordered_not_billed_count": "Ordered, not billed: sent purchase orders with no price (every Dispatch order) and no invoice or bill yet. A count, never a dollar figure. ordered_not_billed_over_30_count is those first sent 30 or more days ago.",
+      "invoice_emailed_count": "Invoice emailed, no bill matched to this order: the supplier emailed an invoice for the order, and no bill is linked to the order yet. The bill may already be on the job without a link to the order, so check before chasing it. Money owed or paid, never nothing owed. invoice_emailed_ex is the amount of the priced ones; it is in neither committed_open_ex nor actual cost.",
+      "rollup_expected_vs_actual": "Company view: expected against actual cost counts only jobs whose actual cost is complete (cost_flag ok or text_matched_lines). A job with an expected cost but partial actual cost (no cost linked, materials not linked, labour missing, unclassified or incomplete lines) is not comparable and is counted in jobs_with_expected_not_comparable instead. A group with no publishable job reads profit and margin as null (Unknown), never 0.",
+      "holding_jobs": "Holding jobs (costs parked on a bucket card, not a customer's job) are in no company, work-type or month total; their figures are reported on their own under holding_jobs."
+    }
+  }
+}

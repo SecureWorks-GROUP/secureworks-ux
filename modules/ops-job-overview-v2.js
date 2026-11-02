@@ -313,6 +313,7 @@ var JobOverviewV2Core = (function () {
       evidence_until: src.evidence_until || r.evidence_until || null,
       request_open: !!(r.request_open || src.request_open || writer.open_request || (req.requested_at && !req.done_at)),
       requested_at: r.requested_at || req.requested_at || null,
+      last_failure: obj(writer.last_failure),
       writer_on: writer.on == null ? (r.writer_on == null ? null : !!r.writer_on) : !!writer.on
     };
   }
@@ -434,7 +435,7 @@ var JobOverviewV2Core = (function () {
     var loops = arr(story && story.loops).filter(function (l) {
       return l && l.what && ['closed', 'superseded', 'done', 'resolved'].indexOf(lower(l.status)) < 0;
     });
-    if (!loops.length) loops = loopsFromNotes(Array.isArray(notes) ? notes : (obj(notes) && notes.items));
+    if (!loops.length && !(story && story.placement_review && story.placement_review.state === 'needs_review')) loops = loopsFromNotes(Array.isArray(notes) ? notes : (obj(notes) && notes.items));
     var groups = { blocking: [], waiting: [], know: [] };
     loops.forEach(function (l, i) {
       var g = loopGroup(l);
@@ -469,7 +470,7 @@ var JobOverviewV2Core = (function () {
     if (unread > 0) return 'AI notes have not read the newest ' + plural(unread, 'record') + ' yet';
     if (l.stale === true || l.needs_rebuild === true) return 'AI notes are due for a fresh read';
     var until = l.evidence_until ? stamp(l.evidence_until, now) : '';
-    return until ? 'AI notes have read everything up to ' + until : 'AI notes are up to date';
+    return until ? 'AI notes have read captured records placed on this job up to ' + until : 'AI notes are current for captured records placed on this job';
   }
 
   // ── Money ──
@@ -1777,7 +1778,7 @@ var JobOverviewV2 = (function () {
     h += nextHtml(m);
     h += storyMomentsHtml(m) + storyMoneyHtml(m) + storyBookHtml(m) + storyBillsHtml(m);
     h += openItemsHtml(m, true);
-    h += heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
+    h += ledgerHistoryHtml(m) + heldMessagesHtml(m) + lastWordHtml(m) + unknownHtml(m);
     if (sec) {
       var more = [['the_job', 'The job'], ['how_we_got_here', 'How we got here'], ['watch_out', 'Watch out']]
         .filter(function (p) { return !!sec[p[0]]; });
@@ -1855,6 +1856,42 @@ var JobOverviewV2 = (function () {
     }
     return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told the customer', m.lastUs) + '</div>';
   }
+  // These are the reader's recorded states, not new decisions or money signoff.
+  // Keep reference identities, but never render raw citation excerpts or fetch originals.
+  function ledgerHistoryHtml(m) {
+    var story = m.story || {};
+    var labels = { closed: 'Closed in AI notes', declined: 'Declined', superseded: 'Replaced', disputed: 'Disputed' };
+    function references(item) {
+      var seen = {}, refs = C.arr(item.cites).concat(C.arr(item.closed_by)).filter(function (c) {
+        if (!c || typeof c !== 'object') return false;
+        var key = C.str(c.t || c.table) + ':' + C.str(c.id);
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      return '<details><summary>Source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>' +
+        (refs.length ? refs.map(function (c) { return '<li>' + esc(C.str(c.t || c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; }).join('') : '<li>Source references unavailable.</li>') + '</ul></details>';
+    }
+    function list(key) {
+      if (!Array.isArray(story[key])) return '<p>' + (key === 'disputed' ? 'Disputed' : 'Settled and replaced') + ' notes were not returned in this read.</p>';
+      if (!story[key].length) return '<p>No ' + (key === 'disputed' ? 'disputed' : 'settled or replaced') + ' notes were returned by the reader.</p>';
+      return story[key].map(function (raw) {
+        var item = C.obj(raw) || {}, status = C.lower(item.status);
+        var valid = key === 'disputed' ? status === 'disputed' : ['closed', 'declined', 'superseded'].indexOf(status) >= 0;
+        var at = valid ? (key === 'disputed' ? item.disputed_at : item.closed_at) : null;
+        var date = at && isFinite(C.toMs(at)) ? C.longDate(at, m.now) : 'Status date not recorded';
+        return '<article class="ov2-held-item" data-ov2-ledger-key="' + esc(item.key || '') + '"><strong>' + esc(valid ? labels[status] : 'Note status unavailable') + '</strong>' +
+          '<div class="ov2-im">' + esc(date) + '</div>' +
+          (item.job_certain === false ? '<p><strong>Job not certain: may belong to another job.</strong></p>' : '') +
+          (item.customer_reported === true ? '<p>Customer-reported claim; not independently confirmed.</p>' : '') +
+          '<p>' + esc(C.clean(item.what) || 'Note wording unavailable') + '</p>' + references(item) + '</article>';
+      }).join('');
+    }
+    return '<section class="ov2-story-block" id="ov2LedgerHistory" aria-label="Disputed and historical AI notes">' +
+      '<h3>Disputed notes</h3><p>These disagreements remain recorded. They are not settled facts or a new instruction to chase payment.</p>' + list('disputed') +
+      '<details><summary>Settled and replaced notes' + (Array.isArray(story.settled) ? ' (' + story.settled.length + ')' : '') + '</summary>' +
+      '<p>These are the AI reader\'s recorded decisions, true as at their dates. Closed does not prove payment, cost completeness or bank settlement.</p>' + list('settled') + '</details></section>';
+  }
   function heldMessagesHtml(m) {
     var held = C.obj(m.story && m.story.held_messages);
     if (!held) return '';
@@ -1883,8 +1920,33 @@ var JobOverviewV2 = (function () {
     });
     return h + '</section>';
   }
+  // Historical review is read-only. Do not route to the unreleased original-message
+  // endpoint or display citation excerpts (which can include protected call words).
+  function placementReviewHtml(m) {
+    var review = C.obj(m.story && m.story.placement_review);
+    if (!review || review.state !== 'needs_review') return '';
+    var items = C.arr(review.items);
+    var h = '<section id="ov2PlacementReview" aria-label="Historical notes needing review"><h3>Historical notes needing review</h3>' +
+      '<p>The sources no longer support these notes on this job. The matters remain unresolved. They have not been settled or transferred and are not current debt claims.</p>';
+    if (!items.length) h += '<p>Review details could not be read. This does not mean nothing remains unresolved.</p>';
+    items.forEach(function (item) {
+      h += '<article data-ov2-review-key="' + esc(item.item_key || '') + '"><p>' + esc(C.clean(item.what) || 'Note wording unavailable') + '</p>' +
+        '<details><summary>Retained source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>';
+      var cites = C.arr(item.opened_by);
+      cites.forEach(function (c) { h += '<li>' + esc(C.str(c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; });
+      if (!cites.length) h += '<li>Source references unavailable.</li>';
+      h += '</ul></details></article>';
+    });
+    return h + '</section>';
+  }
   function unknownHtml(m) {
-    var gaps = C.arr(m.story && m.story.not_known).map(function (x) {
+    var review = C.obj(m.story && m.story.placement_review);
+    var reviewing = review && review.state === 'needs_review';
+    var gaps = C.arr(m.story && m.story.not_known).filter(function (x) {
+      // The full review below owns these exact notes, with references; unrelated gaps stay.
+      return !(reviewing && x && x.certainty === 'source_placement_review' && C.arr(review.items).some(function (i) { return i.item_key && i.item_key === x.item_key; }));
+    }).map(function (x) {
+      if (reviewing && x && /^\d+ reader items? (?:was|were) hidden because messages (?:it|they) cited moved off this job; the story needs a rebuild\.$/.test(C.clean(x.what))) return 'Some historical notes need source-placement review before the AI notes can be rebuilt. The unresolved matters remain listed below.';
       return C.clean(typeof x === 'string' ? x : (x && (x.what || x.line || x.text)));
     }).filter(Boolean);
     var seen = {};
@@ -1896,6 +1958,7 @@ var JobOverviewV2 = (function () {
       billGaps(m).map(function (x) { return '<li data-ov2-bill-gap="1">' + esc(x) + '</li>'; }).join('') +
       standing.map(function (x) { return '<li data-ov2-not-seen="1">' + esc(x) + '</li>'; }).join('');
     if (lines) h += '<ul>' + lines + '</ul>';
+    h += placementReviewHtml(m);
     h += matchingHtml(m);
     return h + '</div>';
   }
@@ -1988,18 +2051,38 @@ var JobOverviewV2 = (function () {
   }
   function stampHtml(m) {
     var t = m.text, u = m.u, parts = [];
+    var failure = t && t.last_failure;
+    var failedAt = C.toMs(failure && failure.at);
+    var writtenAt = C.toMs(t && t.sections && t.written_at);
+    var askedAt = C.toMs(u.asked && u.asked.at);
+    // A terminal server receipt supersedes the local request acknowledgement.
+    // An older failure cannot cancel a newer request; an old cache is not a receipt.
+    var localPending = !!(u.asked && u.asked.ok &&
+      !(isFinite(askedAt) && ((isFinite(failedAt) && failedAt >= askedAt) ||
+        (isFinite(writtenAt) && writtenAt >= askedAt))));
+    var pending = !!((t && t.request_open) || localPending);
     if (t && t.sections) {
-      parts.push((t.written_at ? 'Story as of ' + C.stamp(t.written_at, m.now) : 'Story written') + ', rewritten when something new happens');
+      parts.push(t.written_at ? 'Story as of ' + C.stamp(t.written_at, m.now) : 'Story written');
       if (t.state === 'stale') parts.push('Something newer has happened since it was written');
     }
-    parts.push(C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
+    parts.push(m.story.placement_review && m.story.placement_review.state === 'needs_review'
+      ? 'AI notes need source-placement review before a fresh reading; unresolved matters remain listed below'
+      : C.ledgerWords(C.obj(m.story.meta) && m.story.meta.ledger, m.now));
     var h = '<div class="ov2-stamp" id="ov2Stamp"><p>' + esc(parts.join('. ') + '.') + '</p>';
+    if (failure && !(isFinite(failedAt) && isFinite(writtenAt) && writtenAt > failedAt)) {
+      var failedWords = failure.error === 'fact_check_failed'
+        ? 'The last rewrite did not pass its source checks.' : 'The last rewrite failed.';
+      failedWords += ' No replacement story was saved.';
+      if (isFinite(failedAt)) failedWords += ' Last attempt: ' + C.stamp(failure.at, m.now) + '.';
+      if (!pending) failedWords += ' No rewrite is queued.';
+      h += '<p class="ov2-bad" id="ov2WriterFailure" role="status">' + esc(failedWords) + '</p>';
+    }
     if (t && t.writer_on === false) {
       h += '<p id="ov2WriterOff">Written stories and rewriting are not switched on yet.</p>';
-    } else if (u.asked && u.asked.ok) {
-      h += '<p class="ov2-asked" id="ov2Asked">' + esc('Asked at ' + C.timeWords(u.asked.at) + '.' + (u.asked.words ? ' ' + u.asked.words : '')) + '</p>';
     } else if (t && t.request_open) {
       h += '<p class="ov2-asked" id="ov2Asked">A rewrite has been asked for.</p>';
+    } else if (localPending) {
+      h += '<p class="ov2-asked" id="ov2Asked">' + esc('Asked at ' + C.timeWords(u.asked.at) + '.' + (u.asked.words ? ' ' + u.asked.words : '')) + '</p>';
     } else {
       if (u.asked && !u.asked.ok) h += '<p class="ov2-asked ov2-bad" id="ov2Asked">' + esc(u.asked.words) + '</p>';
       h += '<button type="button" class="ov2-linkbtn" id="ov2Rewrite" data-ov2-act="rewrite" aria-label="Ask for the story to be rewritten">Rewrite</button>';

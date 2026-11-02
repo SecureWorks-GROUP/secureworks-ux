@@ -250,8 +250,8 @@ test('a written story shows its sections and when it was written', async ({ page
   await expect(page.locator('#ov2Story')).toContainText('Replace the 23m back and side fence, the old asbestos fence comes out');
   await expect(page.locator('#ov2Story [data-ov2-group="know"]')).toContainText('Good to know 2');
   await expect(page.locator('#ov2Stamp')).toContainText('Story as of');
-  await expect(page.locator('#ov2Stamp')).toContainText('rewritten when something new happens');
-  await expect(page.locator('#ov2Stamp')).toContainText('AI notes have read everything up to');
+  await expect(page.locator('#ov2Stamp')).not.toContainText('rewritten when something new happens');
+  await expect(page.locator('#ov2Stamp')).toContainText('AI notes have read captured records placed on this job up to');
   const text = await page.locator('#jdOverview').innerText();
   expect(text).not.toMatch(/[\u2013\u2014]/);
 });

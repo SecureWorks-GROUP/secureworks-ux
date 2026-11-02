@@ -411,6 +411,8 @@ var ReconCore = (function () {
     if (!res || typeof res !== 'object' || !res.kind) return { error: 'The original could not be read just now.' };
     var v = { kind: res.kind, rows: [], body: null, bodyNote: '', files: null, filesNote: '', callNote: '', listen: '' };
     var at = perthWhen(res.at);
+    if (res.at_source === 'unknown') at = 'Message time unknown';
+    else if (res.at_source === 'captured' && at) at = 'Captured ' + at;
     if (res.kind === 'call') {
       var c = res.call || {};
       var mins = typeof c.duration_seconds === 'number' && isFinite(c.duration_seconds) ? c.duration_seconds : null;
@@ -741,7 +743,7 @@ function rcCard(item) {
     h += '<div class="rc-top"><span>' + rcEsc((s.channel || 'Message') + (s.from ? ' from ' + s.from : '')) +
       (held ? '<span class="rc-held">' + rcEsc(held) + '</span>' : '') + '</span>' +
       (band === 2 ? '<span>They owe ' + rcEsc(ReconCore.money(item.amount)) + '</span>' : '') + '</div>';
-    h += '<div class="rc-meta">' + rcEsc([ReconCore.senderWords(s.counterpart_role), ReconCore.perthWhen(s.occurred_at), item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
+    h += '<div class="rc-meta">' + rcEsc([ReconCore.senderWords(s.counterpart_role), (ReconCore.perthWhen(s.occurred_at) || 'Message time unknown'), item.waiting_days == null ? '' : 'Waiting ' + ReconCore.waitWords(item.waiting_days),
       item.band == null ? ReconCore.causeWords(item.cause) : ''].filter(Boolean).join(' · ')) + '</div>';
     if (s.subject) h += '<div class="rc-preview"><strong>' + rcEsc(s.subject) + '</strong></div>';
     if (s.preview) h += '<div class="rc-preview">' + rcEsc(s.preview) + '</div>';

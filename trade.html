@@ -22916,6 +22916,43 @@
       return line ? line.label + ' \u2212' + money(line.amount) : '';
     }
     // </trade-recurring-deduction>
+    // <trade-xero-changes>
+    // Group WO V10 (3 Nov 2026): the office adds its own lines to a crew bill
+    // in Xero after it is sent, for example a vehicle loan repayment. ops-api
+    // sends what xero-sync read from the bill: `xero_adjustments` {total,
+    // lines [{description, amount, account_code, kind}]}, the pay after them
+    // (`payable_after_xero`) and the bill's total in Xero (`xero_pays`). The
+    // app only shows them. Absent means the bill is not read yet, and every
+    // screen reads exactly as before.
+    function xeroChangesOf(source) {
+      var x = source && source.xero_adjustments;
+      if (!x || typeof x !== 'object' || !Array.isArray(x.lines)) return null;
+      var after = source.payable_after_xero;
+      var lines = x.lines.map(function (l) {
+        var amount = l && hasMoney(l.amount) ? round2(l.amount) : null;
+        var label = String((l && l.description) == null ? '' : l.description).replace(/\s+/g, ' ').trim();
+        return label && amount != null && amount !== 0 ? { label: label, amount: amount } : null;
+      }).filter(Boolean);
+      return {
+        lines: lines,
+        total: hasMoney(x.total) ? round2(x.total) : 0,
+        before: hasMoney(source.trade_payable) ? round2(source.trade_payable) : null,
+        after: hasMoney(after) ? round2(after) : null,
+        pays: hasMoney(source.xero_pays) ? round2(source.xero_pays) : null
+      };
+    }
+    // "Vehicle Loan repayment -$100.00" with a real minus sign (or "+$75.00").
+    function xeroChangeLabel(line) {
+      if (!line) return '';
+      return line.label + ' ' + (line.amount < 0 ? '\u2212' : '+') + money(Math.abs(line.amount));
+    }
+    // When Xero's bill differs from the pay shown with no line to say why (a
+    // GST bill entered in Xero without GST), say so instead of hiding it.
+    function xeroGapNote(x) {
+      if (!x || x.pays == null || x.after == null || sameMoney(x.pays, x.after)) return '';
+      return 'Xero\'s bill for this invoice is ' + money(x.pays) + ', not ' + money(x.after) + ' as shown here. Ask the office.';
+    }
+    // </trade-xero-changes>
     // What the amount column says for one invoice. Paid: what Xero actually
     // paid (amount_paid), with the invoiced figure beside it when the two
     // differ. Part paid: what is still owed. Otherwise the payable figure, or
@@ -23012,9 +23049,12 @@
       var onclick = String(row.status || '') === 'draft' ? "openInvoiceDraft('" + esc(row.id) + "')" : "viewInvoiceDetail('" + esc(row.id) + "')";
       var h = '<div class="mm-inv" data-mm-invoice="' + esc(row.id) + '" data-mm-status="' + esc(st.cls) + '" onclick="' + onclick + '">';
       h += '<div class="mm-inv-l"><div class="mm-inv-when">' + esc(when) + '</div><div class="mm-inv-num">' + esc(row.invoice_number || '') + (row.counts === false ? ' (not counted)' : '') + '</div></div>';
-      // my_money rows already carry the reduced payable; name what came off it.
+      // my_money rows already carry the reduced payable; name what came off it,
+      // and each change the office made in Xero. [trade-xero-changes]
       var ded = deductionOf(row);
-      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amt.main) + '</div>' + (amt.sub ? '<div class="mm-inv-sub" data-mm-amount-sub>' + esc(amt.sub) + '</div>' : '') + (ded ? '<div class="mm-inv-sub" data-mm-deduction>' + esc(deductionLabel(ded)) + '</div>' : '') + '<span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+      var xero = xeroChangesOf(row);
+      var xeroSubs = xero ? xero.lines.map(function (l) { return '<div class="mm-inv-sub" data-mm-xero-change>' + esc(xeroChangeLabel(l)) + ' (in Xero)</div>'; }).join('') : '';
+      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amt.main) + '</div>' + (amt.sub ? '<div class="mm-inv-sub" data-mm-amount-sub>' + esc(amt.sub) + '</div>' : '') + (ded ? '<div class="mm-inv-sub" data-mm-deduction>' + esc(deductionLabel(ded)) + '</div>' : '') + xeroSubs + '<span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
       h += '</div>';
       return h;
     }
@@ -23041,7 +23081,7 @@
       h += '</div>';
       return h;
     }
-    return { money: money, dateShort: dateShort, statusOf: statusOf, amountOf: amountOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit, deductionOf: deductionOf, deductionWeekOf: deductionWeekOf, deductionComesOff: deductionComesOff, deductionLabel: deductionLabel };
+    return { money: money, dateShort: dateShort, statusOf: statusOf, amountOf: amountOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit, deductionOf: deductionOf, deductionWeekOf: deductionWeekOf, deductionComesOff: deductionComesOff, deductionLabel: deductionLabel, xeroChangesOf: xeroChangesOf, xeroChangeLabel: xeroChangeLabel, xeroGapNote: xeroGapNote };
   })();
   // </trade-my-money>
 
@@ -23336,6 +23376,8 @@
     };
     if (deduction) persisted.deduction = deduction;
     if (weekDeduction) persisted.deduction_week = weekDeduction;
+    var xero = MyMoneyCore.xeroChangesOf(source);
+    if (xero && xero.after != null) persisted.xero = xero;
     return persisted;
   }
 
@@ -23370,6 +23412,10 @@
     } else if (!inv.figures_error && _invoiceHasPersistedNumber(inv.total_inc)) {
       payable = Number(inv.total_inc);
     }
+    // Once xero-sync has read the bill, the pay is the server's figure after
+    // the office's changes in Xero. [trade-xero-changes]
+    var xero = isWorkOrderInvoice ? null : MyMoneyCore.xeroChangesOf(inv);
+    if (xero && xero.after != null && payable != null) payable = xero.after;
     var row = {
       id: inv.id,
       invoice_number: inv.invoice_number || inv.xero_bill_number || null,
@@ -23384,14 +23430,20 @@
       figures_ok: payable != null
     };
     if (deduction) row.deduction = deduction;
+    if (xero && xero.lines.length) row.xero_changes = xero.lines;
     return row;
   }
 
-  // "Ute hire -$100.00" under the amount of a row that carries a deduction.
+  // "Ute hire -$100.00" under the amount of a row that carries a deduction,
+  // and each change the office made in Xero. [trade-xero-changes]
   function _invoiceRowDeductionHtml(row) {
-    return row && row.deduction
+    var h = row && row.deduction
       ? '<div class="mm-inv-sub" data-inv-deduction>' + esc(MyMoneyCore.deductionLabel(row.deduction)) + '</div>'
       : '';
+    (row && row.xero_changes || []).forEach(function(line) {
+      h += '<div class="mm-inv-sub" data-inv-xero-change>' + esc(MyMoneyCore.xeroChangeLabel(line)) + ' (in Xero)</div>';
+    });
+    return h;
   }
 
   function _invoiceDetailStatusHtml(inv) {
@@ -23468,6 +23520,10 @@
     // invoice the server says was not taken, only its reason is shown: never
     // the row and the reason together.
     var comesOff = !!(opts.gstSwitch && MyMoneyCore.deductionComesOff(weekDeduction));
+    // [trade-xero-changes] The office's changes to the bill in Xero, on a
+    // saved invoice only. With any, "You get paid" moves below them.
+    var xero = !opts.gstSwitch && money.xero ? money.xero : null;
+    var xeroLines = xero ? xero.lines : [];
     var attrs = ' class="inv-money-summary" data-invoice-money-summary';
     if (opts.id) attrs += ' id="' + opts.id + '"';
     var html = '<div' + attrs + '>';
@@ -23480,8 +23536,8 @@
     html += '<div class="inv-money-row"><span>Company covers the other ' + _invoiceRateLabel(workerRate) + '</span><span>' + _invoiceMoney(company) + '</span></div>';
     // "You get paid" is only ever the last figure. On an invoice with a
     // deduction that is the server's trade_payable, further down.
-    if (deduction || comesOff) {
-      html += '<div class="inv-money-row' + (deduction ? '' : ' net') + '" data-invoice-after-super><span>After super</span><span>' + _invoiceMoney(cash) + '</span></div>';
+    if (deduction || comesOff || xeroLines.length) {
+      html += '<div class="inv-money-row' + (deduction || xeroLines.length ? '' : ' net') + '" data-invoice-after-super><span>After super</span><span>' + _invoiceMoney(cash) + '</span></div>';
     } else {
       html += '<div class="inv-money-row net"><span>You get paid</span><span>' + _invoiceMoney(cash) + '</span></div>';
     }
@@ -23500,8 +23556,21 @@
       if (deduction) {
         if (deduction.before != null) html += '<div class="inv-money-row" data-invoice-before-deduction><span>Payable before ' + esc(deduction.label) + '</span><span>' + _invoiceMoney(deduction.before) + '</span></div>';
         html += '<div class="inv-money-row" data-invoice-deduction><span>' + esc(deduction.label) + '</span><span>−' + _invoiceMoney(deduction.amount) + '</span></div>';
-        html += '<div class="inv-money-row net" data-invoice-paid><span>You get paid</span><span>' + _invoiceMoney(deduction.paid) + '</span></div>';
+        if (!xeroLines.length) html += '<div class="inv-money-row net" data-invoice-paid><span>You get paid</span><span>' + _invoiceMoney(deduction.paid) + '</span></div>';
       }
+      if (xeroLines.length) {
+        if (xero.before != null) html += '<div class="inv-money-row" data-invoice-before-xero><span>Payable before changes in Xero</span><span>' + _invoiceMoney(xero.before) + '</span></div>';
+        xeroLines.forEach(function(line) {
+          html += '<div class="inv-money-row" data-invoice-xero-change><span>' + esc(line.label) + ' (in Xero)</span><span>' + (line.amount < 0 ? '−' : '+') + _invoiceMoney(Math.abs(line.amount)) + '</span></div>';
+        });
+        html += '<div class="inv-money-row net" data-invoice-paid><span>You get paid</span><span>' + _invoiceMoney(xero.after) + '</span></div>';
+      }
+    }
+    if (xeroLines.length) {
+      html += '<div class="inv-money-note" data-invoice-xero-note>The office changed this bill in Xero after you sent it: ' + esc(xeroLines.map(MyMoneyCore.xeroChangeLabel).join(', ')) + '. Ask the office about any change you do not expect.</div>';
+    }
+    if (xero && MyMoneyCore.xeroGapNote(xero)) {
+      html += '<div class="inv-money-note" data-invoice-xero-gap>' + esc(MyMoneyCore.xeroGapNote(xero)) + '</div>';
     }
     if (deduction) {
       html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(MyMoneyCore.deductionLabel(deduction)) + ' came off this invoice after super and GST.</div>';

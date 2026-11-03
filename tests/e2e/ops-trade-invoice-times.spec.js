@@ -111,3 +111,29 @@ test('trade bills: the reason a deduction was not taken shows at every status, o
   await expect(otherRow.locator('[data-deduction-note]')).toHaveCount(0);
   await expect(otherRow).not.toContainText('Old review note');
 });
+
+// Group WO V10 (3 Nov 2026): the office adds its own lines to a crew bill in
+// Xero after it is pushed. The read sends what xero-sync took from the bill;
+// the Total cell names each line and what Xero pays. Real bill:
+// SW-INV-A-261011-029, "Vehicle Loan repayment" -100.00 on 611, Xero 1338.20.
+test('trade bills: an office line added in Xero is named, with what Xero pays; an unread or unchanged bill reads as before', async ({ page }) => {
+  await bootOps(page);
+  await page.evaluate(() => {
+    window.renderTradeBillTable([
+      {
+        id: 'inv-alyx', users: { name: 'Alyx Trade' }, week_start: '2026-09-28', total_hours: 0, total_inc: 1530, trade_payable: 1438.2, status: 'paid',
+        xero_adjustments: { total: -100, lines: [{ description: 'Vehicle Loan repayment', amount: -100, account_code: '611', kind: 'office_line' }] },
+        payable_after_xero: 1338.2, xero_pays: 1338.2
+      },
+      { id: 'inv-same', users: { name: 'Same Trade' }, week_start: '2026-10-12', total_hours: 8, total_inc: 440, trade_payable: 416, status: 'paid', xero_adjustments: { total: 0, lines: [] }, payable_after_xero: 416, xero_pays: 416 },
+      { id: 'inv-unread', users: { name: 'Unread Trade' }, week_start: '2026-10-12', total_hours: 8, total_inc: 440, trade_payable: 416, status: 'pushed_to_xero' }
+    ]);
+  });
+  const rows = page.locator('#tradeBillTable tbody tr');
+  const alyx = rows.filter({ hasText: 'Alyx Trade' }).locator('td').nth(3);
+  await expect(alyx.locator('[data-invoice-xero-change]')).toHaveText('Vehicle Loan repayment (611) −$100.00 in Xero');
+  await expect(alyx.locator('[data-invoice-xero-pays]')).toHaveText('Xero pays $1338.20');
+  for (const name of ['Same Trade', 'Unread Trade']) {
+    expect(await rows.filter({ hasText: name }).locator('td').nth(3).innerHTML()).toBe('$440.00');
+  }
+});

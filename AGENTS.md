@@ -1036,6 +1036,20 @@ Search `// <trade-recurring-deduction>` (`MyMoneyCore.deductionOf` /
 `deductionWeekOf`) and `// <trade-recurring-deduction-ops>`. Contract, screens
 and wording: `trade-app.md` → "Pay tab: a weekly deduction".
 
+## Trade pay after the office's changes in Xero: server figures only (`trade.html`, `ops.html`)
+
+The office adds its own lines to a crew bill in Xero after it is pushed (a
+vehicle loan repayment, an overpayment taken back; Group WO V10, 3 Nov 2026).
+xero-sync reads them from the bill and the reads send `xero_adjustments`
+`{total, lines [{description, amount, account_code, kind}]}`,
+`payable_after_xero` and `xero_pays` (the bill's total in Xero). Once read,
+the pay figure is `payable_after_xero` (my_money's `payable` already is); each
+line is named beside it, and when `xero_pays` differs (a GST bill entered in
+Xero without GST) the invoice says so instead of hiding it. Absent fields mean
+the bill is not read yet and every screen reads exactly as before. Never work
+a figure out in the browser. Search `// <trade-xero-changes>` and
+`swTradeInvoiceXeroChangesHtml`; checks in `scripts/test-trade-my-money.js`.
+
 ## Trade own work: Today, History, Calendar default (`trade.html`)
 
 "My work" is ONE list: `ownAssignmentRows` (`// <trade-own-work>`) keeps the

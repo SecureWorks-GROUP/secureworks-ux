@@ -360,4 +360,46 @@ context._hoursWeekStart = '2026-10-12';
 const labelHtml = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(Object.assign({}, uteInvoice, { recurring_deduction: { label: 'Ute <hire> & trailer', amount: 100 } })));
 check('a deduction label is escaped on the invoice', labelHtml.indexOf('Ute &lt;hire&gt; &amp; trailer') !== -1 && labelHtml.indexOf('<hire>') === -1);
 
+// Group WO V10 (3 Nov 2026): the office adds lines to a crew bill in Xero
+// after it is sent. These are the shapes ops-api now sends for real bills,
+// read from Xero: SW-INV-A-261011-029 (Alyx: app 1438.20, Xero 1338.20 after
+// the office's "Vehicle Loan repayment" -100.00) and SW-INV-H-260914-029 (a
+// GST bill Xero holds without GST: 1883.20). The expected pay is Xero's.
+const alyxRead = {
+  id: 'ti-alyx', invoice_number: 'SW-INV-A-261011-029', week_end: '2026-10-04', status: 'paid', xero_bill_status: 'PAID', paid: true, amount_paid: 1338.2,
+  gross_earned: 1530, super_rate: 0.12, super_amount: 183.6, net_pay: 1438.2, gst_on: false, gst: 0, total_inc: 1530, trade_payable: 1438.2,
+  xero_adjustments: { total: -100, lines: [{ description: 'Vehicle Loan repayment', amount: -100, account_code: '611', kind: 'office_line' }] },
+  payable_after_xero: 1338.2, xero_pays: 1338.2
+};
+const alyxXero = M.xeroChangesOf(alyxRead);
+check('V10: xeroChangesOf reads the office line and the server figures', alyxXero.lines.length === 1 && alyxXero.lines[0].label === 'Vehicle Loan repayment' && alyxXero.lines[0].amount === -100 && alyxXero.before === 1438.2 && alyxXero.after === 1338.2 && alyxXero.pays === 1338.2);
+check('V10: the change label has a real minus sign', M.xeroChangeLabel(alyxXero.lines[0]) === 'Vehicle Loan repayment −$100.00');
+check('V10: an unread bill has no Xero changes', M.xeroChangesOf({ trade_payable: 1438.2 }) === null);
+const alyxMoneyRow = M.invoiceRowHTML({ id: 'ti-alyx', invoice_number: 'SW-INV-A-261011-029', week_end: '2026-10-04', status: 'paid', paid: true, amount_paid: 1338.2, payable: 1338.2, trade_payable: 1438.2, xero_adjustments: alyxRead.xero_adjustments, xero_pays: 1338.2 });
+check('V10: my money row shows what Xero paid and names the office line', alyxMoneyRow.indexOf('<div class="mm-inv-amt">$1,338.20</div>') !== -1 && alyxMoneyRow.indexOf('<div class="mm-inv-sub" data-mm-xero-change>Vehicle Loan repayment −$100.00 (in Xero)</div>') !== -1 && alyxMoneyRow.indexOf('Invoiced') === -1);
+const alyxHistory = context._invoiceHistoryMoneyRow(alyxRead);
+check('V10: invoice history pays the figure after Xero, with the change named', alyxHistory.payable === 1338.2 && M.amountOf(alyxHistory).main === '$1,338.20' && M.amountOf(alyxHistory).sub === '' && alyxHistory.xero_changes.length === 1);
+const alyxDetail = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(alyxRead));
+const rowAt = (html, text) => html.indexOf(text);
+check('V10: the saved invoice shows the pay before Xero, the office line, then You get paid as Xero pays',
+  rowAt(alyxDetail, '<span>After super</span><span>$1438.20</span>') !== -1
+  && rowAt(alyxDetail, '<span>Payable before changes in Xero</span><span>$1438.20</span>') !== -1
+  && rowAt(alyxDetail, '<span>Vehicle Loan repayment (in Xero)</span><span>−$100.00</span>') > rowAt(alyxDetail, 'Payable before changes in Xero')
+  && rowAt(alyxDetail, '<div class="inv-money-row net" data-invoice-paid><span>You get paid</span><span>$1338.20</span></div>') > rowAt(alyxDetail, 'Vehicle Loan repayment (in Xero)')
+  && (alyxDetail.match(/You get paid/g) || []).length === 1);
+check('V10: the saved invoice says the office changed it in Xero', alyxDetail.indexOf('The office changed this bill in Xero after you sent it: Vehicle Loan repayment −$100.00. Ask the office about any change you do not expect.') !== -1 && alyxDetail.indexOf('—') === -1);
+const unread = Object.assign({}, alyxRead); delete unread.xero_adjustments; delete unread.payable_after_xero; delete unread.xero_pays;
+const unreadDetail = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(unread));
+check('V10: an unread bill reads exactly as before', unreadDetail.indexOf('Xero') === -1 && unreadDetail.indexOf('<div class="inv-money-row net"><span>You get paid</span><span>$1438.20</span></div>') !== -1);
+const hugoGst = {
+  gross_earned: 2140, super_rate: 0.12, super_amount: 256.8, net_pay: 1883.2, gst_on: true, gst: 214, gst_amount: 214, total_inc: 2354, trade_payable: 2097.2,
+  xero_adjustments: { total: 0, lines: [] }, payable_after_xero: 2097.2, xero_pays: 1883.2
+};
+const hugoDetail = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(hugoGst));
+check('V10: a GST bill Xero holds without GST is no deduction row, and the gap is said plainly',
+  hugoDetail.indexOf('data-invoice-xero-change') === -1 && hugoDetail.indexOf('data-invoice-before-xero') === -1
+  && hugoDetail.indexOf('Xero&#39;s bill for this invoice is $1,883.20, not $2,097.20 as shown here. Ask the office.') !== -1);
+const oddName = context._invoiceMoneySummaryHtml(context._invoicePersistedMoney(Object.assign({}, alyxRead, { xero_adjustments: { total: -100, lines: [{ description: 'Loan <ute> & trailer', amount: -100 }] } })));
+check('V10: an office line description is escaped', oddName.indexOf('Loan &lt;ute&gt; &amp; trailer (in Xero)') !== -1 && oddName.indexOf('<ute>') === -1);
+
 console.log('trade-my-money: ' + passed + ' checks passed');

@@ -19706,8 +19706,10 @@ function _jpPaid(paid, paidOn) {
   return '<span class="jp-unk">Unknown</span>';
 }
 // Quoted only from a sent or accepted quote; expected only from a cost fixed at
-// the quote. Any other source (or none) reads as missing, never as the figure.
-var JP_EXPECTED_SOURCES = ['frozen_at_acceptance', 'accepted_quote_revision', 'sent_quote_revision'];
+// the quote or a locked (sealed) scope revision (Marnin's yes, 2 Nov; switch
+// job_profit_patio_expected_from_frozen_scope). Any other source (or none) reads
+// as missing, never as the figure.
+var JP_EXPECTED_SOURCES = ['frozen_at_acceptance', 'accepted_quote_revision', 'sent_quote_revision', 'frozen_scope_revision'];
 function _jpQuoted(j) {
   return /^sent_quote:/.test(String(j.quoted_source || '')) ? _jpNum(j.quoted_ex) : null;
 }

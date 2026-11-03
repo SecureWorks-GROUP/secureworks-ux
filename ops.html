@@ -4983,7 +4983,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
         <!-- The Finance Health sub-tab is hidden (Captain 2026-10-06). Its panel,
              loader and ops-api action stay. -->
-        <button class="sub-tab" onclick="showSubTab('jobprofit')" data-sub="jobprofit" style="display:none;" title="Owner only: job profitability, expected vs actual cost, money timeline">Job profit</button>
+        <button class="sub-tab" onclick="showSubTab('jobprofit')" data-sub="jobprofit" style="display:none;" title="Owner, admins and office staff: job profitability, expected vs actual cost, money timeline">Job profit</button>
       </div>
 
       <!-- Invoices -->
@@ -19545,8 +19545,8 @@ async function loadQuotes() {
 // margin. Null evidence renders as Unknown, never $0, and a suppressed margin
 // stays suppressed. Company totals are never a sum of a loaded list page: until
 // the server answers view=rollup with totals, the Company view says so.
-// The tab is hidden unless the signed-in email is on JOB_PROFIT_VIEWERS
-// (_canSeeJobProfit, owner only); ops-api independently refuses anyone but admin/owner.
+// The tab is hidden unless the signed-in login is the owner's email or has an admin, owner or office-staff
+// role (_canSeeJobProfit); ops-api independently refuses every other role.
 // ════════════════════════════════════════════════════════════
 
 var JP_PAGE = 100;
@@ -19639,10 +19639,17 @@ function jpToggleTradeLines(btn, key) {
 }
 var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
 
-// Owner only (approved MVP visibility). Client-side gate; ops-api enforces admin/owner.
+// Owner, admins and office staff. Marnin, 3 Nov 2026 (call B): "yes office staff can see job profit in
+// ops dash or thorugh agents asking". Client-side gate by the signed-in login's role from list_users;
+// ops-api enforces the same roles (admin, owner, ops_manager) on job_profit and job_profit_list.
 var JOB_PROFIT_VIEWERS = ['marnin@secureworkswa.com.au'];
+var JOB_PROFIT_ROLES = ['admin', 'owner', 'ops_manager'];
 function _canSeeJobProfit() {
-  return !!(_opsUserEmail && JOB_PROFIT_VIEWERS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
+  if (!_opsUserEmail) return false;
+  var email = String(_opsUserEmail).toLowerCase();
+  if (JOB_PROFIT_VIEWERS.indexOf(email) !== -1) return true;
+  var me = (typeof _crewList !== 'undefined' && _crewList || []).find(function(u) { return String(u.email || '').toLowerCase() === email; });
+  return !!(me && JOB_PROFIT_ROLES.indexOf(String(me.role || '').toLowerCase()) !== -1);
 }
 
 function syncJobProfitTabVisibility() {
@@ -19807,7 +19814,7 @@ async function _jpLoadPage(reset) {
   } catch (e) {
     if (seq !== _jp.listSeq) return;
     var m = (e && e.message) || 'unknown error';
-    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load the job list, so no job here is known: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner/admin sign-in required)' : '') + '. Press Retry; if it keeps failing, narrow the filters and try again. <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()">Retry</button></div></td></tr>';
+    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load the job list, so no job here is known: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner, admin or office-staff sign-in required)' : '') + '. Press Retry; if it keeps failing, narrow the filters and try again. <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()">Retry</button></div></td></tr>';
     if (more) more.innerHTML = reset ? '' : '<div class="jp-note err">Could not load more: ' + _jpEsc(m) + ' <button class="btn btn-secondary btn-sm" onclick="jpLoadMore()">Retry</button></div>';
     if (status && reset) status.textContent = '';
   }
@@ -32005,7 +32012,8 @@ function initApp() {
       });
     }
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
-  loadCrewList(); // Pre-cache crew list for dropdowns
+  // Pre-cache crew list for dropdowns; the Job Profit tab's role check reads it, so re-check once loaded.
+  loadCrewList().then(function() { if (typeof syncJobProfitTabVisibility === 'function') syncJobProfitTabVisibility(); });
   restoreTab();
   // Debt tab: hidden until switched on (?debt=1, localStorage sw_debt_ws, or the backend's tab_visible).
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();

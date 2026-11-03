@@ -17,12 +17,16 @@ test.use({
   timezoneId: 'Australia/Perth'
 });
 
-async function openBuilder(page) {
+async function openWeek(page) {
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.locator('#invSaveBtn')).toBeVisible();
   await expect(page.locator('#invSubmitBtn')).toBeVisible();
+}
+
+async function openBuilder(page) {
+  await openWeek(page);
   await expect(page.locator('.jc-card', { hasText: 'SWMS-261400' })).toHaveCount(1);
   await expect(page.locator('.jc-card', { hasText: 'SWF-CLAIMED' })).toHaveCount(0);
 }
@@ -73,5 +77,48 @@ test('Save keeps the draft without sending, and it is still there after a fresh 
     path: '/opt/cursor/artifacts/invoice-saved-draft-reloaded.png',
     fullPage: true
   });
+  expect(feedRequests.some((entry) => entry.action === 'generate_trade_invoice')).toBe(false);
+});
+
+test('the owner can delete an auto line, and a reload keeps the edit and leaves the line off', async ({ appPage: page, feedRequests }) => {
+  await signIn(page, PERSONAS.installer);
+  await openBuilder(page);
+
+  const hours = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+  const auto = page.locator('.jc-card').filter({ hasText: 'SWMS-261400' });
+  await expect(hours.locator('[data-cardremove]')).toHaveText('Remove');
+  await expect(auto.locator('[data-cardremove]')).toHaveText('Remove');
+
+  await hours.locator('[data-carddesc]').fill('Hugo changed the auto line');
+  await hours.locator('[data-carddesc]').blur();
+  await auto.locator('[data-cardremove]').click();
+  await expect(page.locator('.jc-card', { hasText: 'SWMS-261400' })).toHaveCount(0);
+
+  await page.locator('#invSaveBtn').click();
+  await expect(page.locator('#toast')).toContainText('not been sent');
+  await expect(page.getByText('Invoice Submitted')).toHaveCount(0);
+
+  const saves = feedRequests.filter((entry) => entry.action === 'save_running_invoice_draft');
+  expect(saves.length).toBeGreaterThan(0);
+  const last = saves[saves.length - 1].body;
+  expect(last.draft_builder.manualLock).toBe(true);
+  expect(last.draft_builder.dismissedKeys).toContain('wo:e2e-approved-wo');
+  expect(last.draft_builder.jobCards.some((row) => row.job_number === 'SWMS-261400')).toBe(false);
+  expect(last.draft_builder.jobCards.some((row) => row.description === 'Hugo changed the auto line')).toBe(true);
+  expect(last.submit).toBeUndefined();
+  expect(last.xero).toBeUndefined();
+  expect(feedRequests.some((entry) => entry.action === 'generate_trade_invoice')).toBe(false);
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await openWeek(page);
+
+  await expect(page.locator('.jc-card', { hasText: 'SWMS-261400' })).toHaveCount(0);
+  await expect(page.locator('.jc-card', { hasText: 'SWF-CLAIMED' })).toHaveCount(0);
+  const kept = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+  await expect(kept.locator('[data-carddesc]')).toHaveValue('Hugo changed the auto line');
+  await expect(kept.locator('[data-carddesc]')).not.toHaveValue('Auto rebuilt this line');
+  await expect(page.locator('#invSaveBtn')).toBeVisible();
+  await expect(page.locator('#invSubmitBtn')).toBeVisible();
   expect(feedRequests.some((entry) => entry.action === 'generate_trade_invoice')).toBe(false);
 });

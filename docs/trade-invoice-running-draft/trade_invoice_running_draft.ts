@@ -1,5 +1,9 @@
 // Running weekly invoice draft.
 //
+// This copy is behind supabase/functions/ops-api/trade_invoice_running_draft.ts
+// in secureworks-backend. Do not paste this file over that one. The delete
+// and edit behaviour lands in the backend file.
+//
 // Save stores one draft per person per week. It never submits, authorises,
 // pays, or creates a Xero bill. GST, super and the weekly deduction stay on
 // generate_trade_invoice. Keep the merge rules in step with

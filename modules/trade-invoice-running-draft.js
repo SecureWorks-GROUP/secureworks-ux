@@ -84,7 +84,7 @@
 
   function snapshot(state) {
     state = state || {};
-    return {
+    var snap = {
       version: VERSION,
       ...(Array.isArray(state.groupIds) && state.groupIds.length ? { groupIds: state.groupIds.map(String) } : {}),
       jobCards: clone(state.jobCards || []) || [],
@@ -96,6 +96,10 @@
       weekStart: state.weekStart || '',
       weekEnd: state.weekEnd || ''
     };
+    // Set once the owner has deleted or edited a line. A later rebuild
+    // keeps those cards and does not put a removed line back.
+    if (state.manualLock) snap.manualLock = true;
+    return snap;
   }
 
   function saveBody(snap, extra) {
@@ -130,18 +134,161 @@
     return err;
   }
 
+  function draftError(message, code) {
+    var err = new Error(message);
+    err.code = code;
+    return err;
+  }
+
+  // Owner of this draft, or office (admin / ops manager / owner), or the
+  // assistant acting for that owner. Submitted and authorised invoices stay locked.
+  function mayEditDraft(input) {
+    input = input || {};
+    var status = String(input.invoice_status || (input.existing && input.existing.status) || 'draft');
+    if (status !== 'draft') {
+      return {
+        ok: false,
+        code: 'draft_locked',
+        message: 'Only a draft invoice can be changed. A submitted invoice stays as it was sent.'
+      };
+    }
+    var owner = String(input.owner_id || input.user_id || '');
+    var caller = String(input.caller_id || '');
+    var role = String(input.caller_role || '').toLowerCase();
+    var kind = String(input.caller_kind || 'agent');
+    var office = kind === 'office' || role === 'admin' || role === 'ops_manager' || role === 'owner';
+    if (kind === 'agent' || office) {
+      if (!owner) return { ok: false, code: 'not_draft_owner', message: 'Say whose draft this is.' };
+      return { ok: true };
+    }
+    if (owner && caller && owner === caller) return { ok: true };
+    return {
+      ok: false,
+      code: 'not_draft_owner',
+      message: 'Only the person whose invoice this is, or the office, can change a draft.'
+    };
+  }
+
+  var EDIT_FIELDS = ['description', 'hours', 'rate', 'work_date', 'start_time', 'finish_time', 'break_minutes', 'included', 'job_number', 'client_name'];
+
+  function copyEdit(card, edit) {
+    EDIT_FIELDS.forEach(function (field) {
+      if (Object.prototype.hasOwnProperty.call(edit, field)) card[field] = edit[field];
+    });
+    if (!Object.prototype.hasOwnProperty.call(edit, 'rate') && Object.prototype.hasOwnProperty.call(edit, 'amount')) {
+      card.rate = edit.amount;
+    }
+    card.owner_edited = true;
+    var key = sourceKey(card);
+    if (key) card.source_key = key;
+  }
+
+  // Delete and edit lines already on a draft. A line in `lines` is still an
+  // add, unless it says remove or update. Adds are returned for mergeApproved,
+  // which will not put a dismissed line back and will not replace a line
+  // that is already there.
+  function applyOwnerCommand(state) {
+    state = state || {};
+    var cards = clone(state.cards || []) || [];
+    var dismissed = (state.dismissed || []).slice();
+    var removed = [];
+    var edited = [];
+    var missing = [];
+    var adds = [];
+
+    function drop(ref) {
+      var key = typeof ref === 'string' ? String(ref) : sourceKey(ref);
+      if (!key) {
+        missing.push('');
+        return;
+      }
+      var before = cards.length;
+      cards = cards.filter(function (card) { return sourceKey(card) !== key; });
+      if (cards.length === before) missing.push(key);
+      else removed.push(key);
+      dismissed = dismissKey(dismissed, key);
+    }
+
+    function change(edit) {
+      if (!edit || typeof edit !== 'object') return;
+      var key = sourceKey(edit);
+      if (!key) {
+        missing.push('');
+        return;
+      }
+      var card = null;
+      cards.forEach(function (item) { if (sourceKey(item) === key) card = item; });
+      if (!card) {
+        missing.push(key);
+        return;
+      }
+      copyEdit(card, edit);
+      edited.push(key);
+    }
+
+    (state.remove || []).forEach(drop);
+    (state.edits || []).forEach(change);
+    (state.lines || []).forEach(function (line) {
+      if (!line || typeof line !== 'object') return;
+      if (line.remove === true) {
+        drop(line);
+        return;
+      }
+      if (line.update === true) {
+        change(line);
+        return;
+      }
+      adds.push(clone(line));
+    });
+
+    return {
+      cards: cards,
+      dismissed: dismissed,
+      adds: adds,
+      removed: removed,
+      edited: edited,
+      missing: missing,
+      locked: removed.length > 0 || edited.length > 0
+    };
+  }
+
+  // Rebuild from work orders and hours. Removed keys stay off unless
+  // restoreRemoved is set. A line already on the draft is not replaced,
+  // so an edit the owner made stays.
+  function regenerate(state) {
+    state = state || {};
+    var dismissed = state.restoreRemoved ? [] : (state.dismissed || []).slice();
+    return mergeApproved({
+      cards: state.cards || [],
+      dismissed: dismissed,
+      claimed: state.claimed || [],
+      suggested: state.suggested || []
+    });
+  }
+
   // Always a draft. Marks the draft as written by an agent.
   // Throws if the caller asks to submit, send, authorise, pay, or touch Xero.
+  // The same ownership rule as the screen: the owner, the office, or the
+  // assistant for that owner, and only while the invoice is still a draft.
   function agentDraft(input) {
     input = input || {};
     var check = assertDraftOnly(input);
     if (!check.ok) throw agentError('An agent can only save a draft. It cannot submit, send, authorise, pay, or create a Xero bill.');
+    var auth = mayEditDraft(input);
+    if (!auth.ok) throw draftError(auth.message, auth.code);
     var existing = input.existing || {};
-    var merged = mergeApproved({
+    var command = applyOwnerCommand({
       cards: existing.jobCards || [],
       dismissed: existing.dismissedKeys || input.dismissed || [],
+      remove: input.remove,
+      edits: input.edits,
+      lines: input.lines
+    });
+    var merged = mergeApproved({
+      cards: command.cards,
+      dismissed: command.dismissed,
       claimed: input.claimed || [],
-      suggested: input.lines || []
+      suggested: command.adds
     });
     var snap = snapshot({
       groupIds: existing.groupIds || [],
@@ -149,6 +296,7 @@
       invRows: existing.invRows || [],
       invLumpLines: existing.invLumpLines || [],
       dismissedKeys: merged.dismissed,
+      manualLock: !!(existing.manualLock || command.locked),
       notes: input.notes != null ? input.notes : (existing.notes || ''),
       gst_on: input.gst_on != null ? input.gst_on : !!existing.gst_on,
       weekStart: input.week_start || existing.weekStart || '',
@@ -164,6 +312,9 @@
       submitted: false,
       draft_builder: snap,
       added: merged.added,
+      removed: command.removed,
+      edited: command.edited,
+      missing: command.missing,
       pay_rules: 'unchanged_until_submit'
     };
   }
@@ -186,6 +337,9 @@
     snapshot: snapshot,
     saveBody: saveBody,
     assertDraftOnly: assertDraftOnly,
+    mayEditDraft: mayEditDraft,
+    applyOwnerCommand: applyOwnerCommand,
+    regenerate: regenerate,
     agentDraft: agentDraft,
     hashSnapshot: hashSnapshot,
     dismissKey: dismissKey

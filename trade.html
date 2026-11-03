@@ -35,7 +35,7 @@
   <script src="shared/group-work-order.js?v=office-hours-20261030"></script>
   <script src="modules/trade-group-work-order.js?v=crew-approval-20261030"></script>
   <script src="modules/trade-group-invoice.js?v=office-hours-20261030"></script>
-  <script src="modules/trade-invoice-running-draft.js?v=normal-group-invoice-20261029"></script>
+  <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
   <style>
@@ -22440,6 +22440,9 @@
   var _invNotes = ''; // preserved across re-renders
   var _draftInvoiceId = null; // existing draft being edited
   var _invDismissedKeys = []; // source keys the person removed from this week's draft
+  var _invManualLock = false; // owner has edited; a rebuild must not put removed lines back or overwrite edits
+  var _invSuggested = [];
+  var _invClaimed = [];
   var _invCreatedByAgent = false;
   var _invRunningSavedHash = '';
   var _invRunningHydrating = false;
@@ -22488,6 +22491,9 @@
     _invNotes = '';
     _draftInvoiceId = null;
     _invDismissedKeys = [];
+    _invManualLock = false;
+    _invSuggested = [];
+    _invClaimed = [];
     _invCreatedByAgent = false;
     _invRunningSavedHash = '';
     _pmDraftIsPerMetre = false;
@@ -23829,6 +23835,8 @@
     _hoursWeekStart = draft.weekStart || _hoursWeekStart;
     _hoursWeekEnd = draft.weekEnd || _hoursWeekEnd;
     _draftInvoiceId = draft.draftId || null;
+    _invDismissedKeys = Array.isArray(draft.dismissedKeys) ? draft.dismissedKeys.slice() : [];
+    _invManualLock = draft.manualLock === true;
     _pmDraftIsPerMetre = !!(draft.is_per_metre || String(draft.invoice_type || '') === 'per_metre');
     _invoiceBuilderOpen = true;
     if (_pmDraftIsPerMetre && _pmWoHydrateState === 'idle') {
@@ -23862,6 +23870,8 @@
         is_per_metre: isPerMetreUser(),
         invoice_type: (_hoursData && _hoursData.invoice_type) || (_user && _user.invoice_type) || '',
         gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
+        dismissedKeys: (_invDismissedKeys || []).slice(),
+        manualLock: !!_invManualLock,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
       sessionStorage.removeItem('sw_inv_draft');
@@ -23885,6 +23895,9 @@
     _invRows = [];
     _draftSaveUnresolved = false;
     _invDismissedKeys = [];
+    _invManualLock = false;
+    _invSuggested = [];
+    _invClaimed = [];
     _invCreatedByAgent = false;
     _invRunningSavedHash = '';
     _invRunningHydrating = false;
@@ -24098,6 +24111,7 @@
       invRows: _invRows,
       invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
       dismissedKeys: _invDismissedKeys || [],
+      manualLock: !!_invManualLock,
       notes: _invNotes || '',
       gst_on: !!_invGst,
       weekStart: _hoursWeekStart || '',
@@ -24124,6 +24138,13 @@
     var html = '';
     if (_invCreatedByAgent) {
       html += '<div data-invoice-agent-banner style="margin-top:16px;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">An assistant drafted lines on this invoice. Only you can send it.</div>';
+    }
+    if (_invManualLock || (_invDismissedKeys && _invDismissedKeys.length)) {
+      html += '<button type="button" id="invResyncBtn" data-invoice-resync onclick="resyncRunningInvoiceDraft()" style="margin-top:10px;background:none;border:0;padding:6px 0;font:inherit;font-size:13px;font-weight:600;color:var(--sw-orange-deep,#C7431B);cursor:pointer">Re-sync from this week\'s jobs</button>';
+      html += '<div data-invoice-resync-note style="text-align:center;font-size:11px;color:var(--sw-text-sec)">Lines you removed stay off. Edits you made stay. Jobs added since then are brought in.</div>';
+      if (_invDismissedKeys && _invDismissedKeys.length) {
+        html += '<button type="button" id="invRestoreRemovedBtn" data-invoice-restore-removed onclick="restoreRemovedInvoiceLines()" style="margin-top:4px;background:none;border:0;padding:6px 0;font:inherit;font-size:13px;font-weight:600;color:var(--sw-text-sec);cursor:pointer">Put removed lines back</button>';
+      }
     }
     html += '<button type="button" class="hours-submit-btn" id="invSaveBtn" data-invoice-save onclick="saveRunningInvoiceDraft()" style="margin-top:16px;background:var(--sw-mid)">Save</button>';
     html += '<div id="invSaveState" data-invoice-save-state style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px"></div>';
@@ -24152,14 +24173,20 @@
         _invNotes = builder.notes || '';
         if (typeof builder.gst_on === 'boolean') _invGst = builder.gst_on;
         _invDismissedKeys = Array.isArray(builder.dismissedKeys) ? builder.dismissedKeys.slice() : [];
+        _invManualLock = builder.manualLock === true;
       }
+      if (res && Array.isArray(res.dismissed_source_keys) && !_invDismissedKeys.length) {
+        _invDismissedKeys = res.dismissed_source_keys.slice();
+      }
+      _invSuggested = (res && res.suggested) || [];
+      _invClaimed = (res && res.claimed) || [];
       if (res && res.draft_id) _draftInvoiceId = res.draft_id;
       _invCreatedByAgent = !!(res && res.created_by_agent);
-      var merged = core.mergeApproved({
+      var merged = core.regenerate({
         cards: _serializeJobCardsDraft(_jobCards),
         dismissed: _invDismissedKeys,
-        claimed: (res && res.claimed) || [],
-        suggested: (res && res.suggested) || []
+        claimed: _invClaimed,
+        suggested: _invSuggested
       });
       _jobCards = _restoreJobCardsDraft(merged.cards);
       _invDismissedKeys = merged.dismissed;
@@ -24219,6 +24246,56 @@
       toast(text, true);
       _paintRunningSaveState('Not saved.');
       return false;
+    });
+  };
+
+  function _paintRegeneratedDraft(merged) {
+    _jobCards = _restoreJobCardsDraft(merged.cards);
+    _invDismissedKeys = merged.dismissed;
+    _invManualLock = true;
+    renderInvoiceBuilder();
+    _saveInvDraft();
+    _scheduleRunningInvoiceAutosave();
+  }
+
+  // Pull in jobs added since the last edit. Removed lines stay off.
+  // Edits on a line already here stay. This does not send the invoice.
+  window.resyncRunningInvoiceDraft = function() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core || _invRunningHydrating) return;
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+    var merged = core.regenerate({
+      cards: _serializeJobCardsDraft(_jobCards),
+      dismissed: _invDismissedKeys,
+      claimed: _invClaimed,
+      suggested: _invSuggested
+    });
+    _paintRegeneratedDraft(merged);
+    toast('Brought in jobs from this week. Removed lines stayed off.');
+  };
+
+  window.restoreRemovedInvoiceLines = function() {
+    var core = window.TradeInvoiceRunningDraft;
+    if (!core || !_invDismissedKeys.length || _invRunningHydrating) return;
+    showConfirm(
+      'Put removed lines back?',
+      'Lines you removed are added again from this week\'s jobs. Edits you made on other lines stay. This does not send the invoice.',
+      'Put them back'
+    ).then(function(ok) {
+      if (!ok) return;
+      _syncRowsFromDOM();
+      _syncInvLumpLinesFromDOM();
+      if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+      var merged = core.regenerate({
+        cards: _serializeJobCardsDraft(_jobCards),
+        dismissed: _invDismissedKeys,
+        claimed: _invClaimed,
+        suggested: _invSuggested,
+        restoreRemoved: true
+      });
+      _paintRegeneratedDraft(merged);
     });
   };
 
@@ -25160,9 +25237,14 @@
     return !!(card && (card.hours_mode_locked || card.hours_user_edited));
   }
 
+  function _markDraftEdited(card) {
+    if (card) card.owner_edited = true;
+    _invManualLock = true;
+  }
   function _markJobCardHoursEdited(card) {
     if (!card || card.wo_mode || card.commission_mode) return;
     card.hours_user_edited = true;
+    _markDraftEdited(card);
   }
 
   // Same date/job guard for bound and unbound cards. A stored work_order_id
@@ -25863,8 +25945,10 @@
         var descVal = cardMode === 'commission' ? commAutoDesc : esc(c.description || '');
         // An hours card's description sits with its other boxes (above).
         if (cardMode !== 'hours') html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
-        if (c.manually_added) {
-          html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">Added by you — the office will verify. <a href="#" data-cardremove="' + c._idx + '" onclick="event.preventDefault();removeManualJobCard(' + c._idx + ')" style="color:var(--sw-red);font-weight:600">Remove</a></div>';
+        if (!_invRunningHydrating) {
+          html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">'
+            + (c.manually_added ? 'Added by you — the office will verify. ' : '')
+            + '<button type="button" data-cardremove="' + c._idx + '" onclick="removeDraftJobCard(' + c._idx + ')" style="background:none;border:0;padding:0;font:inherit;font-size:10px;font-weight:600;color:var(--sw-red);cursor:pointer">Remove</button></div>';
         }
         // [M4 U2] Over-allowance make-safe variation prompt (hours mode only). Capture, never blocks.
         if (_isMakesafeCard(c) && cardMode === 'hours' && Number(c.hours) > 2) {
@@ -26245,15 +26329,23 @@
     renderInvoiceBuilder();
   };
 
-  window.removeManualJobCard = function(idx) {
+  // Any line on this draft, including one built from a job or a work order.
+  // The source key is kept so the next rebuild does not put that line back.
+  window.removeDraftJobCard = function(idx) {
     var c = _jobCards[idx];
-    if (!c || !c.manually_added) return;
+    if (!c || _invRunningHydrating) return;
     _syncJobCardsFromDOM();
     var core = window.TradeInvoiceRunningDraft;
     var key = core ? core.sourceKey(c) : '';
-    if (key) _invDismissedKeys = core.dismissKey(_invDismissedKeys, key);
+    if (key && core) _invDismissedKeys = core.dismissKey(_invDismissedKeys, key);
+    _markDraftEdited(c);
     _jobCards.splice(idx, 1);
     renderInvoiceBuilder();
+    _saveInvDraft();
+    _scheduleRunningInvoiceAutosave();
+  };
+  window.removeManualJobCard = function(idx) {
+    window.removeDraftJobCard(idx);
   };
 
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
@@ -26461,6 +26553,7 @@
   window.setJobCardDescription = function(idx, val) {
     var c = _jobCards[idx]; if (!c) return;
     c.description = val || '';
+    _markDraftEdited(c);
     _markJobCardHoursEdited(c);
     _saveInvDraft();
   };
@@ -26472,6 +26565,7 @@
   window.toggleJobCard = function(idx, on) {
     var c = _jobCards[idx]; if (!c) return;
     c.included = !!on;
+    _markDraftEdited(c);
     var el = document.querySelector('.jc-card[data-card="' + idx + '"]');
     if (el) el.style.opacity = on ? '1' : '0.5';
     _refreshJobCardLine(idx);

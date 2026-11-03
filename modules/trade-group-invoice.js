@@ -457,7 +457,7 @@
       var me = crewHours(g).find(function(c) { return c.me; });
       var name = (typeof options.userName === 'function' && options.userName()) || (me && me.name) || '';
       busy = id; changed();
-      api('sign_group_work_order_crew', null, {group_id:id, signer_name:String(name)}).then(function(res) {
+      api('sign_group_work_order', null, {group_id:id, signer_name:String(name)}).then(function(res) {
         if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
         busy = ''; load(true);
       }).catch(function(err) { busy = ''; say(err.message || 'Could not approve the hours.', true); changed(); });

@@ -69,7 +69,7 @@ async function fixtures(page, initial) {
     if (action === 'my_hours') return json(henryHours());
     if (action === 'my_group_work_orders') return json({ enabled: true, group_job_ids: [groupJob], groups: [PHASES[phase]] });
     const post = () => posts.push({ action, body: req.postDataJSON() });
-    if (action === 'sign_group_work_order_crew') { post(); phase = 'unsigned'; return json({ ok: true }); }
+    if (action === 'sign_group_work_order') { post(); phase = 'unsigned'; return json({ ok: true }); }
     if (action === 'capture_group_client_signoff') { post(); phase = 'ready'; return json({ ok: true }); }
     if (action === 'freeze_group_work_order') { post(); phase = 'frozen'; return json({ ...PHASES.frozen }); }
     if (action === 'generate_trade_invoice') {
@@ -132,7 +132,7 @@ test('the group sits in its own job card and Henry approves everyone’s hours',
 
   await card.getByRole('button', { name: /Approve everyone.s hours/ }).click();
   await expect.poll(() => f.posts.length).toBe(1);
-  expect(f.posts[0]).toEqual({ action: 'sign_group_work_order_crew', body: { group_id: groupId, signer_name: 'Henry Fence' } });
+  expect(f.posts[0]).toEqual({ action: 'sign_group_work_order', body: { group_id: groupId, signer_name: 'Henry Fence' } });
   await expect(rows.first()).toHaveText(/Henry\s*\(you\)\s*18h\s*✓ Approved/);
   await expect(card.getByRole('button', { name: /Approve everyone/ })).toHaveCount(0);
   await expect(card.locator('[data-group-pill]')).toHaveText('Needs sign-off');

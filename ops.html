@@ -20668,6 +20668,31 @@ function swTradeInvoiceDeduction(inv) {
 }
 // The Total cell of a Trade Bills row: the amount payable, with what came off.
 function swTradeInvoiceTotalHtml(inv, total) {
+  return swTradeInvoiceTotalBaseHtml(inv, total) + swTradeInvoiceXeroChangesHtml(inv);
+}
+// Group WO V10 (3 Nov 2026): the office's own lines on the crew bill in Xero
+// (a loan repayment, an overpayment taken back), as xero-sync read them, and
+// what Xero pays. Sent by list_trade_invoices; absent until the bill is read.
+function swTradeInvoiceXeroChangesHtml(inv) {
+  var x = inv && inv.xero_adjustments;
+  if (!x || typeof x !== 'object' || !Array.isArray(x.lines)) return '';
+  var sub = 'font-size:10px;color:var(--sw-text-sec);font-weight:400;margin-top:2px';
+  var h = '';
+  x.lines.forEach(function(line) {
+    var amount = Number(line && line.amount);
+    var label = String((line && line.description) == null ? '' : line.description).replace(/\s+/g, ' ').trim();
+    if (!label || !isFinite(amount) || amount === 0) return;
+    var code = line.account_code ? ' (' + escapeHtml(String(line.account_code)) + ')' : '';
+    h += '<div data-invoice-xero-change style="' + sub + '">' + escapeHtml(label) + code + ' ' + (amount < 0 ? '\u2212' : '+') + '$' + Math.abs(amount).toFixed(2) + ' in Xero</div>';
+  });
+  var pays = inv.xero_pays == null || inv.xero_pays === '' ? null : Number(inv.xero_pays);
+  var after = inv.payable_after_xero == null || inv.payable_after_xero === '' ? null : Number(inv.payable_after_xero);
+  if (pays != null && isFinite(pays) && (h || (after != null && Math.abs(pays - after) >= 0.005))) {
+    h += '<div data-invoice-xero-pays style="' + sub + ';font-weight:600">Xero pays $' + pays.toFixed(2) + '</div>';
+  }
+  return h;
+}
+function swTradeInvoiceTotalBaseHtml(inv, total) {
   var d = swTradeInvoiceDeduction(inv);
   if (!d) return '$' + total.toFixed(2);
   var sub = 'font-size:10px;color:var(--sw-text-sec);font-weight:400;margin-top:2px';

@@ -1463,7 +1463,7 @@ var JobWorkOrderCore = (function () {
   function enrichCrewLine(wo, inv) {
     var out = {};
     Object.keys(wo).forEach(function (k) { out[k] = wo[k]; });
-    ['review_state', 'acknowledgment_status', 'invoice_status', 'trade_invoice_status', 'counted', 'line_type', 'cost_lane', 'override_amount', 'line_total_ex', 'amount_ex', 'trade_name', 'description', 'total_hours', 'hours', 'work_date', 'week_label', 'office_review_status', 'office_review_note'].forEach(function (k) {
+    ['review_state', 'acknowledgment_status', 'invoice_status', 'trade_invoice_status', 'counted', 'line_type', 'cost_lane', 'override_amount', 'line_total_ex', 'amount_ex', 'trade_name', 'description', 'total_hours', 'hours', 'work_date', 'week_label', 'office_review_status', 'office_review_note', 'work_order_claim_warning'].forEach(function (k) {
       if (lineBlank(out[k]) && !lineBlank(inv[k])) out[k] = inv[k];
     });
     if (!out.invoice && inv.invoice) out.invoice = inv.invoice;
@@ -1525,6 +1525,9 @@ var JobWorkOrderCore = (function () {
       counted: countedFlag(it),
       review: reviewOf(it),
       officeReview: officeReviewOf(it),
+      // V16: the office-only "Work order $X" claim check from
+      // list_trade_invoice_lines (staff callers only). Never blocks a review.
+      claimWarning: str(it.work_order_claim_warning).trim(),
       lineId: officeLineId(it),
       woIds: ids
     };
@@ -1668,6 +1671,12 @@ var JobWorkOrderCore = (function () {
         if (showMoney) h += '<td class="r">' + esc(l.amount != null ? moneyWords(l.amount) : '') + '</td>';
         h += '<td><span class="jwo-chip jwo-chip-' + esc(l.review.key) + '" data-job-wo-review="' + esc(l.review.key) + '" data-review-source="' + esc(l.review.source) + '">' + esc(l.review.label) + '</span></td>';
         h += '</tr>';
+        // V16 claim warning: office render only (showMoney), shown whether or
+        // not the review buttons are on. Words only; nothing is blocked.
+        if (showMoney && l.claimWarning) {
+          h += '<tr data-job-wo-claim-warning="' + esc(l.lineId) + '"><td colspan="4">' +
+            '<div class="jwo-msg jwo-msg-warn" role="note">' + esc(l.claimWarning) + '</div></td></tr>';
+        }
         // Office approve / query / reject, one line at a time, before the
         // Xero bill. Absent unless this card was asked and this line has a
         // status. No send, and no agreed-labour figure in this block.

@@ -65,6 +65,15 @@ optional note. An unknown action removes the controls. There is no Send.
 The block does not repeat the agreed labour figure. A trade role still sees
 none of the card.
 
+Work-order claim warning (V16, nested lead claims). A line that claims
+"Work order $X" carries `work_order_claim_warning` on
+`list_trade_invoice_lines` (staff callers only) when the job's live labour
+differs from the largest claim or two or more people claimed. The office
+card draws it in words under that line (`data-job-wo-claim-warning`), with
+or without the review buttons, and only on the office render (`showMoney`).
+It disables nothing and changes no amount. The server writes the words; the
+screen only escapes and shows them.
+
 Billed labour uses the server's `counted` flag when a line has one. Otherwise
 a line counts only when its invoice status is billed (pending acknowledgment,
 queried, acknowledged, pending ops review, approved, pushed to Xero, paid) and
@@ -290,6 +299,9 @@ office money door (`TRADE_JOB_WO_MONEY_KEYS`) also strips `trade_allocation_ex` 
 
 ## Tests
 
+- `tests/unit/work-order-claim-warning.test.cjs` (`npm run test:work-order-claim-warning`):
+  the V16 claim warning on SWF-261209's real lines, office render only, never blocking the
+  review buttons, kept through the work-order merge, and escaped.
 - `tests/e2e/job-work-order-core.spec.js`: the core in node (line reading, addenda, status,
   approver, refusal words, Ops and trade HTML, PDF sections, no money in the trade view, and
   the customer variation rules: addenda from the backend, form checks, approve holds, the

@@ -158,7 +158,7 @@
       if (el._groupBusy || !mine || !core.needsMyApproval(core.closedShare(mine))) return;
       el._groupBusy = true;
       btn.disabled = true;
-      call('sign_group_work_order_crew', null, { group_id: mine.group_id, signer_name: String(options.userName || '') }).then(function (res) {
+      call('sign_group_work_order', null, { group_id: mine.group_id, signer_name: String(options.userName || '') }).then(function (res) {
         if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
         return paint(jobId);
       }).catch(function (e) {

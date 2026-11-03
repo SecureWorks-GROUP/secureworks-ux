@@ -152,6 +152,19 @@
     }
     .header-nav button:hover:not(.active) { color: rgba(255,255,255,0.85); }
     .header-right { display: flex; align-items: center; gap: 12px; }
+    /* <header-fit> Tablet (an iPad in portrait is 810 wide): the seven tabs, search box
+       and Finance View were 1013 px in one row, so the page slid sideways and taps landed
+       on other buttons (D2, 3 Nov 2026). Here the tabs close up and the search box drops
+       to a second row when the first is full; the header never widens the page. The
+       views pinned under the header read its height from --sw-header-h (setHeaderHeightVar). */
+    @media (min-width: 601px) and (max-width: 1100px) {
+      .header { padding: 0 16px; }
+      .header-left { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; gap: 0 12px; }
+      .header-nav button { padding: 0 12px; min-height: 44px; }
+      .header-left .header-search { margin-left: 0 !important; flex: 1 1 220px !important; max-width: 420px; min-width: 0; padding: 6px 0; }
+      .header-left .header-search #globalSearch { width: 100% !important; min-height: 32px; }
+      .header-right { flex-shrink: 0; margin-left: 12px; }
+    }
     /* Phone: the search box shrinks to fit so the header never widens the page. */
     @media (max-width: 600px) {
       .header { padding: 0 12px; }
@@ -180,7 +193,7 @@
     .view.active { display: block; }
     #viewCalendar.active {
       display: flex !important; flex-direction: row; overflow: hidden;
-      position: fixed; top: 56px; left: 0; right: 0; bottom: var(--jarvis-bar-height); z-index: 50;
+      position: fixed; top: calc(var(--sw-header-h, 48px) + 8px); left: 0; right: 0; bottom: var(--jarvis-bar-height); z-index: 50;
       background: var(--sw-bg); /* opaque — fixed overlay must fully cover other tabs' DOM behind it */
     }
     /* Approvals used to carry inline display:flex, which beat .view { display:none }
@@ -1283,7 +1296,7 @@
       display: flex !important;
       flex-direction: column;
       position: fixed;
-      top: 48px; /* navbar height */
+      top: var(--sw-header-h, 48px); /* navbar height (two rows on a tablet, <header-fit>) */
       left: 0;
       right: 0;
       bottom: var(--jarvis-bar-height);
@@ -4702,6 +4715,25 @@
     .mrq-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .mrq-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .mrq-err { color: var(--sw-red, #e74c3c); font-size: 12px; margin-top: 6px; }
+
+    /* <touch-targets> D2 (3 Nov 2026): on a touch screen (an iPad) these controls are at
+       least 44 px, the size a finger can hit; a mouse screen keeps the compact sizes. The
+       board card icons name themselves under the icon, since a tooltip never shows on touch. */
+    .kanban-icon-label { display: none; font-size: 10px; line-height: 1.1; color: var(--sw-text-sec); font-weight: 500; }
+    @media (pointer: coarse) {
+      .sw-tap { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+      .jd-tab { min-height: 44px; }
+      .jd-tabs { overflow-x: auto; }
+      .kanban-icon-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+      .kanban-icon-btn { width: auto; height: auto; min-width: 44px; min-height: 44px; flex-direction: column; gap: 2px; }
+      .kanban-icon-label { display: block; }
+      .kanban-meta { align-items: center; }
+      .kanban-ghl-link { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      .jp-lines-btn { min-height: 44px; }
+      details[data-jp-evidence-lines] > summary { min-height: 44px; padding: 12px 0; box-sizing: border-box; }
+      .btn-header { min-height: 44px; display: inline-flex; align-items: center; }
+      #jpDetail .jp-detail-head .btn, .jp-more .btn { min-height: 44px; min-width: 44px; }
+    }
   </style>
 <script>
 __swOpsStampAssets([
@@ -6893,6 +6925,21 @@ async function opsAuthHeaders(extra) {
   return headers;
 }
 
+// <plain-server-errors> A server answer with no message of its own, in plain words (D2,
+// 3 Nov 2026: Job Profit read "API error: 504" while the server timed out). Screens keep
+// their own Try again buttons. e.plain marks these, so a screen can tell them from a
+// message the server wrote.
+function opsHttpErrorText(status) {
+  if (status === 504 || status === 408 || status === 524 || status === 522) return 'The server took too long. Try again.';
+  if (status === 502 || status === 503) return 'The server is not answering right now. Try again.';
+  if (status === 401) return 'Your sign-in has run out. Sign in again.';
+  if (status === 403) return 'This sign-in is not allowed to do that.';
+  if (status === 404) return 'Not found on the server.';
+  if (status === 429) return 'The server is busy. Wait a moment and try again.';
+  if (status >= 500) return 'The server hit a problem. Try again.';
+  return 'The server refused this request. Try again.';
+}
+
 async function opsFetch(action, params, options) {
   options = options || {};
   var url = _opsApiBase + '?action=' + action;
@@ -6903,13 +6950,23 @@ async function opsFetch(action, params, options) {
   }
   var fetchOpts = { cache: 'no-store', headers: await opsAuthHeaders() };
   if (options.signal) fetchOpts.signal = options.signal;
-  return fetch(url, fetchOpts).then(function(resp) {
+  return fetch(url, fetchOpts).catch(function(err) {
+    // A read that never reached the server (no signal, the line dropped): plain words,
+    // not the browser's "Load failed" / "Failed to fetch". A cancelled read stays as it was.
+    if (err && err.name === 'AbortError') throw err;
+    var ne = new Error('Could not reach the server. Check the signal and try again.');
+    ne.plain = true;
+    ne.network = true;
+    ne.cause = err;
+    throw ne;
+  }).then(function(resp) {
     if (!resp.ok) {
       return resp.json().catch(function() { return {}; }).then(function(err) {
         // SES refusals arrive as { error: fact, refusal: { code, fact } } — keep
         // the machine-readable refusal + HTTP status on the thrown Error so
         // callers can branch (e.g. stale_review re-fetch) without parsing text.
-        var e = new Error(err.error || 'API error: ' + resp.status);
+        var e = new Error(err.error || opsHttpErrorText(resp.status));
+        e.plain = !err.error;
         e.status = resp.status;
         e.refusal = err.refusal || null;
         // The machine code and the whole answer, for screens that word refusals themselves (Debt Workshop).
@@ -6936,7 +6993,8 @@ async function opsPost(action, body) {
         // with a 4xx/5xx status) — surface something readable either way.
         var em = err.error;
         if (em && typeof em === 'object') em = em.message || em.code;
-        var e = new Error(em || 'API error: ' + resp.status);
+        var e = new Error(em || opsHttpErrorText(resp.status));
+        e.plain = !em;
         e.status = resp.status;
         e.refusal = err.refusal || null;
         // Named refusals ({error, reason, detail}) say what is in the way, e.g.
@@ -7627,6 +7685,21 @@ var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: t
 function opsVisibleView(view) {
   return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;
 }
+
+// <header-fit> The header's real height for the views pinned under it (Jobs, Calendar):
+// one row on a desktop, two on a tablet in portrait. A hidden header (full job page)
+// keeps the last height.
+function setHeaderHeightVar() {
+  var h = document.querySelector('.header');
+  var px = h ? Math.round(h.getBoundingClientRect().height) : 0;
+  if (px > 0) document.documentElement.style.setProperty('--sw-header-h', px + 'px');
+}
+(function () {
+  setHeaderHeightVar();
+  var h = document.querySelector('.header');
+  if (h && typeof ResizeObserver === 'function') new ResizeObserver(setHeaderHeightVar).observe(h);
+  window.addEventListener('resize', setHeaderHeightVar);
+})();
 
 function showView(view) {
   view = opsVisibleView(view);
@@ -18443,43 +18516,43 @@ function renderKanbanCard(j, status) {
       html += '<span class="kanban-meta-badge council-step-badge" style="' + stepStyle + 'font-weight:600;cursor:pointer;" title="' + stepTitle + '" onclick="event.stopPropagation();showCouncilSteps(this,\'' + j.id + '\')">Step ' + stepLabel + '</span>';
     }
   }
-  if (j.ghl_opportunity_id) html += '<a class="kanban-ghl-link" href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" onclick="event.stopPropagation()" title="View in GHL">&#8599;</a>';
+  if (j.ghl_opportunity_id) html += '<a class="kanban-ghl-link" href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" onclick="event.stopPropagation()" title="View in GHL" aria-label="View in GHL">&#8599;</a>';
   html += '</div>';
   // Icon row
   var iconRow = '';
   if (j.ghl_contact_id) {
     var commsUrl = 'https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/contacts/detail/' + j.ghl_contact_id;
-    iconRow += '<a class="kanban-icon-btn" href="' + commsUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open comms">'
-      + '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
-      + '</a>';
+    iconRow += '<a class="kanban-icon-btn" href="' + commsUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open comms" aria-label="Open comms">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+      + '<span class="kanban-icon-label">Comms</span></a>';
   }
   if (j.type && j.type !== 'miscellaneous') {
     var scopeUrl = scopeToolUrlFor(j.type, j) + '?jobId=' + j.id;
-    iconRow += '<a class="kanban-icon-btn" href="' + scopeUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open scope tool">'
-      + '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
-      + '</a>';
+    iconRow += '<a class="kanban-icon-btn" href="' + scopeUrl + '" target="_blank" onclick="event.stopPropagation()" title="Open scope tool" aria-label="Open scope tool">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
+      + '<span class="kanban-icon-label">Scope</span></a>';
   }
   // Xero search icon
   if (j.client_name) {
     var xeroUrl = 'https://go.xero.com/app/!j07L4/search-results?searchTerm=' + encodeURIComponent(j.client_name) + '&selectedCategory=all';
-    iconRow += '<a class="kanban-icon-btn" href="' + xeroUrl + '" target="_blank" onclick="event.stopPropagation()" title="Search in Xero">'
-      + '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
-      + '</a>';
+    iconRow += '<a class="kanban-icon-btn" href="' + xeroUrl + '" target="_blank" onclick="event.stopPropagation()" title="Search in Xero" aria-label="Search in Xero">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
+      + '<span class="kanban-icon-label">Xero</span></a>';
   }
   // Notes icon
   var notesBadge = j.ops_notes_count > 0 ? '<span class="ops-note-badge">' + j.ops_notes_count + '</span>' : '';
-  iconRow += '<button class="kanban-icon-btn ops-note-btn' + (j.ops_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openOpsNotesPopup(event,\'' + j.id + '\')" title="Ops notes">'
-    + '<svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z" fill="none"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="12" y2="13"/></svg>'
+  iconRow += '<button class="kanban-icon-btn ops-note-btn' + (j.ops_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openOpsNotesPopup(event,\'' + j.id + '\')" title="Ops notes" aria-label="Ops notes">'
+    + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12l-4 4H4z" fill="none"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="12" y2="13"/></svg>'
     + notesBadge
-    + '</button>';
+    + '<span class="kanban-icon-label">Notes</span></button>';
   // Trade comms icon — the two-way trade<->ops thread (job_events notes). Badge =
   // comms_notes_count (human notes only; from list_jobs). Distinct from the ops
   // scratchpad notes above.
   var commsBadge = j.comms_notes_count > 0 ? '<span class="ops-note-badge">' + j.comms_notes_count + '</span>' : '';
-  iconRow += '<button class="kanban-icon-btn ops-comms-btn' + (j.comms_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openJobComms(event,\'' + j.id + '\')" title="Trade comms">'
-    + '<svg viewBox="0 0 24 24"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" fill="none"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" fill="none"/></svg>'
+  iconRow += '<button class="kanban-icon-btn ops-comms-btn' + (j.comms_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openJobComms(event,\'' + j.id + '\')" title="Trade comms" aria-label="Trade comms">'
+    + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" fill="none"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" fill="none"/></svg>'
     + commsBadge
-    + '</button>';
+    + '<span class="kanban-icon-label">Trade</span></button>';
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
@@ -19612,6 +19685,9 @@ function _jpCostDescription(text) {
   if ((m = /^ref:(\S+)$/.exec(s))) return 'Placed by a machine: the bill\'s Xero reference names ' + m[1];
   if ((m = /^po:(\S+) unique\b/.exec(s))) return 'Placed by a machine: matched to purchase order ' + m[1] + ' by amount and date';
   if ((m = /^agent_prematch:\s*(.*)$/.exec(s))) return 'Placed by the agent' + (m[1] ? ' (its reason: ' + m[1] + ')' : '');
+  if ((m = /^agent_ai:\s*([\s\S]*)$/.exec(s))) return 'Placed by the AI agent' + (m[1] ? ' (its reason: ' + m[1] + ')' : '');
+  // Any other machine prefix ("some_code: text") reads without its underscores.
+  if ((m = /^([a-z]+(?:_[a-z0-9]+)+):\s*([\s\S]*)$/.exec(s))) return _jpStatusText(m[1]) + ': ' + m[2];
   return s;
 }
 // The definitions under a job, in staff words. Each says what the engine's own
@@ -19724,9 +19800,34 @@ function _jpCostUnknown(j) {
 }
 function _jpProfitOf(j) { return _jpCostUnknown(j) ? null : _jpNum(j.profit_ex); }
 function _jpMarginOf(j) { return _jpCostUnknown(j) ? null : _jpNum(j.margin_pct); }
+// Work type and make-safe family in staff words (D2: the list showed general_makesafe).
+var JP_WORK_TYPE_WORDS = { fencing: 'Fencing', patio: 'Patio', decking: 'Decking', makesafe: 'Make-safe', repair: 'Repair', insurance: 'Insurance', miscellaneous: 'Miscellaneous', general: 'General' };
+var JP_SUBTYPE_WORDS = { general_makesafe: 'Make-safe (general)', temp_fence_makesafe: 'Temporary fence make-safe', roof_report: 'Roof report', assessment: 'Assessment', repair: 'Repair' };
 function _jpTypeLabel(j) {
-  var t = j.work_type ? String(j.work_type) : 'unknown type';
-  return _jpEsc(t + (j.work_subtype ? ' · ' + j.work_subtype : ''));
+  var t = j.work_type ? (JP_WORK_TYPE_WORDS[String(j.work_type)] || _jpStatusText(j.work_type)) : 'Unknown type';
+  if (!j.work_subtype) return _jpEsc(t);
+  var sub = JP_SUBTYPE_WORDS[String(j.work_subtype)] || _jpStatusText(j.work_subtype);
+  return _jpEsc(String(j.work_type) === 'makesafe' ? sub : t + ' · ' + sub);
+}
+// Codes inside the engine's own sentences (line evidence reasons) in staff words:
+// "Job Profit withholds this job's profit (xero_project_exceeds_line_costs)".
+var JP_CODE_WORDS = {
+  xero_project_exceeds_line_costs: 'Xero project spend above line costs',
+  xero_project_linked_by_contact_only: 'Xero project linked by client only'
+};
+function _jpPlainText(text) {
+  return String(text == null ? '' : text).replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, function(code) {
+    return JP_CODE_WORDS[code] || (JP_FLAG_LABELS[code] ? JP_FLAG_LABELS[code].charAt(0).toLowerCase() + JP_FLAG_LABELS[code].slice(1) : code.replace(/_/g, ' '));
+  });
+}
+// A cost document's status in staff words (D2: a trade invoice read pushed_to_xero).
+var JP_DOC_STATUS_WORDS = {
+  pushed_to_xero: 'Sent to Xero', pushed: 'Sent to Xero', pending_acknowledgment: 'Waiting for the trade to confirm',
+  acknowledged: 'Confirmed by the trade', pending_ops_review: 'Waiting for office review', approved: 'Approved', paid: 'Paid', queried: 'Queried'
+};
+function _jpDocStatusText(s) {
+  var k = String(s == null ? '' : s);
+  return JP_DOC_STATUS_WORDS[k] || (/_/.test(k) ? _jpStatusText(k) : k);
 }
 function _jpFlagText(f) { return JP_FLAG_LABELS[f] || String(f).replace(/_/g, ' '); }
 function _jpFlags(j) {
@@ -19816,8 +19917,9 @@ async function _jpLoadPage(reset) {
   } catch (e) {
     if (seq !== _jp.listSeq) return;
     var m = (e && e.message) || 'unknown error';
-    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load the job list, so no job here is known: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner, admin or office-staff sign-in required)' : '') + '. Press Retry; if it keeps failing, narrow the filters and try again. <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()">Retry</button></div></td></tr>';
-    if (more) more.innerHTML = reset ? '' : '<div class="jp-note err">Could not load more: ' + _jpEsc(m) + ' <button class="btn btn-secondary btn-sm" onclick="jpLoadMore()">Retry</button></div>';
+    var next = e && e.plain ? ' If it keeps failing, narrow the filters.' : '. Press Retry; if it keeps failing, narrow the filters and try again.';
+    if (reset) body.innerHTML = '<tr><td colspan="10"><div class="jp-note err">Could not load the job list, so no job here is known: ' + _jpEsc(m) + (e && e.status === 403 ? ' (owner, admin or office-staff sign-in required)' : '') + next + ' <button class="btn btn-secondary btn-sm sw-tap" onclick="loadJobProfit()">Retry</button></div></td></tr>';
+    if (more) more.innerHTML = reset ? '' : '<div class="jp-note err">Could not load more: ' + _jpEsc(m) + ' <button class="btn btn-secondary btn-sm sw-tap" onclick="jpLoadMore()">Retry</button></div>';
     if (status && reset) status.textContent = '';
   }
 }
@@ -19946,7 +20048,7 @@ function _jpRenderList() {
         + '</tr>';
     }).join('');
   }
-  if (more) more.innerHTML = _jp.more ? '<button class="btn btn-secondary btn-sm" onclick="jpLoadMore()">Load next ' + JP_PAGE + '</button>' : (_jp.rows.length ? '<span class="jp-sub">End of list.</span>' : '');
+  if (more) more.innerHTML = _jp.more ? '<button class="btn btn-secondary btn-sm sw-tap" onclick="jpLoadMore()">Load next ' + JP_PAGE + '</button>' : (_jp.rows.length ? '<span class="jp-sub">End of list.</span>' : '');
 }
 
 function jpOpenByNumber() {
@@ -19988,8 +20090,8 @@ async function openJobProfitDetail(jobId, jobNumber, quiet) {
     var retry = !(e && (e.status === 404 || e.status === 409));
     if (retry) m = 'Could not read this job\'s profit, so nothing here is known. ' + m;
     area.innerHTML = '<div class="jp-detail"><div class="jp-note err">' + _jpEsc(m) + '</div>'
-      + (retry ? '<button class="btn btn-secondary btn-sm" onclick="openJobProfitDetail(' + (jobId ? '\'' + _jpEsc(jobId) + '\', null' : 'null, \'' + _jpEsc(jobNumber || '') + '\'') + ')">Try again</button> ' : '')
-      + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
+      + (retry ? '<button class="btn btn-secondary btn-sm sw-tap" onclick="openJobProfitDetail(' + (jobId ? '\'' + _jpEsc(jobId) + '\', null' : 'null, \'' + _jpEsc(jobNumber || '') + '\'') + ')">Try again</button> ' : '')
+      + '<button class="btn btn-secondary btn-sm sw-tap" onclick="closeJobProfitDetail()">Close</button></div>';
   }
 }
 
@@ -20011,9 +20113,18 @@ function _jpCard(k, v, s) {
 
 // Work-type comparison: one rollup read per type over all finished work of that
 // type, independent of the page filters. Cleared on every refresh.
+// A busy server can time out once on this read (D2, 3 Nov 2026: a 500 after the 30 s
+// database limit while other heavy reads ran), so it tries once more by itself, after a
+// short pause, before saying it could not load.
+var JP_TYPE_AVG_RETRY_MS = 1500;
 async function _jpFillTypeAverage(seq, workType) {
   if (!_jp.typeAvg[workType]) {
-    _jp.typeAvg[workType] = opsFetch('job_profit_list', { view: 'rollup', type: workType, status: JP_STATUS_SETS.finished });
+    var read = function() { return opsFetch('job_profit_list', { view: 'rollup', type: workType, status: JP_STATUS_SETS.finished }); };
+    _jp.typeAvg[workType] = read().catch(function() {
+      var el = seq === _jp.detailSeq && document.getElementById('jpTypeAvg');
+      if (el) el.textContent = 'Still loading the ' + workType + ' average (second try)...';
+      return new Promise(function(resolve) { setTimeout(resolve, JP_TYPE_AVG_RETRY_MS); }).then(read);
+    });
   }
   var text = '';
   try {
@@ -20026,7 +20137,9 @@ async function _jpFillTypeAverage(seq, workType) {
       : _jpEsc(workType) + ' average unknown';
   } catch (e) {
     delete _jp.typeAvg[workType];
-    text = _jpEsc(workType) + ' average could not load; close and reopen the job to try again';
+    var why = e && (e.plain || /statement timeout|timed out/i.test(String(e.message || ''))) ? 'the server took too long' : 'the server could not answer';
+    text = _jpEsc(workType) + ' average could not load (' + why + ', twice). '
+      + '<button class="btn btn-secondary btn-sm sw-tap" data-jp-type-avg-retry onclick="this.disabled=true;_jpFillTypeAverage(_jp.detailSeq, \'' + _jpEsc(workType) + '\')">Try again</button>';
   }
   if (seq !== _jp.detailSeq) return;
   var el = document.getElementById('jpTypeAvg');
@@ -20112,7 +20225,7 @@ function _jpLineEvidence(data) {
   }
   var status = String(le.status || 'unknown');
   if (status !== 'verified' && status !== 'provisional' && status !== 'no_lines') {
-    return h + '<div class="jp-note" data-jp-line-evidence="unknown"><span class="jp-tag mute">Unknown</span> ' + _jpEsc(le.reason || 'Line evidence could not be read') + '. This job is not verified.</div>';
+    return h + '<div class="jp-note" data-jp-line-evidence="unknown"><span class="jp-tag mute">Unknown</span> ' + _jpEsc(_jpPlainText(le.reason) || 'Line evidence could not be read') + '. This job is not verified.</div>';
   }
   if (status === 'no_lines') {
     return h + '<div class="jp-note" data-jp-line-evidence="no_lines"><span class="jp-tag mute">No lines</span> No Xero invoice or cost lines were found for this job, so it cannot be verified.</div>';
@@ -20128,7 +20241,7 @@ function _jpLineEvidence(data) {
   var why = Array.isArray(le.why_not_verified) ? le.why_not_verified : [];
   if (!verified && why.length) {
     h += '<ul class="jp-sub" data-jp-why-not-verified style="margin:4px 0 0 18px;">';
-    why.forEach(function(w) { h += '<li>' + _jpEsc(w) + '</li>'; });
+    why.forEach(function(w) { h += '<li>' + _jpEsc(_jpPlainText(w)) + '</li>'; });
     h += '</ul>';
   }
   h += '</div>';
@@ -20150,6 +20263,17 @@ function _jpLineEvidence(data) {
   if (le.read_at) h += '<div class="jp-sub" style="margin-top:4px;">Read ' + _jpEsc(String(le.read_at).slice(0, 16).replace('T', ' ')) + ' UTC &middot; rule ' + _jpEsc(le.rule || '') + '</div>';
   return h;
 }
+// Won and still in delivery: profit is not due yet.
+function _jpInDelivery(j) {
+  return JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
+}
+// Why Job Profit shows no margin for a job, in the words of its own detail note
+// (_jpRenderDetail). The quick view says it beside "Withheld" or "Unknown".
+function _jpWithheldWhy(j) {
+  var flags = _jpFlags(j).map(_jpFlagText);
+  if (_jpInDelivery(j)) return 'Job not finished: profit not due yet.' + (flags.length ? ' Open items: ' + flags.join('; ') + '.' : '');
+  return 'Job Profit withholds it until the evidence is complete' + (flags.length ? ': ' + flags.join('; ') : '') + '.';
+}
 function _jpRenderDetail(data) {
   var j = data.job || {};
   var trades = Array.isArray(data.trades) ? data.trades : [];
@@ -20163,11 +20287,11 @@ function _jpRenderDetail(data) {
   h += '<div class="jp-detail-head"><div style="flex:1;min-width:200px;"><h3>' + _jpEsc(j.job_number || 'No job #') + ' &middot; ' + _jpEsc(j.client_name || '') + '</h3>'
     + '<div class="jp-sub">' + _jpTypeLabel(j) + ' &middot; ' + _jpEsc(_jpStatusText(j.status)) + (j.created_at ? ' &middot; created ' + _jpDate(j.created_at) : '') + '</div>'
     + '<div style="margin-top:4px;">' + _jpConfidence(j) + '</div></div>'
-    + (j.job_id ? '<button class="btn btn-secondary btn-sm" onclick="openJobDetail(\'' + _jpEsc(j.job_id) + '\')">Open job</button>' : '')
-    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: Financials > Bill Reconciliation">Place bills</button>' : '')
-    + '<button class="btn btn-secondary btn-sm" onclick="closeJobProfitDetail()">Close</button></div>';
+    + (j.job_id ? '<button class="btn btn-secondary btn-sm sw-tap" onclick="openJobDetail(\'' + _jpEsc(j.job_id) + '\')">Open job</button>' : '')
+    + (flags.indexOf('materials_not_linked') !== -1 ? '<button class="btn btn-secondary btn-sm sw-tap" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: Financials > Bill Reconciliation">Place bills</button>' : '')
+    + '<button class="btn btn-secondary btn-sm sw-tap" onclick="closeJobProfitDetail()">Close</button></div>';
 
-  var inDelivery = JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
+  var inDelivery = _jpInDelivery(j);
   if (_jpProfitOf(j) == null && inDelivery) {
     h += '<div class="jp-note"><strong>Job not finished: profit not due yet.</strong> Costs and invoices are still coming in'
       + (flags.length ? '. Open items: ' + _jpEsc(flags.map(_jpFlagText).join('; ')) : '') + '.</div>';
@@ -20329,7 +20453,7 @@ function _jpRenderDetail(data) {
     other.forEach(function(c) {
       h += '<tr><td>' + _jpDate(c.event_date) + '</td><td data-label="Party">' + _jpEsc(c.party || '') + (c.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(c.description)) + '</div>' : '') + '</td>'
         + '<td data-label="Source">' + _jpEsc(JP_SOURCE_LABELS[c.source] || c.source || '') + (c.is_actual === false ? ' <span class="jp-tag mute">not actual</span>' : '') + '</td>'
-        + '<td data-label="Document"' + (c.source === 'materials_fact' ? ' class="jp-order-document"' : '') + '>' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(c.document_status) + '</div>' : '') + _jpOrderEvidence(c, data.material_order_sources) + '</td>'
+        + '<td data-label="Document"' + (c.source === 'materials_fact' ? ' class="jp-order-document"' : '') + '>' + _jpEsc(c.document_number || '') + (c.document_status ? '<div class="jp-sub">' + _jpEsc(_jpDocStatusText(c.document_status)) + '</div>' : '') + _jpOrderEvidence(c, data.material_order_sources) + '</td>'
         + '<td data-label="Lane">' + _jpEsc(c.lane || '') + '</td><td class="num" data-label="Amount">' + _jpMoney(c.amount_ex) + '</td><td data-label="Paid">' + _jpPaid(c.paid, c.paid_on) + '</td></tr>';
     });
     h += '</tbody></table></div>';
@@ -22270,6 +22394,27 @@ function renderMaterialsKanban() {
   container.innerHTML = html;
 }
 
+// <photo-thumb> A job photo or receipt as a small thumbnail (D2, 3 Nov 2026). The quick
+// view drew 32 full-size receipts (17.6 MB, up to 2.6 MB each) as 83 px squares, all at
+// once. A stored thumbnail wins; a Supabase public object is asked for through the
+// storage image transform at 160 px wide; anything else is used as it is. The image loads
+// lazily and the full photo opens only on a tap. A thumbnail that will not load says so
+// rather than fetching the full photo.
+var SW_STORAGE_OBJECT_RE = /^(https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1)\/object\/public\/([^?#]+)$/i;
+function swPhotoThumbUrl(m) {
+  if (m && m.thumbnail_url) return String(m.thumbnail_url);
+  var u = String((m && m.storage_url) || '');
+  var hit = SW_STORAGE_OBJECT_RE.exec(u);
+  return hit ? hit[1] + '/render/image/public/' + hit[2] + '?width=160' : u;
+}
+function swPhotoThumbHtml(m, alt, style) {
+  var full = String((m && m.storage_url) || '');
+  return '<img src="' + escapeHtml(swPhotoThumbUrl(m)) + '" loading="lazy" decoding="async" alt="' + escapeHtml(alt || 'Photo') + '"'
+    + ' data-full-photo="' + escapeHtml(full) + '" style="' + style + '"'
+    + ' onclick="window.open(this.getAttribute(\'data-full-photo\'),\'_blank\')"'
+    + ' onerror="this.onerror=null;this.removeAttribute(\'src\');this.alt=\'Photo not shown. Tap to open it.\';this.style.background=\'var(--sw-light)\'">';
+}
+
 // ════════════════════════════════════════════════════════════
 // JOB DETAIL SLIDE PANEL (legacy peek — used by Today/Calendar)
 // ════════════════════════════════════════════════════════════
@@ -22307,14 +22452,14 @@ function renderJobPeek(data) {
   html += '<span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span>';
   // External link buttons
   if (j.ghl_opportunity_id) {
-    html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">View in GHL &#8599;</a>';
+    html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" class="btn btn-secondary btn-sm sw-tap" style="font-size:11px; padding:3px 8px; text-decoration:none;">View in GHL &#8599;</a>';
   }
   if (j.type !== 'miscellaneous') {
     var scopeToolUrl = scopeToolUrlFor(j.type, j);
-    html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;">Open Scope &#8599;</a>';
-    html += scopeEngineLinkHtml(j.type, j, j.id, 'class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; text-decoration:none;"');
+    html += '<a href="' + scopeToolUrl + '?jobId=' + j.id + '" target="_blank" class="btn btn-secondary btn-sm sw-tap" style="font-size:11px; padding:3px 8px; text-decoration:none;">Open Scope &#8599;</a>';
+    html += scopeEngineLinkHtml(j.type, j, j.id, 'class="btn btn-secondary btn-sm sw-tap" style="font-size:11px; padding:3px 8px; text-decoration:none;"');
   }
-  html += '<button class="btn btn-primary btn-sm" style="font-size:11px; padding:3px 8px;" onclick="closeSlidePanel(); openJobDetail(\'' + j.id + '\')">Open Record</button>';
+  html += '<button class="btn btn-primary btn-sm sw-tap" style="font-size:11px; padding:3px 8px;" onclick="closeSlidePanel(); openJobDetail(\'' + j.id + '\')">Open Record</button>';
   html += '</div>';
   if (j.site_address) html += '<div style="font-size:13px; margin-bottom:4px;">' + j.site_address + '</div>';
   if (j.client_phone) html += '<div style="font-size:13px; color:var(--sw-text-sec);">Phone: <a href="tel:' + j.client_phone + '">' + j.client_phone + '</a></div>';
@@ -22335,11 +22480,8 @@ function renderJobPeek(data) {
   var invoicedTotal = salesInvoices.reduce(function(s, inv) { return s + (parseFloat(inv.total) || 0); }, 0);
   var invoicePaid = salesInvoices.reduce(function(s, inv) { return s + (parseFloat(inv.amount_paid) || 0); }, 0);
   var invoiceRemaining = quoteVal == null ? null : Math.max(0, quoteVal - invoicedTotal);
-  if (quoteVal > 0 || poCostsTotal > 0 || poSum.missing > 0 || invoicedTotal > 0) {
-    // Margin only when the quote and every PO total are known (INT-37)
-    var marginKnown = quoteVal > 0 && !poSum.missing;
-    var margin = marginKnown ? ((quoteVal - poCostsTotal) / quoteVal * 100) : null;
-    var marginColor = !marginKnown ? 'var(--sw-text-sec)' : margin >= 25 ? 'var(--sw-green)' : margin >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)';
+  var peekMoneyBox = quoteVal > 0 || poCostsTotal > 0 || poSum.missing > 0 || invoicedTotal > 0;
+  if (peekMoneyBox) {
     html += '<div style="margin-bottom:16px; padding:10px; background:var(--sw-light); border-radius:8px; font-size:12px;">';
     html += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Quote value</span><strong>' + fmt$(quoteVal, 'no quote total') + '</strong></div>';
     // Cost estimate from pricing_json vs actual PO spend
@@ -22362,12 +22504,9 @@ function renderJobPeek(data) {
     }
     html += '<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>Collected</span><strong style="color:var(--sw-green);">' + fmt$(invoicePaid) + '</strong></div>';
     html += '<div style="display:flex; justify-content:space-between; margin-bottom:6px;"><span>Still to invoice</span><strong style="color:' + (invoiceRemaining == null ? 'var(--sw-text-sec)' : invoiceRemaining > 0 ? 'var(--sw-orange)' : 'var(--sw-green)') + ';">' + fmt$(invoiceRemaining, 'no quote total') + '</strong></div>';
-    if (quoteVal > 0) {
-      var barPct = Math.min(100, poCostsTotal / quoteVal * 100);
-      html += '<div style="height:6px; background:#e0e0e0; border-radius:3px; overflow:hidden;">';
-      html += '<div style="height:100%; width:' + barPct + '%; background:' + marginColor + '; border-radius:3px;"></div></div>';
-      html += '<div style="text-align:right; margin-top:2px; font-weight:600; color:' + marginColor + ';">Margin: ' + (marginKnown ? margin.toFixed(0) + '%' : 'Unknown (' + poSum.missing + ' PO' + (poSum.missing === 1 ? '' : 's') + ' with no total)') + '</div>';
-    }
+    // <peek-margin> Job Profit's margin for this job, read after paint (peekFillMargin).
+    // PO costs are part of the cost only, so no margin is worked out from them here.
+    if (_canSeeJobProfit()) html += '<div data-peek-margin style="text-align:right; margin-top:2px; font-weight:600; color:var(--sw-text-sec);">Margin: reading Job Profit\u2026</div>';
     html += '</div>';
   }
 
@@ -22454,11 +22593,10 @@ function renderJobPeek(data) {
       html += '<div class="panel-title" style="margin-top:16px;">Photos (' + jobPhotos.length + ')</div>';
       html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;">';
       jobPhotos.forEach(function(m) {
-        var src = m.thumbnail_url || m.storage_url;
         var phase = m.phase || '';
         html += '<div style="position:relative">';
-        html += '<img src="' + escapeHtml(src) + '" alt="' + escapeHtml(m.label || phase) + '" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(\'' + escapeHtml(m.storage_url) + '\',\'_blank\')">';
-        if (phase) html += '<span style="position:absolute;bottom:2px;left:2px;font-size:9px;background:rgba(0,0,0,0.6);color:#fff;padding:1px 4px;border-radius:3px">' + phase + '</span>';
+        html += swPhotoThumbHtml(m, m.label || phase, 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer');
+        if (phase) html += '<span style="position:absolute;bottom:2px;left:2px;font-size:9px;background:rgba(0,0,0,0.6);color:#fff;padding:1px 4px;border-radius:3px">' + escapeHtml(_jpStatusText(phase)) + '</span>';
         html += '</div>';
       });
       html += '</div>';
@@ -22471,11 +22609,10 @@ function renderJobPeek(data) {
       var poLookup = {};
       (data.purchase_orders || []).forEach(function(po) { poLookup[po.id] = po.po_number; });
       receiptPhotos.forEach(function(m) {
-        var src = m.thumbnail_url || m.storage_url;
         var poLabel = m.po_id && poLookup[m.po_id] ? poLookup[m.po_id] : 'No PO';
         html += '<div style="position:relative">';
-        html += '<img src="' + escapeHtml(src) + '" alt="Receipt" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(\'' + escapeHtml(m.storage_url) + '\',\'_blank\')">';
-        html += '<span style="position:absolute;bottom:2px;left:2px;font-size:9px;background:rgba(0,0,0,0.6);color:#fff;padding:1px 4px;border-radius:3px">' + poLabel + '</span>';
+        html += swPhotoThumbHtml(m, 'Receipt', 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer');
+        html += '<span style="position:absolute;bottom:2px;left:2px;font-size:9px;background:rgba(0,0,0,0.6);color:#fff;padding:1px 4px;border-radius:3px">' + escapeHtml(poLabel) + '</span>';
         html += '</div>';
       });
       html += '</div>';
@@ -22488,11 +22625,9 @@ function renderJobPeek(data) {
     html += '<div style="font-size:13px;">';
     html += '<div>' + (data.xero_project.project_name || '') + '</div>';
     html += '<div>Invoiced: ' + fmt$(data.xero_project.total_invoiced) + '</div>';
-    html += '<div>Expenses: ' + fmt$(data.xero_project.total_expenses) + '</div>';
-    var margin = data.xero_project.total_invoiced > 0
-      ? ((data.xero_project.total_invoiced - data.xero_project.total_expenses) / data.xero_project.total_invoiced * 100).toFixed(0)
-      : 0;
-    html += '<div>Margin: ' + margin + '%</div>';
+    // Evidence only (Job Profit's rule): the Project's expenses are not the job's full
+    // cost, so no margin is worked out from them.
+    html += '<div>Expenses on the Project: ' + fmt$(data.xero_project.total_expenses) + ' (not the job\'s full cost)</div>';
     html += '</div>';
   }
 
@@ -22514,18 +22649,44 @@ function renderJobPeek(data) {
   }
 
   document.getElementById('slidePanelBody').innerHTML = html;
+  if (peekMoneyBox && _canSeeJobProfit()) peekFillMargin(j.id);
+}
+
+// <peek-margin> The quick view's margin is Job Profit's own (D2, 3 Nov 2026): the same
+// read (ops-api job_profit) and the same rule as Job Profit's Margin card, so it shows
+// Job Profit's figure or "Withheld" with Job Profit's reason, never one worked out from
+// the PO costs above (which said 100% when no PO had a total).
+var _peekMarginSeq = 0;
+async function peekFillMargin(jobId) {
+  var seq = ++_peekMarginSeq;
+  var paint = function(html) {
+    var el = seq === _peekMarginSeq && document.querySelector('#slidePanelBody [data-peek-margin]');
+    if (el) el.innerHTML = html;
+  };
+  try {
+    var data = await opsFetch('job_profit', { job_id: jobId });
+    var jp = (data && data.job) || {};
+    var m = _jpMarginOf(jp);
+    var why = m == null ? _jpWithheldWhy(jp) : '';
+    paint('<span style="color:' + (m == null ? 'var(--sw-text-sec)' : m >= 25 ? 'var(--sw-green)' : m >= 15 ? 'var(--sw-yellow)' : 'var(--sw-red)') + ';">Margin (Job Profit): ' + _jpPct(m, _jpCostUnknown(jp)) + '</span>'
+      + (why ? '<div data-peek-margin-why style="font-weight:400; color:var(--sw-text-sec); text-align:left; margin-top:2px;">' + _jpEsc(why) + '</div>' : ''));
+  } catch (e) {
+    var why = e && e.status === 404 ? 'This job has no Job Profit row yet.' : 'Job Profit could not be read: ' + ((e && e.message) || 'unknown error');
+    paint('Margin: <span class="jp-unk">Not known</span><div data-peek-margin-why style="font-weight:400; text-align:left; margin-top:2px;">' + _jpEsc(why) + '</div>'
+      + (e && e.status === 404 ? '' : '<button class="btn btn-secondary btn-sm sw-tap" style="margin-top:4px;" onclick="peekFillMargin(\'' + _jpEsc(jobId) + '\')">Try again</button>'));
+  }
 }
 
 function formatEventType(type, detail) {
   var labels = {
     'job_created': 'Job created',
-    'status_changed': 'Status → ' + (detail?.new_status || ''),
+    'status_changed': 'Status → ' + _jpStatusText(detail?.new_status),
     'ghl_linked': 'Linked to GHL',
     'ghl_stage_synced': 'GHL stage synced',
     'ghl_updated': 'Updated from GHL',
     'assignment_created': 'Scheduled',
     'assignment_deleted': 'Assignment removed',
-    'assignment_status_changed': 'Assignment ' + (detail?.new_status || 'updated'),
+    'assignment_status_changed': 'Assignment ' + (detail?.new_status ? _jpStatusText(detail.new_status).toLowerCase() : 'updated'),
     'po_created': 'PO created' + (detail?.po_number ? ' (' + detail.po_number + ')' : ''),
     'po_email_log': (detail?.direction === 'received' ? 'Email received' : 'Email sent') + (detail?.supplier ? ' — ' + detail.supplier : ''),
     'scope_saved': 'Scope saved',
@@ -26673,9 +26834,8 @@ function renderFilesView(data) {
     html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Photos (' + jobPhotos.length + ')</div>';
     html += '<div class="jd-photo-grid">';
     jobPhotos.forEach(function(m) {
-      var src = m.thumbnail_url || m.storage_url;
       html += '<div class="jd-photo-item">';
-      html += '<img src="' + escapeHtml(src) + '" alt="' + escapeHtml(m.label || m.phase || '') + '" onclick="window.open(\'' + escapeHtml(m.storage_url) + '\',\'_blank\')">';
+      html += swPhotoThumbHtml(m, m.label || m.phase || 'Photo', '');
       html += '<button class="jd-photo-delete" onclick="event.stopPropagation();deleteMedia(\'' + m.id + '\')" title="Delete photo">&times;</button>';
       if (m.phase) html += '<span class="jd-photo-phase">' + m.phase + '</span>';
       html += '</div>';
@@ -26690,10 +26850,9 @@ function renderFilesView(data) {
     html += '<div style="font-size:14px;font-weight:700;margin-top:16px;margin-bottom:8px;">Receipts (' + receiptPhotos.length + ')</div>';
     html += '<div class="jd-photo-grid">';
     receiptPhotos.forEach(function(m) {
-      var src = m.thumbnail_url || m.storage_url;
       var poLabel = m.po_id && poLookup[m.po_id] ? poLookup[m.po_id] : 'No PO';
       html += '<div class="jd-photo-item">';
-      html += '<img src="' + escapeHtml(src) + '" alt="Receipt" onclick="window.open(\'' + escapeHtml(m.storage_url) + '\',\'_blank\')">';
+      html += swPhotoThumbHtml(m, 'Receipt', '');
       html += '<button class="jd-photo-delete" onclick="event.stopPropagation();deleteMedia(\'' + m.id + '\')" title="Delete photo">&times;</button>';
       html += '<span class="jd-photo-phase">' + poLabel + '</span>';
       html += '</div>';

@@ -527,6 +527,28 @@ var JobOverviewV2Core = (function () {
     var v = firstNum(pj.totalIncGST, pj.total);
     return v != null && v > 0 ? v : null;
   }
+  // Field names the story card's own sentences can carry, in staff words (D2, 3 Nov 2026:
+  // "exceed the job value $13,750.00 (pricing_json.totalIncGST)"). pricing_json is the job's
+  // saved scope price, not a quote's value, so it reads as the value box's own source does.
+  var FIELD_WORDS = {
+    'pricing_json.totalIncGST': 'saved scope price, inc GST', 'pricing_json.total': 'saved scope price',
+    'jobs.quoted_value': 'recorded quote value', 'jobs.price_inc': 'job price, inc GST'
+  };
+  function plainFields(v) {
+    return str(v).replace(/\b(?:pricing_json\.(?:totalIncGST|total)|jobs\.(?:quoted_value|price_inc))\b/g, function (f) { return FIELD_WORDS[f]; });
+  }
+  // The kind of record a source reference points at, never the table name (D2: the AI
+  // notes listed "business_events: <id>"). Unknown tables read as "Record".
+  var RECORD_KINDS = {
+    business_events: 'Message', xero_invoices: 'Xero invoice', job_assignments: 'Crew booking', job_documents: 'Job document',
+    job_contacts: 'Job contact', job_events: 'Job note', jobs: 'Job record', job_media: 'Photo', quote_documents: 'Quote',
+    purchase_orders: 'Purchase order', work_orders: 'Work order', service_reports: 'Service report', person: 'Person', check: 'Check'
+  };
+  function recordRef(c) {
+    var t = str(c && (c.t || c.table)), id = str(c && c.id);
+    var kind = t ? (RECORD_KINDS[t] || 'Record') : 'Source type unavailable';
+    return kind + ', ' + (id ? 'reference ' + id : 'reference unavailable');
+  }
   // A recorded price is not a settled contract when the card carries a value check.
   // Keep the source and the conflicting records beside it; never infer a new contract
   // or a receivable from invoice percentages in the browser.
@@ -542,7 +564,7 @@ var JobOverviewV2Core = (function () {
     if (!basis || /^pricing_json\./.test(basis)) basis = 'Saved scope price';
     else if (basis === 'jobs.quoted_value') basis = 'Recorded quote value';
     return { unconfirmed: unconfirmed, recordOnly: !obj(sm.job_value), basis: basis,
-      checks: checks.map(function (c) { return clean(c.what); }).filter(Boolean) };
+      checks: checks.map(function (c) { return plainFields(clean(c.what)); }).filter(Boolean) };
   }
   function futureMoney(story) {
     var f = obj(story && story.money && story.money.not_yet_invoiced);
@@ -1476,7 +1498,7 @@ var JobOverviewV2Core = (function () {
     humanStatus: humanStatus, hasBanned: hasBanned, flagOn: flagOn, isNotDeployed: isNotDeployed,
     storyText: storyText, storyBook: storyBook, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
-    invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
+    invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, plainFields: plainFields, recordRef: recordRef, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
     timeline: timeline, recordTimeline: recordTimeline, conversation: conversation, heldList: heldList,
     callWords: callWords, messagesFromDetail: messagesFromDetail, customerExchange: customerExchange,
     NOT_SEEN_STANDING: NOT_SEEN_STANDING, notSeen: notSeen, matchingWait: matchingWait, placedBy: placedBy, decisionsUnread: decisionsUnread,
@@ -1870,7 +1892,7 @@ var JobOverviewV2 = (function () {
         return true;
       });
       return '<details><summary>Source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>' +
-        (refs.length ? refs.map(function (c) { return '<li>' + esc(C.str(c.t || c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; }).join('') : '<li>Source references unavailable.</li>') + '</ul></details>';
+        (refs.length ? refs.map(function (c) { return '<li>' + esc(C.recordRef(c)) + '</li>'; }).join('') : '<li>Source references unavailable.</li>') + '</ul></details>';
     }
     function list(key) {
       if (!Array.isArray(story[key])) return '<p>' + (key === 'disputed' ? 'Disputed' : 'Settled and replaced') + ' notes were not returned in this read.</p>';
@@ -1933,7 +1955,7 @@ var JobOverviewV2 = (function () {
       h += '<article data-ov2-review-key="' + esc(item.item_key || '') + '"><p>' + esc(C.clean(item.what) || 'Note wording unavailable') + '</p>' +
         '<details><summary>Retained source references</summary><p>Original source opening is unavailable here. Access must follow the existing staff privacy rules.</p><ul>';
       var cites = C.arr(item.opened_by);
-      cites.forEach(function (c) { h += '<li>' + esc(C.str(c.table) || 'Source type unavailable') + ': ' + esc(C.str(c.id) || 'Source identity unavailable') + '</li>'; });
+      cites.forEach(function (c) { h += '<li>' + esc(C.recordRef(c)) + '</li>'; });
       if (!cites.length) h += '<li>Source references unavailable.</li>';
       h += '</ul></details></article>';
     });

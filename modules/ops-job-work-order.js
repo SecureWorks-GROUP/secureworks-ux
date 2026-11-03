@@ -740,7 +740,10 @@ var JobWorkOrderOps = (function () {
       '.jwo-table .r{text-align:right;white-space:nowrap;}' +
       '.jwo-line-note{font-size:11px;color:var(--sw-text-sec);}' +
       '.jwo-office-review{margin-top:4px;font-size:12px;}' +
-      '.jwo-office-review-actions{display:flex;gap:6px;margin-top:6px;}' +
+      // Approve, Query and Reject change records, so they sit well apart; on a touch
+      // screen each is at least 44 px (D2, 3 Nov 2026: they were 25 px, side by side).
+      '.jwo-office-review-actions{display:flex;flex-wrap:wrap;gap:16px;margin-top:8px;}' +
+      '@media (pointer:coarse){.jwo-office-review-actions .btn{min-height:44px;min-width:88px;}}' +
       '.jwo-office-review input{display:block;margin-top:4px;padding:4px 6px;width:220px;}' +
       '.jwo-warn{font-size:10px;font-weight:700;color:#B45309;}' +
       '.jwo-addendum{border-left:3px solid var(--sw-orange);padding-left:10px;margin-top:8px;}' +

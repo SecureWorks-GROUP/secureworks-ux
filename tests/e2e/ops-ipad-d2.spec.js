@@ -15,6 +15,9 @@
 //     board card icons; the card icons also name themselves without a mouse.
 //  6. A server failure reads in plain words ("The server took too long. Try again.") and
 //     keeps the Try again button.
+//  8. Follow-up (3 Nov 10:12Z): the patio roof codes in the quick view and "agent_ai:" in
+//     Job Profit's line evidence read in words; the board pipeline tabs, Financials
+//     sub-tabs, job card back arrow and Call, SMS and Navigate are 44 px.
 // Offline: every ops-api read is answered in the page or by a route here. No live read, no
 // write. D2_SHOTS=<dir> saves screenshots (D2_SHOTS_TAG names them, e.g. before or after).
 const fs = require('node:fs');
@@ -594,5 +597,83 @@ test.describe('7. The patio average under Margin tries once more by itself', () 
     await again.tap();
     await expect(avg).toContainText('31.8% pooled margin');
     expect(await rollups(page)).toBe(3);
+  });
+});
+
+// D2 follow-up (CIO, 3 Nov 10:12Z): the two code words the live check still read, and the
+// small controls it named.
+test.describe('8. Follow-up: roof codes and AI placements in words; the last small controls at 44 px', () => {
+  test('quick view patio scope: roof type, roof sheet and connection in words, not codes', async ({ page }) => {
+    const d = jobDetail(JOB_P, 'SWP-261247');
+    d.job.scope_json = { config: { roofStyle: 'reverse_skillion', roofing: 'polycarb_corrugated', connection: 'riser', length: 6, projection: 4 } };
+    await boot(page, { job_detail: d, job_profit: profitDetail(PROFIT_P) });
+    await openPeek(page, JOB_P);
+    const body = page.locator('#slidePanelBody');
+    await expect(body).toContainText('Reverse skillion roof');
+    await expect(body).toContainText('Polycarbonate corrugated');
+    await expect(body).toContainText('Riser connection');
+    expect(await codesShown(body)).toEqual([]);
+    await shot(page, '8-quickview-roof-words', body);
+    // Every code stored on 3 Nov has its words; any other reads with spaces, never as the code.
+    expect(await page.evaluate(() => [
+      patioScopeWords('roofing', 'solarspan75'), patioScopeWords('roofing', 'polycarb_trimdek'), patioScopeWords('roofing', 'stratco_cgi100_760'),
+      patioScopeWords('roofStyle', 'gable'), patioScopeWords('connection', 'freestanding'), patioScopeWords('roofing', 'new_panel_type'),
+    ])).toEqual(['SolarSpan 75 mm insulated panel', 'Polycarbonate Trimdek', 'Stratco CGI 100, 760 mm', 'Gable roof', 'Freestanding', 'New panel type']);
+  });
+
+  test('Job Profit line evidence and bills: an AI agent placement in words', async ({ page }) => {
+    const detail = profitDetail(PROFIT_P, {
+      cost_events: [{ source: 'materials_fact', party: 'Fixture Supplies', description: 'Polycarbonate sheets', document_id: 'd1', document_number: 'INV-1', lane: 'materials', amount_ex: 120, match_method: 'agent_ai' }],
+      line_evidence: { status: 'provisional', invoice_lines: 1, invoice_lines_evidenced: 1, cost_items: 1, cost_items_evidenced: 0, evidenced_ex: 1000, not_evidenced_ex: 120, lines: [
+        { kind: 'invoice_line', document: 'INV-2', date: '2026-10-20', description: 'Patio install', amount_ex: 1000, state: 'evidenced' },
+        { kind: 'supplier_bill', document: 'INV-1', date: '2026-10-21', description: 'agent_ai: The email attached to this invoice identifies SWP-261247.', amount_ex: 120, state: 'no_evidence' },
+      ] },
+    });
+    await boot(page, { list_invoices: { invoices: [] }, job_profit_list: profitList([PROFIT_P]), job_profit: detail });
+    await page.evaluate(() => { showView('financials'); showSubTab('jobprofit'); openJobProfitDetail(null, 'SWP-261247'); });
+    const lines = page.locator('#jpDetail [data-jp-evidence-lines]');
+    await lines.locator('summary').tap();
+    await expect(lines).toContainText('Placed by the AI agent (its reason: The email attached to this invoice identifies SWP-261247.)');
+    await expect(lines).toContainText('Patio install');
+    await expect(lines).not.toContainText('agent_ai');
+    await expect(page.locator('#jpDetail')).toContainText('placed whole by the AI agent');
+    expect(await codesShown(page.locator('#jpDetail'))).toEqual([]);
+    await shot(page, '8-jobprofit-line-evidence-words', lines);
+  });
+
+  test('board pipeline tabs', async ({ page }) => {
+    await boot(page, { pipeline: PIPELINE });
+    await page.evaluate(() => showView('jobs'));
+    const tabs = page.locator('#viewJobs .pipeline-tab');
+    await expect(tabs.first()).toBeVisible();
+    expectTappable(await sizes(tabs), 'pipeline tab');
+    await shot(page, '8-pipeline-tabs', page.locator('#viewJobs .filter-bar'));
+  });
+
+  test('Financials sub-tabs, Job profit among them', async ({ page }) => {
+    await boot(page, { list_invoices: { invoices: [] } });
+    await page.evaluate(() => showView('financials'));
+    const tabs = page.locator('#viewFinancials .sub-tab');
+    await expect(page.locator('#viewFinancials .sub-tab[data-sub="jobprofit"]')).toBeVisible();
+    const s = await sizes(tabs);
+    expect(s.map((x) => x.t)).toContain('Job profit');
+    expectTappable(s, 'Financials sub-tab');
+    await shot(page, '8-financials-subtabs', page.locator('#viewFinancials .sub-tabs'));
+  });
+
+  test('job card back arrow, and Call, SMS and Navigate', async ({ page }) => {
+    const { JOB_ID, buildJobDetail, buildJobOverview } = require('../fixtures/job-overview-v2');
+    await boot(page, { job_detail: buildJobDetail(), job_overview: buildJobOverview(), annotations: { annotations: [] }, list_job_actions: [] }, { url: '/ops.html?overview=v2' });
+    await page.evaluate((id) => openJobDetail(id), JOB_ID);
+    const cust = page.locator('#ov2Cust');
+    await expect(cust.locator('.ov2-acts')).toContainText('Navigate');
+    expectTappable(await sizes(page.locator('.jd-back')), 'back arrow');
+    expect(await page.locator('.jd-back').getAttribute('aria-label')).toBe('Back');
+    const acts = await sizes(cust.locator('.ov2-acts .ov2-btn'));
+    expect(acts.map((x) => x.t)).toEqual(expect.arrayContaining(['Call', 'SMS', 'Navigate']));
+    expectTappable(acts, 'customer button');
+    const next = page.locator('#ov2Next .ov2-nacts .ov2-btn');
+    if (await next.count()) expectTappable(await sizes(next), 'next step button');
+    await shot(page, '8-job-card-back-call-sms-navigate', page.locator('#jobDetailView'));
   });
 });

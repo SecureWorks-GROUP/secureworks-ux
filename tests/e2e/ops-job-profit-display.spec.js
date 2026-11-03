@@ -163,3 +163,106 @@ test('a failed job list read says nothing is known and what to do next', async (
   });
   expect(text).toContain('Could not load the job list, so no job here is known: canceling statement due to statement timeout. Press Retry; if it keeps failing, narrow the filters and try again.');
 });
+
+// When each trade charged (finish line A5, owner ask 1, coordinator spot-check
+// 3 Nov 2026 18:02Z). SWF-261099 as production holds it: trade one submitted
+// $140 worked 12 Oct and $80 worked 13 Oct on 18 Oct; trade two submitted $70
+// with no work date on 22 Oct. Every line's cost date is the pay week's start,
+// 12 Oct, which must never show as when they charged.
+const T1 = '00000000-0000-4000-8000-0000000000e1';
+const T2 = '00000000-0000-4000-8000-0000000000e2';
+function chargedLine(party, partyName, amount, submitted, work, line, over) {
+  return Object.assign({ source: 'trade_line', party_id: party, party: partyName, lane: 'labour', description: 'Fence install',
+    amount_ex: amount, event_date: '2026-10-12', hours: null, document_number: 'SW-INV-H-261018-034', is_actual: true,
+    match_method: 'job_id', submitted_on: submitted, work_date: work, line_date: line }, over || {});
+}
+const SWF_261099 = {
+  job: job({ job_number: 'SWF-261099', work_type: 'fence', actual_labour_ex: 290, actual_cost_ex: 290 }),
+  trades: [
+    { party_id: T1, party: 'Trade One', amount_ex: 220, lines: 2, first: '2026-10-12', last: '2026-10-12',
+      first_charge: { submitted_on: '2026-10-18', work_date: '2026-10-12', line_date: null },
+      last_charge: { submitted_on: '2026-10-18', work_date: '2026-10-13', line_date: null } },
+    { party_id: T2, party: 'Trade Two', amount_ex: 70, lines: 1, first: '2026-10-12', last: '2026-10-12',
+      first_charge: { submitted_on: '2026-10-22', work_date: null, line_date: null },
+      last_charge: { submitted_on: '2026-10-22', work_date: null, line_date: null } },
+  ],
+  cost_events: [
+    chargedLine(T1, 'Trade One', 80, '2026-10-18', '2026-10-13', null),
+    chargedLine(T1, 'Trade One', 140, '2026-10-18', '2026-10-12', null),
+    chargedLine(T2, 'Trade Two', 70, '2026-10-22', null, null, { document_number: 'SW-INV-R-261022-032' }),
+  ],
+  timeline: [
+    { date: '2026-10-18', kind: 'trade_charge', lane: 'labour', party: 'Trade One', amount_ex: 140, counts: true, source: 'trade_line', source_id: 'a', submitted_on: '2026-10-18', work_date: '2026-10-12', line_date: null },
+    { date: '2026-10-18', kind: 'trade_charge', lane: 'labour', party: 'Trade One', amount_ex: 80, counts: true, source: 'trade_line', source_id: 'b', submitted_on: '2026-10-18', work_date: '2026-10-13', line_date: null },
+    { date: '2026-10-22', kind: 'trade_charge', lane: 'labour', party: 'Trade Two', amount_ex: 70, counts: true, source: 'trade_line', source_id: 'c', submitted_on: '2026-10-22', work_date: null, line_date: null },
+  ],
+};
+
+test('A5 ask 1: each trade shows when it submitted its first and last charge, with the day worked (SWF-261099)', async ({ page }) => {
+  await render(page, SWF_261099);
+  const rows = page.locator('[data-jp-trades] tbody tr[data-trade-party]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('[data-label="Lines"]')).toHaveText('2');
+  await expect(rows.nth(0).locator('[data-label="Amount"]')).toHaveText('$220.00');
+  await expect(rows.nth(0).locator('[data-jp-charge="first"]')).toHaveText('Submitted 18 Oct 26 · worked 12 Oct 26');
+  await expect(rows.nth(0).locator('[data-jp-charge="last"]')).toHaveText('Submitted 18 Oct 26 · worked 13 Oct 26');
+  await expect(rows.nth(1).locator('[data-label="Lines"]')).toHaveText('1');
+  await expect(rows.nth(1).locator('[data-label="Amount"]')).toHaveText('$70.00');
+  await expect(rows.nth(1).locator('[data-jp-charge="first"]')).toHaveText('Submitted 22 Oct 26 · no work date');
+  await expect(rows.nth(1).locator('[data-jp-charge="last"]')).toHaveText('Submitted 22 Oct 26 · no work date');
+  await expect(page.locator('[data-jp-charge-note]')).toHaveText('First and last charge: the day the trade submitted the crew invoice, and the day worked where the line records one.');
+  // Each trade's own lines, in the order charged, each with its own dates.
+  await page.locator('[data-jp-trade-toggle="jt0"]').click();
+  const items = page.locator('[data-jp-trade-lines="jt0"] li');
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText('$140.00');
+  await expect(items.nth(0).locator('[data-jp-charge="line"]')).toHaveText('Submitted 18 Oct 26 · worked 12 Oct 26');
+  await expect(items.nth(1)).toContainText('$80.00');
+  await expect(items.nth(1).locator('[data-jp-charge="line"]')).toHaveText('Submitted 18 Oct 26 · worked 13 Oct 26');
+  await page.locator('[data-jp-trade-toggle="jt1"]').click();
+  await expect(page.locator('[data-jp-trade-lines="jt1"] [data-jp-charge="line"]')).toHaveText('Submitted 22 Oct 26 · no work date');
+  // The money timeline dates each trade charge by the day it was submitted.
+  const tl = page.locator('tr:has([data-jp-charge="timeline"])');
+  await expect(tl).toHaveCount(3);
+  await expect(tl.nth(0).locator('td').first()).toHaveText('18 Oct 26');
+  await expect(tl.nth(0).locator('[data-jp-charge="timeline"]')).toHaveText('Submitted 18 Oct 26 · worked 12 Oct 26');
+  await expect(tl.nth(2).locator('td').first()).toHaveText('22 Oct 26');
+  await expect(tl.nth(2).locator('[data-jp-charge="timeline"]')).toHaveText('Submitted 22 Oct 26 · no work date');
+  // The pay week's start is never shown as a charge date.
+  expect(await page.locator('[data-jp-trades] td[data-label="First charge"], [data-jp-trades] td[data-label="Last charge"]').allInnerTexts()).not.toContain('12 Oct 26');
+});
+
+test('A5 ask 1: a job whose lines have no work date says so, and a line\'s own day is named as such', async ({ page }) => {
+  const P = '00000000-0000-4000-8000-0000000000e3';
+  await render(page, {
+    job: job({ job_number: 'SWP-261183' }),
+    trades: [{ party_id: P, party: 'Patio Crew', amount_ex: 130, lines: 2, first: '2026-09-18', last: '2026-09-21',
+      first_charge: { submitted_on: '2026-09-22', work_date: null, line_date: null },
+      last_charge: { submitted_on: '2026-09-25', work_date: null, line_date: '2026-09-18' } }],
+    cost_events: [
+      chargedLine(P, 'Patio Crew', 50, '2026-09-25', null, '2026-09-18', { event_date: '2026-09-18' }),
+      chargedLine(P, 'Patio Crew', 80, '2026-09-22', null, null, { event_date: '2026-09-21' }),
+      chargedLine(P, 'Patio Crew', 30, null, null, null, { event_date: '2026-09-21', is_actual: false, document_status: 'draft' }),
+    ],
+  });
+  const row = page.locator('[data-jp-trades] tbody tr[data-trade-party]');
+  await expect(row.locator('[data-jp-charge="first"]')).toHaveText(/^Submitted 22 Sept? 26 · no work date$/);
+  await expect(row.locator('[data-jp-charge="last"]')).toHaveText(/^Submitted 25 Sept? 26 · line dated 18 Sept? 26$/);
+  await page.locator('[data-jp-trade-toggle]').click();
+  const dates = await page.locator('[data-jp-trade-lines] [data-jp-charge="line"]').allInnerTexts();
+  expect(dates[0]).toMatch(/^Submitted 22 Sept? 26 · no work date$/);
+  expect(dates[1]).toMatch(/^Submitted 25 Sept? 26 · line dated 18 Sept? 26$/);
+  expect(dates[2]).toBe('Not submitted yet · no work date');
+});
+
+test('A5 ask 1: an engine read without the crew invoice dates says so, never the pay week as the charge date', async ({ page }) => {
+  await render(page, { job: job(), trades: TRADES, cost_events: TRADE_LINES, timeline: [
+    { date: '2026-10-06', kind: 'trade_charge', lane: 'labour', party: 'Patio Crew', amount_ex: 1615, counts: true, source: 'trade_line', source_id: 'x' },
+  ] });
+  const row = page.locator('[data-jp-trades] tbody tr[data-trade-party]');
+  await expect(row.locator('[data-jp-charge="first"]')).toHaveText('Submitted date not in this read');
+  await expect(row.locator('[data-jp-charge="last"]')).toHaveText('Submitted date not in this read');
+  await page.locator('[data-jp-trade-toggle]').click();
+  await expect(page.locator('[data-jp-trade-lines] [data-jp-charge="line"]').first()).toHaveText('Submitted date not in this read');
+  await expect(page.locator('[data-jp-charge="timeline"]')).toHaveCount(0);
+});

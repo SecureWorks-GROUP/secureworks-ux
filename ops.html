@@ -19780,6 +19780,24 @@ function _jpDate(d) {
   if (!dateOnly) opts.timeZone = 'Australia/Perth';
   return dt.toLocaleDateString('en-AU', opts);
 }
+// When a trade charged (finish line A5, owner ask 1, 3 Nov 2026): the day the
+// trade submitted the crew invoice, and the day worked where the line records
+// one. A crew line's cost date is the pay week's start for most lines, so it is
+// never shown as when they charged. x: a trade line, a trade's first_charge or
+// last_charge, or a timeline entry (ops-api job_profit). An engine read
+// without these dates says so.
+function _jpChargeWhen(x) {
+  if (!x || !Object.prototype.hasOwnProperty.call(x, 'submitted_on')) return '<span class="jp-unk">Submitted date not in this read</span>';
+  var sent = x.submitted_on ? 'Submitted ' + _jpDate(x.submitted_on)
+    : '<span class="jp-unk">' + (x.document_status === 'draft' ? 'Not submitted yet' : 'Submitted date not recorded') + '</span>';
+  var day = x.work_date ? 'worked ' + _jpDate(x.work_date)
+    : x.line_date ? 'line dated ' + _jpDate(x.line_date)
+    : 'no work date';
+  return sent + ' &middot; ' + day;
+}
+function _jpChargeOrder(c) {
+  return String(c.submitted_on || '9999-12-31') + '|' + String(c.work_date || c.line_date || '9999-12-31');
+}
 // Every paid flag on the job profit read is Xero's PAID (v_job_profit; a trade
 // invoice's 'paid' is set by xero-sync when its bill is PAID).
 function _jpPaid(paid, paidOn) {
@@ -20381,22 +20399,23 @@ function _jpRenderDetail(data) {
       var key = c.party_id || ('name:' + (c.party || ''));
       (tradeLines[key] = tradeLines[key] || []).push(c);
     });
+    h += '<div class="jp-sub" data-jp-charge-note>First and last charge: the day the trade submitted the crew invoice, and the day worked where the line records one.</div>';
     h += '<div class="jp-wrap"><table class="jp-table jp-stack" data-jp-trades><thead><tr><th>Trade</th><th class="num">Lines</th><th>First charge</th><th>Last charge</th><th class="num">Amount</th></tr></thead><tbody>';
     trades.forEach(function(t, i) {
       var lines = tradeLines[t.party_id || ('name:' + (t.party || ''))] || [];
-      lines.sort(function(a, b) { return String(a.event_date || '').localeCompare(String(b.event_date || '')); });
+      lines.sort(function(a, b) { return _jpChargeOrder(a).localeCompare(_jpChargeOrder(b)) || String(a.event_date || '').localeCompare(String(b.event_date || '')); });
       var n = _jpNum(t.lines);
       var key = 'jt' + i;
       var label = (n != null ? n : lines.length) + ' line' + ((n != null ? n : lines.length) === 1 ? '' : 's');
       h += '<tr data-trade-party="' + _jpEsc(t.party_id || '') + '"><td>' + _jpEsc(t.party || 'Unnamed trade')
         + (lines.length ? ' <button type="button" class="btn btn-secondary btn-sm jp-lines-btn" data-jp-trade-toggle="' + key + '" data-jp-lines-label="' + _jpEsc(label) + '" aria-expanded="false" onclick="jpToggleTradeLines(this, \'' + key + '\')">Show ' + _jpEsc(label) + '</button>' : '')
-        + '</td><td class="num" data-label="Lines">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td data-label="First charge">' + _jpDate(t.first) + '</td><td data-label="Last charge">' + _jpDate(t.last) + '</td><td class="num" data-label="Amount">' + _jpMoney(t.amount_ex) + '</td></tr>';
+        + '</td><td class="num" data-label="Lines">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td data-label="First charge" data-jp-charge="first">' + _jpChargeWhen(t.first_charge) + '</td><td data-label="Last charge" data-jp-charge="last">' + _jpChargeWhen(t.last_charge) + '</td><td class="num" data-label="Amount">' + _jpMoney(t.amount_ex) + '</td></tr>';
       if (lines.length) {
         h += '<tr class="jp-trade-lines" data-jp-trade-lines="' + key + '" hidden><td colspan="5"><ul class="jp-line-list">';
         lines.forEach(function(c) {
           h += '<li><span class="jp-line-desc">' + _jpEsc(c.description || 'No description') + '</span>'
             + '<span class="jp-line-amt">' + _jpMoney(c.amount_ex) + '</span>'
-            + '<div class="jp-sub">' + _jpDate(c.event_date) + ' &middot; counted as ' + _jpEsc(c.lane || 'no lane')
+            + '<div class="jp-sub"><span data-jp-charge="line">' + _jpChargeWhen(c) + '</span> &middot; counted as ' + _jpEsc(c.lane || 'no lane')
             + (_jpNum(c.hours) != null ? ' &middot; ' + _jpNum(c.hours).toFixed(1) + ' h' : '')
             + (c.document_number ? ' &middot; ' + _jpEsc(c.document_number) : '')
             + (c.is_actual === false ? ' &middot; <span class="jp-tag mute">not actual</span>' : '') + '</div></li>';
@@ -20487,7 +20506,9 @@ function _jpRenderDetail(data) {
     h += '<div class="jp-wrap"><table class="jp-table jp-stack"><thead><tr><th>Date</th><th>Event</th><th>Who</th><th>Document</th><th class="num">Hours</th><th class="num">Amount</th><th>Paid</th></tr></thead><tbody>';
     timeline.forEach(function(t) {
       var counted = t.counts === false && (t.kind === 'sales_invoice_paid' || t.kind === 'cost_paid');
-      h += '<tr><td>' + _jpDate(t.date) + '</td><td data-label="Event">' + _jpEsc(JP_KIND_LABELS[t.kind] || t.kind || '') + (t.lane ? ' <span class="jp-sub">' + _jpEsc(t.lane) + '</span>' : '') + (t.counts === false && !counted ? ' <span class="jp-tag mute">not counted</span>' : '') + '</td>'
+      // A trade charge is dated by the day it was submitted (ops-api job_profit), with the day worked under it.
+      var when = t.kind === 'trade_charge' && Object.prototype.hasOwnProperty.call(t, 'submitted_on') ? '<div class="jp-sub" data-jp-charge="timeline">' + _jpChargeWhen(t) + '</div>' : '';
+      h += '<tr><td>' + _jpDate(t.date) + '</td><td data-label="Event">' + _jpEsc(JP_KIND_LABELS[t.kind] || t.kind || '') + (t.lane ? ' <span class="jp-sub">' + _jpEsc(t.lane) + '</span>' : '') + (t.counts === false && !counted ? ' <span class="jp-tag mute">not counted</span>' : '') + when + '</td>'
         + '<td data-label="Who">' + _jpEsc(t.party || '') + (t.description ? '<div class="jp-sub">' + _jpEsc(_jpCostDescription(t.description)) + '</div>' : '') + '</td>'
         + '<td data-label="Document">' + _jpEsc(t.document_number || '') + '</td><td class="num" data-label="Hours">' + (_jpNum(t.hours) != null ? _jpNum(t.hours).toFixed(1) : '') + '</td>'
         + '<td class="num" data-label="Amount">' + (counted ? '<span class="jp-sub">' + _jpEsc(_jpNum(t.amount_ex) != null ? fmt$(t.amount_ex) : '') + '</span>' : _jpMoney(t.amount_ex)) + '</td><td data-label="Paid">' + _jpPaid(t.paid, t.paid_on) + '</td></tr>';

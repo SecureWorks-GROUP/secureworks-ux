@@ -24630,6 +24630,10 @@
     if (showDate) h += '<input type="date" id="ir_date_' + i + '" aria-label="Date worked" value="' + (row.date || '') + '" max="' + clockPerthDay(new Date()) + '" onchange="invRowChanged(' + i + ')" style="flex:0 0 132px;min-height:44px;padding:5px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:16px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
     h += '<input type="text" id="ir_job_' + i + '" value="' + esc(row.job_text || '') + '" list="invJobList" placeholder="Job number" oninput="invJobSearch(' + i + ')" onchange="invJobChanged(' + i + ')" style="flex:1;padding:7px 9px;border:1px solid ' + jobBorder + ';border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
     h += '</div>';
+    // Owner, 3 Nov 2026: a job the crew cannot find goes to the office group.
+    if (row.job_text && !hasKnownJob) {
+      h += '<button type="button" onclick="askOfficeForJob(' + i + ')" style="background:none;border:none;padding:2px 0 6px;color:var(--sw-mid);font-size:12px;font-weight:700;text-decoration:underline;cursor:pointer">Can\'t find this job? Ask the office to set it up</button>';
+    }
 
     h += '<select id="ir_div_' + i + '" style="width:100%;padding:8px 10px;margin-bottom:5px;border:2px solid ' + divBorder + ';border-radius:7px;font-size:13px;font-weight:600;font-family:var(--sw-font);color:' + (noDivSelected ? 'var(--sw-text-sec)' : 'var(--sw-dark)') + ';background:#fff;box-sizing:border-box">';
     h += '<option value=""' + (noDivSelected ? ' selected' : '') + ' disabled>Select type of work...</option>';
@@ -24708,6 +24712,18 @@
     // Re-render to show/hide client fields
     _syncRowsFromDOM();
     renderInvoiceBuilder();
+  };
+
+  window.askOfficeForJob = function(idx) {
+    _syncRowsFromDOM();
+    var row = _invRows[idx] || {};
+    var text = [row.job_text, row.client_name, row.site_address].filter(Boolean).join(', ').trim();
+    if (!text) { toast('Type the job number, address or client first', true); return; }
+    var team = row.division === 'Fencing' ? 'fencing' : 'patio';
+    api('request_work_order', null, { job_text: text, team: team }).then(function(res) {
+      if (res && res.ok) toast('Sent. The office has been asked to set up a work order for this job.');
+      else toast('Could not send. Please tell the office directly.', true);
+    }).catch(function(err) { toast('Could not send: ' + friendlyError(err), true); });
   };
 
   window.invJobSearch = function(idx) {

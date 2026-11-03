@@ -4808,7 +4808,7 @@
     if (code === 'no_approved_email') return { text: 'This supplier has no approved order email, so Dispatch cannot send to it. Ask Shaun to add one.' };
     if (code === 'no_lines_to_order') return { text: 'Nothing in this box to order. In stock lines and lines already sent are left off.' };
     if (code === 'not_dispatch_work') return { text: 'Make-safe jobs are not ordered from Dispatch.' };
-    if (code === 'invalid_request' && err && text(err.message) && !/^API error/.test(err.message)) return { text: v2Plain(err.message) };
+    if (code === 'invalid_request' && err && !err.plain && text(err.message) && !/^API error/.test(err.message)) return { text: v2Plain(err.message) };
     return fallback ? { text: fallback, retry: true } : null;
   }
 

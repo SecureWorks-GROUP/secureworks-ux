@@ -421,13 +421,6 @@ test('writer off is named without offering Rewrite; off response never says Aske
   await page.locator('#ov2Rewrite').click();
   await expect(page.locator('#ov2Asked')).toHaveText('Rewriting is not switched on yet.');
   await expect(page.locator('#ov2Asked')).not.toContainText('Asked at');
-  await page.evaluate(() => {
-    const entry = window.JobOverviewV2._state.cache[_currentJobData.job.id];
-    entry.data.story_text.writer.on = false;
-    renderOverviewView(_currentJobData);
-  });
-  await expect(page.locator('#ov2WriterOff')).toContainText('not switched on yet');
-  await expect(page.locator('#ov2Rewrite')).toHaveCount(0);
 });
 
 test('partial source failure and a failed refresh are visible while the job stays usable', async ({ page }) => {

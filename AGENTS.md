@@ -834,8 +834,7 @@ cached per job for 3 minutes, one read at a time, stale answers dropped) and
 writes only `request_job_story` and the Comms tab's own `send_sms` request. Keep
 its ids `ov2`-prefixed and its CSS under `.ov2` (injected on first render); never
 reuse Comms ids, which the Comms poll writes into. Pure rules live between
-`// <job-overview-v2-core>` sentinels, run in node by
-`tests/e2e/ops-job-overview-v2-core.spec.js`. Contract, data rules and states:
+`// <job-overview-v2-core>` sentinels. Contract, data rules and states:
 `docs/job-overview-v2.md`. Guard: `tests/e2e/ops-job-overview-v2.spec.js`.
 The middle Job Story card reads the live card's `now`, timeline, money and loops;
 the Quoted band uses only a recorded current-quote value. Backend `notes` is an

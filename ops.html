@@ -4733,6 +4733,12 @@
       details[data-jp-evidence-lines] > summary { min-height: 44px; padding: 12px 0; box-sizing: border-box; }
       .btn-header { min-height: 44px; display: inline-flex; align-items: center; }
       #jpDetail .jp-detail-head .btn, .jp-more .btn { min-height: 44px; min-width: 44px; }
+      /* D2 follow-up (3 Nov 10:12Z): board pipeline tabs, Financials sub-tabs, the job page's
+         back arrow, and the job card's Call, SMS, Navigate (and the buttons beside them). */
+      .pipeline-tab { min-height: 44px; }
+      #viewFinancials .sub-tab { min-height: 44px; }
+      .jd-back { min-width: 44px; min-height: 44px; }
+      #ov2Cust .ov2-btn, #ov2Next .ov2-nacts .ov2-btn { min-height: 44px; min-width: 44px; }
     }
   </style>
 <script>
@@ -19961,6 +19967,7 @@ var JP_BILL_PLACED_BY = {
   xero_ref_link: 'placed whole by a machine from its Xero reference',
   po_deterministic: 'placed whole by a machine from a purchase order',
   agent_prematch: 'placed whole by the agent',
+  agent_ai: 'placed whole by the AI agent',
 };
 // A held bill a machine placed has no queue row, and confirming it in place is not
 // built (JP-15), so the note says so rather than implying a path.
@@ -20253,7 +20260,7 @@ function _jpLineEvidence(data) {
       h += '<tr data-jp-evidence-state="' + _jpEsc(l.state || 'no_evidence') + '"><td data-label="Line">' + _jpEsc(_jpLeKind(l.kind)) + '</td>'
         + '<td data-label="Document">' + _jpEsc(l.document || '') + '</td>'
         + '<td data-label="Date">' + (l.date ? _jpDate(l.date) : '<span class="jp-unk">No date</span>') + '</td>'
-        + '<td data-label="Description">' + _jpEsc(l.description || 'No description') + '</td>'
+        + '<td data-label="Description">' + _jpEsc(l.description ? _jpCostDescription(l.description) : 'No description') + '</td>'
         + '<td class="num" data-label="Amount">' + _jpMoney(l.amount_ex) + '</td>'
         + '<td data-label="Evidence">' + _jpLeState(l)
         + (l.basis && l.state === 'evidenced' ? '<div class="jp-sub">' + _jpEsc(String(l.basis).replace(/_/g, ' ')) + '</div>' : '') + '</td></tr>';
@@ -22923,6 +22930,26 @@ function fenceScopingNoteFields(scope_json) {
   ].filter(function (f) { return f.text && String(f.text).trim(); });
 }
 
+// The patio scope tool's codes in staff words (D2 follow-up, 3 Nov 2026: the quick view
+// showed "polycarb_corrugated"). Every code stored on a patio job's scope config on 3 Nov
+// is here; any other reads with spaces for its underscores and a capital, never as the code.
+var PATIO_SCOPE_WORDS = {
+  roofing: {
+    solarspan75: 'SolarSpan 75 mm insulated panel', solarspan100: 'SolarSpan 100 mm insulated panel', solarspan200: 'SolarSpan 200 mm insulated panel',
+    spanplus330: 'SpanPlus 330', trimdek: 'Trimdek', corrugated: 'Corrugated', spandek: 'Spandek',
+    polycarb_trimdek: 'Polycarbonate Trimdek', polycarb_corrugated: 'Polycarbonate corrugated', stratco_cgi100_760: 'Stratco CGI 100, 760 mm'
+  },
+  roofStyle: { skillion: 'Skillion roof', reverse_skillion: 'Reverse skillion roof', gable: 'Gable roof', hip: 'Hip roof', flat: 'Flat roof' },
+  connection: { riser: 'Riser connection', fascia: 'Fascia connection', wall: 'Wall connection', freestanding: 'Freestanding', flyover: 'Flyover' }
+};
+function patioScopeWords(kind, code) {
+  var k = String(code == null ? '' : code);
+  var words = PATIO_SCOPE_WORDS[kind] && PATIO_SCOPE_WORDS[kind][k.toLowerCase()];
+  if (words) return words;
+  var t = k.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 function renderScopeSummary(scope_json, jobType, jobId) {
   var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
   if (!scope) return '<div style="font-size:12px; color:var(--sw-text-sec); padding:4px 0;">No scope data</div>';
@@ -22980,11 +23007,11 @@ function renderScopeSummary(scope_json, jobType, jobId) {
       if (config.length && config.projection) html += ' (' + (config.length * config.projection).toFixed(1) + 'm²)';
       html += '</div>';
     }
-    // Visual badges for patio
+    // Visual badges for patio, in staff words (patioScopeWords)
     html += '<div style="margin:6px 0;">';
-    if (config.roofStyle) html += '<span style="' + badgeStyle + '">' + escapeHtml(config.roofStyle) + '</span>';
-    if (config.roofing || config.panel_type) html += '<span style="' + badgeStyle + '">' + escapeHtml(config.roofing || config.panel_type) + '</span>';
-    if (config.connection) html += '<span style="' + badgeStyle + '">' + escapeHtml(config.connection) + '</span>';
+    if (config.roofStyle) html += '<span style="' + badgeStyle + '">' + escapeHtml(patioScopeWords('roofStyle', config.roofStyle)) + '</span>';
+    if (config.roofing || config.panel_type) html += '<span style="' + badgeStyle + '">' + escapeHtml(patioScopeWords('roofing', config.roofing || config.panel_type)) + '</span>';
+    if (config.connection) html += '<span style="' + badgeStyle + '">' + escapeHtml(patioScopeWords('connection', config.connection)) + '</span>';
     if (config.sheetColor) html += '<span style="' + badgeStyle + 'border-color:var(--sw-orange);">&#127912; ' + escapeHtml(config.sheetColor) + '</span>';
     if (config.steelColor) html += '<span style="' + badgeStyle + '">Steel: ' + escapeHtml(config.steelColor) + '</span>';
     html += '</div>';
@@ -23861,7 +23888,7 @@ function renderHealthBar(data) {
   var j = data.job;
 
   // Minimal header: back, job#, client, suburb, type, status — nothing else
-  var html = '<button class="jd-back" onclick="closeJobDetail()" title="Back">&larr;</button>';
+  var html = '<button class="jd-back" onclick="closeJobDetail()" title="Back" aria-label="Back">&larr;</button>';
   html += '<span class="jd-job-id">' + (j.job_number || '') + '</span>';
   html += '<span class="jd-client-name">' + escapeHtml(j.client_name || 'Unknown') + '</span>';
   html += '<span class="jd-suburb">' + escapeHtml(j.site_suburb || '') + '</span>';

@@ -51,7 +51,7 @@ function boot() {
   assert.ok(!JSON.stringify(writes).includes('send_email')); groups++;
   set({ claims: [{ id: claimId, job_id: job, state: 'draft_confirmed', label: 'Accepted payment' }] });
   await api.read(job);
-  assert.match(api.html(), /Draft confirmed in Xero/); assert.match(api.html(), /not been issued or sent/);
+  assert.match(api.html(), /Draft creation confirmed/); assert.match(api.html(), /current issue and send status/);
   assert.ok(!api.html().includes('data-dpc-billing-process')); groups++;
   set({ claims: [], post: new Error('provider reply lost') });
   await api.read(job); await api.act('process');
@@ -64,7 +64,7 @@ function boot() {
   set({ unreadable: false, post: { ok: true }, claims: [{ job_id: other, state: 'draft_confirmed' }] });
   await api.read(job); assert.match(api.html(), /Could not confirm billing records/); groups++;
   api.state.jobId = other;
-  assert.ok(!api.html().includes('Draft confirmed in Xero')); groups++;
+  assert.ok(!api.html().includes('Draft creation confirmed')); groups++;
   assert.ok(calls.every((c) => c.action === 'invoice_milestone_drafts' || c.action === 'invoice_milestone_reviews'));
   console.log(`PASS ${groups} billing controller groups; exact jobs, read-only open, unknown outcome hold, reconciliation and no sends`);
 })().catch((err) => { console.error(err); process.exitCode = 1; });

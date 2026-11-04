@@ -2685,12 +2685,12 @@
     if (e.error) return h + '<p role="alert">' + esc(e.error) + '</p></section>';
     if (!e.loaded) return h + '</section>';
     if (!e.drafts.length) h += '<p class="dpc-empty dpc-empty-tight">No automatic draft is recorded. Booking reviews below are held requests, not invoices or debts.</p>';
-    var words = { prepared: 'Ready for draft preparation', dispatching: 'Outcome being checked', unknown: 'Outcome unknown', draft_confirmed: 'Draft confirmed in Xero' };
+    var words = { prepared: 'Ready for draft preparation', dispatching: 'Outcome being checked', unknown: 'Outcome unknown', draft_confirmed: 'Draft creation confirmed' };
     e.drafts.forEach(function (claim) {
       var outcome = words[claim.state] || 'Needs office review';
       h += '<div class="dpc-note-saved"><strong>' + esc(text(claim.label) || 'Quote payment') + '</strong><p>' + esc(outcome) + '</p>';
       if (claim.due_date) h += '<small>Due ' + esc(text(claim.due_date)) + '</small>';
-      if (claim.state === 'draft_confirmed') h += '<p>Saved as a draft. It has not been issued or sent.</p>';
+      if (claim.state === 'draft_confirmed') h += '<p>Created as a draft. Check the invoice record for its current issue and send status.</p>';
       if (claim.state === 'unknown' || claim.state === 'dispatching') {
         h += '<p>Check for the existing invoice before any new preparation. A missing mirror entry does not mean no invoice exists.</p>';
         h += '<button type="button" data-dpc-billing-reconcile="' + esc(text(claim.id)) + '"' + (e.busy ? ' disabled' : '') + '>Check existing invoice</button>';

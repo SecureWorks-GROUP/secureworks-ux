@@ -49,9 +49,10 @@ function boot() {
   assert.equal(writes.length, 1); assert.equal(writes[0].action, 'invoice_milestone_drafts');
   assert.equal(writes[0].body.mode, 'reconcile'); assert.equal(writes[0].body.claim_id, claimId);
   assert.ok(!JSON.stringify(writes).includes('send_email')); groups++;
-  set({ claims: [{ id: claimId, job_id: job, state: 'draft_confirmed', label: 'Accepted payment' }] });
+  set({ claims: [{ id: claimId, job_id: job, state: 'draft_confirmed', label: 'Accepted payment', provider_invoice_id: claimId }] });
   await api.read(job);
   assert.match(api.html(), /Draft creation confirmed/); assert.match(api.html(), /current issue and send status/);
+  assert.match(api.html(), /Open invoice PDF/); assert.match(api.html(), /Original booking and council reviews/);
   assert.ok(!api.html().includes('data-dpc-billing-process')); groups++;
   set({ claims: [], post: new Error('provider reply lost') });
   await api.read(job); await api.act('process');

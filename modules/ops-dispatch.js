@@ -2691,6 +2691,9 @@
       h += '<div class="dpc-note-saved"><strong>' + esc(text(claim.label) || 'Quote payment') + '</strong><p>' + esc(outcome) + '</p>';
       if (claim.due_date) h += '<small>Due ' + esc(text(claim.due_date)) + '</small>';
       if (claim.state === 'draft_confirmed') h += '<p>Created as a draft. Check the invoice record for its current issue and send status.</p>';
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text(claim.provider_invoice_id))) {
+        h += '<button type="button" data-dpc-invoice="' + esc(text(claim.provider_invoice_id)) + '">Open invoice PDF</button>';
+      }
       if (claim.state === 'unknown' || claim.state === 'dispatching') {
         h += '<p>Check for the existing invoice before any new preparation. A missing mirror entry does not mean no invoice exists.</p>';
         h += '<button type="button" data-dpc-billing-reconcile="' + esc(text(claim.id)) + '"' + (e.busy ? ' disabled' : '') + '>Check existing invoice</button>';
@@ -2698,9 +2701,9 @@
       h += '</div>';
     });
     if (e.reviews.length) {
-      h += '<h4 class="dpc-h4">Held booking and council reviews</h4>';
+      h += '<h4 class="dpc-h4">Original booking and council reviews</h4>';
       e.reviews.forEach(function (review) {
-        h += '<p class="dpc-empty dpc-empty-tight">' + esc(review.trigger_kind === 'scheduled' ? 'Installation booking review' : 'Council completion review') + ': held for accepted payment instructions and payer checks. This review is not an invoice.</p>';
+        h += '<p class="dpc-empty dpc-empty-tight">' + esc(review.trigger_kind === 'scheduled' ? 'Installation booking review' : 'Council completion review') + ': recorded for accepted payment instructions and payer checks. This review is not an invoice; the outcomes above show its preparation result.</p>';
       });
     }
     if (e.reviews.length && !e.drafts.some(function (claim) { return claim.state === 'unknown' || claim.state === 'dispatching' || claim.state === 'draft_confirmed'; })) {

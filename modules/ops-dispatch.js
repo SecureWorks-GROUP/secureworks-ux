@@ -975,6 +975,7 @@
     arch: emptyView(),
     found: emptyView(),
     jobId: null,
+    requestedJobId: null,
     row: null,
     rowStale: false,
     detail: { jobId: null, status: 'idle', data: null },
@@ -1115,6 +1116,12 @@
     if (now) state.row = now;
     paintList(true);
     if (state.jobId && state.row) { paintHead(); paintCouncil(); paintSched(); return; }
+    if (state.requestedJobId) {
+      var requested = rowById(state.requestedJobId);
+      if (requested) selectJob(requested);
+      else { paintWorkspace(); paintContext(); }
+      return;
+    }
     var pick = rowById(readStore('sessionStorage', SS_JOB)) || state.base.rows[0] || null;
     if (pick) selectJob(pick); else { paintWorkspace(); paintContext(); }
   }
@@ -1182,6 +1189,7 @@
 
   function selectJob(row) {
     if (!row || !row.id) return;
+    state.requestedJobId = null;
     var same = state.jobId === row.id;
     var stale = state.rowStale;
     if (!same) v2Leave();
@@ -6489,7 +6497,7 @@
       // job opened since, from a search that did load, is shown.
       h += '<div class="dpc-jobhead">' + failLine('Could not load this job.', 'list', true) + '</div>';
     } else if (!state.row) {
-      h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
+      h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? (state.requestedJobId ? 'This job is not in Dispatch. Check that it has been accepted and is ready for materials.' : 'No job to show.') : 'Loading jobs...') + '</div></div>';
     } else {
       h += headHtml(state.row) + sectionHtml() + v2Html() + mailHtml() + schedHtml();
     }
@@ -6992,6 +7000,7 @@
   // A job the lists have not loaded yet is picked up when Active loads.
   function openJob(jobId) {
     if (!jobId) return;
+    state.requestedJobId = jobId;
     writeStore('sessionStorage', SS_JOB, jobId);
     var row = rowById(jobId);
     if (row) { selectJob(row); return; }

@@ -15,6 +15,9 @@ jobs:
       - name: Check ops-api source boundary
         run: bash scripts/check-ops-api-boundary.sh
 
+      - name: Check office draft invoice outcomes and reconciliation
+        run: node scripts/test-dispatch-invoice-drafts.js
+
       - name: Get changed files
         id: changed
         run: |

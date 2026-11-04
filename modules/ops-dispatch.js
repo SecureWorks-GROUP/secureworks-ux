@@ -994,6 +994,7 @@
     sending: {},
     replyMsg: {},
     pdfLoading: {},
+    invoiceDrafts: {},
     // v2 slices 2 and 3: which list is showing (opens on Active), the stage
     // sections folded shut, the latest board's stage lists, and the rail's
     // press state: the one open confirm line ({ jobId, to, label, offer }),
@@ -2671,7 +2672,84 @@
 
   // Sources: quotes and invoices from job_detail, then the job's old purchase
   // orders (if any) from the v1 materials read already made on job open.
-  function sourcesHtml() { return sourceDocsHtml() + poSourcesHtml(); }
+  function sourcesHtml() { return sourceDocsHtml() + invoiceDraftsHtml() + poSourcesHtml(); }
+
+  // Billing is a separate office read. Opening a job never creates or sends an invoice.
+  function invoiceDraftsHtml() {
+    var e = state.invoiceDrafts[state.jobId];
+    var h = '<section aria-label="Draft invoice automation"><h4 class="dpc-h4">Draft invoice preparation</h4>';
+    h += '<p class="dpc-empty dpc-empty-tight">Uses the payment instructions on the accepted quote. The office still issues and sends invoices.</p>';
+    h += '<button type="button" data-dpc-billing-read' + (e && e.busy ? ' disabled' : '') + '>Check billing records</button>';
+    if (!e) return h + '</section>';
+    if (e.busy) h += '<p role="status">Checking the saved outcome...</p>';
+    if (e.error) return h + '<p role="alert">' + esc(e.error) + '</p></section>';
+    if (!e.loaded) return h + '</section>';
+    if (!e.drafts.length) h += '<p class="dpc-empty dpc-empty-tight">No automatic draft is recorded. Booking reviews below are held requests, not invoices or debts.</p>';
+    var words = { prepared: 'Ready for draft preparation', dispatching: 'Outcome being checked', unknown: 'Outcome unknown', draft_confirmed: 'Draft confirmed in Xero' };
+    e.drafts.forEach(function (claim) {
+      var outcome = words[claim.state] || 'Needs office review';
+      h += '<div class="dpc-note-saved"><strong>' + esc(text(claim.label) || 'Quote payment') + '</strong><p>' + esc(outcome) + '</p>';
+      if (claim.due_date) h += '<small>Due ' + esc(text(claim.due_date)) + '</small>';
+      if (claim.state === 'draft_confirmed') h += '<p>Saved as a draft. It has not been issued or sent.</p>';
+      if (claim.state === 'unknown' || claim.state === 'dispatching') {
+        h += '<p>Check for the existing invoice before any new preparation. A missing mirror entry does not mean no invoice exists.</p>';
+        h += '<button type="button" data-dpc-billing-reconcile="' + esc(text(claim.id)) + '"' + (e.busy ? ' disabled' : '') + '>Check existing invoice</button>';
+      }
+      h += '</div>';
+    });
+    if (e.reviews.length) {
+      h += '<h4 class="dpc-h4">Held booking and council reviews</h4>';
+      e.reviews.forEach(function (review) {
+        h += '<p class="dpc-empty dpc-empty-tight">' + esc(review.trigger_kind === 'scheduled' ? 'Installation booking review' : 'Council completion review') + ': held for accepted payment instructions and payer checks. This review is not an invoice.</p>';
+      });
+    }
+    if (e.reviews.length && !e.drafts.some(function (claim) { return claim.state === 'unknown' || claim.state === 'dispatching' || claim.state === 'draft_confirmed'; })) {
+      h += '<button type="button" data-dpc-billing-process' + (e.busy ? ' disabled' : '') + '>Prepare eligible draft</button>';
+      h += '<p class="dpc-empty dpc-empty-tight">Creates only an eligible later payment draft from accepted terms. It never issues or sends it.</p>';
+    }
+    return h + '</section>';
+  }
+
+  function loadInvoiceDrafts(jobId, entry) {
+    var e = entry || state.invoiceDrafts[jobId] || { drafts: [], reviews: [], loaded: false };
+    state.invoiceDrafts[jobId] = e;
+    e.busy = true; e.error = null;
+    var token = e.token = (e.token || 0) + 1;
+    paintPanel();
+    return Promise.all([
+      Promise.resolve().then(function () { return global.opsFetch('invoice_milestone_drafts', { job_id: jobId }); }),
+      Promise.resolve().then(function () { return global.opsFetch('invoice_milestone_reviews', { job_id: jobId }); })
+    ]).then(function (answers) {
+      if (e.token !== token) return;
+      if (!answers[0] || answers[0].ok !== true || !Array.isArray(answers[0].drafts) || !answers[1] || answers[1].ok !== true || !Array.isArray(answers[1].reviews)) throw new Error('Unreadable billing records');
+      if (answers[0].job_id !== jobId || answers[1].job_id !== jobId
+        || answers[0].drafts.some(function (claim) { return !claim || claim.job_id !== jobId; })
+        || answers[1].reviews.some(function (review) { return !review || review.job_id !== jobId; })) throw new Error('Billing job identity mismatch');
+      e.drafts = answers[0].drafts; e.reviews = answers[1].reviews; e.loaded = true;
+    }).catch(function () {
+      if (e.token === token) e.error = 'Could not confirm billing records. Check again before preparing a draft; no unpaid balance is inferred.';
+    }).then(function () {
+      if (e.token === token) { e.busy = false; if (state.jobId === jobId) paintPanel(); }
+    });
+  }
+
+  function actInvoiceDrafts(mode, claimId) {
+    var jobId = state.jobId, e = state.invoiceDrafts[jobId];
+    if (!jobId || !e || e.busy || !e.loaded || e.error) return;
+    if (mode === 'reconcile' && !e.drafts.some(function (claim) { return claim.id === claimId && (claim.state === 'unknown' || claim.state === 'dispatching'); })) return;
+    if (mode === 'process' && (!e.reviews.length || e.drafts.some(function (claim) { return claim.state !== 'prepared'; }))) return;
+    e.busy = true; e.error = null; paintPanel();
+    var body = { job_id: jobId, mode: mode };
+    if (claimId) body.claim_id = claimId;
+    return Promise.resolve().then(function () { return global.opsPost('invoice_milestone_drafts', body); }).then(function (answer) {
+      if (!answer || answer.ok !== true) throw new Error('Unconfirmed invoice outcome');
+      return loadInvoiceDrafts(jobId, e);
+    }).catch(function () {
+      e.busy = false;
+      e.error = 'The invoice outcome is unconfirmed. Check billing records, then check the existing invoice. Do not prepare another draft.';
+      if (state.jobId === jobId) paintPanel();
+    });
+  }
 
   function sourceDocsHtml() {
     var d = state.detail;
@@ -6549,7 +6627,7 @@
 
   function onClick(e) {
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
-      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
+      '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-billing-read],[data-dpc-billing-reconcile],[data-dpc-billing-process],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
       '[data-dpc-mode],[data-dpc-onus],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
@@ -6557,6 +6635,9 @@
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
     if (!t || t.disabled) return;
+    if (t.hasAttribute('data-dpc-billing-read')) { if (state.jobId && !(state.invoiceDrafts[state.jobId] || {}).busy) loadInvoiceDrafts(state.jobId); return; }
+    if (t.hasAttribute('data-dpc-billing-reconcile')) { actInvoiceDrafts('reconcile', t.getAttribute('data-dpc-billing-reconcile')); return; }
+    if (t.hasAttribute('data-dpc-billing-process')) { actInvoiceDrafts('process'); return; }
     if (onV2Click(t)) return;
     if (onPadClick(t)) return;
     if (onMailClick(t)) return;

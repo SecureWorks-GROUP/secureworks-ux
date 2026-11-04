@@ -7804,8 +7804,27 @@ function scanMsIntakeCockpit() {
   });
 }
 
+// <dispatch-job-deep-link>
+function restoreDispatchJob(hash) {
+  if (!hash.startsWith('dispatch/')) return false;
+  var jobId = '';
+  try { jobId = decodeURIComponent(hash.slice(9)); } catch (e) { /* invalid link */ }
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(jobId)) {
+    showView('dispatch');
+    showToast('This Dispatch job link is invalid.', 'error');
+    return true;
+  }
+  // Remember the requested job before the list loads, in either Dispatch version.
+  if (typeof OpsDispatch !== 'undefined') OpsDispatch.openJob(jobId);
+  showView('dispatch');
+  if (history.replaceState) history.replaceState(null, '', '#dispatch/' + encodeURIComponent(jobId));
+  return true;
+}
+// </dispatch-job-deep-link>
+
 function restoreTab() {
   var hash = window.location.hash.slice(1);
+  if (restoreDispatchJob(hash)) return;
   // Handle #job/<jobNumber> deep links
   if (hash.startsWith('job/')) {
     var jobRef = hash.slice(4);
@@ -32279,6 +32298,7 @@ function initApp() {
   // Handle browser back/forward for job detail
   window.addEventListener('popstate', function() {
     var hash = window.location.hash.slice(1);
+    if (restoreDispatchJob(hash)) return;
     if (hash.startsWith('job/')) {
       var jobRef = hash.slice(4);
       openJobDetailByRef(jobRef);

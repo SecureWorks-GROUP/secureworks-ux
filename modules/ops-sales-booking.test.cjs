@@ -337,6 +337,9 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
   assert.ok(end > start, 'showView slice must include the Sales host');
   const prevDoc = global.document;
   const prevFetch = global.opsFetch;
+  // The current tab block also measures the real header. This fixture has no
+  // header; supply the browser hooks without running layout or a live page.
+  host.document.querySelector = () => null;
   global.document = host.document;
   global.opsFetch = async (action) => {
     if (action === 'sales_booking_read') return sampleRead();
@@ -347,6 +350,7 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
   };
   const ctx = {
     document: host.document,
+    window: { addEventListener: () => {} },
     localStorage: {
       getItem: (key) => (store[key] == null ? null : store[key]),
       setItem: (key, value) => { store[key] = String(value); }

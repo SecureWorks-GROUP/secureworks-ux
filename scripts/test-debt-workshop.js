@@ -325,7 +325,7 @@ check('debt report: the Send words, the gate, the route and "last sent"', () => 
   assert.strictEqual(C.reportRoute(d), 'Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
   assert.strictEqual(C.reportLastSent(null, d, '2026-10-15'), 'Last sent to Marnin: never');
   assert.strictEqual(C.reportLastSent({ at: '2026-10-15T01:02:00Z', to: ['marnin@secureworkswa.com.au'], by: 'Shaun' }, d, '2026-10-15'), 'Last sent to Marnin: today, 9:02am by Shaun');
-  assert.strictEqual(C.reportLastSent({ at: '2026-10-14T04:00:00Z', kind: 'auto', to: ['marnin@secureworkswa.com.au'] }, d, '2026-10-15'), 'Last sent to Marnin: Wed 14 Oct, 12:00pm (Wednesday 12pm auto-send)');
+  assert.strictEqual(C.reportLastSent({ at: '2026-10-14T04:00:00Z', kind: 'auto', to: ['marnin@secureworkswa.com.au'] }, d, '2026-10-15'), 'Last sent to Marnin: Wed 14 Oct, 12:00pm (Wednesday 2pm auto-send)');
   // Consolidate first: a stale Xero copy keeps Send off with the backend's reason, and a refused send reads in its words.
   const stale = "Our Xero copy of invoices was last synced at 11:39am Perth time, more than 20 minutes ago, so the report would not show today's debt. Wait for the next sync (every 15 minutes) and try again";
   assert.deepStrictEqual(C.reportGate(Object.assign({}, d, { can_send: false, why_not: stale })), { ok: false, reason: stale + '.' });
@@ -397,25 +397,107 @@ check('chat window: what the bottom holds, and why nothing goes when it cannot',
   assert.strictEqual(mode({ row: {}, suggestion: { kind: 'move' }, manual_text: ok }).mode, 'move');
 });
 
-// ── Total owed to us (approved 20 Oct 2026) ──
-check('total owed: the backend lines are shown as sent, add up to the total, and Debt is the chart\'s figure', () => {
+// ── Receivables (approved 4 Nov 2026; was Total owed to us, 20 Oct 2026) ──
+check('receivables: the backend lines are shown as sent, add up to the total, and Debt overdue is the chart\'s figure', () => {
   const { buildDebtWorkshopFixture } = require('../tests/fixtures/debt-workshop');
   const ov = buildDebtWorkshopFixture('2026-10-08').overview;
   const o = C.owedView(ov);
+  assert.strictEqual(o.receivables, true);
   assert.strictEqual(o.addsUp, true);
-  assert.deepStrictEqual(o.lines.map((l) => l.key), ['debt', 'not_due', 'progress', 'companies', 'deposits', 'not_chased', 'needs_a_look']);
+  assert.deepStrictEqual(o.lines.map((l) => l.key), ['debt_not_due', 'debt_overdue', 'other_not_due', 'other_overdue', 'write_off', 'needs_a_look']);
   const sum = o.lines.reduce((s, l) => s + Math.round(l.amount * 100), 0) / 100;
   assert.strictEqual(sum, o.amount);
-  // The Debt line is exactly what the chart shows on All jobs.
-  const chart = C.totals(C.items(ov, 'all')).all;
-  const debt = o.lines[0];
+  // Receivables is the same figure as the older total owed: every unpaid invoice.
+  assert.deepStrictEqual([o.count, o.amount], [ov.total_owed.count, ov.total_owed.amount]);
+  // The Debt overdue line is exactly what the chart shows on Debt, All jobs (the big number).
+  const chart = C.totals(C.items(ov, 'all', 'debt')).all;
+  const debt = o.lines[1];
   assert.deepStrictEqual([debt.count, debt.amount], [chart.count, chart.amount]);
+  assert.deepStrictEqual([chart.count, chart.amount], [12, 16207.79]);
   // Lines that do not add up are flagged, never hidden.
-  const bad = JSON.parse(JSON.stringify(ov)); bad.total_owed.amount += 1;
+  const bad = JSON.parse(JSON.stringify(ov)); bad.receivables.amount += 1;
   assert.strictEqual(C.owedView(bad).addsUp, false);
-  // An older backend sends no total_owed: no card.
+  // A backend from before 4 Nov sends only total_owed: shown the same way.
+  const older = JSON.parse(JSON.stringify(ov)); delete older.receivables;
+  const oo = C.owedView(older);
+  assert.strictEqual(oo.receivables, false);
+  assert.deepStrictEqual(oo.lines.map((l) => l.key), ['debt', 'not_due', 'progress', 'companies', 'deposits', 'not_chased', 'needs_a_look']);
+  assert.deepStrictEqual([oo.lines[0].count, oo.lines[0].amount], [C.totals(C.items(older, 'all')).all.count, C.totals(C.items(older, 'all')).all.amount]);
+  // One older still sends neither: no card.
   assert.strictEqual(C.owedView({ rows: [] }), null);
   assert.strictEqual(C.owedView(null), null);
+});
+check('receivables: test invoices are left out and named', () => {
+  const { buildDebtWorkshopFixture } = require('../tests/fixtures/debt-workshop');
+  const none = C.owedView(buildDebtWorkshopFixture('2026-10-08').overview);
+  assert.strictEqual(C.testLine(none), '');
+  const ov = buildDebtWorkshopFixture('2026-10-08', { testInvoices: { count: 2, amount: 20, invoices: [{ invoice_number: 'INV-0001' }, { invoice_number: 'INV-0002' }] } }).overview;
+  assert.strictEqual(C.testLine(C.owedView(ov)), 'Test invoices left out: INV-0001, INV-0002 ($20.00).');
+});
+check('the Debt / Other receivables / All filter: Debt first, companies count as Debt', () => {
+  assert.deepStrictEqual(plain(C.CLASS_FILTERS).map((f) => f.label), ['Debt', 'Other receivables', 'All']);
+  const { buildDebtWorkshopFixture } = require('../tests/fixtures/debt-workshop');
+  const fx = buildDebtWorkshopFixture('2026-10-08');
+  const ids = (jt, rc) => C.items(fx.overview, jt, rc).map((i) => i.id);
+  const jordan = fx.overview.rows[1].xero_invoice_id;
+  assert(!ids('all', 'debt').includes(jordan), 'a progress payment is not Debt');
+  assert.deepStrictEqual(ids('all', 'other'), [jordan], 'Other: the materials invoice only, no companies');
+  assert.strictEqual(ids('all', 'all').length, ids('all', 'debt').length + 1);
+  assert.deepStrictEqual(ids('insurance', 'debt'), ids('insurance', 'all'), 'companies are Debt');
+  assert.deepStrictEqual(ids('insurance', 'other'), []);
+  // An older backend sends no receivable_class: a progress payment is Other, the rest Debt.
+  assert.strictEqual(C.classOf({ kind: 'progress' }), 'other');
+  assert.strictEqual(C.classOf({ kind: 'final' }), 'debt');
+  assert.strictEqual(C.classOf({ kind: 'final', receivable_class: 'needs_a_look' }), 'needs_a_look');
+  // Left out, the filter means All (so older callers see every row).
+  assert.deepStrictEqual(ids('all'), ids('all', 'all'));
+});
+check('the big number says what it adds up', () => {
+  assert.strictEqual(C.midLabel('debt', 'all', 'All jobs'), 'debt overdue, all jobs');
+  assert.strictEqual(C.midLabel('debt', 'fencing', 'Fencing'), 'debt overdue, fencing');
+  assert.strictEqual(C.midLabel('other', 'all', 'All jobs'), 'other receivables overdue, all jobs');
+  assert.strictEqual(C.midLabel('all', 'patio', 'Patio'), 'overdue, debt and other, patio');
+});
+check('a final that could not be placed (job not marked Complete) is named, not hidden', () => {
+  const ov = { rows: [
+    { xero_invoice_id: 'a', job_type: 'fencing', kind: 'final', receivable_class: 'needs_a_look', category: 'active', amount_due: 100 },
+    { xero_invoice_id: 'b', job_type: 'patio', kind: 'final', receivable_class: 'debt', category: 'active', amount_due: 50 },
+  ] };
+  assert.deepStrictEqual(C.unplacedRows(ov, 'all').map((r) => r.xero_invoice_id), ['a']);
+  assert.deepStrictEqual(C.unplacedRows(ov, 'patio'), []);
+  assert.deepStrictEqual(C.items(ov, 'all', 'debt').map((i) => i.id), ['b']);
+  assert.deepStrictEqual(C.items(ov, 'all', 'all').map((i) => i.id), ['a', 'b']);
+});
+check('rows: invoiced, pay by and days overdue in words', () => {
+  assert.strictEqual(C.overdueText({ days_overdue: 12, day: 12 }), '12 days overdue');
+  assert.strictEqual(C.overdueText({ days_overdue: 1 }), '1 day overdue');
+  assert.strictEqual(C.overdueText({ days_overdue: 0, day: -6 }), 'not due yet');
+  assert.strictEqual(C.overdueText({ day: 5 }), 'day 5', 'an older backend: the tab\'s day words');
+  assert.strictEqual(C.rowDates({ invoice_date: '2026-10-05', pay_by: '2026-10-15' }), 'Invoiced Mon 5 Oct \u00b7 Pay by Thu 15 Oct');
+  assert.strictEqual(C.rowDates({ invoice_date: null, pay_by: '2026-10-15' }), 'Pay by Thu 15 Oct');
+  assert.strictEqual(C.rowDates({}), '');
+  assert.strictEqual(C.typeWord({ type_label: 'Materials', kind: 'progress' }), 'Materials');
+  assert.strictEqual(C.typeWord({ kind: 'progress' }), 'progress payment');
+  assert.strictEqual(C.typeWord({ kind: 'final' }), 'final invoice');
+});
+check('company terms: words, and the box takes 0 to 120 whole days', () => {
+  assert.strictEqual(C.termsWords({ terms_days: 14, terms_default: false }), 'Terms 14 days');
+  assert.strictEqual(C.termsWords({ terms_days: 10, terms_default: true }), 'Terms 10 days (the default)');
+  assert.strictEqual(C.termsWords({ terms_days: 1 }), 'Terms 1 day');
+  assert.strictEqual(C.termsWords({}), '', 'an older backend sends no terms');
+  assert.deepStrictEqual(C.termsInput('14'), { ok: true, days: 14, reason: '' });
+  assert.deepStrictEqual(C.termsInput(' 0 '), { ok: true, days: 0, reason: '' });
+  assert.strictEqual(C.termsInput('121').ok, false);
+  assert.strictEqual(C.termsInput('7.5').ok, false);
+  assert.strictEqual(C.termsInput('-3').ok, false);
+  assert.strictEqual(C.termsInput('').ok, false);
+});
+check('this week: paid to us against new invoices, and which is ahead', () => {
+  const w = C.weekMoneyLine({ paid_in: { count: 3, amount: 4210.4 }, invoiced: { count: 2, amount: 3100 } });
+  assert.deepStrictEqual(w, { paid: '$4,210.40', paidCount: '3 payments', invoiced: '$3,100.00', invoicedCount: '2 invoices', trend: 'More paid in than invoiced, by $1,110.40', up: false });
+  assert.strictEqual(C.weekMoneyLine({ paid_in: { count: 1, amount: 100 }, invoiced: { count: 1, amount: 400 } }).trend, 'More invoiced than paid in, by $300.00');
+  assert.strictEqual(C.weekMoneyLine({ paid_in: { count: 0, amount: 0 }, invoiced: { count: 0, amount: 0 } }).trend, 'Paid in and invoiced are level');
+  assert.strictEqual(C.weekMoneyLine(null), null, 'unread or an older backend: no line');
 });
 check('total owed: with a job type filter the Debt line says it is all jobs', () => {
   assert.strictEqual(C.owedDebtSub('Past due and followed up: the figure above', 'all', 'All jobs'), 'Past due and followed up: the figure above');
@@ -470,6 +552,8 @@ const BACKEND_ONLY_KEYS = {
   debt_ws_agent_submit: ['xero_invoice_id', 'xero_invoice_ids', 'step', 'kind', 'channel', 'text', 'why', 'proposed_category', 'agent_version'],
   // The debt report send takes no fields: the backend reads the recipients from its settings.
   debt_ws_report_send: [],
+  // A company's terms (4 Nov 2026): days null puts it back on the default.
+  debt_ws_set_company_terms: ['company_key', 'days'],
 };
 // Fields every dashboard POST carries (opsPost adds operator_email); the backend's ENVELOPE.
 const ENVELOPE = ['action', 'operator_email'];
@@ -540,6 +624,12 @@ async function uxPosts() {
   await ctx.dwApprove(fx.ids.harbour, false);
   await ctx.dwApprove(fx.ids.harbour, true);
   await ctx.dwJanRemove(fx.ids.drew);
+  // A company's terms: 14 typed in the box, then Use the default (days null).
+  const getEl = ctx.document.getElementById;
+  ctx.document.getElementById = (id) => (id === 'dwTermsIn' ? { value: '14' } : null);
+  await ctx.dwTermsSave(fx.ids.coastline, false);
+  await ctx.dwTermsSave(fx.ids.coastline, true);
+  ctx.document.getElementById = getEl;
   // The debt report: Send asks first, then posts on "Yes, send it".
   DW.view = 'report'; DW.rep = JSON.parse(JSON.stringify(fx.report)); DW.repBusy = null; DW.repConfirm = false;
   ctx.dwReportSend();
@@ -563,7 +653,7 @@ async function uxPosts() {
     });
     check('every write on the screen was driven', () => {
       const seen = new Set(sent.map((p) => p.action));
-      ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove', 'debt_ws_report_send'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
+      ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove', 'debt_ws_report_send', 'debt_ws_set_company_terms'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
     });
     check('the debt report asks first: Send posts nothing until "Yes, send it", then posts once with no fields', () => {
       assert.strictEqual(askedFirst, true);
@@ -581,6 +671,10 @@ async function uxPosts() {
     check('Link contact posts the invoice, so the backend links its PAYER (a neighbour\'s own row on a shared fence)', () => {
       const links = sent.filter((p) => p.action === 'debt_ws_link_contact');
       assert.deepStrictEqual(links.map((p) => [p.body.xero_invoice_id, p.body.ghl_contact_id]), [[fx.ids.avery, fx.ids.averyContact], [fx.ids.riley, fx.ids.rileyContact]]);
+    });
+    check('company terms post the company and its days, or null for the default', () => {
+      const t = sent.filter((p) => p.action === 'debt_ws_set_company_terms');
+      assert.deepStrictEqual(t.map((p) => p.body), [{ company_key: fx.ids.coastline, days: 14 }, { company_key: fx.ids.coastline, days: null }]);
     });
     check('Change beside the pill posts set_category with no suggestion_id', () => {
       const own = sent.filter((p) => p.action === 'debt_ws_set_category' && !('suggestion_id' in p.body));

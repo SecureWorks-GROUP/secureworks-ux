@@ -16,28 +16,40 @@ The Debt buttons (header and mobile nav, `data-debt-nav`) start hidden. They sho
 
 ## W1: the overview
 
-- **Header:** the read time, a "Sending off / Sending on" chip (from `settings.sending_on`), "Agent on" when it is, and, top right, the **Debt report** button (see "The debt report" below) above the job type filters: All jobs, Fencing, Patio, Insurance.
+- **Header:** the read time, a "Sending off / Sending on" chip (from `settings.sending_on`), "Agent on" when it is, and, top right, the **Debt report** button (see "The debt report" below) above two rows of filters: **Debt / Other receivables / All** (`#dwClassFilters`, Debt to start), then the job types: All jobs, Fencing, Patio, Insurance.
+- **Debt / Other receivables / All** (approved by Shaun on 4 Nov 2026, "yes go"). The backend puts every invoice in one group (`row.receivable_class`, secureworks-backend `debt_ws_receivables.ts`); the screen never decides it:
+  - **Debt:** final invoices on jobs whose ops dashboard status is Complete or later (Rectification, Complete, Final payment, Get review, Invoiced, Paid, Archived), and company invoices (make-safes, repairs, roof reports, insurance). Companies always count as Debt. GHL pipeline stages are not used.
+  - **Other receivables:** deposits, go-ahead deposits, materials, progress payments, planning fees and extra labour.
+  - **All:** everything, including the Write-off list and anything the rules could not place.
+  - A final invoice on a job not marked Complete yet is **Needs a look**: it is still followed up exactly as before and shows under All. On Debt or Other a line under the chart says how many there are, with **Show All** (`#dwUnplaced`).
+  - An older backend sends no `receivable_class`: a progress payment then counts as Other and everything else as Debt (`DebtWorkshopCore.classOf`).
+  - The filter changes which invoices the donut and the list show. It changes no chase step, hold, statement or Jan's list.
 - **Donut and legend:** the five categories (Active, Escalating, Bad debt, Says paid, Rectification), sized by amount.
-  - The totals are summed from the same items the list shows (`DebtWorkshopCore.items` and `totals`), so the donut always matches the list for the chosen filter.
-  - Clicking a segment or a legend row picks the list. The first category with money in it is picked to start.
+  - The big number in the middle stays **Debt**: on the Debt filter it is overdue Debt, and the words under it say so ("debt overdue, all jobs", `DebtWorkshopCore.midLabel`).
+  - The totals are summed from the same items the list shows (`DebtWorkshopCore.items` and `totals`), so the donut always matches the list for the chosen filters.
+  - Clicking a segment or a legend row picks the list. The first category with money in it is picked to start, and again whenever the Debt / Other / All filter changes.
   - Invoices that are not due yet (no category) are never in the donut.
-- **Total owed to us** (approved by Shaun on 20 Oct 2026), directly under the chart (`#dwOwed`). The chart and its figure are unchanged; this is a second figure.
-  - The total is every open invoice in our Xero copy, the same as Xero's open receivables once the copy matches Xero. It comes whole from the backend (`debt_ws_overview.total_owed`, the same code as the debt report), so the lines always add up to it; the screen never adds its own.
-  - The lines, each with its count and amount: **Debt** (the chart's figure on All jobs; with a filter on it says "All jobs. The chart above shows patio only"), **Not due yet**, **Progress payments** (not due yet), **Companies on statements** (not due yet), **Deposits** (go-ahead payments), **Not chased** (Emergency Trade Services, Builderwest), **Needs a look**, and **Test invoices** or **Not placed** only when there are any. Each line opens its invoices in a list (payer, invoice, job, and the category and day, the due date, or why it is not debt). A line with nothing in it shows $0.00 and does not open.
+- **Receivables** (approved by Shaun on 4 Nov 2026; it was "Total owed to us", approved 20 Oct 2026), directly under the chart (`#dwOwed`). This is the second figure.
+  - The total is every unpaid invoice in our Xero copy, the same as Xero's open receivables once the copy matches Xero. Test invoices (`SAMPLE-`) are left out and named under the lines (`#dwTests`). It comes whole from the backend (`debt_ws_overview.receivables`, the same code as the Wednesday report), so the lines always add up to it; the screen never adds its own.
+  - Under the header, one line (`#dwWeek`, from `debt_ws_overview.week_money`): money paid to us this week against new invoices raised this week (Monday to Sunday, GST included), and which is ahead, so you can see whether receivables are growing or shrinking. No line when the backend could not read it.
+  - The lines, each with its count and amount: **Debt not due yet**, **Debt overdue** (the chart's figure on Debt, All jobs; with a job type filter on it says "All jobs. The chart above shows patio only"), **Other receivables not due yet**, **Other receivables overdue**, **Write-off list** ("Emergency Trade Services, Builderwest: for us to check whether to write off"), and **Needs a look** only when there are any. Each line opens its invoices in a list (payer, invoice, job, and the next step or hold).
+  - A backend from before 4 Nov sends only the older `total_owed`, which shows the same way with its older lines; one older still sends neither, and then there is no card.
   - Under it, one line from `debt_ws_overview.xero_check` (`#dwXeroCheck`): **Matches Xero** in green with the check time, or **Does not match Xero: N invoices differ (INV-...)** in red, which opens the invoices that differ and what each side says, or "Not checked against Xero yet". The backend checks our copy against Xero every hour and heals it from Xero where Xero says money is owed (secureworks-backend `docs/debt-workshop/README.md`, "Total owed to us and the check against Xero").
   - Then **Drafts not sent: N invoices, $X. Not in the total.** (`#dwDrafts`, Xero's DRAFT sales invoices), only when there are any.
-  - Display only: it posts nothing, chases nothing and changes no rule, text or gate. An older backend that sends no `total_owed` shows no card.
+  - Display only: it posts nothing, chases nothing and changes no rule, text or gate.
 - **The list:** one row per homeowner invoice, with:
   - the payer label, with "(neighbour of X)" in quieter type;
   - the job type badge and the invoice number;
-  - the kind, the job number, and "no GHL contact" when it applies;
+  - its type (`type_label`: Final, Materials, Progress payment, Deposit, Planning fee), the job number, and "no GHL contact" when it applies;
   - a small "N notices" marker when `flag_count > 0`;
-  - the day (or "not due yet") and the amount;
+  - **Invoiced** and **Pay by** dates (`invoice_date`, `pay_by`): a private final is due on its invoice date (or the day it left Rectification), a company invoice on its invoice date plus that company's terms, and Other receivables on Xero's due date;
+  - **days overdue** from the pay-by date ("12 days overdue", or "not due yet"; `days_overdue`) and the amount. The word is always "overdue", never "late";
   - the next step, in orange when a draft is ready: a due step that is not day 21, or a pending suggestion.
 - **Row order:** ready drafts first, then the oldest, then the biggest. Companies are one row each. On All jobs, clicking a company opens its statement preview. Account-lane invoice rows only show alone when the backend sends no `companies[]`.
 - **Insurance:** shows company statement rows (all companies, the biggest past due first; a legend click narrows them to one category).
+  - Each row has its **terms**, the days the company has to pay from the invoice date ("Terms 14 days", or "Terms 10 days (the default)"): MLB (all its contacts) 10, Ambrose Construct Group 14, every other company 10. **Change** (owner only; disabled for staff with "Only an owner can change terms") opens a small box for a whole number of days from 0 to 120, with **Save** and **Use the default**. It posts `debt_ws_set_company_terms {company_key, days}` (`days: null` for the default). The backend stores it in `debt_ws_settings` and only that company's pay-by dates, days and category move; who counts as a company does not change.
   - Each row has the statement status, **Preview** (the statement HTML in a sandboxed frame inside a modal, with the To address and the total) and **Approve** (`debt_ws_statement_send {company_key}`).
-  - Approve is disabled with its reason shown: Sending is off until you switch it on, No accounts email set, Sent this week, Nothing past due, Only an owner can approve.
+  - Approve is disabled with its reason shown: Sending is off until you switch it on, No accounts email set, Sent this week, Nothing overdue, Only an owner can approve.
   - When the backend refuses a statement as `possible_payment`, the row (and the preview's footer) lists each invoice with the payment that may match, and offers **Send anyway** (owner only), which posts `debt_ws_statement_send {company_key, override_possible_payment: true}`.
 - **Bad debt** (not on Insurance) shows **Jan's visit list** above the list (`debt_ws_jan_list`):
   - the visit date, how many people, and the status in words (open, locked, sending, sent, failed, skipped);
@@ -46,7 +58,7 @@ The Debt buttons (header and mobile nav, `data-debt-nav`) start hidden. They sho
 - **Footer:**
   - Paid this week (opens a list);
   - Needs a look with its count (opens a list with the reasons);
-  - Not chased (opens a list);
+  - **Write-off list** (it was "Not chased"; Emergency Trade Services, Builderwest), which opens the list "for us to check whether to write off". They are still never chased or put on a statement;
   - Not due yet, greyed (opens the not-due rows when the overview sends them).
 
 ## W2: the job screen
@@ -93,21 +105,21 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
 
 ## The debt report
 
-**Debt report** (top right of W1, `#dwReportBtn`) opens the live debt position as its own view inside the Debt tab (`DW.view = 'report'`). Shaun approved it on 15 Oct 2026; the plan is the local Lavish page `debt-collection-fresh/.lavish/debt-report-button-plan.html`. The backend is secureworks-backend `docs/debt-workshop/README.md`, "The debt report".
+**Debt report** (top right of W1, `#dwReportBtn`) opens the live **Debt and receivables** report as its own view inside the Debt tab (`DW.view = 'report'`). Shaun approved the view on 15 Oct 2026 (the plan is the local Lavish page `debt-collection-fresh/.lavish/debt-report-button-plan.html`) and the receivables report on 4 Nov 2026 (`C:\Coding Projects\.lavish\receivables-build-spec.md`). The backend is secureworks-backend `docs/debt-workshop/README.md`, "The debt report".
 
 - **Always live.** The view reads `debt_ws_report` every time it opens (and on **Read again**). Nothing is cached between visits.
-- **The report** is the backend's HTML (`html`), shown in a sandboxed frame (`#dwReportFrame`, `sandbox=""`: no scripts, no reach into the page). It holds: cash at bank per Xero account; money received in the last 7 and 30 days; debt expected in the next 7 and 30 days; total debt by the 5 categories, by job type, homeowners against companies, aging and the top 10 debtors; companies (past due, not yet due, oldest, this week's statement); every open invoice worst first; not counted as debt (not due, go-ahead deposits, needs a look, not chased); key points and notes; the line that ties it all to the total owed to us (our Xero copy's open total) to the cent; and, under it, whether that copy matched Xero at the last hourly check. Its headline figure is **Total owed to us**, the same total and lines as the tab. Its categories are the tab's own. The debt total leaves out the not-chased contacts, as the chart does; they are listed under not counted as debt.
-- **Top of the view:** "As at" the read time, **Read again**, **Download PDF**, **Send to Marnin**, then who it goes to ("Sends from admin@secureworkswa.com.au to marnin@..., cc shaun@..."), "Last sent to Marnin: today, 9:02am" (or "never"; an automatic send ends "(Wednesday 12pm auto-send)"), and "Wednesday 12pm auto-send: on/off" (`#dwReportAuto`, from `delivery.auto_send`).
-- **Download PDF** reads `debt_ws_report_pdf` and saves the PDF it returns (`Debt position <date>.pdf`), the same PDF the email carries. Anyone who can see the tab can download it.
+- **The report** is the backend's HTML (`html`), shown in a sandboxed frame (`#dwReportFrame`, `sandbox=""`: no scripts, no reach into the page). Titled "Debt and receivables", it holds: the top numbers (Receivables, Debt overdue, Bad debt 21+, Other receivables with how much is overdue, and cash at bank, the total and the total less provisions); where the receivables sit (the same lines as the tab), tied to our Xero copy to the cent, with test invoices left out and named, and whether the copy matched Xero at the last hourly check; Debt by how overdue (not due, 1 to 7, 8 to 20, 21+ bad debt) for Private and Companies; what comes due in the next 7 days, Debt and Other apart; what happened this week; every invoice by how overdue it is (Who, Invoice, Type, Amount, Invoiced, Pay by, Days overdue, with any hold on its row); and a short terms note.
+- **Top of the view:** "As at" the read time, **Read again**, **Download PDF**, **Send to Marnin**, then who it goes to ("Sends from admin@secureworkswa.com.au to marnin@..., cc shaun@..."), "Last sent to Marnin: today, 9:02am" (or "never"; an automatic send ends "(Wednesday 2pm auto-send)"), and "Wednesday 2pm auto-send: on/off" (`#dwReportAuto`, from `delivery.auto_send`).
+- **Download PDF** reads `debt_ws_report_pdf` and saves the PDF it returns (`Debt and receivables <date>.pdf`), the same PDF the email carries. Anyone who can see the tab can download it.
 - **Send to Marnin** is owner only and needs sending on (`DebtWorkshopCore.reportGate`; the reason shows when it is off). It asks first: the first click shows "Send this report now?" with **Yes, send it** and **Cancel**; nothing is posted until Yes. Yes posts `debt_ws_report_send` with no fields (the backend reads the recipients from its settings and builds the report again at that moment). The answer shows "Sent to ..." and "Last sent" updates at once; only the top of the view is redrawn, so the report keeps its place.
 - **Refusals** read in words (`DebtWorkshopCore.reportRefusalText`): sending off, not the owner, `recently_sent` (sent in the last two minutes), `recipient_not_internal`, `no_recipients`, `report_pdf_failed`, `email_failed`, `send_not_confirmed` ("Check Sent Items in the admin mailbox before sending it again"), and `xero_copy_stale` (in the backend's own words, with the time of the last sync).
-- **Wednesday 12pm, on fresh debt.** The automatic report goes on Wednesday at 12:00 Perth (Shaun, 16 Oct 2026; it was Monday 08:00). The backend consolidates first: one extra Xero invoice sync runs at 11:55, the report is built at 12:00 from the tab's own book with bank balances read live, and any send (automatic or **Send to Marnin**) is refused while our Xero copy is more than 20 minutes old. While it is stale the backend sets `delivery.can_send` false with the reason in `why_not`, so Send stays off and the reason shows in `#dwReportWhy`. The auto-send stays off until Shaun switches `report_auto_send` on; the screen only shows it. Backend: secureworks-backend `docs/debt-workshop/README.md`, "Consolidate first".
+- **Wednesday 2pm, on fresh debt.** The automatic report goes on Wednesday at 14:00 Perth (Shaun, 4 Nov 2026; it was Wednesday 12:00 from 16 Oct, and Monday 08:00 before that). The backend consolidates first: one extra Xero invoice sync runs at 13:55, the report is built at 14:00 from the tab's own book with bank balances read live, and any send (automatic or **Send to Marnin**) is refused while our Xero copy is more than 20 minutes old. While it is stale the backend sets `delivery.can_send` false with the reason in `why_not`, so Send stays off and the reason shows in `#dwReportWhy`. The auto-send stays off until Shaun switches `report_auto_send` on; the screen only shows it. Backend: secureworks-backend `docs/debt-workshop/README.md`, "Consolidate first".
 - **The button's words** come from the recipients: "Send to Marnin" for one recipient, else "Send report".
 - **Back to the Debt tab** returns to the overview.
 
 ## Owner only and refusals
 
-- When `settings.viewer_is_owner` is false, these are disabled or hidden: Send, Send anyway, Skip, Move, Keep chasing, Change, Link, Dismiss, Approve and Remove. A line says so. Notes still work.
+- When `settings.viewer_is_owner` is false, these are disabled or hidden: Send, Send anyway, Skip, Move, Keep chasing, Change (the category and a company's terms), Link, Dismiss, Approve and Remove. A line says so. Notes still work.
 - Every refusal is shown in plain words, never as a bare code. `DebtWorkshopCore.REFUSALS` holds words only for codes `debt_ws_actions.ts` really throws (`sending_off`, `possible_payment`, `part_paid`, `paid`, `not_open`, `amount_required`, `already_sent`, `step_not_due`, `send_refused_by_guard`, `send_not_confirmed`, `xero_unavailable`, `bank_check_unavailable`, `suggestion_not_pending`, `suggestion_mismatch`, `text_not_allowed`, `jan_list_closed`, `contact_already_linked`, `not_in_book`, `not_found`, and a few more). Any other code shows the backend's own reason.
 - The code is read from a thrown error's `refusal.code`, its `code`, or its `body.code`; `opsFetch` and `opsPost` now keep `e.code` and `e.body`. An answer that comes back `ok: false` or `sent: false` counts as a refusal too.
 - A `possible_payment` refusal that carries `possible_payments` updates the warning on screen.
@@ -117,6 +129,7 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
 
 - `npm run test:debt-workshop` (`scripts/test-debt-workshop.js`, in `test:e2e`) runs the pure core in a node VM:
   - the filters and the account lane, totals and the donut, list order, next-step words;
+  - receivables: the Debt / Other receivables / All filter (companies are Debt; an older backend's fallback), the big number's words, an unplaced final named, the row dates and days overdue, the company terms words and box, the week line, test invoices named, and that the Receivables lines add up with Debt overdue equal to the chart;
   - the statement and send gates, refusal words, the tab flag;
   - the debt report's Send words, gate, route and "last sent" line, and that Send asks first and then posts once with no fields;
   - conversation order, notes, ladder, story and money;
@@ -125,7 +138,7 @@ Clicking a row opens the job inside the view. **Back to <category>** returns to 
   - **the backend contract:** it drives every write on the screen with the fixture and checks each POST field is in that action's backend `onlyKeys` list, that every send carries its amount, and that every code in `REFUSALS` is one the backend throws. The checks run against a hand copy of the backend lists (`BACKEND_CODES`, `BACKEND_ONLY_KEYS`), so CI needs only this repo. When the backend sits next to this worktree (`../backend-debt-workshop`, or `DEBT_WS_BACKEND_DIR`), the copy is also compared with `debt_ws_actions.ts` and `debt_ws_store.ts`; a mismatch means the backend changed, so update the copy. Without the backend it prints a note and carries on.
 - `tests/e2e/ops-debt-workshop.spec.js` checks:
   - the hidden tab and its three switches;
-  - W1, the footer, Insurance (preview, approve, refusal) and Jan's list;
+  - W1, the footer (with the Write-off list), Receivables (lines, the week line, an older backend), the Debt / Other receivables / All filter, an unplaced final, Insurance (preview, approve, refusal, company terms with Change for the owner and disabled for staff) and Jan's list;
   - W2 (strip, ladder, story, the chat window: bar, chips, thread, transcript, email marked read only, note as a yellow line, the proposed text word for word, Add a note; notice, notes, Back and Next);
   - edit in the box, Put the proposed text back, and send with a refusal, dismiss, a promise note;
   - Write my own text instead (a manual text: step `manual`, `client_ref`, a long dash refused on screen), no step due (the box for your own text), and paused chasing (says paid, Jan's list) saying why above an empty box that sends a manual text;

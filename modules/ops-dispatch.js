@@ -2706,6 +2706,7 @@
         h += '<p class="dpc-empty dpc-empty-tight">' + esc(review.trigger_kind === 'scheduled' ? 'Installation booking review' : 'Council completion review') + ': recorded for accepted payment instructions and payer checks. This review is not an invoice; the outcomes above show its preparation result.</p>';
         var notes = {
           previous_revision_invoice_claim_requires_review: 'An earlier accepted revision already has an invoice claim. The office must reconcile it before a replacement payment is prepared.',
+          accepted_replacement_requires_review: 'This job has an earlier acceptance. The office must review the replacement quote before another payment is prepared.',
           existing_invoice_requires_review: 'An existing invoice needs office review before another payment draft is prepared.',
           invoice_inventory_unavailable: 'The existing invoices could not all be confirmed. Check the invoice records before preparing a draft.'
         };

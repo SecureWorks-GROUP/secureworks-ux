@@ -31,7 +31,7 @@ function boot() {
   const { api, calls, set } = boot();
   assert.match(api.html(), /Check billing records/);
   assert.equal(calls.length, 0); groups++;
-  set({ reviews: [{ job_id: job, trigger_kind: 'scheduled', hold_reasons: ['previous_revision_invoice_claim_requires_review', 'existing_invoice_requires_review', 'invoice_inventory_unavailable'] }] });
+  set({ reviews: [{ job_id: job, trigger_kind: 'scheduled', hold_reasons: ['previous_revision_invoice_claim_requires_review', 'accepted_replacement_requires_review', 'existing_invoice_requires_review', 'invoice_inventory_unavailable'] }] });
   await api.read(job);
   assert.equal(calls.length, 2);
   assert.ok(calls.every((c) => c.method === 'GET' && c.params.job_id === job));
@@ -39,6 +39,7 @@ function boot() {
   assert.match(api.html(), /Prepare eligible draft/); groups++;
   assert.match(api.html(), /Recorded preparation check/);
   assert.match(api.html(), /earlier accepted revision/);
+  assert.match(api.html(), /review the replacement quote/);
   assert.match(api.html(), /existing invoices could not all be confirmed/);
   set({ claims: [{ id: claimId, job_id: job, state: 'unknown', label: '<unsafe>' }] });
   await api.read(job);

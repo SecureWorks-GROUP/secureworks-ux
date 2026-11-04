@@ -21,20 +21,30 @@ const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
 function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
   const d = (n) => addIsoDays(today, n);
   const at = (n, hm) => d(n) + 'T' + hm + ':00+08:00';
-  const settings = Object.assign({ tab_visible: false, sending_on: false, agent_on: false, viewer_is_owner: true }, opts.settings || {});
+  const settings = Object.assign({ tab_visible: false, sending_on: false, agent_on: false, viewer_is_owner: true, terms_default_days: 10, terms_status: 'ok' }, opts.settings || {});
 
-  const row = (n, o) => Object.assign({
-    share_key: uuid(9000 + n), xero_invoice_id: uuid(9000 + n), invoice_number: 'INV-' + (9000 + n),
-    reference: (o.job_type === 'patio' ? 'SWP-' : 'SWF-') + (90000 + n) + '-FINBAL', job_id: uuid(500 + n),
-    job_number: (o.job_type === 'patio' ? 'SWP-' : 'SWF-') + (90000 + n), lane: 'homeowner', neighbour_of: null, kind: 'final',
-    invoice_date: d(-(o.day || 0)), due_date: d(-(o.day || 0)), step_due: null, next_step: null, paused_until: null,
-    suggestion: null, ghl_linked: true, last_touch: null, on_jan_list: false, flag_count: 0,
-    open: true, says_paid_since: null, not_chased: false,
-  }, o, { payer_label: o.payer_label || o.payer_name });
+  const row = (n, o) => {
+    const r = Object.assign({
+      share_key: uuid(9000 + n), xero_invoice_id: uuid(9000 + n), invoice_number: 'INV-' + (9000 + n),
+      reference: (o.job_type === 'patio' ? 'SWP-' : 'SWF-') + (90000 + n) + '-FINBAL', job_id: uuid(500 + n),
+      job_number: (o.job_type === 'patio' ? 'SWP-' : 'SWF-') + (90000 + n), lane: 'homeowner', neighbour_of: null, kind: 'final',
+      invoice_date: d(-(o.day || 0)), due_date: d(-(o.day || 0)), step_due: null, next_step: null, paused_until: null,
+      suggestion: null, ghl_linked: true, last_touch: null, on_jan_list: false, flag_count: 0,
+      open: true, says_paid_since: null, not_chased: false,
+    }, o, { payer_label: o.payer_label || o.payer_name });
+    // Receivables (4 Nov 2026, backend debt_ws_receivables.ts): a final on a finished job is
+    // Debt, paid by its day 0; a progress payment is Other, paid by Xero's due date.
+    if (!('receivable_class' in o)) r.receivable_class = r.kind === 'progress' ? 'other' : 'debt';
+    if (!('type_label' in o)) r.type_label = r.kind === 'progress' ? 'Progress payment' : 'Final';
+    if (!('pay_by' in o)) r.pay_by = r.due_date;
+    if (!('days_overdue' in o)) r.days_overdue = Math.max(0, r.day || 0);
+    if (!('terms_days' in o)) r.terms_days = null;
+    return r;
+  };
 
   const rows = [
     row(1, { payer_name: 'Avery Lin', job_type: 'fencing', amount_due: 1351.63, day: 2, category: 'active', step_due: { step: 'd1', label: 'Day 1 text' }, ghl_linked: false }),
-    row(2, { payer_name: 'Jordan Pike', job_type: 'patio', kind: 'progress', reference: 'SWP-90002-MAT', amount_due: 3932.06, day: 4, invoice_date: d(-11), category: 'active', next_step: { step: 'd7', date: d(3) } }),
+    row(2, { payer_name: 'Jordan Pike', job_type: 'patio', kind: 'progress', type_label: 'Materials', reference: 'SWP-90002-MAT', amount_due: 3932.06, day: 4, invoice_date: d(-11), category: 'active', next_step: { step: 'd7', date: d(3) } }),
     row(3, { payer_name: 'Casey Morgan', job_type: 'fencing', amount_due: 1420.37, day: 12, category: 'escalating', step_due: { step: 'd12', label: 'Day 12 text' }, suggestion: { id: uuid(601), source: 'template', status: 'pending' }, flag_count: 1, last_touch: { kind: 'text_sent', at: at(-5, '12:35'), label: 'Day 7 text sent' } }),
     row(4, { payer_name: 'Riley Shaw', payer_label: 'Riley Shaw (neighbour of Taylor Brooks)', neighbour_of: 'Taylor Brooks', reference: 'SWF-90004-B-FINBAL', job_type: 'fencing', amount_due: 1025.06, day: 9, category: 'escalating', next_step: { step: 'd12', date: d(3) } }),
     row(5, { payer_name: 'Sasha Cole', job_type: 'patio', amount_due: 2101, day: 8, category: 'escalating', suggestion: { id: uuid(605), source: 'agent', status: 'pending' } }),
@@ -45,10 +55,11 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     row(10, { payer_name: 'Lee Park', job_type: 'fencing', amount_due: 5900, day: -6, category: null, due_date: d(6), invoice_date: d(-1) }),
   ];
   const companies = [
-    { company_key: uuid(701), name: 'Harbour Restoration Pty Ltd', past_due: { count: 3, amount: 2413.1, oldest_days: 31 }, in_grace: { count: 1, amount: 561 }, category: 'bad_debt', statement: { week_start: d(0), status: 'ready' } },
-    { company_key: uuid(702), name: 'Coastline Building Group', past_due: { count: 1, amount: 583, oldest_days: 12 }, in_grace: { count: 0, amount: 0 }, category: 'escalating', statement: { week_start: d(0), status: 'no_email' } },
-    { company_key: uuid(703), name: 'Northside Strata Services', past_due: { count: 0, amount: 0, oldest_days: 0 }, in_grace: { count: 1, amount: 300 }, category: null, statement: { week_start: d(0), status: 'nothing_due' } },
+    { company_key: uuid(701), name: 'Harbour Restoration Pty Ltd', past_due: { count: 3, amount: 2413.1, oldest_days: 31 }, in_grace: { count: 1, amount: 561 }, category: 'bad_debt', statement: { week_start: d(0), status: 'ready' }, terms_days: 10, terms_default: true },
+    { company_key: uuid(702), name: 'Coastline Building Group', past_due: { count: 1, amount: 583, oldest_days: 12 }, in_grace: { count: 0, amount: 0 }, category: 'escalating', statement: { week_start: d(0), status: 'no_email' }, terms_days: 14, terms_default: false },
+    { company_key: uuid(703), name: 'Northside Strata Services', past_due: { count: 0, amount: 0, oldest_days: 0 }, in_grace: { count: 1, amount: 300 }, category: null, statement: { week_start: d(0), status: 'nothing_due' }, terms_days: 10, terms_default: true },
   ];
+  const jordanId = uuid(9002); // the one progress payment (Other receivables)
   const categories = {};
   ['active', 'escalating', 'bad_debt', 'says_paid', 'rectification'].forEach((k) => { categories[k] = { count: 0, amount: 0 }; });
   rows.forEach((r) => { if (r.category) { categories[r.category].count += 1; categories[r.category].amount += r.amount_due; } });
@@ -71,7 +82,7 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     jan_list: { visit_date: d(4), status: 'open', count: 2 },
   };
 
-  // "Total owed to us" (debt_ws_overview.total_owed, backend debt_ws_report.ts totalOwedFrom):
+  // The older "Total owed to us" (debt_ws_overview.total_owed, backend debt_ws_report.ts totalOwedFrom, still sent for a screen that has not reloaded):
   // every open invoice, broken down so the lines add up to the total. Debt is the chart's own
   // figure (the categories above); the rest come from the same fixture's footer figures.
   const inv = (n, payer, amount, detail, o = {}) => Object.assign({ xero_invoice_id: uuid(n), invoice_number: 'INV-' + n, payer, job_number: null, amount, detail }, o);
@@ -92,6 +103,39 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     amount: Math.round(owedLines.reduce((s, l) => s + Math.round(l.amount * 100), 0)) / 100,
     lines: owedLines, adds_up: true,
   };
+  // "Receivables" (4 Nov 2026, debt_ws_overview.receivables, backend debt_ws_report.ts
+  // receivablesFrom): the same invoices as total_owed above, split into Debt and Other
+  // receivables, the Write-off list and Needs a look. The lines add up to the total.
+  const debtOverdue = debtInvoices.filter((i) => i.xero_invoice_id !== jordanId);
+  const rcvLines = [
+    owedLine('debt_not_due', 'Debt not due yet', 'Final and company invoices before their pay-by date', [inv(9010, 'Lee Park', 5900, 'Pay by ' + d(6)), inv(9304, 'Harbour Restoration Pty Ltd', 561, 'Pay by ' + d(4)), inv(9321, 'Northside Strata Services', 300, 'Pay by ' + d(8))]),
+    owedLine('debt_overdue', 'Debt overdue', 'Final and company invoices past their pay-by date', debtOverdue),
+    owedLine('other_not_due', 'Other receivables not due yet', 'Deposits, materials, progress payments and planning fees', [inv(9401, 'Kim Taylor', 2500, 'Invoiced ' + d(-3))]),
+    owedLine('other_overdue', 'Other receivables overdue', 'Past the Xero due date', debtInvoices.filter((i) => i.xero_invoice_id === jordanId)),
+    owedLine('write_off', 'Write-off list', 'Example Trade Services: for us to check whether to write off', [inv(9501, 'Example Trade Services', 305.25, 'Never chased')]),
+    owedLine('needs_a_look', 'Needs a look', 'The rules could not place it', [inv(9201, 'Robin Vale', 880, 'Needs a look: looks like a duplicate'), inv(9202, 'Pat Kim', 412.5, 'Needs a look: not linked to a job')]),
+  ];
+  const tot = (xs) => ({ count: xs.length, amount: Math.round(xs.reduce((s, i) => s + Math.round(i.amount * 100), 0)) / 100 });
+  overview.receivables = {
+    count: rcvLines.reduce((s, l) => s + l.count, 0),
+    amount: Math.round(rcvLines.reduce((s, l) => s + Math.round(l.amount * 100), 0)) / 100,
+    debt: tot(rcvLines[0].invoices.concat(debtOverdue)),
+    debt_overdue: tot(debtOverdue),
+    bad_debt: tot(debtOverdue.filter((i) => /bad debt/i.test(i.detail || ''))),
+    other: tot(rcvLines[2].invoices.concat(rcvLines[3].invoices)),
+    other_overdue: tot(rcvLines[3].invoices),
+    write_off: tot(rcvLines[4].invoices),
+    needs_a_look: tot(rcvLines[5].invoices),
+    lines: rcvLines,
+    test: Object.assign({ count: 0, amount: 0, invoices: [] }, opts.testInvoices || {}),
+    adds_up: true,
+  };
+  // Paid to us this week against new invoices raised this week (debt_ws_overview.week_money).
+  overview.week_money = opts.weekMoney === null ? null : Object.assign({
+    week_start: d(0), week_end: d(6),
+    paid_in: { count: 3, amount: 4210.4 },
+    invoiced: { count: 2, amount: 3100 },
+  }, opts.weekMoney || {});
   // Whether our Xero copy matched Xero at the last hourly check (debt_ws_xero_check.ts).
   overview.xero_check = Object.assign({
     status: 'matches', words: 'Matches Xero', checked_at: at(0, '06:49'), stale: false,
@@ -270,10 +314,10 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
   const owner = !!settings.viewer_is_owner, sendingOn = !!settings.sending_on;
   const report = {
     ok: true, version: 'debt-ws/v1', perth_date: today, read_at: at(0, '09:15'),
-    report: { version: 'debt-report/v1', today, as_at: '9:15am Perth time, today', debt: { count: 12, amount: 21456.82 }, xero_open: { count: 20, amount: 41890.4 }, total_owed: { count: 20, amount: 41890.4 }, tie: { ok: true } },
-    html: '<!doctype html><html><head><meta charset="utf-8"><title>Debt position</title></head><body style="font-family:Helvetica,Arial,sans-serif;padding:20px">' +
-      '<h1>Debt position</h1><p>As at 9:15am Perth time, today</p><table><tr><td>Total debt</td><td>$21,456.82</td></tr>' +
-      '<tr><td>Adds up to total owed to us</td><td>$41,890.40</td></tr></table><p>Check: $41,890.40 equals the total owed in our Xero copy to the cent.</p><p>Check against Xero: our Xero copy matched Xero.</p></body></html>',
+    report: { version: 'debt-report/v2', today, as_at: '9:15am Perth time, today', xero_open: { count: 20, amount: 41890.4 }, receivables: { count: 20, amount: 41890.4, debt_overdue: { count: 12, amount: 21456.82 } }, tie: { ok: true } },
+    html: '<!doctype html><html><head><meta charset="utf-8"><title>Debt and receivables</title></head><body style="font-family:Helvetica,Arial,sans-serif;padding:20px">' +
+      '<h1>Debt and receivables</h1><p>As at 9:15am Perth time, today</p><table><tr><td>Receivables</td><td>$41,890.40</td></tr>' +
+      '<tr><td>Debt overdue</td><td>$21,456.82</td></tr></table><p>Check: $41,890.40 equals the unpaid invoices in our Xero copy to the cent.</p><p>Check against Xero: our Xero copy matched Xero.</p></body></html>',
     delivery: {
       from: 'admin@secureworkswa.com.au', to: ['marnin@secureworkswa.com.au'], cc: ['shaun@secureworkswa.com.au'], auto_send: !!settings.report_auto_send,
       sending_on: sendingOn, viewer_is_owner: owner, can_send: owner && sendingOn,
@@ -282,7 +326,7 @@ function buildDebtWorkshopFixture(today = perthDate(), opts = {}) {
     last_sent: opts.reportLastSent || null,
     last_attempt: opts.reportLastSent || null,
   };
-  const reportPdf = { ok: true, filename: 'Debt position ' + today + '.pdf', content_type: 'application/pdf', pdf_base64: PDF_B64, page_count: 1 };
+  const reportPdf = { ok: true, filename: 'Debt and receivables ' + today + '.pdf', content_type: 'application/pdf', pdf_base64: PDF_B64, page_count: 1 };
   return { overview, jobs, jobsAll, janList, statements, documents, report, reportPdf, invoicePdf: { success: true, pdf_base64: PDF_B64, filename: 'invoice.pdf' }, ids: {
     avery: avery.xero_invoice_id, casey: casey.xero_invoice_id, sasha: sasha.xero_invoice_id, riley: uuid(9004), harbour: uuid(701), coastline: uuid(702), drew: uuid(9007),
     jamie: uuid(9008), caseySuggestion: uuid(601), caseyFlag: uuid(611), sashaSuggestion: uuid(605), averyContact: ghlId(1), harbourInvoice: uuid(9301),

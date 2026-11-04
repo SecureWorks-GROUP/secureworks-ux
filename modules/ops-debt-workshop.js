@@ -6,10 +6,18 @@
 //
 // W1 (overview): a donut of the five categories by amount, job type filters, a legend
 //   that picks the list, one row per invoice (companies grouped), Jan's visit list on
-//   Bad debt, and a quiet footer (paid this week, needs a look, not chased, not due yet).
-//   Under the chart, "Total owed to us" (approved 20 Oct 2026): every open invoice, with
-//   lines that add up to it (Debt is the chart's figure), "Matches Xero" or which invoices
-//   differ, and the drafts not sent. Display only: it changes no chase rule, text or gate.
+//   Bad debt, and a quiet footer (paid this week, needs a look, the Write-off list, not due yet).
+//   Under the chart, "Receivables" (approved 4 Nov 2026, was "Total owed to us"): every
+//   unpaid invoice, with lines that add up to it (Debt not due, Debt overdue, Other
+//   receivables, the Write-off list, Needs a look), "Matches Xero" or which invoices differ,
+//   the drafts not sent, and one line of money paid in against new invoices this week.
+//   Display only: it changes no chase rule, text or gate.
+//   Receivables (4 Nov 2026): a Debt / Other receivables / All filter. Debt is final invoices
+//   on jobs marked Complete or later, plus company invoices; Other receivables is deposits,
+//   materials, progress payments and planning fees. The backend decides which is which
+//   (row.receivable_class); "Debt", the big number in the donut, is overdue Debt. Every row
+//   shows when it was invoiced, its pay-by date and how many days overdue it is. Each
+//   company carries its terms (days to pay), which an owner can change.
 // W2 (job screen): a status strip with the ladder of follow-up steps, then three calm
 //   columns: the job story, money and documents; the chat window; notes.
 //   The chat window (approved 16 Oct 2026, shaped like GoHighLevel's): who we are texting
@@ -18,14 +26,15 @@
 //   step's text already typed in, word for word from the template. Shaun may write his own
 //   text instead: it goes through the same send and every check, as a manual text that
 //   never moves the follow-up days (ops-api debt_ws_decide, step "manual").
-// The debt report: "Debt report" (top right of W1) opens the live debt position as its own
+// The debt report: "Debt report" (top right of W1) opens the live "Debt and receivables" report as its own
 //   view, read fresh each time, with Download PDF and Send to Marnin (owner only, asks first).
 //
-// Reads:  debt_ws_overview (with total_owed and xero_check), debt_ws_job, debt_ws_document, get_invoice_pdf,
+// Reads:  debt_ws_overview (with receivables, week_money and xero_check), debt_ws_job, debt_ws_document, get_invoice_pdf,
 //         debt_ws_statement_preview, debt_ws_jan_list, debt_ws_report, debt_ws_report_pdf.
 // Writes: debt_ws_note (any staff), and owner only: debt_ws_decide (send, skip or dismiss),
 //         debt_ws_set_category (a move card, Keep chasing, or Change beside the pill),
-//         debt_ws_link_contact, debt_ws_statement_send, debt_ws_jan_list_remove, debt_ws_report_send. The backend runs every guard again; the screen only
+//         debt_ws_link_contact, debt_ws_statement_send, debt_ws_jan_list_remove, debt_ws_report_send,
+//         debt_ws_set_company_terms (a company's days to pay). The backend runs every guard again; the screen only
 //         disables what it already knows will be refused, and always says why.
 //
 // The tab is hidden until it is switched on: ?debt=1, localStorage.sw_debt_ws === '1',
@@ -264,7 +273,7 @@ var DebtWorkshopCore = (function () {
       case 'ready': return { text: 'Statement ready', tone: 'ready' };
       case 'sent': return { text: 'Statement sent this week', tone: 'quiet' };
       case 'no_email': return { text: 'No accounts email set', tone: 'warn' };
-      case 'nothing_due': return { text: 'Nothing past due', tone: 'quiet' };
+      case 'nothing_due': return { text: 'Nothing overdue', tone: 'quiet' };
       default: return { text: 'Statement not ready', tone: 'quiet' };
     }
   }
@@ -273,7 +282,7 @@ var DebtWorkshopCore = (function () {
     var st = (company && company.statement && company.statement.status) || '';
     settings = settings || {};
     if (st === 'sent') return { ok: false, reason: 'Sent this week' };
-    if (st === 'nothing_due') return { ok: false, reason: 'Nothing past due' };
+    if (st === 'nothing_due') return { ok: false, reason: 'Nothing overdue' };
     if (st === 'no_email') return { ok: false, reason: 'No accounts email set' };
     if (!settings.sending_on) return { ok: false, reason: SENDING_OFF_WORDS };
     if (!settings.viewer_is_owner) return { ok: false, reason: 'Only an owner can approve' };
@@ -284,16 +293,19 @@ var DebtWorkshopCore = (function () {
   // Everything the list can show for one job type filter. Homeowner invoices are one item
   // each; companies are one item each (their invoices are grouped on the statement), so an
   // account-lane invoice row is only shown alone when the backend sends no companies.
-  function items(ov, jt) {
-    ov = ov || {}; jt = jt || 'all';
+  // rc is the Debt / Other receivables / All filter (CLASS_FILTERS); left out it means All.
+  // Companies are always Debt (their invoices are company invoices), so they show on Debt and All.
+  function items(ov, jt, rc) {
+    ov = ov || {}; jt = jt || 'all'; rc = rc || 'all';
     var out = [], companies = Array.isArray(ov.companies) ? ov.companies : [];
     (ov.rows || []).forEach(function (r) {
       var t = typeKey(r);
       if (t === 'insurance' && companies.length) return;
       if (jt !== 'all' && t !== jt) return;
+      if (rc !== 'all' && classOf(r) !== rc) return;
       out.push({ type: 'row', id: String(r.xero_invoice_id || r.share_key || ''), category: r.category || null, amount: num(r.amount_due), count: 1, day: num(r.day), jt: t, row: r });
     });
-    if (jt === 'all' || jt === 'insurance') {
+    if ((jt === 'all' || jt === 'insurance') && rc !== 'other') {
       companies.forEach(function (c) {
         var pd = c.past_due || {};
         out.push({ type: 'company', id: 'company:' + String(c.company_key || c.name || ''), category: c.category || null, amount: num(pd.amount), count: num(pd.count), day: num(pd.oldest_days), jt: 'insurance', company: c });
@@ -342,6 +354,86 @@ var DebtWorkshopCore = (function () {
   }
   // Rows in the backend's list that are not due yet (no category), for the greyed footer list.
   function notDueRows(ov) { return ((ov && ov.rows) || []).filter(function (r) { return !r.category; }); }
+
+  // ── Receivables (approved by Shaun 4 Nov 2026) ──
+  // The filter on the list. The backend puts every invoice in one group (row.receivable_class):
+  //   debt         final invoices on jobs marked Complete or later, and company invoices;
+  //   other        deposits, materials, progress payments and planning fees;
+  //   write_off    the contacts we never chase (the Write-off list);
+  //   needs_a_look anything its rules could not place (for example a final invoice on a job
+  //                not marked Complete yet). It is still chased as today; it shows under All.
+  var CLASS_FILTERS = [
+    { key: 'debt', label: 'Debt' },
+    { key: 'other', label: 'Other receivables' },
+    { key: 'all', label: 'All' },
+  ];
+  // A row's group. An older backend sends none: a progress payment is Other, the rest Debt.
+  function classOf(row) {
+    var c = row && row.receivable_class;
+    if (c) return String(c);
+    return row && row.kind === 'progress' ? 'other' : 'debt';
+  }
+  // The words under the big number in the donut: what it adds up, for the filters picked.
+  function midLabel(rc, jt, jtLabel) {
+    var what = { debt: 'debt overdue', other: 'other receivables overdue' }[rc] || 'overdue, debt and other';
+    return what + ', ' + (!jt || jt === 'all' ? 'all jobs' : String(jtLabel || jt).toLowerCase());
+  }
+  // How many rows the backend sent that the Debt filter does not show because they could not
+  // be placed (still chased; under All). The screen says so rather than hiding them quietly.
+  function unplacedRows(ov, jt) {
+    return ((ov && ov.rows) || []).filter(function (r) { return classOf(r) === 'needs_a_look' && (!jt || jt === 'all' || typeKey(r) === jt); });
+  }
+  // "12 days overdue", "1 day overdue" or "not due yet", from the row's pay-by date. An older
+  // backend sends no days_overdue: fall back to the tab's own day words.
+  function overdueText(row) {
+    if (!row || row.days_overdue === undefined || row.days_overdue === null) return dayText(row);
+    var d = num(row.days_overdue);
+    return d >= 1 ? plural(d, 'day', 'days') + ' overdue' : 'not due yet';
+  }
+  // "Invoiced Mon 5 Oct · Pay by Thu 15 Oct" for a list row ('' parts are left out).
+  function rowDates(row) {
+    if (!row) return '';
+    var parts = [];
+    if (row.invoice_date) parts.push('Invoiced ' + dateWords(row.invoice_date));
+    if (row.pay_by) parts.push('Pay by ' + dateWords(row.pay_by));
+    return parts.join(' · ');
+  }
+  // A row's type word: the backend's type_label (Final, Company, Materials, Progress payment,
+  // Deposit, Planning fee, Extra labour), else the old kind words.
+  function typeWord(row) {
+    if (row && row.type_label) return String(row.type_label);
+    return row && row.kind === 'progress' ? 'progress payment' : row && row.kind === 'final' ? 'final invoice' : '';
+  }
+  // A company's terms in words: "Terms 14 days" or "Terms 10 days (the default)". '' when an
+  // older backend sends none.
+  function termsWords(company) {
+    if (!company || company.terms_days === undefined || company.terms_days === null) return '';
+    var d = num(company.terms_days);
+    return 'Terms ' + plural(d, 'day', 'days') + (company.terms_default ? ' (the default)' : '');
+  }
+  // What was typed in the terms box: a whole number of days from 0 to 120 (the backend's rule).
+  function termsInput(value) {
+    var s = String(value == null ? '' : value).trim();
+    if (!/^\d{1,3}$/.test(s)) return { ok: false, days: null, reason: 'Type a whole number of days, from 0 to 120.' };
+    var d = Number(s);
+    if (d > 120) return { ok: false, days: null, reason: 'Terms can be at most 120 days.' };
+    return { ok: true, days: d, reason: '' };
+  }
+  // The one line of money in against new invoices this week (debt_ws_overview.week_money,
+  // Monday to Sunday, GST included). Null when the backend could not read it or is older.
+  function weekMoneyLine(wm) {
+    if (!wm || typeof wm !== 'object' || !wm.paid_in || !wm.invoiced) return null;
+    var inC = cents(wm.paid_in.amount), outC = cents(wm.invoiced.amount);
+    var gap = money(Math.abs(inC - outC) / 100);
+    var trend = inC > outC ? 'More paid in than invoiced, by ' + gap
+      : inC < outC ? 'More invoiced than paid in, by ' + gap
+      : 'Paid in and invoiced are level';
+    return {
+      paid: money(wm.paid_in.amount), paidCount: plural(num(wm.paid_in.count), 'payment', 'payments'),
+      invoiced: money(wm.invoiced.amount), invoicedCount: plural(num(wm.invoiced.count), 'invoice', 'invoices'),
+      trend: trend, up: inC < outC,
+    };
+  }
 
   // Donut arcs as SVG circle dashes. R is the radius on a 200 x 200 view box.
   function donut(t, selected, R) {
@@ -702,7 +794,7 @@ var DebtWorkshopCore = (function () {
     if (!last || !last.at) return head + 'never';
     var day = perthDay(last.at);
     var when = day && today && day === today ? 'today' : dateWords(day);
-    return head + when + ', ' + perthTime(last.at) + (last.kind === 'auto' ? ' (Wednesday 12pm auto-send)' : last.by ? ' by ' + last.by : '');
+    return head + when + ', ' + perthTime(last.at) + (last.kind === 'auto' ? ' (Wednesday 2pm auto-send)' : last.by ? ' by ' + last.by : '');
   }
   // A refusal on the report, in words.
   function reportRefusalText(x) {
@@ -713,22 +805,32 @@ var DebtWorkshopCore = (function () {
     return REPORT_REFUSALS[code] || refusalText(x);
   }
 
-  // ── Total owed to us (approved 20 Oct 2026) ──
-  // The backend works out every open invoice and its breakdown (debt_ws_overview.total_owed,
-  // the same code as the debt report), so the lines always add up to the total. The screen
-  // only shows it: nothing in it is chased, and the chart above is unchanged. An older
-  // backend sends no total_owed, and then nothing is shown.
+  // ── Receivables (approved 4 Nov 2026; was "Total owed to us", 20 Oct 2026) ──
+  // The backend works out every unpaid invoice and its breakdown (debt_ws_overview.receivables,
+  // the same code as the Wednesday report), so the lines always add up to the total. The
+  // screen only shows it: nothing in it is chased. A backend from before 4 Nov sends only the
+  // older total_owed, which is shown the same way; one older still sends neither: no card.
   function owedView(ov) {
-    var t = ov && ov.total_owed;
+    var r = ov && ov.receivables, t = r && typeof r === 'object' && Array.isArray(r.lines) ? r : ov && ov.total_owed;
     if (!t || typeof t !== 'object' || !Array.isArray(t.lines)) return null;
     var sumC = 0, n = 0;
     var lines = t.lines.filter(function (l) { return l && typeof l === 'object'; }).map(function (l) {
       sumC += cents(l.amount); n += num(l.count);
       return { key: String(l.key || ''), name: String(l.name || ''), sub: String(l.sub || ''), count: num(l.count), amount: num(l.amount), invoices: Array.isArray(l.invoices) ? l.invoices : [] };
     });
-    return { count: num(t.count), amount: num(t.amount), lines: lines, addsUp: t.adds_up !== false && sumC === cents(t.amount) && n === num(t.count) };
+    // Test invoices (SAMPLE-) are left out of Receivables and named, so nothing is hidden.
+    var test = t === r && r.test && num(r.test.count) > 0
+      ? { count: num(r.test.count), amount: num(r.test.amount), names: (Array.isArray(r.test.invoices) ? r.test.invoices : []).map(function (i) { return String((i && i.invoice_number) || ''); }).filter(Boolean) }
+      : null;
+    return { receivables: t === r, count: num(t.count), amount: num(t.amount), lines: lines, test: test, addsUp: t.adds_up !== false && sumC === cents(t.amount) && n === num(t.count) };
   }
-  // The Debt line's small words: the chart above shows all jobs only on the All jobs filter.
+  // "Test invoices left out: INV-0001, INV-0002 ($20.00)." Empty when there are none.
+  function testLine(o) {
+    if (!o || !o.test) return '';
+    return 'Test invoices left out: ' + (o.test.names.length ? o.test.names.join(', ') : plural(o.test.count, 'invoice', 'invoices')) + ' (' + money(o.test.amount) + ').';
+  }
+  // The Debt line's small words: the lines are always all jobs, so with a job type filter on
+  // the Debt overdue line says so (the chart above shows that job type only).
   function owedDebtSub(sub, filterKey, filterLabel) {
     if (!filterKey || filterKey === 'all') return sub;
     return 'All jobs. The chart above shows ' + String(filterLabel || '').toLowerCase() + ' only';
@@ -754,7 +856,9 @@ var DebtWorkshopCore = (function () {
   }
 
   return {
-    owedView: owedView, owedDebtSub: owedDebtSub, xeroCheckLine: xeroCheckLine, draftsLine: draftsLine,
+    owedView: owedView, owedDebtSub: owedDebtSub, xeroCheckLine: xeroCheckLine, draftsLine: draftsLine, testLine: testLine,
+    CLASS_FILTERS: CLASS_FILTERS, classOf: classOf, midLabel: midLabel, unplacedRows: unplacedRows, overdueText: overdueText,
+    rowDates: rowDates, typeWord: typeWord, termsWords: termsWords, termsInput: termsInput, weekMoneyLine: weekMoneyLine,
     CATS: CATS, FILTERS: FILTERS, BADGES: BADGES, STEPS: STEPS, REFUSALS: REFUSALS, SENDING_OFF_WORDS: SENDING_OFF_WORDS,
     nameFromEmail: nameFromEmail, reportSendLabel: reportSendLabel, reportGate: reportGate, reportRoute: reportRoute,
     reportLastSent: reportLastSent, reportRefusalText: reportRefusalText,
@@ -784,6 +888,7 @@ var DebtWorkshopCore = (function () {
 var DW = {
   gen: 0, ov: null, ovErr: null, loading: false,
   jt: 'all', cat: null, // on Insurance, cat null means "all companies"
+  rc: 'debt', // the Debt / Other receivables / All filter (4 Nov 2026): Debt first, the big number
   view: 'list', // 'list' (W1) or 'job' (W2)
   jobGen: 0, jobId: null, job: null, jobErr: null, nav: [], navFrom: null,
   janGen: 0, jan: null, janErr: null, janLoading: false,
@@ -893,6 +998,8 @@ function dwCss() {
     '.dw-card{background:#fff;border:1px solid var(--dw-soft);border-radius:var(--dw-r);box-shadow:var(--sw-shadow,0 1px 3px rgba(41,60,70,.06))}',
     // W1: donut and legend
     '.dw-ov{display:grid;grid-template-columns:240px minmax(0,1fr);gap:36px;align-items:center;padding:26px 30px}',
+    // The note under the donut when invoices could not be placed as Debt or Other.
+    '.dw-ov .dw-hint{grid-column:1 / -1;font-size:12.5px;color:var(--dw-mid);padding-top:12px;border-top:1px solid var(--dw-soft)}',
     '.dw-donut{position:relative;width:220px;height:220px;margin:0 auto}',
     '.dw-donut svg{width:100%;height:100%;transform:rotate(-90deg);display:block}',
     '.dw-donut circle.seg{cursor:pointer;transition:stroke-width .15s,opacity .15s}',
@@ -912,7 +1019,7 @@ function dwCss() {
     '.dw-list-h{display:flex;justify-content:space-between;align-items:baseline;gap:6px 14px;padding:18px 22px 12px;flex-wrap:wrap}',
     '.dw-list-h h2{font-size:16px;font-weight:700;display:flex;gap:9px;align-items:center;margin:0;color:var(--dw-dark)}',
     '.dw-list-h .m{font-size:12.5px;color:var(--dw-midl)}',
-    '#viewDebt .dw-row{display:grid;grid-template-columns:minmax(0,2.3fr) 92px 112px minmax(0,1.5fr) 14px;grid-template-areas:"main day amt nx chev";gap:16px;align-items:center;padding:14px 22px;border:0;border-top:1px solid var(--dw-faint);cursor:pointer;background:none;width:100%;text-align:left;color:inherit;font-size:13px}',
+    '#viewDebt .dw-row{display:grid;grid-template-columns:minmax(0,2.3fr) 118px 112px minmax(0,1.5fr) 14px;grid-template-areas:"main day amt nx chev";gap:16px;align-items:center;padding:14px 22px;border:0;border-top:1px solid var(--dw-faint);cursor:pointer;background:none;width:100%;text-align:left;color:inherit;font-size:13px}',
     '#viewDebt .dw-row:hover{background:#FBF8F5}',
     '#viewDebt .dw-row:focus-visible{outline:2px solid var(--dw-or);outline-offset:-2px}',
     '.dw-row .main{grid-area:main;min-width:0}.dw-row .dw-day{grid-area:day}.dw-row .dw-amt{grid-area:amt}.dw-row .dw-nx{grid-area:nx}.dw-row .dw-chev{grid-area:chev}',
@@ -929,11 +1036,16 @@ function dwCss() {
     '.dw-jt{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:2px;color:#fff;line-height:1.4}',
     '.dw-jt.f{background:#3B6E8F}.dw-jt.p{background:#B5651D}.dw-jt.i{background:#5E5E8F}.dw-jt.o{background:#8FA4B2}',
     // Company rows (Insurance)
-    '.dw-co{display:grid;grid-template-columns:minmax(0,2.3fr) 92px 112px minmax(0,1.5fr);grid-template-areas:"main day amt act";gap:16px;align-items:center;padding:14px 22px;border-top:1px solid var(--dw-faint)}',
+    '.dw-co{display:grid;grid-template-columns:minmax(0,2.3fr) 118px 112px minmax(0,1.5fr);grid-template-areas:"main day amt act";gap:16px;align-items:center;padding:14px 22px;border-top:1px solid var(--dw-faint)}',
     '.dw-co .main{grid-area:main;min-width:0;cursor:pointer}.dw-co .dw-day{grid-area:day}.dw-co .dw-amt{grid-area:amt}.dw-co .act{grid-area:act;display:flex;flex-direction:column;align-items:flex-end;gap:6px}',
     '.dw-co .btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}',
     '.dw-co .why{font-size:11.5px;color:var(--dw-midl);text-align:right}',
     '.dw-co .msg{grid-column:1 / -1}',
+    // Receivables (4 Nov 2026): a row's invoiced and pay-by dates, and a company's terms.
+    '.dw-rd{display:block;font-size:11.5px;color:var(--dw-midl);margin-top:2px}',
+    '.dw-terms{display:block;font-size:11.5px;color:var(--dw-mid);margin-top:2px}',
+    '.dw-terms-f{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}',
+    '#viewDebt .dw-terms-f input,#dwModal .dw-terms-f input{width:80px;padding:6px 8px;border:1px solid var(--dw-line);border-radius:6px;font-size:13px}',
     // Jan's visit list
     '.dw-jan{padding:18px 22px 8px}',
     '.dw-jan-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap;margin-bottom:6px}',
@@ -944,11 +1056,13 @@ function dwCss() {
     // Footer
     '.dw-foot{display:flex;gap:10px 26px;flex-wrap:wrap;font-size:12.5px;color:var(--dw-mid);padding:0 4px}',
     '.dw-foot b{color:var(--dw-dark)}.dw-foot .paid b{color:var(--dw-sage)}.dw-foot .grey,.dw-foot .grey b{color:var(--dw-midl);font-weight:500}',
-    // Total owed to us (under the chart)
+    // Receivables (under the chart; was Total owed to us)
     '.dw-owed{padding:20px 30px 16px}',
     '.dw-owed-h{display:flex;justify-content:space-between;align-items:flex-end;gap:6px 16px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--dw-soft)}',
     '.dw-owed-h h2{margin:0;font-size:15px;font-weight:700;color:var(--dw-dark)}.dw-owed-h .s{font-size:12.5px;color:var(--dw-midl);margin-top:3px}',
     '.dw-owed-h .v{font-size:24px;font-weight:700;letter-spacing:-.02em;color:var(--dw-dark);line-height:1.1}',
+    // Paid in against new invoices this week (one line under the Receivables header).
+    '.dw-week{font-size:12.5px;color:var(--dw-mid);padding:10px 0 2px}.dw-week b{color:var(--dw-dark)}.dw-week .tr{color:var(--dw-midl)}',
     '.dw-owed-ls{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:2px 32px;padding:8px 0}',
     '#viewDebt .dw-owl{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:9px 10px;border:1px solid transparent;border-radius:var(--dw-r);background:none;text-align:left;cursor:pointer;color:inherit;width:100%;font-size:13px}',
     '#viewDebt .dw-owl:hover:not(:disabled){background:var(--dw-faint)}#viewDebt .dw-owl:disabled{cursor:default}',
@@ -1226,7 +1340,7 @@ function dwOpenJob(id) {
   var cur = dwCurrent();
   DW.nav = DebtWorkshopCore.listFor(cur.items, cur.cat).filter(function (i) { return i.type === 'row'; }).map(function (i) { return i.id; });
   if (DW.nav.indexOf(id) < 0) DW.nav = [id];
-  DW.navFrom = { cat: cur.cat, jt: DW.jt };
+  DW.navFrom = { cat: cur.cat, jt: DW.jt, rc: DW.rc };
   dwShowJob(id);
 }
 function dwShowJob(id) {
@@ -1254,7 +1368,7 @@ async function dwLoadJob(quiet) {
 
 // The items, totals and category for the current filter.
 function dwCurrent() {
-  var C = DebtWorkshopCore, its = C.items(DW.ov, DW.jt), t = C.totals(its);
+  var C = DebtWorkshopCore, its = C.items(DW.ov, DW.jt, DW.rc), t = C.totals(its);
   var cat = DW.cat;
   if (DW.jt !== 'insurance' && !cat) cat = C.defaultCategory(t);
   return { items: its, totals: t, cat: cat };
@@ -1301,8 +1415,12 @@ function dwListHtml() {
     '<span class="dw-state' + (s.sending_on ? ' on' : '') + '" id="dwSendingState"><i></i>' + (s.sending_on ? 'Sending on' : 'Sending off') + '</span>' +
     (s.agent_on ? '<span class="dw-state on"><i></i>Agent on</span>' : '') +
     (DW.loading ? '<span>Refreshing</span>' : '') +
-    // Top right: the Debt report button, then the job type filters under it.
+    // Top right: the Debt report button, then the Debt / Other receivables / All and job type filters under it.
     '</div></div><div class="dw-headr"><button type="button" class="dw-btn g" data-dw="report" id="dwReportBtn">Debt report</button>' +
+    // Debt / Other receivables / All (4 Nov 2026), then the job type filters.
+    '<div class="dw-filters" role="group" aria-label="Debt or other receivables" id="dwClassFilters">' +
+    C.CLASS_FILTERS.map(function (f) { return '<button type="button" class="dw-chip' + (f.key === DW.rc ? ' on' : '') + '" data-dw="rc" data-k="' + f.key + '" aria-pressed="' + (f.key === DW.rc) + '">' + dwEsc(f.label) + '</button>'; }).join('') +
+    '</div>' +
     '<div class="dw-filters" role="group" aria-label="Job type">' +
     C.FILTERS.map(function (f) { return '<button type="button" class="dw-chip' + (f.key === DW.jt ? ' on' : '') + '" data-dw="jt" data-k="' + f.key + '" aria-pressed="' + (f.key === DW.jt) + '">' + dwEsc(f.label) + '</button>'; }).join('') +
     '</div></div></div>';
@@ -1314,26 +1432,32 @@ function dwListHtml() {
       var cat = C.catByKey(g.key);
       return '<circle class="seg" data-dw="cat" data-k="' + g.key + '" cx="100" cy="100" r="78" fill="none" stroke="' + g.color + '" stroke-width="' + (g.on ? 34 : 26) + '" stroke-dasharray="' + g.dash + '" stroke-dashoffset="' + g.offset + '" style="opacity:' + (g.on || !cur.cat ? 1 : 0.78) + '"><title>' + dwEsc(cat.name + ' ' + C.money(t[g.key].amount)) + '</title></circle>';
     }).join('') + '</svg>';
-  var donut = '<div class="dw-donut" id="dwDonut">' + svg + '<div class="dw-mid"><b id="dwTotal">' + dwEsc(C.money0(t.all.amount)) + '</b><span>owed, ' + dwEsc(DW.jt === 'all' ? 'all jobs' : filter.label.toLowerCase()) + '</span></div></div>';
+  var donut = '<div class="dw-donut" id="dwDonut">' + svg + '<div class="dw-mid"><b id="dwTotal">' + dwEsc(C.money0(t.all.amount)) + '</b><span id="dwTotalLabel">' + dwEsc(C.midLabel(DW.rc, DW.jt, filter.label)) + '</span></div></div>';
   var legend = '<div class="dw-legend" id="dwLegend">' + C.CATS.map(function (c) {
     var on = c.key === cur.cat, n = t[c.key].count;
     return '<button type="button" class="dw-lg' + (on ? ' on' : '') + (n ? '' : ' zero') + '" data-dw="cat" data-k="' + c.key + '" aria-pressed="' + on + '"><span class="dw-dot" style="background:' + c.color + '"></span><span><span class="nm">' + dwEsc(c.name) + '</span><span class="ds">' + dwEsc(c.desc) + '</span></span><span class="ct">' + dwEsc(C.plural(n, 'invoice', 'invoices')) + '</span><span class="am">' + dwEsc(C.money(t[c.key].amount)) + '</span></button>';
   }).join('') + '</div>';
-  var ovCard = '<div class="dw-card dw-ov">' + donut + legend + '</div>';
+  // On Debt or Other, a final invoice the rules could not place (its job is not marked
+  // Complete yet) is in neither list. It is still chased; say where it is.
+  var unplaced = DW.rc === 'all' ? [] : C.unplacedRows(ov, DW.jt);
+  var hint = unplaced.length ? '<div class="dw-hint" id="dwUnplaced">' + dwEsc(C.plural(unplaced.length, 'invoice', 'invoices') + ' (' + C.money(unplaced.reduce(function (a, r) { return a + C.num(r.amount_due); }, 0)) + ') could not be placed as Debt or Other, usually a final invoice on a job not marked Complete yet. ' + (unplaced.length === 1 ? 'It is' : 'They are') + ' still followed up as today and ' + (unplaced.length === 1 ? 'shows' : 'show') + ' under All.') + ' <button type="button" class="dw-link" data-dw="rc" data-k="all">Show All</button></div>' : '';
+  var ovCard = '<div class="dw-card dw-ov">' + donut + legend + hint + '</div>';
 
   var jan = cur.cat === 'bad_debt' && DW.jt !== 'insurance' ? dwJanHtml() : '';
   return '<div class="dw">' + head + ovCard + dwOwedHtml(ov, filter) + jan + dwListCardHtml(cur, s, today) + dwFootHtml(ov) + '</div>';
 }
 
-// "Total owed to us": every open invoice, directly under the chart. Each line opens the
-// invoices in it; the check line says whether our Xero copy matched Xero (and which
-// invoices differ). Nothing here is chased. An older backend sends nothing: no card.
+// "Receivables" (4 Nov 2026, was "Total owed to us"): every unpaid invoice, directly under
+// the chart. Each line opens the invoices in it; the check line says whether our Xero copy
+// matched Xero (and which invoices differ); one line compares money paid in this week with
+// new invoices raised this week. Nothing here is chased. An older backend sends nothing: no card.
 function dwOwedHtml(ov, filter) {
   var C = DebtWorkshopCore, o = C.owedView(ov);
   if (!o) return '';
-  var xl = C.xeroCheckLine(ov.xero_check, dwToday()), drafts = C.draftsLine(ov.xero_check);
+  var xl = C.xeroCheckLine(ov.xero_check, dwToday()), drafts = C.draftsLine(ov.xero_check), tests = C.testLine(o);
   var lines = o.lines.map(function (l) {
-    var sub = l.key === 'debt' ? C.owedDebtSub(l.sub, DW.jt, filter && filter.label) : l.sub;
+    // The Debt line (Debt overdue on a 4 Nov backend, Debt on an older one) says when the chart is narrower.
+    var sub = l.key === 'debt' || l.key === 'debt_overdue' ? C.owedDebtSub(l.sub, DW.jt, filter && filter.label) : l.sub;
     return '<button type="button" class="dw-owl' + (l.count ? '' : ' zero') + '" data-dw="owed" data-k="' + dwEsc(l.key) + '"' + dwDis(!l.count) + '>' +
       '<span><span class="nm">' + dwEsc(l.name) + '</span><span class="ds">' + dwEsc(sub) + '</span></span>' +
       '<span class="ct">' + dwEsc(C.plural(l.count, 'invoice', 'invoices')) + '</span><span class="am">' + dwEsc(C.money(l.amount)) + '</span></button>';
@@ -1342,11 +1466,20 @@ function dwOwedHtml(ov, filter) {
   var check = !xl ? '' : xl.list
     ? '<button type="button" class="dw-xchk ' + xl.cls + '" data-dw="xero-check" id="dwXeroCheck">' + inner + '</button>'
     : '<div class="dw-xchk ' + xl.cls + '" id="dwXeroCheck">' + inner + '</div>';
-  var foot = check || drafts ? '<div class="dw-owed-f">' + check + (drafts ? '<div class="dw-drafts" id="dwDrafts">' + dwEsc(drafts) + '</div>' : '') + '</div>' : '';
+  var foot = check || drafts || tests ? '<div class="dw-owed-f">' + check + (drafts ? '<div class="dw-drafts" id="dwDrafts">' + dwEsc(drafts) + '</div>' : '') +
+    (tests ? '<div class="dw-drafts" id="dwTests">' + dwEsc(tests) + '</div>' : '') + '</div>' : '';
   return '<div class="dw-card dw-owed" id="dwOwed">' +
-    '<div class="dw-owed-h"><div><h2>Total owed to us</h2><div class="s">' + dwEsc(C.plural(o.count, 'open invoice', 'open invoices')) + ', the debt above included</div></div>' +
+    '<div class="dw-owed-h"><div><h2>Receivables</h2><div class="s">' + dwEsc(C.plural(o.count, 'unpaid invoice', 'unpaid invoices')) + ', the debt above included</div></div>' +
     '<div class="v" id="dwOwedTotal">' + dwEsc(C.money(o.amount)) + '</div></div>' +
+    dwWeekHtml(ov.week_money) +
     '<div class="dw-owed-ls" id="dwOwedLines">' + lines + '</div>' + foot + '</div>';
+}
+// Paid to us this week against new invoices raised this week (Monday to Sunday, GST included),
+// so it shows whether receivables are growing or shrinking. Nothing when it could not be read.
+function dwWeekHtml(wm) {
+  var w = DebtWorkshopCore.weekMoneyLine(wm);
+  if (!w) return '';
+  return '<div class="dw-week" id="dwWeek">This week: paid to us <b>' + dwEsc(w.paid) + '</b> (' + dwEsc(w.paidCount) + '), new invoices <b>' + dwEsc(w.invoiced) + '</b> (' + dwEsc(w.invoicedCount) + '). <span class="tr">' + dwEsc(w.trend) + '.</span></div>';
 }
 function dwOwedModal(k) {
   var C = DebtWorkshopCore, o = C.owedView(DW.ov || {});
@@ -1403,24 +1536,37 @@ function dwListCardHtml(cur, s, today) {
 
 function dwRowHtml(it, today) {
   var C = DebtWorkshopCore, r = it.row, nx = C.nextStep(r, today);
-  var sub = [r.invoice_number, r.kind === 'progress' ? 'progress payment' : r.kind === 'final' ? 'final invoice' : '', r.job_number].filter(Boolean).map(dwEsc).join(' · ');
+  var sub = [r.invoice_number, C.typeWord(r), r.job_number].filter(Boolean).map(dwEsc).join(' · ');
   if (r.ghl_linked === false) sub += ' · no GHL contact';
   var flags = Number(r.flag_count) > 0 ? ' <span class="dw-flagm" title="The agent has left a notice on this job"><i></i>' + dwEsc(C.plural(Number(r.flag_count), 'notice', 'notices')) + '</span>' : '';
+  // When it was invoiced and when it should be paid by (4 Nov 2026); days overdue in the day column.
+  var dates = C.rowDates(r);
   return '<div class="dw-row" role="button" tabindex="0" data-dw="open" data-k="' + dwEsc(it.id) + '">' +
-    '<span class="main"><span class="dw-nm">' + dwPayerHtml(r) + ' ' + dwBadgeHtml(it.jt) + '</span><span class="dw-rs" style="display:block">' + sub + flags + '</span></span>' +
-    '<span class="dw-day">' + dwEsc(C.dayText(r)) + '</span><span class="dw-amt">' + dwEsc(C.money(r.amount_due)) + '</span>' +
+    '<span class="main"><span class="dw-nm">' + dwPayerHtml(r) + ' ' + dwBadgeHtml(it.jt) + '</span><span class="dw-rs" style="display:block">' + sub + flags + '</span>' +
+    (dates ? '<span class="dw-rd">' + dwEsc(dates) + '</span>' : '') + '</span>' +
+    '<span class="dw-day">' + dwEsc(C.overdueText(r)) + '</span><span class="dw-amt">' + dwEsc(C.money(r.amount_due)) + '</span>' +
     '<span class="dw-nx ' + nx.tone + '">' + dwEsc(nx.text) + '</span><span class="dw-chev">' + DW_IC.right + '</span></div>';
 }
 function dwCompanySub(c) {
   var C = DebtWorkshopCore, pd = c.past_due || {}, ig = c.in_grace || {}, n = Number(pd.count) || 0, g = Number(ig.count) || 0;
-  return [n ? C.plural(n, 'invoice', 'invoices') + ' past due' : 'Nothing past due', g ? C.plural(g, 'invoice', 'invoices') + ' not due yet' : '', 'weekly statement'].filter(Boolean).join(' · ');
+  return [n ? C.plural(n, 'invoice', 'invoices') + ' overdue' : 'Nothing overdue', g ? C.plural(g, 'invoice', 'invoices') + ' not due yet' : '', 'weekly statement'].filter(Boolean).join(' · ');
 }
-function dwOldest(c) { var d = Number(c.past_due && c.past_due.oldest_days); return d > 0 ? 'oldest ' + d + ' days' : ''; }
+// A company's terms (days to pay from the invoice date), with Change for the owner. Staff see
+// the button disabled with the reason. Nothing when an older backend sends no terms.
+function dwTermsHtml(c, s) {
+  var C = DebtWorkshopCore, words = C.termsWords(c);
+  if (!words) return '';
+  var owner = !!(s && s.viewer_is_owner), key = String(c.company_key || '');
+  return '<span class="dw-terms" data-terms="' + dwEsc(key) + '">' + dwEsc(words) +
+    ' <button type="button" class="dw-link" data-dw="terms" data-k="' + dwEsc(key) + '"' + dwDis(!owner || !!DW.busy) + (owner ? '' : ' title="Only an owner can change terms"') + '>Change</button></span>';
+}
+function dwOldest(c) { var d = Number(c.past_due && c.past_due.oldest_days); return d > 0 ? 'oldest ' + d + ' days overdue' : ''; }
 // On All jobs a company is one quiet row; clicking it opens its statement.
 function dwCompanyRowHtml(it) {
   var C = DebtWorkshopCore, c = it.company, sw = C.statementWords(c);
   return '<div class="dw-row" role="button" tabindex="0" data-dw="company" data-k="' + dwEsc(c.company_key) + '">' +
-    '<span class="main"><span class="dw-nm">' + dwEsc(c.name) + ' ' + dwBadgeHtml('insurance') + '</span><span class="dw-rs" style="display:block">' + dwEsc(dwCompanySub(c)) + '</span></span>' +
+    '<span class="main"><span class="dw-nm">' + dwEsc(c.name) + ' ' + dwBadgeHtml('insurance') + '</span><span class="dw-rs" style="display:block">' + dwEsc(dwCompanySub(c)) + '</span>' +
+    (C.termsWords(c) ? '<span class="dw-rd">' + dwEsc(C.termsWords(c)) + '</span>' : '') + '</span>' +
     '<span class="dw-day">' + dwEsc(dwOldest(c)) + '</span><span class="dw-amt">' + dwEsc(C.money(it.amount)) + '</span>' +
     '<span class="dw-nx ' + sw.tone + '">' + dwEsc(sw.text) + '</span><span class="dw-chev">' + DW_IC.right + '</span></div>';
 }
@@ -1429,7 +1575,8 @@ function dwCompanyActHtml(it, s) {
   var C = DebtWorkshopCore, c = it.company, sw = C.statementWords(c), gate = C.statementGate(c, s), key = String(c.company_key || '');
   var busy = DW.busy === 'approve:' + key, msg = DW.rowMsg[key];
   return '<div class="dw-co" data-company="' + dwEsc(key) + '">' +
-    '<div class="main" data-dw="preview" data-k="' + dwEsc(key) + '"><span class="dw-nm">' + dwEsc(c.name) + ' ' + dwBadgeHtml('insurance') + '</span><span class="dw-rs" style="display:block">' + dwEsc(dwCompanySub(c)) + '</span></div>' +
+    // The terms' Change button sits inside the row: a click on it changes terms, not the preview.
+    '<div class="main" data-dw="preview" data-k="' + dwEsc(key) + '"><span class="dw-nm">' + dwEsc(c.name) + ' ' + dwBadgeHtml('insurance') + '</span><span class="dw-rs" style="display:block">' + dwEsc(dwCompanySub(c)) + '</span>' + dwTermsHtml(c, s) + '</div>' +
     '<span class="dw-day">' + dwEsc(dwOldest(c)) + '</span><span class="dw-amt">' + dwEsc(C.money(it.amount)) + '</span>' +
     '<div class="act"><span class="dw-nx ' + sw.tone + '">' + dwEsc(sw.text) + '</span><div class="btns">' +
     '<button type="button" class="dw-btn g sm" data-dw="preview" data-k="' + dwEsc(key) + '">Preview</button>' +
@@ -1474,20 +1621,21 @@ function dwJanHtml() {
     body + (DW.janMsg ? '<div class="dw-refuse">' + dwEsc(DW.janMsg) + '</div>' : '') + '</div>';
 }
 
-// The quiet footer: paid this week, needs a look, not chased, and not due yet (greyed).
+// The quiet footer: paid this week, needs a look, the Write-off list (was "Not chased"), and
+// not due yet (greyed).
 function dwFootHtml(ov) {
   var C = DebtWorkshopCore, paid = ov.paid_this_week || {}, look = ov.needs_a_look || [], nc = ov.not_chased || [], nd = ov.not_due || {};
   var pn = Number(paid.count) || 0;
   var parts = [
     '<span class="paid" id="dwPaid">Paid this week: <b>' + dwEsc(C.money(paid.amount)) + '</b> from ' + dwEsc(C.plural(pn, 'invoice', 'invoices')) + (pn ? ' <button type="button" class="dw-link" data-dw="foot" data-k="paid">see who</button>' : '') + '</span>',
     '<span id="dwLook">' + (look.length ? 'Needs a look: <b>' + look.length + '</b> <button type="button" class="dw-link" data-dw="foot" data-k="look">open</button>' : 'Nothing needs a look') + '</span>',
-    nc.length ? '<span id="dwNotChased">Not chased: <b>' + nc.length + '</b> <button type="button" class="dw-link" data-dw="foot" data-k="notchased">see</button></span>' : '',
+    nc.length ? '<span id="dwWriteOff">Write-off list: <b>' + nc.length + '</b> <button type="button" class="dw-link" data-dw="foot" data-k="notchased">see</button></span>' : '',
     '<span class="grey" id="dwNotDue">Not due yet: <b>' + dwEsc(C.money(nd.amount)) + '</b> from ' + dwEsc(C.plural(Number(nd.count) || 0, 'invoice', 'invoices')) + (C.notDueRows(ov).length ? ' <button type="button" class="dw-link" data-dw="foot" data-k="notdue">see</button>' : '') + '</span>',
   ];
   return '<div class="dw-foot">' + parts.filter(Boolean).join('') + '</div>';
 }
 function dwFootModal(k) {
-  var C = DebtWorkshopCore, ov = DW.ov || {}, li = [], title = '', grey = false;
+  var C = DebtWorkshopCore, ov = DW.ov || {}, li = [], title = '', grey = false, top = '';
   var line = function (name, detail, amount, attrs) { return '<li' + (attrs || '') + '><div><b>' + dwEsc(name) + '</b><div class="d">' + dwEsc(detail) + '</div></div><span class="a">' + dwEsc(amount) + '</span></li>'; };
   if (k === 'paid') {
     title = 'Paid this week';
@@ -1496,7 +1644,7 @@ function dwFootModal(k) {
     title = 'Needs a look';
     li = (ov.needs_a_look || []).map(function (n) { return line(n.payer_name || 'Unknown', [n.invoice_number, n.reason].filter(Boolean).join(' · '), C.money(n.amount_due)); });
   } else if (k === 'notchased') {
-    title = 'Not chased';
+    title = 'Write-off list'; top = 'For us to check whether to write off. These contacts are never chased or put on a statement.';
     li = (ov.not_chased || []).map(function (n) {
       if (typeof n === 'string') return line(n, 'In the totals, never chased or put on a statement', '');
       var amt = n.amount != null ? n.amount : n.amount_due;
@@ -1506,7 +1654,7 @@ function dwFootModal(k) {
     title = 'Not due yet'; grey = true;
     li = C.notDueRows(ov).map(function (r) { return line(r.payer_label || r.payer_name || 'Unknown', [r.invoice_number, r.due_date ? 'due ' + C.dateWords(r.due_date) : ''].filter(Boolean).join(' · '), C.money(r.amount_due)); });
   }
-  dwModal({ title: title, size: 'sm', body: li.length ? '<ul class="dw-mlist' + (grey ? ' grey' : '') + '">' + li.join('') + '</ul>' : '<div class="dw-empty">Nothing to show.</div>' });
+  dwModal({ title: title, size: 'sm', top: top ? dwEsc(top) : '', body: li.length ? '<ul class="dw-mlist' + (grey ? ' grey' : '') + '">' + li.join('') + '</ul>' : '<div class="dw-empty">Nothing to show.</div>' });
 }
 
 // ── W2: the job screen ──
@@ -1847,7 +1995,7 @@ function dwReportTopHtml() {
   var C = DebtWorkshopCore, R = DW.rep || {}, d = R.delivery || {}, gate = C.reportGate(d), today = R.perth_date || dwToday();
   var asAt = R.report && R.report.as_at ? R.report.as_at : (R.read_at ? C.perthTime(R.read_at) : '');
   var busy = DW.repBusy;
-  var head = '<div class="dw-rep-row"><div><h1 class="dw-title">Debt report</h1><div class="dw-sub">' +
+  var head = '<div class="dw-rep-row"><div><h1 class="dw-title">Debt and receivables</h1><div class="dw-sub">' +
     (asAt ? '<span>As at ' + dwEsc(asAt) + '</span>' : '') +
     '<span>Built fresh from live data each time it opens</span>' + (DW.repLoading ? '<span>Refreshing</span>' : '') + '</div></div>' +
     '<div class="dw-acts dw-rep-acts">' +
@@ -1857,7 +2005,7 @@ function dwReportTopHtml() {
     '</div></div>';
   var meta = '<div class="dw-rep-meta" id="dwReportMeta"><span>' + dwEsc(C.reportRoute(d)) + '</span>' +
     '<span id="dwReportLast">' + dwEsc(C.reportLastSent(R.last_sent, d, today)) + '</span>' +
-    '<span id="dwReportAuto">Wednesday 12pm auto-send: ' + (d.auto_send ? 'on' : 'off') + '</span>' +
+    '<span id="dwReportAuto">Wednesday 2pm auto-send: ' + (d.auto_send ? 'on' : 'off') + '</span>' +
     (gate.ok ? '' : '<span class="why" id="dwReportWhy">' + dwEsc(gate.reason) + '</span>') + '</div>';
   var confirm = DW.repConfirm
     ? '<div class="dw-rep-confirm" id="dwReportConfirm"><b>Send this report now?</b> ' + dwEsc(C.reportRoute(d)) +
@@ -1890,7 +2038,7 @@ async function dwReportPdf() {
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     var url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
     var a = document.createElement('a');
-    a.href = url; a.download = r.filename || 'Debt position.pdf'; a.style.display = 'none';
+    a.href = url; a.download = r.filename || 'Debt and receivables.pdf'; a.style.display = 'none';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
     DW.repBusy = null; dwToast('PDF downloaded', 'success');
@@ -2015,6 +2163,44 @@ async function dwPreview(key) {
     // The statement HTML is shown in a sandboxed frame: no scripts, no reach into this page.
     dwModalSet('bd', r.html ? '<iframe sandbox="" title="Statement preview" srcdoc="' + dwEsc(r.html) + '"></iframe>' : '<div class="dw-empty">Nothing on this statement yet.</div>');
   } catch (e) { if (g === DW.modalGen) dwModalSet('bd', dwFailHtml('The statement preview', e)); }
+}
+
+// A company's terms (Shaun, 4 Nov 2026): the days it has to pay, counted from the invoice
+// date. MLB is on 10, Ambrose Construct Group on 14 and every other company on the default
+// (10). Owner only; the backend checks again. Saving moves that company's pay-by dates,
+// days and category, and nothing else about the chase.
+function dwTermsModal(key) {
+  var C = DebtWorkshopCore, c = dwCompany(key), s = dwSettings(); if (!c || !s.viewer_is_owner) return;
+  var def = C.num(s.terms_default_days) || 10;
+  var top = dwEsc('Days ' + c.name + ' has to pay, counted from the invoice date. Every company without its own terms is on ' + C.plural(def, 'day', 'days') + '.') +
+    (s.terms_status && s.terms_status !== 'ok' ? '<div class="dw-refuse">' + dwEsc('The terms setting could not be read, so every company is on ' + C.plural(def, 'day', 'days') + ' for now.') + '</div>' : '');
+  var body = '<div class="dw-terms-f"><label for="dwTermsIn">Terms</label><input id="dwTermsIn" type="number" min="0" max="120" step="1" inputmode="numeric" value="' + dwEsc(C.num(c.terms_days)) + '"> days' +
+    '<span class="why" id="dwTermsMsg" role="status"></span></div>';
+  var foot = '<button type="button" class="dw-btn g" data-dw="terms-default" data-k="' + dwEsc(key) + '"' + dwDis(!!c.terms_default) + '>Use the default (' + dwEsc(C.plural(def, 'day', 'days')) + ')</button>' +
+    '<button type="button" class="dw-btn" data-dw="terms-save" data-k="' + dwEsc(key) + '" id="dwTermsSave">Save</button>';
+  dwModal({ title: 'Terms for ' + c.name, size: 'sm', top: top, body: body, foot: foot });
+  var inp = document.getElementById('dwTermsIn'); if (inp && inp.focus) inp.focus();
+}
+async function dwTermsSave(key, useDefault) {
+  var C = DebtWorkshopCore, c = dwCompany(key); if (!c || DW.busy) return;
+  var msg = document.getElementById('dwTermsMsg'), inp = document.getElementById('dwTermsIn');
+  var days = null;
+  if (!useDefault) {
+    var chk = C.termsInput(inp ? inp.value : '');
+    if (!chk.ok) { if (msg) msg.textContent = chk.reason; return; }
+    days = chk.days;
+  }
+  DW.busy = 'terms:' + key;
+  try {
+    // days null takes the company's own terms away, so it goes back on the default.
+    var res = await dwPost('debt_ws_set_company_terms', { company_key: key, days: days });
+    DW.busy = null; dwCloseModal();
+    dwToast('Terms for ' + c.name + ': ' + C.plural(C.num(res && res.terms_days != null ? res.terms_days : days), 'day', 'days'), 'success');
+    dwLoadOverview(true);
+  } catch (e) {
+    DW.busy = null;
+    if (msg) msg.textContent = C.refusalText(e);
+  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -2197,6 +2383,8 @@ function dwAct(a, k) {
       if (k === DW.jt) return;
       if (k === 'insurance' || DW.jt === 'insurance') DW.cat = null;
       DW.jt = k; return dwRender();
+    // Debt / Other receivables / All: the category is picked again for the new list.
+    case 'rc': if (k === DW.rc) return; DW.rc = k; if (DW.jt !== 'insurance') DW.cat = null; return dwRender();
     case 'cat': DW.cat = k; return dwRender();
     case 'cats-all': DW.cat = null; return dwRender();
     case 'open': return dwOpenJob(k);
@@ -2207,10 +2395,14 @@ function dwAct(a, k) {
     case 'foot': return dwFootModal(k);
     case 'owed': return dwOwedModal(k);
     case 'xero-check': return dwXeroCheckModal();
+    // A company's terms (owner only): the box, then Save or Use the default.
+    case 'terms': return dwTermsModal(k);
+    case 'terms-save': return dwTermsSave(k, false);
+    case 'terms-default': return dwTermsSave(k, true);
     case 'reload': return dwLoadOverview(false);
     case 'back':
       DW.view = 'list'; DW.jobGen++; DW.job = null; DW.jobId = null;
-      if (DW.navFrom) { DW.jt = DW.navFrom.jt || DW.jt; DW.cat = DW.navFrom.cat || null; }
+      if (DW.navFrom) { DW.jt = DW.navFrom.jt || DW.jt; DW.rc = DW.navFrom.rc || DW.rc; DW.cat = DW.navFrom.cat || null; }
       dwRender(); try { window.scrollTo(0, 0); } catch (e) {} return;
     case 'next': { var i = DW.nav.indexOf(DW.jobId); if (i >= 0 && i < DW.nav.length - 1) dwShowJob(DW.nav[i + 1]); return; }
     case 'job-reload': DW.jobErr = null; dwRender(); return dwLoadJob(false);

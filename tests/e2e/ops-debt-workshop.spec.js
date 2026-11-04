@@ -11,10 +11,16 @@
 //    amount and the next step (orange when a draft is ready); a notice marker when flag_count > 0.
 //  - Insurance shows company rows with statement status, Preview (statement in a modal) and
 //    Approve (disabled with the reason when sending is off or there is no email).
-//  - Bad debt shows Jan's visit list with Remove; the footer opens Paid this week and Needs a look.
-//  - Total owed to us (20 Oct 2026) sits under the chart: the backend's lines, which add up to
-//    it, each opening its invoices; "Matches Xero" or which invoices differ; drafts not in the
-//    total. It posts nothing, and an older backend shows no card.
+//  - Bad debt shows Jan's visit list with Remove; the footer opens Paid this week, Needs a look
+//    and the Write-off list (was "Not chased").
+//  - Receivables (4 Nov 2026, was Total owed to us) sits under the chart: the backend's lines,
+//    which add up to it, each opening its invoices; "Matches Xero" or which invoices differ;
+//    drafts not in the total; one line of money paid in against new invoices this week. It
+//    posts nothing, and an older backend shows no card.
+//  - The Debt / Other receivables / All filter (4 Nov 2026): Debt first (the big number is
+//    overdue Debt); a progress payment is under Other receivables; rows show Invoiced, Pay by
+//    and days overdue. Each company shows its terms; Change is owner only and posts
+//    debt_ws_set_company_terms.
 //  - W2: status strip with the ladder; story, money and documents (opened in a modal); agent
 //    notices with Dismiss; a move card; a Link contact card; notes with a promise date.
 //  - The chat window (approved 16 Oct 2026): a bar with who we text, "Texts go from 771", the
@@ -140,18 +146,26 @@ test('W1: donut and legend pick the list; rows say who, what, how late and what 
   await expect(page.locator('#dwSendingState')).toHaveText('Sending off');
   // Active by default: the first category with money in it, a ready draft in orange first.
   await expect(page.locator('#dwListTitle')).toHaveText('Active');
-  await expect(page.locator('#dwList .dw-row')).toHaveCount(2);
+  // Debt first: Jordan's materials invoice is under Other receivables, not here.
+  await expect(page.locator('[data-dw="rc"][data-k="debt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#dwList .dw-row')).toHaveCount(1);
   const avery = rowByName(page, 'Avery Lin');
   await expect(avery.locator('.dw-nx.ready')).toHaveText('Day 1 text ready');
   await expect(avery.locator('.dw-jt')).toHaveText('FENCING');
   await expect(avery).toContainText('no GHL contact');
+  await page.locator('[data-dw="rc"][data-k="other"]').click();
+  await expect(page.locator('#dwList .dw-row')).toHaveCount(1);
   await expect(rowByName(page, 'Jordan Pike').locator('.dw-nx')).toHaveText(/Day 7 text \+ call on /);
   await expect(rowByName(page, 'Jordan Pike').locator('.dw-jt')).toHaveText('PATIO');
+  await expect(rowByName(page, 'Jordan Pike')).toContainText('Materials');
+  await page.locator('[data-dw="rc"][data-k="debt"]').click();
   // The legend picks the list; the donut segment does too.
   await page.locator('#dwLegend .dw-lg', { hasText: 'Escalating' }).click();
   await expect(page.locator('#dwListTitle')).toHaveText('Escalating');
   await expect(rowByName(page, 'Riley Shaw')).toContainText('Riley Shaw (neighbour of Taylor Brooks)');
-  await expect(rowByName(page, 'Casey Morgan')).toContainText('day 12');
+  await expect(rowByName(page, 'Casey Morgan').locator('.dw-day')).toHaveText('12 days overdue');
+  await expect(rowByName(page, 'Casey Morgan').locator('.dw-rd')).toContainText('Invoiced ');
+  await expect(rowByName(page, 'Casey Morgan').locator('.dw-rd')).toContainText('Pay by ');
   await expect(rowByName(page, 'Casey Morgan')).toContainText('$1,420.37');
   await expect(rowByName(page, 'Casey Morgan').locator('.dw-flagm')).toHaveText('1 notice');
   await expect(rowByName(page, 'Sasha Cole').locator('.dw-nx.ready')).toHaveText('Suggestion ready');
@@ -168,7 +182,7 @@ test('W1: donut and legend pick the list; rows say who, what, how late and what 
   await shot(page, '01-overview.png');
 });
 
-test('W1 footer: paid this week, needs a look with reasons, not due yet greyed', async ({ page }) => {
+test('W1 footer: paid this week, needs a look with reasons, not due yet greyed, the Write-off list', async ({ page }) => {
   await openDebt(page);
   await expect(page.locator('#dwPaid')).toContainText('$4,210.40 from 3 invoices');
   await page.locator('#dwPaid .dw-link').click();
@@ -181,11 +195,13 @@ test('W1 footer: paid this week, needs a look with reasons, not due yet greyed',
   await page.locator('#dwModal [data-dw="modal-close"]').click();
   await expect(page.locator('#dwNotDue')).toHaveClass(/grey/);
   await expect(page.locator('#dwNotDue')).toContainText('$6,200.00 from 2 invoices');
-  await page.locator('#dwNotChased .dw-link').click();
+  await expect(page.locator('#dwWriteOff')).toContainText('Write-off list: 1');
+  await page.locator('#dwWriteOff .dw-link').click();
   await expect(page.locator('#dwModal')).toContainText('Example Trade Services');
+  await expect(page.locator('#dwModal .to')).toContainText('For us to check whether to write off');
 });
 
-test('W1: Total owed to us sits under the chart; its lines add up, open their invoices, and say Matches Xero', async ({ page }) => {
+test('W1: Receivables sits under the chart; its lines add up, open their invoices, and say Matches Xero', async ({ page }) => {
   await openDebt(page);
   const owed = page.locator('#dwOwed');
   await expect(owed).toBeVisible();
@@ -195,27 +211,30 @@ test('W1: Total owed to us sits under the chart; its lines add up, open their in
   const list = await page.locator('#dwList').boundingBox();
   expect(card.y).toBeGreaterThanOrEqual(chart.y + chart.height - 1);
   expect(list.y).toBeGreaterThanOrEqual(card.y + card.height - 1);
-  // The chart and its figure are unchanged.
-  await expect(page.locator('#dwTotal')).toHaveText('$20,140');
+  // The big number is overdue Debt (12 invoices, $16,207.79), and says so.
+  await expect(page.locator('#dwTotal')).toHaveText('$16,208');
+  await expect(page.locator('#dwTotalLabel')).toHaveText('debt overdue, all jobs');
+  await expect(owed.locator('h2')).toHaveText('Receivables');
   await expect(page.locator('#dwOwedTotal')).toHaveText('$30,998.60');
-  await expect(owed).toContainText('20 open invoices');
+  await expect(owed).toContainText('20 unpaid invoices');
   const line = (k) => page.locator('#dwOwedLines [data-dw="owed"][data-k="' + k + '"]');
-  await expect(line('debt')).toContainText('$20,139.85');
-  await expect(line('debt')).toContainText('13 invoices');
-  await expect(line('not_due')).toContainText('$5,900.00');
-  await expect(line('companies')).toContainText('Companies on statements');
-  await expect(line('deposits')).toContainText('$2,500.00');
-  await expect(line('not_chased')).toContainText('Example Trade Services');
+  await expect(line('debt_overdue')).toContainText('$16,207.79');
+  await expect(line('debt_overdue')).toContainText('12 invoices');
+  await expect(line('debt_not_due')).toContainText('$6,761.00');
+  await expect(line('other_not_due')).toContainText('$2,500.00');
+  await expect(line('other_overdue')).toContainText('$3,932.06');
+  await expect(line('write_off')).toContainText('Write-off list');
+  await expect(line('write_off')).toContainText('Example Trade Services: for us to check whether to write off');
   await expect(line('needs_a_look')).toContainText('$1,292.50');
-  // A line with nothing in it is shown at $0.00 and does not open.
-  await expect(line('progress')).toBeDisabled();
+  // Money in against new invoices this week, in one line.
+  await expect(page.locator('#dwWeek')).toHaveText('This week: paid to us $4,210.40 (3 payments), new invoices $3,100.00 (2 invoices). More paid in than invoiced, by $1,110.40.');
   // Each line opens the invoices in it.
-  await line('companies').click();
+  await line('debt_not_due').click();
   await expect(page.locator('#dwModal')).toContainText('Northside Strata Services');
-  await expect(page.locator('#dwModal')).toContainText('INV-9304');
+  await expect(page.locator('#dwModal')).toContainText('INV-9321');
   await page.locator('#dwModal [data-dw="modal-close"]').click();
-  await line('debt').click();
-  await expect(page.locator('#dwModal li')).toHaveCount(13);
+  await line('debt_overdue').click();
+  await expect(page.locator('#dwModal li')).toHaveCount(12);
   await page.keyboard.press('Escape');
   // The check against Xero, and the drafts that are not in the total.
   await expect(page.locator('#dwXeroCheck')).toHaveClass(/ok/);
@@ -225,8 +244,9 @@ test('W1: Total owed to us sits under the chart; its lines add up, open their in
   // With a job type filter, the chart narrows but the total stays all jobs, and says so.
   await page.locator('[data-dw="jt"][data-k="patio"]').click();
   await expect(page.locator('#dwOwedTotal')).toHaveText('$30,998.60');
-  await expect(line('debt')).toContainText('All jobs. The chart above shows patio only');
-  await shot(page, '20-total-owed.png', '#dwOwed');
+  await expect(line('debt_overdue')).toContainText('All jobs. The chart above shows patio only');
+  await expect(page.locator('#dwTotalLabel')).toHaveText('debt overdue, patio');
+  await shot(page, '20-receivables.png', '#dwOwed');
   // Nothing was posted: the card only reads.
   expect(await posts(page)).toEqual([]);
 });
@@ -249,11 +269,17 @@ test('W1: Does not match Xero names the invoices and lists them; an older backen
   await expect(page.locator('#dwModal')).toContainText('our copy says deleted');
   await expect(page.locator('#dwModal')).toContainText('Xero says $32,085.08 across 22 invoices');
   await page.locator('#dwModal [data-dw="modal-close"]').click();
-  // An older backend sends no total_owed: the tab reads exactly as before.
+  // A backend from before 4 Nov sends only total_owed: the same card, with the older lines.
+  const before = buildDebtWorkshopFixture();
+  delete before.overview.receivables; delete before.overview.week_money;
+  await openDebt(page, { fixture: before });
+  await expect(page.locator('#dwOwedLines [data-dw="owed"][data-k="debt"]')).toContainText('$20,139.85');
+  await expect(page.locator('#dwWeek')).toHaveCount(0);
+  // One older still sends neither: the tab reads exactly as before, with no card.
   const old = buildDebtWorkshopFixture();
-  delete old.overview.total_owed; delete old.overview.xero_check;
+  delete old.overview.receivables; delete old.overview.total_owed; delete old.overview.xero_check;
   await openDebt(page, { fixture: old });
-  await expect(page.locator('#dwTotal')).toHaveText('$20,140');
+  await expect(page.locator('#dwTotal')).toHaveText('$16,208');
   await expect(page.locator('#dwOwed')).toHaveCount(0);
 });
 
@@ -275,6 +301,57 @@ test('Insurance: company statements with Preview and Approve, each refusal said 
   await expect(page.locator('#dwModal iframe[sandbox]')).toHaveAttribute('srcdoc', /Statement for Harbour Restoration/);
   await page.locator('#dwModal [data-dw="modal-close"]').click();
   await shot(page, '07-insurance.png');
+});
+
+test('W1: a final the rules could not place is named under the chart and shows under All', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  // Avery's job is not marked Complete yet: the backend cannot call it Debt.
+  fixture.overview.rows[0].receivable_class = 'needs_a_look';
+  await openDebt(page, { fixture });
+  await expect(page.locator('#dwUnplaced')).toContainText('1 invoice ($1,351.63) could not be placed as Debt or Other');
+  await expect(rowByName(page, 'Avery Lin')).toHaveCount(0);
+  await page.locator('#dwUnplaced [data-dw="rc"]').click();
+  await expect(page.locator('[data-dw="rc"][data-k="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#dwUnplaced')).toHaveCount(0);
+  await expect(rowByName(page, 'Avery Lin')).toHaveCount(1);
+  await expect(page.locator('#dwTotalLabel')).toHaveText('overdue, debt and other, all jobs');
+});
+
+test('Insurance: each company shows its terms; Change (owner only) posts the new days', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  await openDebt(page, { fixture, posts: { debt_ws_set_company_terms: { resolve: { ok: true, company_key: fixture.ids.coastline, terms_days: 21, terms_default: false, default_days: 10 } } } });
+  await page.locator('.dw-chip', { hasText: 'Insurance' }).click();
+  const harbour = page.locator('.dw-co', { hasText: 'Harbour Restoration' });
+  const coast = page.locator('.dw-co', { hasText: 'Coastline' });
+  await expect(harbour.locator('.dw-terms')).toContainText('Terms 10 days (the default)');
+  await expect(coast.locator('.dw-terms')).toContainText('Terms 14 days');
+  await coast.locator('[data-dw="terms"]').click();
+  await expect(page.locator('#dwModal')).toContainText('Terms for Coastline Building Group');
+  await expect(page.locator('#dwTermsIn')).toHaveValue('14');
+  // Out of range: said plainly, nothing posted.
+  await page.locator('#dwTermsIn').fill('200');
+  await page.locator('#dwTermsSave').click();
+  await expect(page.locator('#dwTermsMsg')).toHaveText('Terms can be at most 120 days.');
+  expect((await posts(page)).filter((p) => p.action === 'debt_ws_set_company_terms')).toHaveLength(0);
+  await page.locator('#dwTermsIn').fill('21');
+  await shot(page, '21-company-terms.png', '#dwModal .dw-sheet');
+  await page.locator('#dwTermsSave').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_set_company_terms').map((p) => p.body)).toEqual([{ company_key: fixture.ids.coastline, days: 21 }]);
+  await expect(page.locator('#dwModal')).toHaveCount(0);
+  // Use the default takes the company's own terms away (days null).
+  await coast.locator('[data-dw="terms"]').click();
+  await page.locator('#dwModal [data-dw="terms-default"]').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_set_company_terms').map((p) => p.body.days)).toEqual([21, null]);
+});
+
+test('Insurance: staff see the terms but cannot change them', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { viewer_is_owner: false } });
+  await openDebt(page, { fixture });
+  await page.locator('.dw-chip', { hasText: 'Insurance' }).click();
+  const coast = page.locator('.dw-co', { hasText: 'Coastline' });
+  await expect(coast.locator('.dw-terms')).toContainText('Terms 14 days');
+  await expect(coast.locator('[data-dw="terms"]')).toBeDisabled();
+  await expect(coast.locator('[data-dw="terms"]')).toHaveAttribute('title', 'Only an owner can change terms');
 });
 
 test('Insurance: with sending on, Approve sends the statement', async ({ page }) => {
@@ -634,7 +711,7 @@ test('phone: the donut shrinks, the list fits, the job columns stack', async ({ 
   expect(fit).toBe(true);
   const donut = await page.locator('#dwDonut').boundingBox();
   expect(donut.width).toBeLessThanOrEqual(180);
-  // Total owed to us fits a phone: one column of lines, every amount inside the card.
+  // Receivables fits a phone: one column of lines, every amount inside the card.
   const owed = await page.locator('#dwOwed').boundingBox();
   const amounts = await page.locator('#dwOwedLines .am').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
   amounts.forEach((right) => expect(right).toBeLessThanOrEqual(owed.x + owed.width + 1));
@@ -695,6 +772,8 @@ test('chat window: with no step due the box takes your own text; paused chasing 
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
   await openDebt(page, { fixture });
   // Jordan: nothing due today (day 7 is in a few days), so the box is for your own text.
+  // His materials invoice is under Other receivables.
+  await page.locator('[data-dw="rc"][data-k="other"]').click();
   await openJob(page, 'Jordan Pike');
   await expect(page.locator('#dwProposed')).toContainText('Your own text');
   await expect(page.locator('#dwNextLine')).toContainText('Nothing proposed today. Next: Day 7 text + call');
@@ -702,6 +781,9 @@ test('chat window: with no step due the box takes your own text; paused chasing 
   await expect(page.locator('#dwReply')).toHaveAttribute('placeholder', 'Write a text to Jordan');
   await expect(page.locator('#dwSend')).toBeEnabled();
   await page.locator('#dwBack').click();
+  // Back on the list, the filter is still Other receivables: Jamie's final is Debt.
+  await expect(page.locator('[data-dw="rc"][data-k="other"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-dw="rc"][data-k="debt"]').click();
   // Jamie says they have paid: the steps wait and the reason shows, with an empty box below it
   // for a reply in Shaun's own words (Shaun, 16 Oct 2026). Nothing is proposed or pre-filled.
   await openJob(page, 'Jamie Fox', 'Says paid');
@@ -727,14 +809,14 @@ test('Debt report: the button opens the live report as its own view; staff read 
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: false } });
   await openDebt(page, { fixture });
   await page.locator('#dwReportBtn').click();
-  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt position/);
+  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt and receivables/);
   await expect(page.locator('#dwReportFrame')).toHaveAttribute('sandbox', '');
   // Read fresh from the backend every time the view opens.
   const reads = async () => (await page.evaluate(() => window.__dwFetches)).filter((f) => f.action === 'debt_ws_report').length;
   expect(await reads()).toBe(1);
   await expect(page.locator('#dwReportMeta')).toContainText('Sends from admin@secureworkswa.com.au to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
   await expect(page.locator('#dwReportLast')).toHaveText('Last sent to Marnin: never');
-  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 12pm auto-send: off');
+  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 2pm auto-send: off');
   await expect(page.locator('#dwReportSend')).toHaveText('Send to Marnin');
   await expect(page.locator('#dwReportSend')).toBeDisabled();
   await expect(page.locator('#dwReportWhy')).toHaveText('Only an owner can send the report.');
@@ -771,7 +853,7 @@ test('Debt report: Send to Marnin asks first, then sends and shows Last sent; a 
   await expect(page.locator('#dwReportMsg')).toHaveText('Sent to marnin@secureworkswa.com.au, cc shaun@secureworkswa.com.au.');
   await expect(page.locator('#dwReportLast')).toContainText('Last sent to Marnin: today');
   // The frame was not redrawn by the send (it keeps its place).
-  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt position/);
+  await expect(page.locator('#dwReportFrame')).toHaveAttribute('srcdoc', /Debt and receivables/);
   // A refusal from the backend reads in words.
   await page.evaluate(() => { window.__dwPostAnswers.debt_ws_report_send = { reject: { message: 'The report was just sent', status: 409, code: 'recently_sent' } }; });
   await page.locator('#dwReportSend').click();
@@ -785,11 +867,11 @@ test('Debt report: Send to Marnin asks first, then sends and shows Last sent; a 
   await expect(page.locator('#dwReportMsg')).toHaveText(stale + '.');
 });
 
-test('Debt report: the Wednesday 12pm auto-send reads on when it is switched on', async ({ page }) => {
+test('Debt report: the Wednesday 2pm auto-send reads on when it is switched on', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: true, report_auto_send: true } });
   await openDebt(page, { fixture });
   await page.locator('#dwReportBtn').click();
-  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 12pm auto-send: on');
+  await expect(page.locator('#dwReportAuto')).toHaveText('Wednesday 2pm auto-send: on');
 });
 
 test('Debt report: with sending off the owner sees why Send is off', async ({ page }) => {

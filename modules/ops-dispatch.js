@@ -2704,6 +2704,14 @@
       h += '<h4 class="dpc-h4">Original booking and council reviews</h4>';
       e.reviews.forEach(function (review) {
         h += '<p class="dpc-empty dpc-empty-tight">' + esc(review.trigger_kind === 'scheduled' ? 'Installation booking review' : 'Council completion review') + ': recorded for accepted payment instructions and payer checks. This review is not an invoice; the outcomes above show its preparation result.</p>';
+        var notes = {
+          previous_revision_invoice_claim_requires_review: 'An earlier accepted revision already has an invoice claim. The office must reconcile it before a replacement payment is prepared.',
+          existing_invoice_requires_review: 'An existing invoice needs office review before another payment draft is prepared.',
+          invoice_inventory_unavailable: 'The existing invoices could not all be confirmed. Check the invoice records before preparing a draft.'
+        };
+        if (Array.isArray(review.hold_reasons)) review.hold_reasons.forEach(function (reason) {
+          if (notes[reason]) h += '<p class="dpc-empty dpc-empty-tight">Recorded preparation check: ' + esc(notes[reason]) + '</p>';
+        });
       });
     }
     if (e.reviews.length && !e.drafts.some(function (claim) { return claim.state === 'unknown' || claim.state === 'dispatching' || claim.state === 'draft_confirmed'; })) {

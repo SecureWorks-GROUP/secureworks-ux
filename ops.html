@@ -5565,6 +5565,7 @@ __swOpsStampAssets([
         <input type="hidden" id="assignEndDate">
       </div>
     </div>
+    <div id="assignArrivalWarning" role="status" aria-live="polite" hidden style="margin:0 0 16px;padding:12px;background:var(--sw-light);color:var(--sw-text);font-size:14px;overflow-wrap:anywhere;"></div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Start Time</label>
@@ -6423,6 +6424,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
   {t:'js', u:'modules/ops-modals.js?v=6'},
+  {t:'js', u:'modules/ops-assignment-arrival.js?v=1'},
   {t:'js', u:'modules/job-scope-record.js?v=1'},
   // <dispatch-version>
   window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=9'}
@@ -27457,6 +27459,7 @@ function toggleAssignTypeField() {
   var text = (document.getElementById('assignJobSearch').value || '').trim();
   var grp = document.getElementById('assignTypeGroup');
   if (grp) grp.style.display = (!jobId && text) ? 'block' : 'none';
+  if (window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
 }
 
 function syncAssignEndDate() {
@@ -27467,6 +27470,7 @@ function syncAssignEndDate() {
     end.setDate(end.getDate() + dur - 1);
     document.getElementById('assignEndDate').value = localDateStr(end);
   }
+  if (window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
 }
 
 // Helper to open assignment modal pre-filled for a specific job
@@ -27476,6 +27480,7 @@ function openAssignmentModalForJob(jobId) {
   setTimeout(function() {
     var sel = document.getElementById('assignJobSelect');
     if (sel) sel.value = jobId;
+    if (window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
   }, 300);
 }
 
@@ -28673,11 +28678,13 @@ async function openAssignmentModal(preSelectJobId, preDate, preCrew) {
   _editAssignmentId = null; // Reset — this is a new assignment
   document.getElementById('assignmentModal').classList.add('active');
   document.getElementById('assignModalTitle').textContent = 'Schedule Assignment';
+  document.getElementById('assignType').value = 'install';
   document.getElementById('assignDate').value = preDate || new Date().toISOString().slice(0, 10);
   document.getElementById('assignDuration').value = '2'; // Default 2 days
   syncAssignEndDate();
   document.getElementById('assignJobSearch').value = '';
   document.getElementById('assignJobSelect').value = '';
+  if (window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
   await loadPOJobList();
   await loadCrewList();
   // Render crew dropdown — preCrew can be a user ID or a name
@@ -28709,6 +28716,7 @@ async function openEditAssignmentModal(assignmentId) {
   if (!ev) { alert('Assignment not found'); return; }
 
   _editAssignmentId = assignmentId;
+  document.getElementById('assignType').value = ev.assignment_type || 'install';
   document.getElementById('assignModalTitle').textContent = 'Edit Assignment — ' + (ev.client_name || '');
 
   document.getElementById('assignmentModal').classList.add('active');
@@ -28727,6 +28735,7 @@ async function openEditAssignmentModal(assignmentId) {
   document.getElementById('assignJobSearch').value = '';
   document.getElementById('assignJobSelect').value = '';
   document.getElementById('assignNotes').value = ev.notes || '';
+  if (window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
 
   await loadPOJobList();
   await loadCrewList();
@@ -28860,6 +28869,7 @@ function selectJobPicker(prefix, jobId) {
   var hidden = document.getElementById(prefix + 'JobSelect');
   if (dd) dd.classList.remove('show');
   if (hidden) hidden.value = jobId || '';
+  if (prefix === 'assign' && window.AssignmentArrivalWarning) AssignmentArrivalWarning.refresh();
 
   if (!jobId) {
     if (search) search.value = '';

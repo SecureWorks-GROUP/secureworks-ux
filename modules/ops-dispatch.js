@@ -2710,7 +2710,7 @@
           invoice_inventory_unavailable: 'The existing invoices could not all be confirmed. Check the invoice records before preparing a draft.'
         };
         if (Array.isArray(review.hold_reasons)) review.hold_reasons.forEach(function (reason) {
-          if (notes[reason]) h += '<p class="dpc-empty dpc-empty-tight">Recorded preparation check: ' + esc(notes[reason]) + '</p>';
+          if (typeof reason === 'string' && Object.prototype.hasOwnProperty.call(notes, reason)) h += '<p class="dpc-empty dpc-empty-tight">Recorded preparation check: ' + esc(notes[reason]) + '</p>';
         });
       });
     }

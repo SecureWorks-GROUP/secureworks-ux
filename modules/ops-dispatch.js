@@ -1027,7 +1027,7 @@
     v2m: {
       open: readStore('localStorage', LS_ORDER) !== '0',
       jobs: {},
-      find: { open: false, q: '', status: 'idle', data: null, token: 0, timer: null },
+      find: { open: false, q: '', status: 'idle', data: null, token: 0, timer: null, more: false },
       modal: null,
       drag: null,
       unrecorded: {}
@@ -6049,6 +6049,8 @@
     paintV2();
     if (f.open) {
       refocus('[data-dpc-v2-q]');
+      // Tweak 4: Show more starts closed each time the search opens.
+      f.more = false;
       if (f.status === 'idle' || f.status === 'error' || f.q) { f.q = ''; v2RunFind(); }
     }
   }
@@ -6062,8 +6064,11 @@
     if (text(f.q)) params.q = text(f.q);
     Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_supplier_search', params); }).then(function (resp) {
       if (token !== f.token) return;
-      if (!isObj(resp) || !Array.isArray(resp.approved) || !Array.isArray(resp.others)) throw new Error('Unexpected search answer');
-      f.data = { approved: resp.approved.filter(isObj), others: resp.others.filter(isObj) };
+      // Tweak 4: approved (one row per approved supplier), more_approved and
+      // others (both under Show more). modules/dispatch-supplier-picker.js.
+      var answer = global.OpsDispatchPicker ? global.OpsDispatchPicker.readAnswer(resp) : null;
+      if (!answer) throw new Error('Unexpected search answer');
+      f.data = answer;
       f.status = 'ok';
       paintV2FindRes();
     }).catch(function () {
@@ -6388,25 +6393,33 @@
     var e = v2Entry(state.jobId);
     if (f.status === 'loading' || f.status === 'idle') return '<div class="dpc-empty dpc-empty-tight">Searching...</div>';
     if (f.status === 'error') return v2Fail1('Could not search the suppliers.', 'data-dpc-v2="find-retry"');
+    if (!global.OpsDispatchPicker) return v2Fail1('Could not load the supplier search. Reload the page.', null);
     var on = {};
     if (e && e.d) e.d.boxes.forEach(function (b) { on[b.supplier_id] = true; });
-    var adding = e && e.busy.add;
-    var item = function (r, approved) {
-      var sid = r.supplier_id ? String(r.supplier_id) : '';
-      var note = !sid ? 'Not linked to a Xero contact yet. Ask Shaun to name the contact.' : on[sid] ? 'On this job' : r.has_approved_email ? '' : v2Plain(r.note) || 'No approved order email: Dispatch will not send to this supplier';
-      var off = !sid || r.can_add === false || on[sid] || !!adding;
-      var sub = approved
-        ? [text(r.approved_name) && text(r.approved_name) !== text(r.name) ? text(r.approved_name) : '', V2_USED_FOR[text(r.used_for)] || text(r.used_for), v2Arr(r.to).join(', ')].filter(Boolean).join(' · ')
-        : '';
-      return '<button type="button" class="dpc-v2-res' + (r.has_approved_email ? '' : ' dpc-v2-res-noemail') + '" data-dpc-v2="addsup" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' +
-        '<strong>' + esc(text(r.name) || text(r.approved_name) || 'Name not recorded') + (adding && adding === sid ? ' <small>Adding...</small>' : '') + '</strong>' +
-        (sub ? '<small>' + esc(sub) + '</small>' : '') + (note ? '<small class="dpc-v2-resnote">' + esc(note) + '</small>' : '') + '</button>';
+    // Tweak 4: the rows come from modules/dispatch-supplier-picker.js. An
+    // approved supplier is one row under its approved name, on its main Xero
+    // contact; its other contacts and every other supplier sit under Show more.
+    var v = global.OpsDispatchPicker.view(f.data, { onJob: on, adding: (e && e.busy.add) || '', more: !!f.more });
+    var item = function (r) {
+      var cls = 'dpc-v2-res' + (r.greyed ? ' dpc-v2-res-noxero' : r.noEmail ? ' dpc-v2-res-noemail' : '');
+      return '<button type="button" class="' + cls + '" data-dpc-v2="addsup" data-dpc-v2-sid="' + esc(r.sid) + '"' + (r.disabled ? ' disabled' : '') + '>' +
+        '<strong>' + esc(r.title) + (r.adding ? ' <small>Adding...</small>' : '') + '</strong>' +
+        (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + (r.note ? '<small class="dpc-v2-resnote">' + esc(v2Plain(r.note)) + '</small>' : '') + '</button>';
     };
     var h = '';
-    h += '<h4 class="dpc-mat-h4">Approved order emails</h4>';
-    h += f.data.approved.length ? f.data.approved.map(function (r) { return item(r, true); }).join('') : '<div class="dpc-empty dpc-empty-tight">No approved supplier matches.</div>';
-    h += '<h4 class="dpc-mat-h4">All other suppliers</h4>';
-    h += f.data.others.length ? f.data.others.map(function (r) { return item(r, false); }).join('') : '<div class="dpc-empty dpc-empty-tight">No other supplier matches.</div>';
+    h += '<h4 class="dpc-mat-h4">Approved suppliers</h4>';
+    h += v.approved.length ? v.approved.map(item).join('') : '<div class="dpc-empty dpc-empty-tight">No approved supplier matches.</div>';
+    if (v.moreCount && !v.showMore) {
+      h += '<button type="button" class="dpc-v2-more" data-dpc-v2="find-more" aria-expanded="false">Show more (' + v.moreCount + ')</button>';
+    } else if (v.showMore) {
+      if (v.approved.length) h += '<button type="button" class="dpc-v2-more" data-dpc-v2="find-more" aria-expanded="true">Show less</button>';
+      if (v.more.length) {
+        h += '<h4 class="dpc-mat-h4">Other Xero contacts of approved suppliers</h4>';
+        h += v.more.map(item).join('');
+      }
+      h += '<h4 class="dpc-mat-h4">All other suppliers</h4>';
+      h += v.others.length ? v.others.map(item).join('') : '<div class="dpc-empty dpc-empty-tight">No other supplier matches.</div>';
+    }
     if (e && e.msg.add) h += v2MsgHtml(e.msg.add, e.msg.add.retry ? 'data-dpc-v2="addsup" data-dpc-v2-sid="' + esc(e.msg.add.retry) + '"' : null);
     return h;
   }
@@ -6416,7 +6429,7 @@
     if (!f.open) return '';
     var h = '<div class="dpc-v2-find" data-dpc-region="v2find"><div class="dpc-row"><input type="search" class="dpc-v2-q" data-dpc-v2-q value="' + esc(f.q) + '" placeholder="Search suppliers by name" aria-label="Search suppliers">';
     h += '<button type="button" data-dpc-v2="find-close">Close</button></div>';
-    h += '<p class="dpc-v2-hint">Approved suppliers come first. Any other supplier can be added to split lines to, but Dispatch will not send to it.</p>';
+    h += '<p class="dpc-v2-hint">Each approved supplier shows once, on the Xero contact we use most. Show more lists its other Xero contacts and every other supplier. Lines can go to any supplier, but Dispatch sends only to approved ones.</p>';
     return h + '<div class="dpc-v2-findres" data-dpc-region="v2findres">' + v2FindResHtml() + '</div></div>';
   }
 
@@ -6544,6 +6557,7 @@
     if (verb === 'find') { v2OpenFind(); return true; }
     if (verb === 'find-close') { state.v2m.find.open = false; paintV2(); refocus('[data-dpc-v2="find"]'); return true; }
     if (verb === 'find-retry') { v2RunFind(); return true; }
+    if (verb === 'find-more') { state.v2m.find.more = !state.v2m.find.more; paintV2FindRes(); refocus('[data-dpc-v2="find-more"]'); return true; }
     if (!jobId) return true;
     if (verb === 'retry') { readV2(jobId, !!(e && e.d)); return true; }
     if (!e || e.status !== 'ok') return true;

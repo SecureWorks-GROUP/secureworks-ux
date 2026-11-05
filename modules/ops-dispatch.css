@@ -851,6 +851,10 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc .dpc-v2-res-noemail { border-style: dashed; background: #FCFCFB; }
 .dpc-v2-res .dpc-v2-resnote { color: #8A5A00; }
 .dpc .dpc-v2-res:disabled { opacity: .6; }
+/* Tweak 4: an approved supplier with no Xero contact yet (greyed, "Add to Xero first"), and the Show more button. */
+.dpc .dpc-v2-res-noxero { border-style: dashed; background: #F3F3F1; }
+.dpc .dpc-v2-res-noxero strong { color: var(--mute); }
+.dpc .dpc-v2-more { display: block; margin: 6px 0 2px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; border-radius: 8px; background: #fff; }
 /* Dragging a line: every box shows it can take it; the one under the pointer lights up. */
 .dpc-v2-dragging [data-dpc-v2-box] { border-style: dashed; }
 .dpc-v2-dragging .dpc-v2-lines { min-height: 40px; }

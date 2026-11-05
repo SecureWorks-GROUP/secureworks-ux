@@ -36,8 +36,9 @@ const SUPPLIERS = {
   [SID(2)]: { name: 'Banksia Roofing', approved: { id: 'ap-2', name: 'Banksia', used_for: 'patio', to: ['sales@banksia.example'], cc: [] } },
   [SID(3)]: { name: 'Plain Hardware', approved: null },
 };
-// An approved entry no Xero contact is linked to yet: listed, never addable.
-const UNLINKED = { approved_id: 'ap-9', approved_name: 'Coastal Fencing', used_for: 'fencing', to: ['yard@coastal.example'], cc: [], has_approved_email: true, supplier_id: null, name: null, can_add: false, note: null };
+// An approved entry no Xero contact is linked to yet: listed greyed, never addable (Tweak 4).
+const UNLINKED = { approved_id: 'ap-9', approved_name: 'Coastal Fencing', used_for: 'fencing', to: ['yard@coastal.example'], cc: [], has_approved_email: true,
+  supplier_id: null, name: 'Coastal Fencing', xero_name: null, main_reason: null, other_contacts: 0, can_add: false, note: 'Add to Xero first: this supplier has no Xero contact yet' };
 const BLOCK_MSG = 'This supplier has no approved order email. Ask Shaun to add one before sending.';
 const TEAM = { fencing: 'fencing@secureworkswa.com.au', patio: 'patios@secureworkswa.com.au', repair: 'ses@secureworkswa.com.au' };
 
@@ -171,15 +172,17 @@ function fakeV2(seed = {}) {
       if (f) return f;
       const q = (url.searchParams.get('q') || '').toLowerCase();
       const hit = (n) => !q || String(n || '').toLowerCase().includes(q);
+      // Tweak 4: one row per approved entry under its approved name, on its (only) Xero contact.
       const approved = Object.keys(SUPPLIERS).filter((sid) => SUPPLIERS[sid].approved).map((sid) => {
         const a = SUPPLIERS[sid].approved;
-        return { approved_id: a.id, approved_name: a.name, used_for: a.used_for, to: a.to, cc: a.cc, has_approved_email: true, supplier_id: sid, name: SUPPLIERS[sid].name, can_add: true, note: null };
-      }).concat([UNLINKED]).filter((r) => hit(r.name) || hit(r.approved_name));
+        return { approved_id: a.id, approved_name: a.name, used_for: a.used_for, to: a.to, cc: a.cc, has_approved_email: true, supplier_id: sid,
+          name: a.name, xero_name: SUPPLIERS[sid].name, main_reason: 'only_contact', other_contacts: 0, can_add: true, note: null };
+      }).concat([UNLINKED]).filter((r) => hit(r.xero_name) || hit(r.approved_name));
       const others = Object.keys(SUPPLIERS).filter((sid) => !SUPPLIERS[sid].approved).map((sid) => ({
         supplier_id: sid, name: SUPPLIERS[sid].name, approved_id: null, approved_name: null, used_for: null, to: [], cc: [], has_approved_email: false, can_add: true,
         note: 'No approved order email: Dispatch will not send to this supplier',
       })).filter((r) => hit(r.name));
-      return { q: q || null, approved, others };
+      return { q: q || null, ranking: 'bills', approved, more_approved: [], others };
     },
     dispatch_v2_photo_url: () => ({ url: 'https://media.example.test/photo.jpg', expires_in_seconds: 600 }),
     dispatch_v2_save_line: (url, b) => {
@@ -603,19 +606,24 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     expect(of('dispatch_v2_materials')).toHaveLength(reads + 1);
   });
 
-  test('Add supplier lists the approved order emails first, then every other supplier; one without an approved email is added with sending blocked', async ({ page }) => {
+  test('Add supplier lists the approved suppliers first, every other supplier under Show more; one without an approved email is added with sending blocked', async ({ page }) => {
     const fake = fakeV2(SPLIT());
     const { mat, writes, of } = await boot(page, fake);
     await mat.locator('[data-dpc-v2="find"]').click();
     const find = mat.locator('.dpc-v2-find');
     await expect(find.locator('[data-dpc-v2-q]')).toBeFocused();
-    await expect(find.locator('.dpc-mat-h4')).toHaveText(['Approved order emails', 'All other suppliers']);
-    await expect(find.locator('.dpc-v2-res strong')).toHaveText(['Acacia Steel Pty Ltd', 'Banksia Roofing', 'Coastal Fencing', 'Plain Hardware']);
+    // Tweak 4: approved suppliers under their approved names; the rest behind Show more.
+    await expect(find.locator('.dpc-mat-h4')).toHaveText(['Approved suppliers']);
+    await expect(find.locator('.dpc-v2-res strong')).toHaveText(['Acacia Steel', 'Banksia', 'Coastal Fencing']);
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Acacia Steel' })).toContainText('Xero: Acacia Steel Pty Ltd');
     // On the job already, and an approved entry with no Xero contact, cannot be pressed.
-    await expect(find.locator('.dpc-v2-res', { hasText: 'Acacia Steel Pty Ltd' })).toBeDisabled();
-    await expect(find.locator('.dpc-v2-res', { hasText: 'Acacia Steel Pty Ltd' })).toContainText('On this job');
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Acacia Steel' })).toBeDisabled();
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Acacia Steel' })).toContainText('On this job');
     await expect(find.locator('.dpc-v2-res', { hasText: 'Coastal Fencing' })).toBeDisabled();
-    await expect(find.locator('.dpc-v2-res', { hasText: 'Coastal Fencing' })).toContainText('Not linked to a Xero contact yet. Ask Shaun to name the contact.');
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Coastal Fencing' })).toHaveClass(/dpc-v2-res-noxero/);
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Coastal Fencing' })).toContainText('Add to Xero first: this supplier has no Xero contact yet');
+    await find.locator('[data-dpc-v2="find-more"]').click();
+    await expect(find.locator('.dpc-mat-h4')).toHaveText(['Approved suppliers', 'All other suppliers']);
     await expect(find.locator('.dpc-v2-res', { hasText: 'Plain Hardware' })).toContainText('No approved order email: Dispatch will not send to this supplier');
     expect(of('dispatch_v2_supplier_search')[0].url.searchParams.get('limit')).toBe('25');
 
@@ -1165,4 +1173,151 @@ test('at 390 the Draft list, the boxes, the held email and the confirm have no s
   expect(await wide()).toBeLessThanOrEqual(0);
   expect(await mat.innerText()).not.toMatch(/[–—]/);
   expect(await modal.innerText()).not.toMatch(/[–—]/);
+});
+
+// ── Tweak 4 (5 Nov 2026): a simpler supplier picker ─────────────────────────
+// Shaun: "when I search B&D Metals I see 3 of them. Show me the one we use
+// most, and put the other ones under Show more." The stub answers the way
+// ops-api dispatch_v2_supplier_search does after Tweak 4 (backend
+// dispatch_v2_supplier_picker.ts): one row per approved supplier on its main
+// Xero contact, the other contacts and every other supplier under Show more,
+// and a search that ignores case, punctuation, "&" and "and". Desktop only.
+const T4_SHOTS = path.resolve(__dirname, '..', '..', 'test-results', 'dispatch-tweak4');
+const T4 = { bd1: SID(41), bd2: SID(42), bd3: SID(43), rr1: SID(44), rr2: SID(45), oneOff: SID(46) };
+
+// The same search key as the backend: "B&D", "b and d", "bnd" and "bd" are all "bd".
+const t4Key = (v) => {
+  const w = String(v || '').toLowerCase().replace(/[&+]/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  const out = [];
+  for (let i = 0; i < w.length; i++) {
+    if (w[i].length === 1 && i + 2 < w.length && (w[i + 1] === 'and' || w[i + 1] === 'n') && w[i + 2].length === 1) {
+      out.push(w[i] + w[i + 2]);
+      i += 2;
+      continue;
+    }
+    const m = /^([b-df-hj-np-tv-z])n([b-df-hj-np-tv-z])$/.exec(w[i]);
+    out.push(m ? m[1] + m[2] : w[i]);
+  }
+  return out.join('');
+};
+
+// Three approved suppliers: BD Metals (three Xero contacts, the busiest is the
+// main one), RnR Fencing (two) and Unique Laser (none yet), plus a one-off.
+const T4_ENTRIES = [
+  { id: 'ap-bd', name: 'BD Metals', used_for: 'fencing', to: ['orders@bd.example'], contacts: [
+    { sid: T4.bd1, name: 'Jaiama Investments Pty Ltd T/A B&D Metals Group Pty', bills: 36 },
+    { sid: T4.bd2, name: 'Jaiama Investments T/a B&D Metals', bills: 0 },
+    { sid: T4.bd3, name: 'Jaiaina Investments Pty Ltd T/A B&D Metals Group Pty', bills: 0 },
+  ] },
+  { id: 'ap-rr', name: 'RnR Fencing', used_for: 'fencing', to: ['orders@rr.example'], contacts: [
+    { sid: T4.rr1, name: 'R&R FENCING', bills: 217 },
+    { sid: T4.rr2, name: 'R&R Fencing (KVS (WA) Pty Ltd)', bills: 0 },
+  ] },
+  { id: 'ap-ul', name: 'Unique Laser', used_for: 'any', to: ['orders@unique-laser.example'], contacts: [] },
+];
+const T4_OTHERS = [{ sid: T4.oneOff, name: 'B and D Steel Supplies' }];
+
+function t4Search(url) {
+  const q = t4Key(url.searchParams.get('q'));
+  const hit = (n) => !q || t4Key(n).includes(q);
+  const approved = [];
+  const more = [];
+  for (const e of T4_ENTRIES) {
+    if (!hit(e.name) && !e.contacts.some((c) => hit(c.name))) continue;
+    const base = { approved_id: e.id, approved_name: e.name, used_for: e.used_for, to: e.to, cc: [], on_account: false, has_approved_email: true };
+    const [main, ...rest] = e.contacts;
+    approved.push(Object.assign({}, base, main
+      ? { name: e.name, supplier_id: main.sid, xero_name: main.name, main_reason: 'most_bills', bills_12m: main.bills, other_contacts: rest.length, can_add: true, note: null }
+      : { name: e.name, supplier_id: null, xero_name: null, main_reason: null, bills_12m: null, other_contacts: 0, can_add: false, note: 'Add to Xero first: this supplier has no Xero contact yet' }));
+    for (const c of rest) more.push(Object.assign({}, base, { name: c.name, supplier_id: c.sid, xero_name: c.name, bills_12m: c.bills, can_add: true, note: null }));
+  }
+  const others = T4_OTHERS.filter((o) => hit(o.name)).map((o) => ({
+    supplier_id: o.sid, name: o.name, approved_id: null, approved_name: null, used_for: null, to: [], cc: [],
+    has_approved_email: false, can_add: true, note: 'No approved order email: Dispatch will not send to this supplier',
+  }));
+  return { q: url.searchParams.get('q'), ranking: 'bills', approved, more_approved: more, others };
+}
+
+test.describe('Dispatch v2 Tweak 4: the simpler supplier picker', () => {
+  const openFind = async (page) => {
+    const booted = await boot(page, fakeV2(SPLIT()), {
+      api: {
+        dispatch_v2_supplier_search: t4Search,
+        // Only the contact the pick sends matters here, so the add is refused.
+        dispatch_v2_add_supplier: () => ({ status: 409, body: { error: 'Stub: not added', code: 'stub' } }),
+      },
+    });
+    await booted.mat.locator('[data-dpc-v2="find"]').click();
+    const find = booted.mat.locator('.dpc-v2-find');
+    await expect(find.locator('[data-dpc-v2-q]')).toBeFocused();
+    await expect.poll(() => booted.of('dispatch_v2_supplier_search').length).toBe(1);
+    return Object.assign(booted, { find });
+  };
+  // Types a search and waits for its read.
+  const search = async (find, of, q) => {
+    const before = of('dispatch_v2_supplier_search').length;
+    await find.locator('[data-dpc-v2-q]').fill(q);
+    await expect.poll(() => of('dispatch_v2_supplier_search').length).toBeGreaterThan(before);
+  };
+
+  test('b&d, bd and "b and d" all show one BD Metals row on its busiest Xero contact; the rest is under Show more', async ({ page }) => {
+    const { find, of } = await openFind(page);
+    for (const q of ['bd', 'b and d', 'b&d']) {
+      await search(find, of, q);
+      await expect(find.locator('.dpc-v2-res strong')).toHaveText(['BD Metals']);
+    }
+    const row = find.locator('.dpc-v2-res', { hasText: 'BD Metals' }).first();
+    await expect(row).toContainText('Xero: Jaiama Investments Pty Ltd T/A B&D Metals Group Pty');
+    await expect(row).toContainText('2 more Xero contacts under Show more');
+    await expect(row).toBeEnabled();
+    await expect(find.locator('[data-dpc-v2="find-more"]')).toHaveText('Show more (3)');
+    await page.screenshot({ path: path.join(T4_SHOTS, 'search-b-and-d-one-row.png') });
+
+    await find.locator('[data-dpc-v2="find-more"]').click();
+    await expect(find.locator('.dpc-mat-h4')).toHaveText(['Approved suppliers', 'Other Xero contacts of approved suppliers', 'All other suppliers']);
+    await expect(find.locator('.dpc-v2-res strong')).toHaveText([
+      'BD Metals',
+      'Jaiama Investments T/a B&D Metals',
+      'Jaiaina Investments Pty Ltd T/A B&D Metals Group Pty',
+      'B and D Steel Supplies',
+    ]);
+    await expect(find.locator('.dpc-v2-res', { hasText: 'Jaiama Investments T/a B&D Metals' })).toContainText('Another Xero contact of BD Metals');
+    await expect(find.locator('.dpc-v2-res', { hasText: 'B and D Steel Supplies' })).toContainText('No approved order email');
+    await page.screenshot({ path: path.join(T4_SHOTS, 'search-b-and-d-show-more.png') });
+    await find.locator('[data-dpc-v2="find-more"]').click();
+    await expect(find.locator('[data-dpc-v2="find-more"]')).toHaveText('Show more (3)');
+    expect(await find.innerText()).not.toMatch(/[\u2013\u2014]/);
+
+    // Picking the row makes the box on the main contact.
+    await find.locator('.dpc-v2-res', { hasText: 'BD Metals' }).first().click();
+    await expect.poll(() => of('dispatch_v2_add_supplier').length).toBe(1);
+    expect(of('dispatch_v2_add_supplier')[0].body.supplier_id).toBe(T4.bd1);
+  });
+
+  test('rnr, r&r and "r and r" all find RnR Fencing', async ({ page }) => {
+    const { find, of } = await openFind(page);
+    for (const q of ['r&r', 'r and r', 'rnr']) {
+      await search(find, of, q);
+      await expect(find.locator('.dpc-v2-res strong')).toHaveText(['RnR Fencing']);
+    }
+    await expect(find.locator('.dpc-v2-res', { hasText: 'RnR Fencing' })).toContainText('Xero: R&R FENCING');
+    await expect(find.locator('.dpc-v2-res', { hasText: 'RnR Fencing' })).toContainText('1 more Xero contact under Show more');
+    await expect(find.locator('[data-dpc-v2="find-more"]')).toHaveText('Show more (1)');
+    await page.screenshot({ path: path.join(T4_SHOTS, 'search-rnr.png') });
+  });
+
+  test('an approved supplier with no Xero contact shows greyed with Add to Xero first; a one-off is found by typing', async ({ page }) => {
+    const { find, of } = await openFind(page);
+    await search(find, of, 'unique');
+    const row = find.locator('.dpc-v2-res', { hasText: 'Unique Laser' });
+    await expect(row).toBeDisabled();
+    await expect(row).toHaveClass(/dpc-v2-res-noxero/);
+    await expect(row).toContainText('Add to Xero first: this supplier has no Xero contact yet');
+    await page.screenshot({ path: path.join(T4_SHOTS, 'greyed-no-xero.png') });
+    // No approved supplier matches: Show more opens by itself.
+    await search(find, of, 'steel');
+    await expect(find.locator('.dpc-mat-h4')).toHaveText(['Approved suppliers', 'All other suppliers']);
+    await expect(find.locator('.dpc-v2-res strong')).toHaveText(['B and D Steel Supplies']);
+    await expect(find.locator('[data-dpc-v2="find-more"]')).toHaveCount(0);
+  });
 });

@@ -2180,6 +2180,8 @@
   var MP_START = 3;  // today
   var MP_END = 76;   // the far end of the line
   var MP_BAY = 82;   // the "No date yet" bay starts here
+  var MP_BADGE_TOP_PX = 20;  // the badge just over a marker (lane 0)
+  var MP_BADGE_LANE_PX = 20; // each badge lane above it
 
   // True when the Arrival read carries the payment step or the date choice.
   function mpOn(a) {
@@ -2225,7 +2227,9 @@
     return Math.max.apply(null, days);
   }
 
-  // Where each order sits, and which label row it takes.
+  // Where each order sits on the line. The labels' places (which orders
+  // share a marker, which lane each label column takes) are worked out by
+  // modules/dispatch-materials-layout.js from these marks: see mpHtml.
   function mpPlot(a) {
     var today = parseDay(a.today);
     var t0 = dayNum(today);
@@ -2239,19 +2243,10 @@
       // An order in the bay gets an even share of it, its label wrapped inside.
       var w = (100 - MP_BAY) / (bay.length || 1);
       return {
-        order: o, tone: mpTone(o), solid: o.mark === 'solid', asap: o.flag === 'asap', bay: b >= 0,
+        order: o, tone: mpTone(o), solid: o.mark === 'solid', asap: o.flag === 'asap', bay: b >= 0, badge: mpBadge(o),
         pct: b >= 0 ? MP_BAY + (b + 0.5) * w : pct(parseDay(o.delivery_date)),
-        labLeft: b >= 0 ? MP_BAY + b * w : null, labWidth: b >= 0 ? w : null, row: 0
+        labLeft: b >= 0 ? MP_BAY + b * w : null, labWidth: b >= 0 ? w : null
       };
-    });
-    marks.sort(function (x, y) { return x.pct - y.pct; });
-    // A label too close to the one before drops to the second row (a bay
-    // label is measured from its left edge, where its words start).
-    var last = [-100, -100];
-    marks.forEach(function (m) {
-      var at = m.bay ? m.labLeft + 7 : m.pct;
-      m.row = at - last[0] >= 15 ? 0 : at - last[1] >= 15 ? 1 : 0;
-      last[m.row] = at;
     });
     var early = inst ? null : mpEarliest(a);
     return { today: today, inst: inst, instPct: inst ? pct(inst) : null, early: early, earlyPct: early ? pct(early) : null, marks: marks, bay: bay.length, pct: pct };
@@ -2292,15 +2287,31 @@
     return { text: parts.join(' · '), cls: n.late ? ' late' : '' };
   }
 
-  // The words under a dot: the name, the date, and where the order is up to.
+  // The words under a marker for one order: the name (cut at three lines, the
+  // full name on hover), the date, and where the order is up to. Several
+  // orders on one date each get one of these, stacked in the marker's column.
   function mpLabelHtml(m) {
     var o = m.order;
     var p = v2PayFrom(o.payment, o.material_stage);
     var stage = p && p.state === 'paid' && text(o.material_stage) === 'order_confirmed' ? 'Paid'
       : text(o.material_stage_label) + (o.material_stage_source === 'set' ? ' (set by hand)' : '');
-    var at = m.bay ? 'left:' + m.labLeft.toFixed(1) + '%;width:' + m.labWidth.toFixed(1) + '%' : 'left:' + m.pct.toFixed(1) + '%';
-    return '<span class="dpc-mp-lab' + (m.row ? ' dpc-mp-r1' : '') + (m.bay ? ' dpc-mp-inbay' : '') + '" style="' + at + '"><b>' + esc(text(o.supplier_name) || 'Supplier') + '</b>' +
+    var name = text(o.supplier_name) || 'Supplier';
+    return '<span class="dpc-mp-lab"><b title="' + esc(name) + '">' + esc(name) + '</b>' +
       '<small>' + esc(arrivalWords(o)) + '</small>' + (stage ? '<span class="dpc-mp-t ' + m.tone + '">' + esc(stage) + '</span>' : '') + '</span>';
+  }
+
+  // The labels under the line: one row per lane, each lane in normal flow so
+  // the panel grows to fit; one column per marker, its left margin the gap
+  // from the column before it in that lane. A short tick at the top of each
+  // column sits right under its marker.
+  function mpLabelsHtml(lay) {
+    return '<div class="dpc-mp-labs">' + lay.lanes.map(function (lane) {
+      return '<div class="dpc-mp-lane">' + lane.map(function (g) {
+        return '<div class="dpc-mp-col' + (g.bay ? ' dpc-mp-inbay' : '') + '" style="margin-left:' + g.gapPct.toFixed(2) + '%;width:' + g.colWidth.toFixed(2) + '%">' +
+          '<i class="dpc-mp-pin ' + g.tone + '" style="left:' + g.pinPct.toFixed(1) + '%" aria-hidden="true"></i>' +
+          g.marks.map(mpLabelHtml).join('') + '</div>';
+      }).join('') + '</div>';
+    }).join('') + '</div>';
   }
 
   // Who or what put the order where it is, for the row's small line.
@@ -2399,20 +2410,26 @@
     h += '</div>';
     if (!a.orders.length) return h + '<p class="dpc-empty dpc-empty-tight">No supplier orders on this job yet.</p></div>';
     var p = mpPlot(a);
-    var two = p.marks.some(function (m) { return m.row === 1; });
-    h += '<div class="dpc-mp-wrap"><div class="dpc-mp-rail' + (two ? ' dpc-mp-two' : '') + '"><span class="dpc-mp-ln"></span>';
+    var lay = global.OpsDispatchLayout.layout(p.marks);
+    // Each extra badge lane over the line pushes the line down this much.
+    var lift = (lay.badgeLanes - 1) * MP_BADGE_LANE_PX;
+    h += '<div class="dpc-mp-wrap"><div class="dpc-mp-plot"><div class="dpc-mp-rail" style="--mp-y:' + lift + 'px"><span class="dpc-mp-ln"></span>';
     h += '<span class="dpc-mp-tick" style="left:' + MP_START + '%"></span><span class="dpc-mp-tl" style="left:' + MP_START + '%">Today ' + esc(dayText(p.today)) + '</span>';
     if (p.bay) h += '<span class="dpc-mp-bayl">No date yet</span><span class="dpc-mp-bay"></span>';
     if (p.inst) h += '<span class="dpc-mp-inst" style="left:' + p.instPct.toFixed(1) + '%"></span><span class="dpc-mp-instl" style="left:' + p.instPct.toFixed(1) + '%">Install ' + esc(dayText(p.inst)) + '</span>';
     else h += mpNoInstallHtml(a, p);
-    p.marks.forEach(function (m) {
-      var at = 'left:' + m.pct.toFixed(1) + '%';
-      var badge = mpBadge(m.order);
-      if (badge) h += '<span class="dpc-mp-bdg ' + m.tone + '" style="' + at + '">' + esc(badge) + '</span>';
-      h += '<i class="dpc-mp-dot ' + m.tone + (m.solid ? ' s' : '') + (m.asap ? ' asap' : '') + '" style="' + at + '" aria-hidden="true"></i>';
-      h += mpLabelHtml(m);
+    // One marker per group (orders on the same date share it), its badge
+    // lifted a lane when it would touch a neighbour's badge.
+    lay.groups.forEach(function (g) {
+      var at = 'left:' + g.pct.toFixed(1) + '%';
+      var who = g.marks.map(function (m) { return text(m.order.supplier_name) || 'Supplier'; }).join(', ');
+      if (g.badge) {
+        var top = MP_BADGE_TOP_PX + (lay.badgeLanes - 1 - g.badgeLane) * MP_BADGE_LANE_PX;
+        h += '<span class="dpc-mp-bdg ' + g.badgeTone + '" style="' + at + ';top:' + top + 'px" title="' + esc(who) + '">' + esc(g.badge) + '</span>';
+      }
+      h += '<i class="dpc-mp-dot ' + g.tone + (g.solid ? ' s' : '') + (g.asap ? ' asap' : '') + '" style="' + at + '" aria-hidden="true"></i>';
     });
-    h += '</div></div>';
+    h += '</div>' + mpLabelsHtml(lay) + '</div></div>';
     h += '<div class="dpc-mp-rows">' + a.orders.filter(isObj).map(function (o) { return mpRowHtml(row.id, o); }).join('') + '</div>';
     h += mpOnUsHtml(a);
     h += '<p class="dpc-arr-legend dpc-mp-legend"><b class="us">Orange</b> = needs us. <b class="sp">Blue</b> = waiting on the supplier. <b class="ok">Green</b> = confirmed and paid. ' +

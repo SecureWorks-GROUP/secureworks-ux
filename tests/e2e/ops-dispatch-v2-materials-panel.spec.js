@@ -274,6 +274,81 @@ test.describe('Dispatch v2: the Materials panel', () => {
   });
 });
 
+test.describe('Dispatch v2: the Materials panel labels never overlap', () => {
+  const panelOf = (root) => root.locator('[data-dpc-region="arrival"]');
+  // Every label block's box on the page.
+  const boxes = (panel) => panel.locator('.dpc-mp-lab').evaluateAll((els) => els.map((e) => {
+    const r = e.getBoundingClientRect();
+    return { name: e.querySelector('b').textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  }));
+  const touching = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+  const assertApart = (list) => {
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      expect(touching(list[i], list[j]), list[i].name + ' overlaps ' + list[j].name).toBe(false);
+    }
+  };
+  // SWP-261293 as it was: three pickups on one day, none confirmed, two of
+  // them to pay, the install a week after.
+  const sameDay = () => {
+    const fake = fakePayment({
+      onAccount: true, install: dayFrom(13),
+      lysaght: { name: 'AMPELITE AUSTRALIA PTY LTD', date: dayFrom(5), confirmed: false },
+      twinside: { name: 'CMI', date: dayFrom(5), confirmed: false },
+    });
+    Object.assign(fake.boxes.find((bx) => bx.n === 3), { name: 'Metroll', fulfilment: 'pickup', date: dayFrom(5), confirmed: false, stage: 'sent' });
+    return fake;
+  };
+
+  test('orders on one date share one marker, and each supplier gets its own label block under it', async ({ page }) => {
+    const { root } = await boot(page, sameDay());
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-mp-dot')).toHaveCount(1);
+    await expect(panel.locator('.dpc-mp-dot')).not.toHaveClass(cls('s'));
+    await expect(panel.locator('.dpc-mp-bdg')).toHaveText(['2 to pay']);
+    await expect(panel.locator('.dpc-mp-bdg')).toHaveAttribute('title', 'AMPELITE AUSTRALIA PTY LTD, CMI, Metroll');
+    await expect(panel.locator('.dpc-mp-col')).toHaveCount(1);
+    const labs = panel.locator('.dpc-mp-col .dpc-mp-lab');
+    await expect(labs.locator('b')).toHaveText(['AMPELITE AUSTRALIA PTY LTD', 'CMI', 'Metroll']);
+    await expect(labs.nth(0)).toContainText('Pickup ' + dayWords(dayFrom(5)) + ', not confirmed');
+    await expect(labs.nth(0).locator('.dpc-mp-t')).toHaveText('Awaiting payment');
+    await expect(labs.nth(2).locator('.dpc-mp-t')).toHaveText('Sent to supplier');
+    // The long name has its full self on hover.
+    await expect(labs.nth(0).locator('b')).toHaveAttribute('title', 'AMPELITE AUSTRALIA PTY LTD');
+    const list = await boxes(panel);
+    assertApart(list);
+    // Stacked one under the other, all inside the panel (nothing clipped).
+    expect(list[1].top).toBeGreaterThanOrEqual(list[0].bottom);
+    expect(list[2].top).toBeGreaterThanOrEqual(list[1].bottom);
+    const plot = await panel.locator('.dpc-mp-plot').boundingBox();
+    expect(list[2].bottom).toBeLessThanOrEqual(plot.y + plot.height + 0.5);
+    // The badge sits over the marker, clear of every label.
+    const bdg = await panel.locator('.dpc-mp-bdg').boundingBox();
+    expect(bdg.y + bdg.height).toBeLessThanOrEqual(Math.min(...list.map((l) => l.top)));
+    if (process.env.DPC_SHOT) await panel.screenshot({ path: process.env.DPC_SHOT + '-same-day.png' });
+    expect(await panel.innerText()).not.toMatch(NO_DASH);
+  });
+
+  test('orders a day apart keep their own markers and their labels never overlap', async ({ page }) => {
+    const fake = fakePayment({
+      onAccount: true, install: dayFrom(40),
+      lysaght: { name: 'AMPELITE AUSTRALIA PTY LTD', date: dayFrom(4), confirmed: false },
+      twinside: { name: 'CMI', date: dayFrom(5), confirmed: true },
+    });
+    Object.assign(fake.boxes.find((bx) => bx.n === 3), { name: 'Metroll', date: dayFrom(6), confirmed: false, stage: 'sent' });
+    const { root } = await boot(page, fake);
+    const panel = panelOf(root);
+    await expect(panel.locator('.dpc-mp-dot')).toHaveCount(3);
+    await expect(panel.locator('.dpc-mp-lane')).toHaveCount(3);
+    assertApart(await boxes(panel));
+    if (process.env.DPC_SHOT) await panel.screenshot({ path: process.env.DPC_SHOT + '-close-days.png' });
+  });
+
+  test('the same panel at a narrower desktop width still keeps every label apart', async ({ page }) => {
+    const { root } = await boot(page, sameDay(), { viewport: { width: 1100, height: 900 } });
+    assertApart(await boxes(panelOf(root)));
+  });
+});
+
 test.describe('Dispatch v2: job card dots', () => {
   test('the job card shows a small dot per order, its name and its badge, in place of the thin line', async ({ page }) => {
     const { root } = await boot(page, fakePayment({ onAccount: true }));

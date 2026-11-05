@@ -891,3 +891,27 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
   .dpc-v2-modal h3 { font-size: 19px; }
   .dpc-v2-modal .dpc-actions > button { flex: 1 1 100%; }
 }
+
+/* Needs you now (Tweak 3): the bar under the Dispatch header, its chips, the
+   tags on each job card, and the count on the Dispatch tab. Colours by kind:
+   To order and To pay orange (on us), Supplier replied blue, Follow up amber,
+   Date at risk red, Emails to sort purple. */
+.dpc-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 14px; background: #fff; border: 1px solid #e3e8eb; border-left: 4px solid #A83C16; border-radius: 8px; }
+.dpc-needs-title { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--ink); margin-right: 6px; }
+.dpc-needs-note { font-size: 12.5px; color: var(--mute); }
+.dpc .dpc-needs-chip { --nc: #5d6b73; display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1.5px solid var(--nc); border-radius: 999px; background: #fff; color: var(--nc); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.dpc .dpc-needs-chip b { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--nc); color: #fff; font-size: 11.5px; text-align: center; }
+.dpc .dpc-needs-chip[aria-pressed="true"] { background: var(--nc); color: #fff; }
+.dpc .dpc-needs-chip[aria-pressed="true"] b { background: #fff; color: var(--nc); }
+.dpc .dpc-needs-chip.dpc-needs-zero { --nc: #9fb0ba; cursor: default; }
+.dpc .dpc-needs-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.dpc .dpc-need-order, .dpc .dpc-need-pay { --nc: #A83C16; }
+.dpc .dpc-need-replied { --nc: #2c5d86; }
+.dpc .dpc-need-follow { --nc: #9A6200; }
+.dpc .dpc-need-risk { --nc: #b3261e; }
+.dpc .dpc-need-emails { --nc: #6b4fa0; }
+/* .dpc-job > span is display:block, so the tag row names its own display. */
+.dpc-job > .dpc-needs-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.dpc-need { max-width: 100%; padding: 1px 7px; border-radius: 4px; background: var(--nc); color: #fff; font-size: 11.5px; font-weight: 600; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The Dispatch tab's count (ops.html header). */
+.header-nav [data-view="dispatch"] .dpc-tab-n { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: #E8652E; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; vertical-align: 1px; }

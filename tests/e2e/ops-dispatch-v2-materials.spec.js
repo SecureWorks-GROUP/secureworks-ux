@@ -140,16 +140,23 @@ function fakeV2(seed = {}) {
       }),
     };
   };
-  const bodyOf = (j, sid, lines, date, fulfilment) => {
+  const bodyOf = (j, sid, lines, date, fulfilment, photos = 0) => {
     const pickup = fulfilment === 'pickup';
+    const photoOnly = !lines.length && photos > 0;
     const main = j.work_type === 'fencing' && mainOf(j) === sid;
     const items = lines.map((l) => [`${l.quantity != null ? l.quantity + (l.unit ? ' ' + l.unit : '') + ' x ' : ''}${l.description}`]
       .concat(l.detail ? [l.detail] : [], l.profile ? ['Profile: ' + l.profile] : [], l.colour ? ['Colour: ' + l.colour] : []).join('\n'));
-    if (main) items.push('4 x bags of quickset', 'Fixings, Post Caps and Screws as necessary');
+    // A photo-only order gets no standing lines (Tweak 5).
+    const standing = main && !photoOnly;
+    if (standing) items.push('4 x bags of quickset', 'Fixings, Post Caps and Screws as necessary');
+    const materials = photoOnly ? 'Please see attached for materials needed.'
+      : items.map((t, i) => `${i + 1}. ${t}`).join('\n\n') + (photos ? '\n\nPlease also see attached.' : '');
     return {
-      main, count: items.length,
-      text: 'Hi Team, could we please order the following for ' + (pickup ? 'pickup' : 'delivery') + ':\n\nDate: ' + longDate(date) + (pickup ? '' : '\nAddress: 12 Example Street, Gwelup') + '\nContact: 0400 000 000 (Jane)\n\nMaterials Needed:\n\n' +
-        items.map((t, i) => `${i + 1}. ${t}`).join('\n\n') + '\n\n\nPlease confirm when you can, thank you.',
+      main, standing, photoOnly, count: items.length,
+      // A pickup has no Address and no Contact line (Tweak 6).
+      text: 'Hi Team, could we please order the following for ' + (pickup ? 'pickup' : 'delivery') + ':\n\nDate: ' + longDate(date) +
+        (pickup ? '' : '\nAddress: 12 Example Street, Gwelup\nContact: 0400 000 000 (Jane)') + '\n\nMaterials Needed:\n\n' +
+        materials + '\n\n\nPlease confirm when you can, thank you.',
     };
   };
   const findEmail = (id) => {
@@ -297,24 +304,27 @@ function fakeV2(seed = {}) {
       const open = j.emails.find((m) => m.supplier_id === b.supplier_id && isOpen(m));
       if (open && !b.rebuild) return { success: true, unchanged: true, email: emailOut(open) };
       if (!s.approved) return no(409, 'no_approved_email');
-      const lines = j.lines.filter((l) => l.supplier_id === b.supplier_id && !l.sent_on_email_id && l.status !== 'in_stock');
-      if (!lines.length) return no(409, 'no_lines_to_order');
+      const lines = j.lines.filter((l) => l.supplier_id === b.supplier_id && !l.sent_on_email_id && l.status !== 'in_stock' && String(l.description || '').trim());
+      // The box's photos not already sent, three at most (Tweak 5).
+      const gone = new Set(j.emails.filter((x) => ['sent', 'sending', 'send_unknown'].includes(x.status)).flatMap((x) => x.photo_ids));
+      const photoIds = j.photos.filter((p) => p.supplier_id === b.supplier_id && !gone.has(p.id)).slice(0, 3).map((p) => p.id);
+      if (!lines.length && !photoIds.length) return no(409, 'no_lines_to_order');
       if (b.fulfilment !== undefined && b.fulfilment !== null && !['delivery', 'pickup'].includes(b.fulfilment)) return no(400, 'invalid_request');
       const date = b.delivery_date || null;
       // A rebuild without a choice keeps the held email's own.
       const fulfilment = b.fulfilment || (open && open.fulfilment) || 'delivery';
-      const built = bodyOf(j, b.supplier_id, lines, date, fulfilment);
+      const built = bodyOf(j, b.supplier_id, lines, date, fulfilment, photoIds.length);
       const team = TEAM[j.work_type] || null;
       const m = open || { id: EID(++fake.n.email), job_id: b.job_id, supplier_id: b.supplier_id, supplier_name: s.name, from: ADMIN, test: null, sent: null };
       Object.assign(m, {
         status: 'draft', to: s.approved.to.slice(), cc: s.approved.cc.concat(team ? [team] : []), team_cc: team,
         subject: 'Material Order Ref ' + j.job_number, body_text: built.text, edited: false, delivery_date: date, fulfilment,
-        is_main_supplier: built.main, standing_lines_included: built.main, line_count: built.count, line_ids: lines.map((l) => l.id),
-        photo_ids: j.photos.filter((p) => p.supplier_id === b.supplier_id).slice(0, 3).map((p) => p.id),
+        is_main_supplier: built.main, standing_lines_included: built.standing, line_count: built.count, line_ids: lines.map((l) => l.id),
+        photo_ids: photoIds,
         empty_detail_lines: date ? [] : ['date'], last_error: null, updated_at: stamp(),
       });
       if (!open) j.emails.push(m);
-      return { success: true, email: emailOut(m), missing: m.empty_detail_lines, team_cc_open_question: null, rebuilt: !!b.rebuild || undefined };
+      return { success: true, email: emailOut(m), missing: m.empty_detail_lines, photo_only: built.photoOnly, team_cc_open_question: null, rebuilt: !!b.rebuild || undefined };
     },
     dispatch_v2_save_email: (url, b) => {
       const f = forced('dispatch_v2_save_email');
@@ -348,6 +358,8 @@ function fakeV2(seed = {}) {
       if (m.updated_at !== b.expected_updated_at) return no(409, 'email_changed');
       if (m.status === 'send_unknown' && !b.confirm_resend) return no(409, 'send_unknown');
       if (m.status !== 'draft' && !(m.status === 'send_unknown' && b.confirm_resend)) return no(409, 'email_not_sendable');
+      // An email needs a line or a photo (Tweak 5).
+      if (!m.line_ids.length && !m.photo_ids.length) return no(409, 'nothing_to_order');
       if (m.empty_detail_lines.length) return no(409, 'email_details_missing', { missing: m.empty_detail_lines });
       if (b.test) {
         fake.testDone = true;
@@ -947,7 +959,7 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     await expect(sent.locator('.dpc-status')).toContainText('Sent');
     await expect(sent).toContainText('14 x 1800H standard width panels with 2400H posts');
     await expect(acacia.locator('.dpc-v2-sentitem summary')).toContainText('Material Order Ref SWF-920001');
-    await expect(acacia).toContainText('Every line here has gone. Add a line to order more.');
+    await expect(acacia).toContainText('Everything here has gone. Add a line or a photo to order more.');
     await expect(acacia.locator('[data-dpc-v2="make"]')).toBeDisabled();
     // A photo that went is kept on the box, with no Move to or cross.
     await expect(acacia.locator('.dpc-v2-photo')).toContainText('Sent');
@@ -1003,6 +1015,127 @@ test.describe('Dispatch v2 Materials: order emails', () => {
     await expect(modal.locator('[data-dpc-v2="modal-go"]')).toBeEnabled();
     expect(writes().filter((c) => c.action === 'dispatch_v2_send_email')).toHaveLength(1);
     expect(fake.jobs['job-f1'].emails[0].status).toBe('draft');
+  });
+});
+
+// ── Tweak 5: an order that is just a photo; Tweak 6: no Contact on a pickup ──
+
+// A photo already on a supplier box (made up), for the photo-only order.
+const BOX_PHOTO = (n, supplierId) => ({ id: PID(n), supplier_id: supplierId, file_name: `drawing-${n}.jpg`, content_type: 'image/jpeg', size_bytes: 120000, added_at: '2026-10-23T00:30:00.000Z' });
+const SHOT = (name) => (process.env.DPC_SHOT ? process.env.DPC_SHOT + '-' + name + '.png' : null);
+
+test.describe('Dispatch v2 Materials: photo-only orders and pickups (Tweaks 5 and 6)', () => {
+  test('a box with no line and no photo keeps Make email off and says to add a line or a photo', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat, writes } = await boot(page, fake);
+    const banksia = boxOf(mat, 'Banksia');
+    await expect(banksia.locator('[data-dpc-v2="make"]')).toBeDisabled();
+    await expect(banksia.locator('.dpc-v2-make + .dpc-v2-hint')).toHaveText('Add a line or a photo to make an email.');
+    expect(writes()).toHaveLength(0);
+  });
+
+  test('a box with only a photo makes a photo-only email: Please see attached, no numbered line, no standing lines; sent, it does not light up again', async ({ page }) => {
+    const seed = SPLIT();
+    seed['job-f1'].photos = [BOX_PHOTO(1, SID(2))];
+    const fake = fakeV2(seed);
+    fake.n.photo = 1;
+    const { mat, writes, modal } = await boot(page, fake);
+    const banksia = boxOf(mat, 'Banksia');
+    const make = banksia.locator('[data-dpc-v2="make"]');
+    await expect(make).toBeEnabled();
+    await expect(banksia.locator('.dpc-v2-photoonly')).toHaveText('Photos only: the email will say Please see attached for materials needed.');
+    if (SHOT('photo-only-box')) await banksia.screenshot({ path: SHOT('photo-only-box') });
+    await makeHeld(mat, 'Banksia', '2026-11-10');
+    expect(writes().map((c) => [c.action, c.body])).toEqual([['dispatch_v2_make_email', { job_id: 'job-f1', supplier_id: SID(2), delivery_date: '2026-11-10', rebuild: false, fulfilment: 'delivery', operator_email: expect.any(String) }]]);
+    const body = await banksia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(body).toBe([
+      'Hi Team, could we please order the following for delivery:',
+      '',
+      'Date: 10 November 2026',
+      'Address: 12 Example Street, Gwelup',
+      'Contact: 0400 000 000 (Jane)',
+      '',
+      'Materials Needed:',
+      '',
+      'Please see attached for materials needed.',
+      '',
+      '',
+      'Please confirm when you can, thank you.',
+    ].join('\n'));
+    expect(body).not.toMatch(/^\d+\. /m);
+    expect(body).not.toContain('quickset');
+    await expect(banksia.locator(`[data-dpc-v2-attach="${PID(1)}"]`)).toBeChecked();
+    if (SHOT('photo-only-email')) await banksia.locator('.dpc-v2-mail').screenshot({ path: SHOT('photo-only-email') });
+    // Send it: the confirm says no lines and one photo.
+    await banksia.locator('[data-dpc-v2="send"]').click();
+    await expect(modal.locator('h3')).toHaveText('Send this order to Banksia?');
+    await expect(modal.locator('.dpc-v2-mfields')).toContainText('0 lines, 1 photo');
+    await modal.locator('[data-dpc-v2="modal-go"]').click();
+    await expect(modal).toHaveCount(0);
+    await expect(banksia).toContainText('Sent to Banksia');
+    // The photo went: nothing left to order until a line or a new photo is added.
+    await expect(banksia.locator('[data-dpc-v2="make"]')).toBeDisabled();
+    await expect(banksia).toContainText('Everything here has gone. Add a line or a photo to order more.');
+    expect(writes().map((c) => c.action)).toEqual(['dispatch_v2_make_email', 'dispatch_v2_send_email']);
+    expect(await mat.innerText()).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  test('photos with lines: the lines are numbered, then Please also see attached; the hint counts the photo', async ({ page }) => {
+    const seed = SPLIT();
+    seed['job-f1'].photos = [BOX_PHOTO(1, SID(1))];
+    const fake = fakeV2(seed);
+    fake.n.photo = 1;
+    const { mat } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    await expect(acacia.locator('.dpc-v2-make + .dpc-v2-hint')).toContainText('1 line to order, with 1 photo attached.');
+    await makeHeld(mat, 'Acacia Steel', '2026-11-04');
+    const body = await acacia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(body).toContain('3. Fixings, Post Caps and Screws as necessary\n\nPlease also see attached.\n\n\nPlease confirm');
+  });
+
+  test('a photo-only email with its photo taken off says so, and the refused send stays in the confirm', async ({ page }) => {
+    const seed = SPLIT();
+    seed['job-f1'].photos = [BOX_PHOTO(1, SID(2))];
+    const fake = fakeV2(seed);
+    fake.n.photo = 1;
+    const { mat, writes, modal } = await boot(page, fake);
+    const banksia = await makeHeld(mat, 'Banksia', '2026-11-10');
+    await banksia.locator(`[data-dpc-v2-attach="${PID(1)}"]`).uncheck();
+    await expect(banksia).toContainText('Saved.');
+    await expect(banksia.locator('.dpc-v2-warn', { hasText: 'no lines and no photo' })).toHaveText('This email has no lines and no photo. Tick a photo, or discard it.');
+    await banksia.locator('[data-dpc-v2="send"]').click();
+    await modal.locator('[data-dpc-v2="modal-go"]').click();
+    await expect(modal.locator('[role="alert"]')).toHaveText('This email has no lines and no photo. Go back and tick a photo on it, or discard it.');
+    expect(fake.jobs['job-f1'].emails[0].status).toBe('draft');
+    expect(writes().map((c) => c.action)).toEqual(['dispatch_v2_make_email', 'dispatch_v2_save_email', 'dispatch_v2_send_email']);
+  });
+
+  test('Tweak 6: a pickup email has no Contact line and no Address line; a delivery keeps both', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    await acacia.locator('[data-dpc-v2-fulfil]').selectOption('pickup');
+    await makeHeld(mat, 'Acacia Steel', '2026-11-02');
+    const body = await acacia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(body.split('\n').slice(0, 5)).toEqual([
+      'Hi Team, could we please order the following for pickup:',
+      '',
+      'Date: 2 November 2026',
+      '',
+      'Materials Needed:',
+    ]);
+    expect(body).not.toContain('Contact:');
+    expect(body).not.toContain('Address:');
+    await expect(acacia.locator('.dpc-v2-warn')).toHaveCount(0);
+    if (SHOT('pickup-email')) await acacia.locator('.dpc-v2-mail').screenshot({ path: SHOT('pickup-email') });
+    // Discarded and made again as a delivery: the Address and Contact lines are back.
+    await acacia.locator('[data-dpc-v2="discard"]').click();
+    await acacia.locator('[data-dpc-v2="discard-go"]').click();
+    await expect(acacia).toContainText('Email discarded. Nothing was sent.');
+    await acacia.locator('[data-dpc-v2-fulfil]').selectOption('delivery');
+    await makeHeld(mat, 'Acacia Steel', '2026-11-02');
+    const delivery = await acacia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(delivery).toContain('\nAddress: 12 Example Street, Gwelup\nContact: 0400 000 000 (Jane)\n');
   });
 });
 

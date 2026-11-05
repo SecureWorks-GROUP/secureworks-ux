@@ -4951,8 +4951,10 @@
     return null;
   }
 
-  // The lines a Make email takes: not In stock, not sent.
-  function v2Orderable(box) { return box.lines.filter(function (l) { return !l.locked && l.status !== 'in_stock'; }); }
+  // What a box's Make email can take, and the hint under it: a line that is
+  // not In stock and not sent, or a photo not yet sent (Tweak 5, an order can
+  // be just a photo). The rules are in modules/dispatch-make-email.js.
+  function v2MakeState(box) { return global.OpsDispatchMakeEmail.makeState(box); }
 
   // The supplier's short name from the approved list, for "Send this order to Stratco?".
   function v2SupWord(box) { return (box && box.approved && box.approved.name) || (box && box.name) || 'this supplier'; }
@@ -5034,7 +5036,8 @@
     if (code === 'accepted_quote_unproven') return { text: 'The accepted quote\'s scope revision could not be confirmed, so nothing was filled in. Try again later, or type the lines in.', retry: true };
     if (code === 'scope_identity_unverified') return { text: 'The frozen scope could not be checked against what was sealed, so nothing was filled in. Freeze the scope again in the scoping tool.' };
     if (code === 'no_approved_email') return { text: 'This supplier has no approved order email, so Dispatch cannot send to it. Ask Shaun to add one.' };
-    if (code === 'no_lines_to_order') return { text: 'Nothing in this box to order. In stock lines and lines already sent are left off.' };
+    if (code === 'no_lines_to_order') return { text: 'Nothing in this box to order. Add a line or a photo. In stock lines, and lines and photos already sent, are left off.' };
+    if (code === 'nothing_to_order') return { text: 'This email has no lines and no photo. Put a photo back on it, or discard it.' };
     if (code === 'not_dispatch_work') return { text: 'Make-safe jobs are not ordered from Dispatch.' };
     if (code === 'invalid_request' && err && !err.plain && text(err.message) && !/^API error/.test(err.message)) return { text: v2Plain(err.message) };
     return fallback ? { text: fallback, retry: true } : null;
@@ -6017,6 +6020,7 @@
       else if (code === 'order_lines_changed') stay = 'The lines in this box changed after the email was made. Go back, press Rebuild from the lines, check the email, then send.';
       else if (code === 'email_details_missing') stay = 'Fill in the ' + v2MissingWords(v2Arr(err.body && err.body.missing).length ? v2Arr(err.body.missing) : ['date']) + ' in the email first.';
       else if (code === 'photo_not_found' || code === 'photo_changed') stay = 'A photo on this email changed or is gone. Go back and change its photos, or rebuild it.';
+      else if (code === 'nothing_to_order') stay = 'This email has no lines and no photo. Go back and tick a photo on it, or discard it.';
       else if (code === 'operator_email_required') stay = 'Dispatch cannot tell who is signed in, so it did not send. Sign in again, then send.';
       else if (code === 'test_send_refused') stay = 'Outlook refused the test copy, so nothing was sent.' + (err.message ? ' ' + v2Plain(err.message) : '') + ' You can try again.';
       else if (code === 'test_send_unknown') after = { bad: true, text: 'We could not tell whether the test copy went. Look for it in admin@. If it is not there, send the test again.' };
@@ -6276,8 +6280,9 @@
     var m = b.open;
     var h = '<div class="dpc-v2-order">';
     if (!m) {
-      var n = v2Orderable(b).length;
-      var off = !!b.blocked || !n || !!e.busy[mkey];
+      var ms = v2MakeState(b);
+      var n = ms.lines;
+      var off = !!b.blocked || !ms.can || !!e.busy[mkey];
       var pick = v2FulfilOf(e, b) === 'pickup';
       h += '<div class="dpc-v2-make"><label class="dpc-v2-date dpc-v2-fulfil"><span>Delivery or pickup</span><select data-dpc-v2-fulfil="' + esc(sid) + '"' + (b.blocked ? ' disabled' : '') + '>' +
         '<option value="delivery"' + (pick ? '' : ' selected') + '>Delivery</option><option value="pickup"' + (pick ? ' selected' : '') + '>Pickup</option></select></label>';
@@ -6287,9 +6292,10 @@
         '<input type="date" data-dpc-v2-date="' + esc(sid) + '" aria-label="' + (pick ? 'Pickup date' : 'Delivery date') + ' for ' + esc(b.name) + '" value="' + esc(asap ? '' : e.dates[sid] || '') + '"' + (b.blocked || asap ? ' disabled' : '') + '></span></div>';
       h += '<button type="button" class="dpc-primary" data-dpc-v2="make" data-dpc-v2-sid="' + esc(sid) + '"' + (off ? ' disabled' : '') + '>' + (e.busy[mkey] ? 'Making the email...' : 'Make email') + '</button></div>';
       if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
-      else if (!n) h += '<p class="dpc-v2-hint">' + (b.sent.length ? 'Every line here has gone. Add a line to order more.' : 'Add a line that is not In stock to make an email.') + '</p>';
-      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order. The email is held for you to check; nothing is sent until you press Send now and confirm.' +
-        (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
+      else if (ms.photoOnly) h += '<p class="dpc-v2-hint dpc-v2-photoonly">' + esc(ms.hint) + (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
+      else if (!n) h += '<p class="dpc-v2-hint">' + esc(ms.hint) + '</p>';
+      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order' + (ms.photos ? ', with ' + esc(v2Count(Math.min(ms.photos, V2_EMAIL_PHOTOS), 'photo', 'photos')) + ' attached' : '') +
+        '. The email is held for you to check; nothing is sent until you press Send now and confirm.' + (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
       // The order already sent keeps the date choice it went out with: say
       // so when the next email's choice is different.
       var sentMode = b.sent.length && b.date_mode ? b.date_mode.sent_mode : null;
@@ -6351,6 +6357,8 @@
     } else {
       h += '<p class="dpc-v2-hint">No photo attached. Add one to this box to attach it.</p>';
     }
+    // A photo-only email with every photo taken off has nothing to order.
+    if (global.OpsDispatchMakeEmail.heldEmailIsEmpty(m.line_count, chosen)) h += '<p class="dpc-v2-warn" role="note">This email has no lines and no photo. Tick a photo, or discard it.</p>';
     if (m.missing.length) h += '<p class="dpc-v2-warn" role="note">The ' + esc(v2MissingWords(m.missing)) + (m.missing.length > 1 ? ' are' : ' is') + ' blank. Fill ' + (m.missing.length > 1 ? 'them' : 'it') + ' in before sending.</p>';
     if (m.last_error) h += '<p class="dpc-v2-warn" role="note">Last try: ' + esc(v2Plain(m.last_error)) + '</p>';
     if (m.test) h += '<p class="dpc-v2-hint">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';

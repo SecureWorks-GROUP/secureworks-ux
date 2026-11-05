@@ -6428,6 +6428,8 @@ __swOpsStampAssets([
   {t:'js', u:'modules/job-scope-record.js?v=1'},
   // The Materials panel's label layout (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-materials-layout.js?v=1'},
+  // Dispatch's Needs you now bar: what each job needs (pure functions; only v2 uses it).
+  {t:'js', u:'modules/dispatch-needs-you.js?v=1'},
   // <dispatch-version>
   window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=9'}
 ]);
@@ -30058,6 +30060,8 @@ setInterval(function() {
   else if (view === 'financials') loadFinancials();
   else if (view === 'dispatch') loadMaterials();
   else if (view === 'inbox') loadInbox();
+  // The Dispatch tab's count from any other tab (it reads at most every ten minutes).
+  if (view !== 'dispatch' && typeof OpsDispatch !== 'undefined' && OpsDispatch.warmNeeds) OpsDispatch.warmNeeds();
   // Today is hidden, so this is the only refresh of the Jarvis bar alert
   // badges. loadAiAlerts caches for 30 minutes.
   loadAiAlerts();
@@ -32285,6 +32289,9 @@ function initApp() {
   // Pre-cache crew list for dropdowns; the Job Profit tab's role check reads it, so re-check once loaded.
   loadCrewList().then(function() { if (typeof syncJobProfitTabVisibility === 'function') syncJobProfitTabVisibility(); });
   restoreTab();
+  // Dispatch tab count (Needs you now): read on its own a little after the
+  // first tab loads, so it shows from any tab. Dispatch v1 has no count.
+  setTimeout(function() { if (typeof OpsDispatch !== 'undefined' && OpsDispatch.warmNeeds) OpsDispatch.warmNeeds(); }, 3000);
   // Debt tab: hidden until switched on (?debt=1, localStorage sw_debt_ws, or the backend's tab_visible).
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
   // Matching / Needs a person (TP-11): on by default for whoever the server lets read it; ?recon=0 turns it off.

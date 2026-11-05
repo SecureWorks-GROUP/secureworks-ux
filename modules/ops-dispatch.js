@@ -41,6 +41,13 @@
  * set_dispatch_stage and set_dispatch_install_confirmed are never called.
  * The next-step line still saves with set_dispatch_next_step (job_id, text).
  *
+ * Needs you now (Tweak 3): a bar under the header with one chip per kind of
+ * action and its count; a chip keeps only its jobs. Each Active card gets a
+ * coloured tag per reason, and the total shows on the Dispatch tab. Worked
+ * out by modules/dispatch-needs-you.js from reads the tab already makes,
+ * plus one read of the Active board and the tray while another tab shows
+ * (at most every ten minutes) for the tab's count. It writes nothing.
+ *
  * v2 slice 7 draws the Arrival line: a thin line under each list card from the
  * row's board.arrival, and the full line in the open job from ops-api
  * dispatch_arrival (read only, once per job open). v2 slice 8 adds Supplier
@@ -1007,6 +1014,9 @@
     // v2 slice 8: each job's supplier replies read and its presses, and the
     // Unmatched supplier emails tray.
     rep: { jobs: {}, tray: { open: false, status: 'idle', data: null, other: false, busy: {}, msg: null, pick: {}, hideAsk: null } },
+    // Needs you now (Tweak 3): the chip pressed (null = show all), the last
+    // worked out summary (modules/dispatch-needs-you.js) and its fingerprint.
+    needs: { kind: null, now: null, sig: '' },
     // Slice 4: the client text's "Text this to the client?" line, per job.
     smsAsk: {},
     // v2 slices 5 and 6, Materials: jobs[jobId] holds that job's
@@ -1048,11 +1058,14 @@
   // The listed rows of the view that is showing, through the work type buttons.
   function listedRows() { return narrowRows(current().rows); }
 
-  // Through the work type buttons, and on Active the Waiting on us button.
+  // Through the work type buttons, and on Active the Waiting on us button
+  // and the Needs you now chip pressed.
   function onUsFiltering() { return state.onUs && state.mode === 'active'; }
+  function needsFiltering() { return !!state.needs.kind && state.needs.kind !== 'emails' && state.mode === 'active' && !!state.needs.now; }
   function narrowRows(rows) {
     var out = filterByType(rows, state.type);
-    return onUsFiltering() ? out.filter(rowOnUs) : out;
+    if (onUsFiltering()) out = out.filter(rowOnUs);
+    return needsFiltering() ? global.OpsDispatchNeeds.filterRows(out, state.needs.now, state.needs.kind) : out;
   }
 
   function listFailed() { return current().status === 'error'; }
@@ -1532,6 +1545,8 @@
       e.data = repliesFrom(resp);
       e.status = 'ok';
       paintRepIf(jobId);
+      // Its date suggestions to Accept count under Supplier replied.
+      needsRefresh();
     }).catch(function () {
       if (e.token !== token || state.rep.jobs[jobId] !== e) return;
       e.status = 'error';
@@ -1693,6 +1708,186 @@
     });
   }
 
+  // ── Needs you now (Tweak 3) ──
+  // A bar under the Dispatch header, one chip per kind of action with its
+  // count (To order, To pay, Supplier replied, Follow up, Date at risk,
+  // Emails to sort). A chip pressed keeps only its jobs in the list; pressed
+  // again, every job shows. Each Active job card carries a small coloured tag
+  // per reason ("Pay CMI", "Follow up R&R, 3 days"), and those jobs come
+  // first in their stage section. The total (jobs needing anything, plus
+  // emails to sort) shows on the Dispatch tab itself, from any tab.
+  //
+  // What counts as what, and the two thresholds, live in
+  // modules/dispatch-needs-you.js. It is worked out here from reads the tab
+  // already makes: the Active board, each opened job's replies read (date
+  // suggestions) and the tray's count. No new writes.
+
+  // The Dispatch tab's count is read again at most this often while another
+  // tab is showing (Dispatch keeps it fresh itself while it is open).
+  var NEEDS_TAB_REFRESH_MS = 10 * 60 * 1000;
+
+  function needsKinds() { return global.OpsDispatchNeeds ? global.OpsDispatchNeeds.KINDS : []; }
+
+  // Today in Perth, as YYYY-MM-DD (WA has no daylight saving).
+  function perthToday() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
+
+  // WA public holidays from the calendar's own WaHolidaysCore (ops.html),
+  // kept per year. Without it, weekends only.
+  var holidayYears = {};
+  function isWaHoliday(iso) {
+    var core = global.WaHolidaysCore;
+    if (!core || typeof core.forYear !== 'function') return false;
+    var y = iso.slice(0, 4);
+    if (!holidayYears[y]) {
+      holidayYears[y] = {};
+      core.forYear(+y).forEach(function (h) { holidayYears[y][h.date] = true; });
+    }
+    return holidayYears[y][iso] === true;
+  }
+
+  // The job's date suggestions, when its replies were read this session.
+  function needsSuggestions(jobId) {
+    var e = repEntry(jobId);
+    return e && e.status === 'ok' && e.data ? e.data.suggestions : null;
+  }
+
+  // Works out the bar from a list of board rows and the tray's count.
+  function needsFrom(rows, emails) {
+    if (!global.OpsDispatchNeeds) return null;
+    var jobs = rows.map(function (r) { return { id: r.id, board: boardOf(r), suggestions: needsSuggestions(r.id) }; });
+    var first = rows.map(boardOf).filter(function (b) { return b && arrivalOk(b.arrival); })[0];
+    var today = first ? text(first.arrival.today) : perthToday();
+    return global.OpsDispatchNeeds.summarise(jobs, { today: today, isHoliday: isWaHoliday }, emails);
+  }
+
+  // The summary for the Active list as read (null until it is read).
+  function needsWorkOut() {
+    state.needs.now = state.base.status === 'ok' ? needsFrom(state.base.rows, trayCount()) : null;
+    return state.needs.now;
+  }
+
+  // A fingerprint of the summary, to repaint only when something changed.
+  function needsSig(n) { return n ? JSON.stringify([n.counts, n.reasons, n.shown]) : ''; }
+
+  // After a read that can change what is needed (a job's replies): repaint
+  // the list and the bar only when the summary moved.
+  function needsRefresh() {
+    if (needsSig(needsWorkOut()) !== state.needs.sig) paintList(true);
+  }
+
+  // A job card's tags: one small coloured tag per reason.
+  function needsTagsHtml(row) {
+    var r = state.needs.now && state.needs.now.reasons[row.id];
+    if (!r || !r.length) return '';
+    return '<span class="dpc-needs-tags">' + r.map(function (x) {
+      return '<span class="dpc-need dpc-need-' + esc(x.kind) + '" title="' + esc(x.text) + '">' + esc(x.text) + '</span>';
+    }).join('') + '</span>';
+  }
+
+  function needsBarHtml() {
+    var n = state.needs.now;
+    var h = '<div class="dpc-needs" data-dpc-region="needs" role="group" aria-label="Needs you now"><span class="dpc-needs-title">Needs you now</span>';
+    if (!n) {
+      var failed = state.base.status === 'error';
+      return h + '<span class="dpc-needs-note">' + (failed ? 'Could not read the jobs.' : 'Reading the jobs...') + '</span></div>';
+    }
+    needsKinds().forEach(function (k) {
+      if (!n.shown[k.key]) return;
+      var count = n.counts[k.key] || 0;
+      var on = state.needs.kind === k.key;
+      h += '<button type="button" class="dpc-needs-chip dpc-need-' + k.key + (count ? '' : ' dpc-needs-zero') + '" data-dpc-needs="' + k.key + '" aria-pressed="' + on + '"' +
+        (count || on ? '' : ' disabled') + '>' + esc(k.label) + ' <b>' + count + '</b></button>';
+    });
+    if (!n.total) h += '<span class="dpc-needs-note">Nothing needs you right now.</span>';
+    else if (needsFiltering()) h += '<button type="button" class="dpc-textbtn" data-dpc-needs="' + esc(state.needs.kind) + '">Show all jobs</button>';
+    return h + '</div>';
+  }
+
+  // Draws the bar again (keeping the keyboard on the button it was on) and
+  // puts the total on the Dispatch tab.
+  function paintNeeds() {
+    var n = state.needs.now;
+    state.needs.sig = needsSig(n);
+    if (n) setTabCount(n.total);
+    var el = region('needs');
+    if (!el) return;
+    var html = needsBarHtml();
+    if (el.outerHTML === html) return;
+    var a = document.activeElement;
+    var kind = a && el.contains(a) ? a.getAttribute('data-dpc-needs') : null;
+    var cls = a && a.classList && a.classList.contains('dpc-textbtn') ? '.dpc-textbtn' : '.dpc-needs-chip';
+    el.outerHTML = html;
+    if (!kind) return;
+    var bar = region('needs');
+    var back = bar.querySelector(cls + '[data-dpc-needs="' + kind + '"]') || bar.querySelector('.dpc-needs-chip[data-dpc-needs="' + kind + '"]');
+    if (back && !back.disabled) back.focus({ preventScroll: true });
+  }
+
+  // A chip pressed. Emails to sort opens (or shuts) the tray; any other chip
+  // keeps only its jobs, on Active, through every work type; pressed again
+  // (or Show all jobs), every job shows.
+  function needsPress(kind) {
+    if (kind === 'emails') {
+      var tray = state.rep.tray;
+      tray.open = !tray.open;
+      if (tray.open && (tray.status === 'idle' || tray.status === 'error')) loadTray(); else paintTray();
+      if (tray.open) { var panel = region('tray'); if (panel) panel.scrollIntoView({ block: 'nearest' }); }
+      return;
+    }
+    state.needs.kind = state.needs.kind === kind ? null : kind;
+    if (state.needs.kind) {
+      state.type = 'all';
+      state.onUs = false;
+      if (state.mode !== 'active' || searching()) {
+        state.mode = 'active';
+        writeStore('localStorage', LS_MODE, state.mode);
+        state.search = '';
+        clearTimeout(searchTimer);
+        var box = root().querySelector('[data-dpc-search]');
+        if (box) box.value = '';
+      }
+    }
+    paintList();
+  }
+
+  // The count on the Dispatch tab (the header's tab button), or none at 0.
+  function setTabCount(n) {
+    var btns = document.querySelectorAll('.header-nav [data-view="dispatch"]');
+    Array.prototype.forEach.call(btns, function (btn) {
+      var tag = btn.querySelector('.dpc-tab-n');
+      if (!n) { if (tag) tag.parentNode.removeChild(tag); return; }
+      if (!tag) {
+        tag = document.createElement('span');
+        tag.className = 'dpc-tab-n';
+        btn.appendChild(tag);
+      }
+      tag.textContent = String(n);
+      tag.title = n + (n === 1 ? ' thing needs' : ' things need') + ' you on Dispatch';
+    });
+  }
+
+  // The tab's count while another tab is showing: the Active board and the
+  // tray read on their own (read only, nothing kept but the count), at most
+  // once each NEEDS_TAB_REFRESH_MS. ops.html calls this once the dashboard
+  // starts and on its five minute refresh. While Dispatch is open its own
+  // reads keep the count.
+  var warmAt = 0;
+  function warmNeeds() {
+    var view = document.getElementById('viewDispatch');
+    if (view && view.classList.contains('active')) return;
+    if (Date.now() - warmAt < NEEDS_TAB_REFRESH_MS) return;
+    warmAt = Date.now();
+    var board = Promise.resolve().then(function () { return global.opsFetch('pipeline', { dispatch: 1, board: 'v2', view: 'active' }); });
+    var tray = Promise.resolve().then(function () { return global.opsFetch('dispatch_v2_replies_unmatched', {}); }).then(function (resp) {
+      var c = isObj(resp) && resp.ok === true && isObj(resp.counts) ? resp.counts : null;
+      return c ? (Number(c.needs_confirmation) || 0) + (Number(c.unmatched_order_desk) || 0) : null;
+    }).catch(function () { return null; });
+    Promise.all([board, tray]).then(function (got) {
+      var n = needsFrom(rowsFromBoard(got[0]).rows, got[1]);
+      if (n) setTabCount(n.total);
+    }).catch(function () { warmAt = 0; });
+  }
+
   // ── the Unmatched supplier emails tray ──
 
   function loadTray() {
@@ -1789,6 +1984,7 @@
     var extra = b && !archived ? extraFlag(b.arrival) : null;
     if (extra) flags.push(extra);
     if (flags.length) h += '<span class="dpc-flags">' + flags.map(flagHtml).join('') + '</span>';
+    if (!archived) h += needsTagsHtml(row);
     h += onUsHtml(todo);
     if (b && !archived) h += cardArrivalHtml(b.arrival);
     return h + '</button>';
@@ -1861,6 +2057,7 @@
     var kind = state.type === 'all' ? '' : (TYPE_LABELS[state.type] || state.type).toLowerCase() + ' ';
     if (searching()) return '<div class="dpc-empty">No ' + (archive ? 'archived ' : '') + 'jobs match.</div>';
     if (onUsFiltering()) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs are waiting on us.</div>';
+    if (needsFiltering()) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs need this right now.</div>';
     if (archive) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs archived in the last ' + esc(from.archiveDays) + ' days.</div>';
     if (kind) return '<div class="dpc-empty">No ' + esc(kind) + 'jobs.</div>';
     // Active with no jobs at all: says so, and still shows its stage
@@ -1884,10 +2081,12 @@
   // nothing narrows the list, and is left out of a search or a type.
   function groupsHtml() {
     var from = current();
-    var narrowed = searching() || state.type !== 'all' || onUsFiltering();
+    var narrowed = searching() || state.type !== 'all' || onUsFiltering() || needsFiltering();
     var h = '';
     from.groups.forEach(function (g) {
       var rows = narrowRows(g.rows);
+      // Jobs that need Shaun first; the rest stay below in their own order.
+      if (state.mode === 'active' && g.key !== 'archive') rows = global.OpsDispatchNeeds.needsFirst(rows, state.needs.now);
       if (!rows.length && narrowed) return;
       var archive = g.key === 'archive';
       var label = archive ? 'Dispatch archive' : g.label;
@@ -1952,6 +2151,8 @@
   // box, so typing is never interrupted. keepPlace puts the list back where it
   // was scrolled to.
   function paintList(keepPlace) {
+    needsWorkOut();
+    paintNeeds();
     var list = region('list');
     if (!list) return;
     tokens.fill++;
@@ -4427,6 +4628,8 @@
 
   var TRAY_FOCUS_KEYS = ['data-dpc-tray-confirm', 'data-dpc-tray-reject', 'data-dpc-tray-assign', 'data-dpc-tray-job', 'data-dpc-tray-put', 'data-dpc-tray-hide', 'data-dpc-tray-hide-go', 'data-dpc-tray-other'];
   function paintTray() {
+    needsWorkOut();
+    paintNeeds();
     var btn = root() ? root().querySelector('[data-dpc-tray-toggle]') : null;
     if (btn) {
       var had = document.activeElement === btn;
@@ -6542,6 +6745,7 @@
     var r = root();
     if (!r) return;
     var h = '<div class="dpc"><div class="dpc-header"><div class="dpc-row"><div class="dpc-grow"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>' + trayBtnHtml() + '</div></div>';
+    h += needsBarHtml();
     h += trayHtml();
     h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div>';
     h += '<div data-dpc-region="v2modal">' + v2ModalHtml() + '</div></div>';
@@ -6567,7 +6771,7 @@
   function onClick(e) {
     var t = e.target.closest ? e.target.closest('[data-dpc-job],[data-dpc-type],[data-dpc-side],[data-dpc-toggle],[data-dpc-retry],[data-dpc-photo],[data-dpc-save],' +
       '[data-dpc-tab],[data-dpc-right],[data-dpc-opentab],[data-dpc-msg],[data-dpc-invoice],[data-dpc-send],[data-dpc-send-go],[data-dpc-send-no],[data-dpc-jobpage],' +
-      '[data-dpc-mode],[data-dpc-onus],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
+      '[data-dpc-mode],[data-dpc-onus],[data-dpc-needs],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
@@ -6603,6 +6807,7 @@
     }
     else if (t.hasAttribute('data-dpc-type')) { state.type = t.getAttribute('data-dpc-type'); paintList(); }
     else if (t.hasAttribute('data-dpc-onus')) { state.onUs = !state.onUs; paintList(); }
+    else if (t.hasAttribute('data-dpc-needs')) needsPress(t.getAttribute('data-dpc-needs'));
     else if (t.hasAttribute('data-dpc-mode')) {
       // Active or Archive. The work type and a search are cleared; a view
       // not read yet (or failed) is read now.
@@ -7025,5 +7230,5 @@
     state.row = null;
   }
 
-  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob };
+  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob, warmNeeds: warmNeeds };
 })(window);

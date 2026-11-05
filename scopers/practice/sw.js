@@ -14,8 +14,8 @@
 //   Saves still go to the job system; work done with no signal stays in the page's own draft and outbox.
 // To turn it off, publish src/offline/sw-retire.js as sw.js.
 'use strict';
-const STAMP = "e089f5dfa4a5-91bf364475b6";
-const PAGE_SHA256 = "91bf364475b6e2e1b499ab8dd5d0a3ec6301817c8c59619df6bcc9e1e772fe7a";
+const STAMP = "6d9d45a9677a-c8038e3677cb";
+const PAGE_SHA256 = "c8038e3677cb786e271e12c0800954976230dfb3be172f5c766612cc62c4a83b";
 const TIMEOUT_MS = 4000;
 const PAGE = new URL('./', self.location.href).href;
 const PREFIX = `offline-copy ${PAGE} `;

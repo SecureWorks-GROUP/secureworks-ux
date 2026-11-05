@@ -393,7 +393,7 @@
 .dpc-mail-top small { font: 400 10.5px var(--mono); color: var(--mute); white-space: nowrap; }
 .dpc-mail-drafttag { margin-left: 6px; font: 600 9.5px var(--mono); color: var(--signal-deep); letter-spacing: .06em; text-transform: uppercase; }
 .dpc-mail-subj { font-weight: 600; margin: 2px 0; }
-.dpc-mail-prev { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dpc-mail-prev { display: -webkit-box !important; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .dpc-mail-tags { display: flex !important; gap: 6px; align-items: center; margin-top: 4px; }
 .dpc-mail-head .dpc-mail-tags { margin-top: 0; }
 .dpc-mail-listfail { padding: 10px 14px; border-bottom: 1px solid var(--line); }
@@ -557,20 +557,24 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
    line's place. Orange = needs us, blue = waiting on the supplier, green =
    confirmed and paid, red = not in time; solid = date confirmed, ring = not. */
 .dpc-mp-wrap { overflow-x: auto; }
-.dpc-mp-rail { position: relative; height: 150px; min-width: 600px; margin-top: 6px; }
-.dpc-mp-rail.dpc-mp-two { height: 190px; }
-.dpc-mp-ln { position: absolute; top: 53px; left: 3%; right: 20%; height: 4px; background: #d6dde2; border-radius: 2px; }
-.dpc-mp-tick { position: absolute; top: 47px; width: 2px; height: 16px; background: #9fb0ba; transform: translateX(-50%); }
+/* The line and the labels under it share one width, so a label column's
+   percent margin lines up with its marker's percent left. */
+.dpc-mp-plot { min-width: 600px; }
+/* --mp-y: the extra room over the line when badges need more than one lane
+   (set inline by mpHtml). Every part of the line moves down by it. */
+.dpc-mp-rail { --mp-y: 0px; position: relative; height: calc(80px + var(--mp-y)); min-width: 600px; margin-top: 6px; }
+.dpc-mp-ln { position: absolute; top: calc(53px + var(--mp-y)); left: 3%; right: 20%; height: 4px; background: #d6dde2; border-radius: 2px; }
+.dpc-mp-tick { position: absolute; top: calc(47px + var(--mp-y)); width: 2px; height: 16px; background: #9fb0ba; transform: translateX(-50%); }
 .dpc-mp-tl { position: absolute; top: 2px; font-size: 11px; color: var(--mute); white-space: nowrap; }
-.dpc-mp-bay { position: absolute; top: 34px; left: 82%; right: 0; height: 42px; border: 1.5px dashed #c5d0d6; border-radius: 8px; background: repeating-linear-gradient(135deg, #f6f8f9 0 6px, #fff 6px 12px); }
+.dpc-mp-bay { position: absolute; top: calc(34px + var(--mp-y)); left: 82%; right: 0; height: 42px; border: 1.5px dashed #c5d0d6; border-radius: 8px; background: repeating-linear-gradient(135deg, #f6f8f9 0 6px, #fff 6px 12px); }
 .dpc-mp-bayl { position: absolute; top: 2px; left: 82%; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--mute); }
-.dpc-mp-inst { position: absolute; top: 22px; height: 56px; width: 0; border-left: 2px solid var(--ink); }
+.dpc-mp-inst { position: absolute; top: calc(22px + var(--mp-y)); height: 56px; width: 0; border-left: 2px solid var(--ink); }
 .dpc-mp-instl { position: absolute; top: 2px; transform: translateX(-50%); font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--ink); }
 .dpc-mp-noinst { color: #9a6200; transform: translateX(-100%); }
 /* The earliest install: a dashed green line, a suggestion only. */
 .dpc-mp-inst.dpc-mp-early { border-left: 2px dashed #2f7d4f; }
 .dpc-mp-earlyl { color: #2f7d4f; }
-.dpc-mp-dot { position: absolute; top: 44px; width: 22px; height: 22px; border-radius: 50%; transform: translateX(-50%); border: 3px solid #c5d0d6; background: #fff; z-index: 1; box-sizing: border-box; }
+.dpc-mp-dot { position: absolute; top: calc(44px + var(--mp-y)); width: 22px; height: 22px; border-radius: 50%; transform: translateX(-50%); border: 3px solid #c5d0d6; background: #fff; z-index: 1; box-sizing: border-box; }
 .dpc-mp-dot.us { border-color: #A83C16; } .dpc-mp-dot.us.s { background: #A83C16; }
 .dpc-mp-dot.sp { border-color: #2c5d86; } .dpc-mp-dot.sp.s { background: #2c5d86; }
 .dpc-mp-dot.ok { border-color: #2f7d4f; } .dpc-mp-dot.ok.s { background: #2f7d4f; }
@@ -579,12 +583,21 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-mp-dot.asap:not(.us) { border-color: #9A6200; }
 .dpc-mp-bdg { position: absolute; top: 20px; transform: translateX(-50%); font: 700 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; color: #fff; white-space: nowrap; background: #9fb0ba; }
 .dpc-mp-bdg.us { background: #A83C16; } .dpc-mp-bdg.sp { background: #2c5d86; } .dpc-mp-bdg.ok { background: #2f7d4f; } .dpc-mp-bdg.late { background: #b3261e; }
-.dpc-mp-lab { position: absolute; top: 72px; transform: translateX(-50%); text-align: center; font-size: 12px; line-height: 1.35; white-space: nowrap; }
-.dpc-mp-lab.dpc-mp-r1 { top: 114px; }
-/* A label in the bay wraps inside its share of the bay. */
-.dpc-mp-lab.dpc-mp-inbay { transform: none; white-space: normal; padding: 0 4px; box-sizing: border-box; }
-.dpc-mp-lab b { display: block; font-weight: 600; color: var(--ink); }
-.dpc-mp-lab small { display: block; color: var(--mute); font-size: 11.5px; }
+/* The labels under the line (modules/dispatch-materials-layout.js): one row per
+   lane, in normal flow so the panel grows to fit; one column per marker,
+   placed by its left margin; one block per order, stacked in the column. */
+.dpc-mp-labs { padding-bottom: 6px; }
+.dpc-mp-lane { display: flex; align-items: flex-start; }
+.dpc-mp-lane + .dpc-mp-lane { margin-top: 10px; }
+.dpc-mp-col { flex: none; position: relative; box-sizing: border-box; padding: 9px 4px 0; min-width: 0; text-align: center; }
+/* The short tick at the top of a column, right under its marker. */
+.dpc-mp-pin { position: absolute; top: 0; width: 2px; height: 6px; transform: translateX(-50%); background: #9fb0ba; }
+.dpc-mp-pin.us { background: #A83C16; } .dpc-mp-pin.sp { background: #2c5d86; } .dpc-mp-pin.ok { background: #2f7d4f; } .dpc-mp-pin.late { background: #b3261e; }
+.dpc-mp-lab { display: block; font-size: 12px; line-height: 1.35; }
+.dpc-mp-lab + .dpc-mp-lab { margin-top: 6px; padding-top: 6px; border-top: 1px solid #eef1f3; }
+/* A long supplier name stops at three lines; the full name is on hover. */
+.dpc-mp-lab b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
+.dpc-mp-lab small { display: block; color: var(--mute); font-size: 11.5px; overflow-wrap: anywhere; }
 .dpc-mp-t { display: block; font-weight: 600; font-size: 11.5px; }
 .dpc-mp-t.us { color: #A83C16; } .dpc-mp-t.sp { color: #2c5d86; } .dpc-mp-t.ok { color: #2f7d4f; } .dpc-mp-t.late { color: #b3261e; }
 .dpc-mp-rows { border-top: 1px solid #eef1f3; margin-top: 4px; }

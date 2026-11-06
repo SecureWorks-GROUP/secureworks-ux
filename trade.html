@@ -3598,7 +3598,6 @@
     <p style="font-size:12px;line-height:1.5;margin:8px 0 0">Live jobs and pay. Changes and submissions are disabled.</p>
   </div>
   <button class="user-menu-btn" id="userMenuActivity" onclick="openActivityFromMenu()">Activity</button>
-  <button class="user-menu-btn" id="userMenuScoper" onclick="openScoperFromMenu()" hidden>Scope a job</button>
   <button class="user-menu-btn" onclick="doLogout()">Sign out</button>
 </div>
 
@@ -4206,16 +4205,8 @@
   function syncUserMenuAccess() {
     var el = document.getElementById('userMenuAccess');
     if (el) el.innerHTML = _user ? tradeAccessBlockHTML('menu') : '';
-    var sc = document.getElementById('userMenuScoper');
-    if (sc) sc.hidden = !scoperLinkAllowed();
   }
 
-  // Staff open the scoper (Scope Engine T42). Shown to office staff only (admin,
-  // owner, ops_manager). The menu's "Scope a job" opens the practice page on this
-  // same site, so the trade app's sign-in carries over. A job's own "Open in the
-  // Scope Engine" opens that job in the live patio or fence page (scoperJobUrl).
-  var SCOPER_LINK_ENABLED = true;
-  var SCOPER_URL = 'scopers/practice/';
   // The live Scope Engine page for one job, by ?jobId=. A patio job already scoped
   // in the older patio page has no link: the Scope Engine never writes over it.
   function scoperJobUrl(job) {
@@ -4233,15 +4224,8 @@
   }
   function scoperLinkAllowed() {
     var role = String((_user && _user.role) || '').toLowerCase();
-    return SCOPER_LINK_ENABLED && (role === 'admin' || role === 'owner' || role === 'ops_manager');
+    return role === 'admin' || role === 'owner' || role === 'ops_manager';
   }
-
-  window.openScoperFromMenu = function () {
-    var menu = document.getElementById('userMenu');
-    if (menu) menu.style.display = 'none';
-    if (!scoperLinkAllowed()) return;
-    window.open(SCOPER_URL, '_blank', 'noopener');
-  };
 
   window.openActivityFromMenu = function () {
     var menu = document.getElementById('userMenu');

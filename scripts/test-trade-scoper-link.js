@@ -21,5 +21,5 @@ assert.equal(scoperJobUrl({ id: 'j4', type: 'patio', scope_json: { tool: 'patio-
 assert.equal(scoperJobUrl({ id: 'j 5', type: 'fencing' }), FENCE + '?jobId=j%205')
 assert.equal(scoperJobUrl({ id: 'j6', type: 'makesafe' }), '')
 assert.equal(scoperJobUrl({ type: 'patio' }), '')
-assert.ok(/var SCOPER_LINK_ENABLED = true;/.test(html), 'the office link is switched on')
+assert.ok(!html.includes('id="userMenuScoper"'), 'the retired standalone scoper menu entry is absent')
 console.log('trade scoper link: 8 checks pass')

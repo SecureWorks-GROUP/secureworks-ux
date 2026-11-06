@@ -2,8 +2,9 @@ const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
-// A group job on site: the group sits in the job's own card, the crew approve
-// each other's hours, the client rates and signs on the phone, then each share
+// A group job on site: the group shows once, in the Group work orders section
+// (its job card only links there), the crew confirm their hours, the client
+// says whether they are happy, rates and signs on the phone, then each share
 // unlocks and the whole crew is sent for payment together. Crew see hours,
 // never anyone else's pay. Server owns every figure.
 test.describe.configure({ timeout: 60_000 });
@@ -70,7 +71,12 @@ async function fixtures(page, initial) {
     if (action === 'my_group_work_orders') return json({ enabled: true, group_job_ids: [groupJob], groups: [PHASES[phase]] });
     const post = () => posts.push({ action, body: req.postDataJSON() });
     if (action === 'sign_group_work_order') { post(); phase = 'unsigned'; return json({ ok: true }); }
-    if (action === 'capture_group_client_signoff') { post(); phase = 'ready'; return json({ ok: true }); }
+    if (action === 'capture_group_client_signoff') {
+      post();
+      // A not-happy sign-off never counts: the server still says not signed.
+      if (req.postDataJSON().happy !== false) phase = 'ready';
+      return json({ ok: true, client_signed: req.postDataJSON().happy !== false });
+    }
     if (action === 'freeze_group_work_order') { post(); phase = 'frozen'; return json({ ...PHASES.frozen }); }
     if (action === 'generate_trade_invoice') {
       post(); phase = 'submitted';
@@ -81,10 +87,10 @@ async function fixtures(page, initial) {
   return { posts };
 }
 
-// Put the job card's title just under the app bar.
+// Put the group's card title just under the app bar.
 async function toCard(page) {
   await page.evaluate(() => {
-    const el = document.querySelector('.jc-card[data-group-job-card]');
+    const el = document.querySelector('section[data-invoice-groups] [data-invoice-group]');
     el.style.scrollMarginTop = '64px';
     el.scrollIntoView({ block: 'start' });
   });
@@ -95,7 +101,8 @@ async function open(page) {
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: 'Weekly Invoice' }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  const card = page.locator('.jc-card[data-group-job-card]');
+  await expect(page.locator('.jc-card[data-group-job-card]')).toContainText('SWP-261247 · Clive Allen');
+  const card = page.locator('section[data-invoice-groups] [data-invoice-group]');
   await expect(card).toContainText('SWP-261247 · Clive Allen');
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
   await toCard(page);
@@ -112,15 +119,24 @@ async function shot(page, name) {
   await page.screenshot({ path: `${shots}/${name}.png` });
 }
 
-test('the group sits in its own job card and Henry confirms his own hours', async ({ appPage: page }) => {
+test('the group shows once with its one hours form; the job card links to it', async ({ appPage: page }) => {
   const f = await fixtures(page, 'approve');
   const card = await open(page);
-  // One place for the group: the job's card, not a separate box.
-  await expect(page.locator('[data-invoice-groups]')).toHaveCount(0);
-  await expect(page.locator('.jc-card[data-group-job-card]')).toHaveCount(1);
-  await expect(card.locator('[data-group-mode] [aria-pressed="true"]')).toHaveText('Group work order');
-  await expect(card.getByRole('button', { name: 'Hours', exact: true })).toBeDisabled();
-  await expect(card.getByRole('button', { name: 'Commission', exact: true })).toBeDisabled();
+  // One place for the group: the group section. The job card only links there.
+  await expect(page.locator('section[data-invoice-groups] [data-invoice-group]')).toHaveCount(1);
+  await expect(page.locator('[data-group-hours-form]')).toHaveCount(1);
+  await expect(card.locator('[data-group-hours-form]')).toHaveCount(1);
+  const jobCard = page.locator('.jc-card[data-group-job-card]');
+  await expect(jobCard).toHaveCount(1);
+  await expect(jobCard.locator('[data-group-hours-form], [data-group-crew-row], [data-group-sign-open]')).toHaveCount(0);
+  await expect(jobCard).toContainText('Paid through its group work order. Add your hours there, under Group work orders above.');
+  await expect(jobCard.locator('[data-group-mode] [aria-pressed="true"]')).toHaveText('Group work order');
+  await expect(jobCard.getByRole('button', { name: 'Hours', exact: true })).toBeDisabled();
+  await expect(jobCard.getByRole('button', { name: 'Commission', exact: true })).toBeDisabled();
+  await jobCard.scrollIntoViewIfNeeded();
+  await jobCard.getByRole('button', { name: 'Go to the group work order', exact: true }).click();
+  await expect(card.locator('.gw-title')).toBeInViewport();
+  await shot(page, 'fix4-1-one-place');
   const rows = card.locator('[data-group-crew-row]');
   await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h$/, /Isaac\s*18h\s*✓ Confirmed/, /Ryan\s*18\.5h\s*✓ Confirmed/]);
   await expect(card.locator('[data-group-signed="no"]')).toContainText('Not signed yet');
@@ -148,10 +164,13 @@ test('the client rates the job, leaves a note and signs on Henry’s phone', asy
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText('SecureWorks crew: Henry, Isaac, Ryan');
   await noOtherPay(sheet);
-  const signOff = sheet.getByRole('button', { name: /happy with the work\. Sign off/ });
+  const signOff = sheet.getByRole('button', { name: 'Sign off: happy with the work', exact: true });
   await expect(signOff).toBeDisabled();
-  // Ratings are never defaulted.
+  // Neither the choice nor any rating is defaulted.
   await expect(sheet.getByRole('radio', { checked: true })).toHaveCount(0);
+  await expect(sheet.getByLabel('Anything to tell us?')).toBeHidden();
+  await sheet.getByRole('radio', { name: 'Happy with the work', exact: true }).click();
+  await expect(sheet.getByLabel('What is the client not happy with?')).toBeHidden();
 
   await sheet.getByLabel('Anything to tell us?').fill('Tidy site and a great crew.');
   await expect(sheet.getByLabel('Client’s name')).toHaveValue('Clive Allen');
@@ -177,6 +196,8 @@ test('the client rates the job, leaves a note and signs on Henry’s phone', asy
     group_id: groupId, signer_name: 'Clive Allen', happy: true, satisfaction_rating: 5,
     ratings: { sales_process: 5, communication: 5, cleanliness: 5, punctuality: 4, crew: 5 }, note: 'Tidy site and a great crew.',
   });
+  expect(body).not.toHaveProperty('outstanding_items');
+  expect(body.capture_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(body.signature_png).toMatch(/^data:image\/png;base64,/);
   expect(body.signature_png.length).toBeGreaterThan(1000);
   await expect(sheet).toBeHidden();
@@ -268,4 +289,98 @@ test('when the office approves the hours for the crew, each row is confirmed and
   await expect(card.getByRole('button', { name: 'Confirm my hours' })).toHaveCount(0);
   await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the client has signed.');
   await noOtherPay(card);
+});
+
+async function signPad(page, sheet) {
+  const pad = await sheet.locator('canvas[data-gw-sign-pad]').boundingBox();
+  await page.mouse.move(pad.x + 30, pad.y + 80);
+  await page.mouse.down();
+  for (const [dx, dy] of [[60, 30], [110, 70], [160, 25], [210, 75]]) await page.mouse.move(pad.x + dx, pad.y + dy, { steps: 4 });
+  await page.mouse.up();
+}
+
+test('a client who is not happy gives a reason; no ratings are sent and the share stays locked', async ({ appPage: page }) => {
+  const f = await fixtures(page, 'unsigned');
+  const card = await open(page);
+  await card.getByRole('button', { name: 'Hand phone to client to sign', exact: true }).click();
+  const sheet = page.locator('dialog[data-group-sign-dialog]');
+  await sheet.getByRole('radio', { name: 'Not happy', exact: true }).click();
+  const record = sheet.getByRole('button', { name: 'Record that the client is not happy', exact: true });
+  await expect(sheet.getByRole('radio', { name: 'The crew 5 of 5', exact: true })).toBeHidden();
+  await expect(sheet.getByLabel('Anything to tell us?')).toBeHidden();
+  await signPad(page, sheet);
+  // A reason is required.
+  await expect(record).toBeDisabled();
+  await sheet.getByLabel('What is the client not happy with?').fill('Gutter join still leaks at the back corner.');
+  await expect(record).toBeEnabled();
+  await shot(page, 'fix4-2-not-happy-sheet');
+
+  await record.click();
+  await expect.poll(() => f.posts.length).toBe(1);
+  const { action, body } = f.posts[0];
+  expect(action).toBe('capture_group_client_signoff');
+  expect(body).toMatchObject({ group_id: groupId, signer_name: 'Clive Allen', happy: false, outstanding_items: 'Gutter join still leaks at the back corner.' });
+  for (const key of ['ratings', 'satisfaction_rating', 'note']) expect(body).not.toHaveProperty(key);
+  expect(body.capture_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  await expect(sheet).toBeHidden();
+
+  await expect(card.locator('[data-group-signed="not-happy"]')).toContainText('Client not happy with the work');
+  await expect(card.locator('[data-group-signed="not-happy"]')).toContainText('The office will sort it out with the client.');
+  await expect(card.locator('[data-group-locked]')).toHaveText('Locked while the office sorts it out with the client.');
+  await expect(card.locator('[data-group-pill]')).toHaveText('Office to sort out');
+  await expect(card.getByRole('button', { name: 'Hand phone to client to sign' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Finalise group shares' })).toHaveCount(0);
+  await toCard(page);
+  await shot(page, 'fix4-3-not-happy-card');
+});
+
+test('a not-happy sign-off the server refuses is said plainly and never sent twice', async ({ appPage: page }) => {
+  const f = await fixtures(page, 'unsigned');
+  const refused = [];
+  await page.route(url => url.pathname.endsWith('/functions/v1/ops-api') && url.searchParams.get('action') === 'capture_group_client_signoff', route => {
+    refused.push(route.request().postDataJSON());
+    return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'group_signoff_field_unknown', error: 'That sign-off could not be saved.' }) });
+  });
+  const card = await open(page);
+  await card.getByRole('button', { name: 'Hand phone to client to sign', exact: true }).click();
+  const sheet = page.locator('dialog[data-group-sign-dialog]');
+  await sheet.getByRole('radio', { name: 'Not happy', exact: true }).click();
+  await signPad(page, sheet);
+  await sheet.getByLabel('What is the client not happy with?').fill('Paint marks on the wall.');
+  const record = sheet.getByRole('button', { name: 'Record that the client is not happy', exact: true });
+  await record.click();
+  await expect(sheet.locator('[data-gw-sign-err]')).toContainText('That sign-off could not be saved. It may not have been recorded. Do not send it again: ask the office to check.');
+  await expect(record).toBeDisabled();
+  await sheet.getByLabel('What is the client not happy with?').fill('Paint marks on the wall, and the gate.');
+  await expect(record).toBeDisabled();
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect(card.locator('[data-group-signed="not-happy-unsure"]')).toContainText('Ask the office to check it before anyone signs again.');
+  await expect(card.getByRole('button', { name: 'Hand phone to client to sign' })).toHaveCount(0);
+  expect(refused).toHaveLength(1);
+  expect(f.posts).toHaveLength(0);
+});
+
+test('a retried sign-off sends the same capture id, so the server saves it once', async ({ appPage: page }) => {
+  await fixtures(page, 'unsigned');
+  const sent = [];
+  let fail = true;
+  await page.route(url => url.pathname.endsWith('/functions/v1/ops-api') && url.searchParams.get('action') === 'capture_group_client_signoff', route => {
+    sent.push(route.request().postDataJSON());
+    if (fail) { fail = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Could not store the signature.' }) }); }
+    return route.fallback();
+  });
+  const card = await open(page);
+  await card.getByRole('button', { name: 'Hand phone to client to sign', exact: true }).click();
+  const sheet = page.locator('dialog[data-group-sign-dialog]');
+  await sheet.getByRole('radio', { name: 'Happy with the work', exact: true }).click();
+  await signPad(page, sheet);
+  for (const label of ['Sales and quote', 'Communication', 'Cleanliness', 'Punctuality', 'The crew']) await sheet.getByRole('radio', { name: `${label} 5 of 5`, exact: true }).click();
+  const signOff = sheet.getByRole('button', { name: 'Sign off: happy with the work', exact: true });
+  await signOff.click();
+  await expect(sheet.locator('[data-gw-sign-err]')).toContainText('Could not store the signature.');
+  await signOff.click();
+  await expect(sheet).toBeHidden();
+  expect(sent).toHaveLength(2);
+  expect(sent[1].capture_id).toBe(sent[0].capture_id);
+  await expect(card.locator('[data-group-signed="client"]')).toContainText('✓ Client signed off');
 });

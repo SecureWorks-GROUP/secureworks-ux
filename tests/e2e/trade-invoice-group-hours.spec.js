@@ -81,3 +81,51 @@ test('a member saves their own hours from the invoice; a refused save keeps the 
   expect(saves).toHaveLength(2);
   expect(saves[1]).toMatchObject({ group_id: groupId, work_date: '2026-11-04', start_time: '07:00', finish_time: '15:30', break_minutes: 30 });
 });
+
+// Fix 4 (6 Nov 2026): a crew member the office removed is never offered Join.
+const removedLine = 'The office removed you from this group. Ask the office if this is wrong.';
+const outsider = (discovery, awaiting) => ({ group_id: groupId, job_id: groupJob, job_number: 'SWP-GROUP-HOURS', client_name: 'Group fixture client', site_suburb: 'South Perth', discovery, awaiting, pot_total: null, my_share: null, needs_hours: true, client_signed: null, group_share_office_review_required: true });
+
+test('a removed member sees a plain line, not Join, when the server says so', async ({ appPage: page }) => {
+  await page.route('**/functions/v1/ops-api?**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action === 'my_group_work_orders') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: true, groups: [outsider({ state: 'setup_required', reason: 'removed_by_office', message: 'The office removed you from this group.' }, 'awaiting_office')] }) });
+    return route.fallback();
+  });
+  await openInvoice(page);
+  const card = page.locator('[data-invoice-group]');
+  await expect(card.locator('[data-group-removed]')).toHaveText(removedLine);
+  await expect(card.getByRole('button', { name: 'Join group work order' })).toHaveCount(0);
+  await expect(card.locator('[data-group-hours-form], [data-group-sign-open]')).toHaveCount(0);
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('group-removed.png') });
+});
+
+test('an older server offers Join; its removal refusal turns the button into the plain line', async ({ appPage: page }) => {
+  const joins = [];
+  await page.route('**/functions/v1/ops-api?**', async (route) => {
+    const req = route.request();
+    const action = new URL(req.url()).searchParams.get('action');
+    const json = (obj, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(obj) });
+    if (action === 'my_group_work_orders') return json({ enabled: true, groups: [outsider({ state: 'join' }, 'needs_join')] });
+    if (action === 'join_group_work_order') { joins.push(req.postDataJSON()); return json({ ok: false, code: 'group_member_removed', error: 'The office removed you from this group.' }, 403); }
+    return route.fallback();
+  });
+  await openInvoice(page);
+  const card = page.locator('[data-invoice-group]');
+  await card.getByRole('button', { name: 'Join group work order', exact: true }).click();
+  await expect(card.locator('[data-group-removed]')).toHaveText(removedLine);
+  await expect(card.getByRole('button', { name: 'Join group work order' })).toHaveCount(0);
+  expect(joins).toEqual([{ group_id: groupId }]);
+});
+
+test('extras say plainly not to repeat the hours above', async ({ appPage: page }) => {
+  await page.route('**/functions/v1/ops-api?**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action === 'my_group_work_orders') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: true, groups: [] }) });
+    return route.fallback();
+  });
+  await openInvoice(page);
+  await expect(page.getByText('Only add items that are not already in your hours above.', { exact: true })).toBeVisible();
+  await expect(page.getByText(/clocked hours above/)).toHaveCount(0);
+});

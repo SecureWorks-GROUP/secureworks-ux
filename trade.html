@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=invoice-hours-20261106"></script>
-  <script src="modules/trade-group-work-order.js?v=invoice-hours-20261106"></script>
-  <script src="modules/trade-group-invoice.js?v=invoice-hours-20261106"></script>
+  <script src="shared/group-work-order.js?v=fix4-20261106"></script>
+  <script src="modules/trade-group-work-order.js?v=fix4-20261106"></script>
+  <script src="modules/trade-group-invoice.js?v=fix4-20261106"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -25876,7 +25876,8 @@
     renderInvoiceBuilder();
   }
   // A group job's card: its work-order choice is the group, paid from the pool,
-  // so Hours and Commission are off. The panel itself is the group module's.
+  // so Hours and Commission are off. It links to the group's one panel in the
+  // Group work orders section; the hours form lives only there.
   function _groupJobCardHtml(c) {
     var seg = 'font-size:11px;font-weight:600;padding:5px 11px;border:none;outline:none;';
     var off = 'background:var(--sw-card);color:var(--sw-text-sec);opacity:0.45;cursor:not-allowed;';
@@ -28045,7 +28046,8 @@
       GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }, userName:function() { return (_user && _user.name) || ''; }, toast:toast});
       _noteInvoiceGroupRoutes(_hoursData);
       GroupWorkOrderInvoice.load();
-      // A group job's panel sits in its own job card; the section keeps the rest.
+      // Every group's panel, with its one hours form, sits in this section; a
+      // group job's card in the job list only links to it.
       html += GroupWorkOrderInvoice.html(_jobCards.map(function(c) { return c.job_id; }));
     }
 
@@ -28089,7 +28091,7 @@
         html += _renderInvRow(row, true);
       });
     }
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Only add items not already covered by the clocked hours above.</div>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Only add items that are not already in your hours above.</div>';
     html += '<button class="inv-add-btn" onclick="addInvRow()">+ Add extra / adjustment</button>';
 
     // ── Notes ──

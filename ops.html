@@ -21004,6 +21004,7 @@ function renderTradeBillLoadError(e) {
 
 function renderTradeBillTable(invoices) {
   var tbody = document.getElementById('tradeBillTableBody');
+  _tradeBillLastRows = invoices;
   if (!invoices.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--sw-text-sec)">No trade bills submitted yet</td></tr>';
     return;
@@ -21049,6 +21050,7 @@ function renderTradeBillTable(invoices) {
       html += '<button onclick="rejectTradeInvoice(\'' + idArg + '\')" style="padding:4px 10px;background:var(--sw-red);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Reject</button>';
       html += '</div>';
     }
+    html += swTradeBillStuckHtml(inv, idArg);
     if ((inv.status === 'approved' || inv.status === 'acknowledged') && !inv.xero_bill_id) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
       html += '<button onclick="retryPushToXero(\'' + idArg + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry: add to Xero as a draft</button>';
@@ -21084,6 +21086,91 @@ function approveTradeInvoice(invoiceId, btn) {
     loadTradeBills();
   });
 }
+
+// <trade-bill-stuck>
+// An invoice stuck in pending acknowledgment with no Xero bill: the office
+// clears it with ops-api resolve_stuck_trade_invoice, either releasing it (the
+// trade can invoice that week again) or sending it on to Xero, with a reason.
+// One confirm, one press per invoice, and the server's answer in plain words.
+// A group share invoice is released through its group, so it is not offered.
+var _tradeBillClearing = {}, _tradeBillClearOpen = {}, _tradeBillClearResult = {};
+function swTradeBillIsStuck(inv) {
+  if (!inv || inv.status !== 'pending_acknowledgment' || inv.xero_bill_id) return false;
+  return !(Array.isArray(inv.lines) && inv.lines.some(function(li) {
+    return String((li && li.line_type) || '').toLowerCase().replace(/_/g, ' ').trim() === 'group share';
+  }));
+}
+function swTradeBillStuckHtml(inv, idArg) {
+  var id = String(inv && inv.id || ''), done = _tradeBillClearResult[id];
+  var h = done ? '<div data-trade-bill-clear-result="' + idArg + '" style="font-size:11px;font-weight:600;text-transform:none;margin-top:6px;color:var(--sw-' + (done.ok ? 'green' : 'red') + ');white-space:normal">' + swTradeBillEsc(done.text) + '</div>' : '';
+  if (!swTradeBillIsStuck(inv)) return h;
+  var busy = !!_tradeBillClearing[id];
+  if (!_tradeBillClearOpen[id]) {
+    return h + '<div style="display:flex;gap:6px;margin-top:6px"><button type="button" data-trade-bill-clear="' + idArg + '" onclick="openClearStuckTradeInvoice(\'' + idArg + '\')" style="padding:4px 10px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Clear stuck invoice</button></div>';
+  }
+  var who = swTradeBillEsc((inv.users && inv.users.name) || 'this trade');
+  var radio = function(value, label) {
+    return '<label style="display:flex;gap:6px;align-items:flex-start;font-weight:400;margin-top:4px"><input type="radio" name="tbClear_' + idArg + '" value="' + value + '" onchange="swTradeBillClearHideError(this)"' + (busy ? ' disabled' : '') + '> <span>' + label + '</span></label>';
+  };
+  return h + '<div data-trade-bill-clear-form="' + idArg + '" style="margin-top:6px;padding:8px;border:1px solid var(--sw-border);border-radius:8px;background:var(--sw-card);color:var(--sw-text);font-size:11px;text-transform:none;white-space:normal;max-width:300px">'
+    + '<div style="font-weight:700">This invoice is stuck waiting on the trade. What should happen to it?</div>'
+    + radio('release', 'Release it. ' + who + ' can invoice that week again. Xero is checked first.')
+    + radio('send_to_xero', 'Send it on. It is approved and added to Xero as a draft bill.')
+    + '<label style="display:block;margin-top:6px;font-weight:600">Reason<input type="text" data-trade-bill-clear-reason maxlength="500" placeholder="Why, in a few words" oninput="swTradeBillClearHideError(this)"' + (busy ? ' disabled' : '') + ' style="display:block;width:100%;box-sizing:border-box;margin-top:2px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font:inherit"></label>'
+    + '<div data-trade-bill-clear-error style="color:var(--sw-red);font-weight:600;margin-top:4px" hidden></div>'
+    + '<div style="display:flex;gap:6px;margin-top:6px"><button type="button" data-trade-bill-clear-go="' + idArg + '" data-trade-name="' + who + '" onclick="clearStuckTradeInvoice(\'' + idArg + '\', this)"' + (busy ? ' disabled' : '') + ' style="padding:4px 10px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">' + (busy ? 'Clearing…' : 'Clear it') + '</button>'
+    + '<button type="button" onclick="closeClearStuckTradeInvoice(\'' + idArg + '\')"' + (busy ? ' disabled' : '') + ' style="padding:4px 10px;background:var(--sw-card);color:var(--sw-text);border:1px solid var(--sw-border);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">Cancel</button></div></div>';
+}
+var _tradeBillLastRows = null;
+function swTradeBillRepaint() { if (_tradeBillLastRows) renderTradeBillTable(_tradeBillLastRows); }
+function openClearStuckTradeInvoice(id) { _tradeBillClearOpen[id] = true; delete _tradeBillClearResult[id]; swTradeBillRepaint(); }
+function closeClearStuckTradeInvoice(id) { if (_tradeBillClearing[id]) return; delete _tradeBillClearOpen[id]; swTradeBillRepaint(); }
+function swTradeBillClearHideError(el) {
+  var form = el && el.closest ? el.closest('[data-trade-bill-clear-form]') : null;
+  var err = form && form.querySelector('[data-trade-bill-clear-error]');
+  if (err) err.hidden = true;
+}
+function swTradeBillClearOutcome(res) {
+  if (!res || res.ok !== true) return { ok: false, text: (res && (res.error || res.message)) || 'The invoice was not cleared. Nothing was changed that we know of. Reload before trying again.' };
+  if (res.decision === 'release') return { ok: true, text: 'Released. The trade can invoice that week again.' };
+  var push = res.xero_push;
+  if (push && typeof push === 'object' && push.success === true && push.xero_bill_id) return { ok: true, text: 'Sent on. The draft bill is in Xero.' };
+  var why = push === 'unconfirmed' && res.xero_push_error ? ' (' + String(res.xero_push_error).slice(0, 160) + ')' : '';
+  return { ok: false, text: 'Approved, but the Xero bill was not confirmed' + why + '. Use Retry: add to Xero as a draft.' };
+}
+function clearStuckTradeInvoice(id, btn) {
+  if (!id || _tradeBillClearing[id]) return;
+  var form = btn && btn.closest ? btn.closest('[data-trade-bill-clear-form]') : null;
+  if (!form) return;
+  var picked = form.querySelector('input[type="radio"]:checked');
+  var reason = (form.querySelector('[data-trade-bill-clear-reason]') || {}).value || '';
+  reason = String(reason).trim();
+  var errEl = form.querySelector('[data-trade-bill-clear-error]');
+  var fail = function(text) { if (errEl) { errEl.textContent = text; errEl.hidden = false; } };
+  if (!picked) return fail('Choose release or send it on.');
+  if (reason.length < 3) return fail('Give a reason of at least 3 letters.');
+  var decision = picked.value === 'release' ? 'release' : 'send_to_xero';
+  var who = btn.getAttribute('data-trade-name') || 'this trade';
+  var ask = decision === 'release'
+    ? 'Release the stuck invoice from ' + who + '? It is sent back, and they can invoice that week again.'
+    : 'Send the stuck invoice from ' + who + ' on? It is approved and a draft bill is made in Xero.';
+  if (!window.confirm(ask)) return;
+  _tradeBillClearing[id] = true;
+  btn.disabled = true; btn.textContent = 'Clearing…';
+  opsPost('resolve_stuck_trade_invoice', { invoice_id: id, decision: decision, reason: reason }).then(function(res) {
+    return swTradeBillClearOutcome(res);
+  }).catch(function(e) {
+    return { ok: false, text: 'Not cleared: ' + String((e && e.message) || 'the server did not answer').replace(/[.\s]+$/, '') + '.' };
+  }).then(function(out) {
+    _tradeBillClearResult[id] = out;
+    delete _tradeBillClearOpen[id];
+    showToast(out.text, out.ok ? 'success' : 'warning');
+  }).finally(function() {
+    delete _tradeBillClearing[id];
+    loadTradeBills();
+  });
+}
+// </trade-bill-stuck>
 
 // Retry Xero push for invoices stuck at 'approved' or 'acknowledged' with no xero_bill_id.
 // Uses the same endpoint as the approve flow — the backend already accepts approved status.

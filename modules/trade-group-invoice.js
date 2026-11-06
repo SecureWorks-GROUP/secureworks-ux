@@ -6,7 +6,7 @@
 (function () {
   'use strict';
   var options = {}, submitted = {};
-  var api, changed, owner = '', state = 'idle', loaded = false, groups = [], jobIds = [], selected = {}, busy = '', generation = 0, sign = null;
+  var api, changed, owner = '', state = 'idle', loaded = false, groups = [], jobIds = [], payableRoutes = [], selected = {}, busy = '', generation = 0, sign = null;
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function money(n) { return Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function hrs(n) { var v = Number(n); return n != null && n !== '' && isFinite(v) ? (Math.round(v * 100) / 100) + 'h' : '–'; }
@@ -17,7 +17,7 @@
     if (owner !== String(userId || '')) { owner = String(userId || ''); reset(); }
   }
   function reset() {
-    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; selected = {}; busy = ''; sign = null;
+    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; payableRoutes = []; selected = {}; busy = ''; sign = null;
     var open = document.querySelectorAll('dialog[data-group-sign-dialog],dialog[data-group-status-dialog]');
     for (var i = 0; i < open.length; i++) if (open[i].open) open[i].close();
   }
@@ -27,7 +27,11 @@
     api('my_group_work_orders').then(function(res) {
       if (seq !== generation) return;
       if (!res || !Array.isArray(res.groups)) throw new Error('Group work orders could not be checked.');
-      groups = res.groups; jobIds = (res.group_job_ids || []).concat(groups.map(function(g) { return g.job_id; })); state = 'ready'; loaded = true;
+      groups = res.groups;
+      payableRoutes = Array.isArray(res.payable_routes) ? res.payable_routes : [];
+      jobIds = (res.group_job_ids || []).concat(groups.map(function(g) { return g.job_id; }))
+        .concat(payableRoutes.filter(function(r) { return r.route === 'group_setup_required'; }).map(function(r) { return r.job_id; }));
+      state = 'ready'; loaded = true;
       Object.keys(selected).forEach(function(id) { if (!groups.some(function(g) { return g.group_id === id && selectable(g); })) delete selected[id]; });
       changed();
     }).catch(function() { if (seq === generation) { state = 'error'; changed(); } });
@@ -279,6 +283,17 @@
     ensureCss();
     var list = groups.filter(function(g) { return String(g.job_id) === String(card.job_id); });
     if (!list.length) {
+      var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
+      if (route && route.route === 'group_setup_required') {
+        var detail = route.setup_reason === 'group_missing'
+          ? 'The approved work-order amount is ready. The office needs to set up the crew group before you invoice your share.'
+          : route.setup_reason === 'work_order_not_approved'
+          ? 'The office needs to approve the job work order before setting up the crew group.'
+          : 'The office needs to set the job work-order amount before setting up the crew group.';
+        return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id })
+          + '<div class="gw-locked" data-group-setup-required style="margin-top:12px"><strong>Group work order needs setting up</strong><p>' + detail + '</p><p>Your other jobs can still be invoiced.</p></div>'
+          + links({ job_id: card.job_id });
+      }
       return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id }) + (toggle || '')
         + '<div class="gw-locked" style="margin-top:12px">Paid from the group work order.</div>' + links({ job_id: card.job_id });
     }

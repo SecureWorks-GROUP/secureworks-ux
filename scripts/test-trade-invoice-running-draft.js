@@ -296,4 +296,38 @@ refusesEdit({
   edits: [{ assignment_id: 'as-hugo-1', description: 'Too late' }]
 }, 'draft_locked');
 
-console.log('trade invoice running draft: ok');
+// A saved card whose patio group is missing stays in the builder, but the
+// group route excludes it from ordinary hours before Submit.
+async function checkPayableRoutes() {
+  const fs = require('fs'), vm = require('vm');
+  const scope = { window: {}, document: { querySelector: () => true, querySelectorAll: () => [] } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../modules/trade-group-invoice.js'), 'utf8'), scope);
+  const group = scope.window.GroupWorkOrderInvoice;
+  const card = { job_id: 'patio-fixture', job_number: 'PATIO-FIXTURE', included: true, hours: 4 };
+  const before = JSON.stringify(card);
+  let reason = 'group_missing', writes = 0;
+  group.use(async (action, params, body) => {
+    if (body) writes++;
+    assert.strictEqual(action, 'my_group_work_orders');
+    return { enabled: true, groups: [], payable_routes: [{ job_id: card.job_id, route: 'group_setup_required', group_id: null, setup_reason: reason }] };
+  }, () => {}, 'fixture-user');
+  group.load();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(group.isGroupJob(card.job_id), true);
+  assert.strictEqual(group.isGroupJob('ordinary-fixture'), false);
+  let html = group.jobCardHtml(card, '<input data-ordinary-hours>');
+  assert(html.includes('Group work order needs setting up'));
+  assert(html.includes('approved work-order amount is ready'));
+  assert(!html.includes('data-ordinary-hours'));
+  assert.strictEqual(group.total(), 0);
+  assert.strictEqual(group.items().length, 0);
+  assert.strictEqual(JSON.stringify(card), before, 'saved hours are retained');
+  reason = 'allowance_missing';
+  group.load(true);
+  await new Promise(resolve => setImmediate(resolve));
+  html = group.jobCardHtml(card);
+  assert(html.includes('set the job work-order amount'));
+  assert(!html.includes('approved work-order amount is ready'));
+  assert.strictEqual(writes, 0);
+}
+checkPayableRoutes().then(() => console.log('trade invoice running draft: ok')).catch(error => { console.error(error); process.exitCode = 1; });

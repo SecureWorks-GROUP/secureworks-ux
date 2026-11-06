@@ -336,11 +336,11 @@ async function checkPayableRoutes() {
   ];
   const untouched = JSON.stringify(stored);
   const recovery = group.savedEntriesHtml(stored);
-  assert(recovery.includes('Excluded from draft'));
+  assert(recovery.includes('Not ticked'));
   assert(recovery.includes('7h') && recovery.includes('2.25h') && recovery.includes('Hours not entered'));
   assert(recovery.includes('07:00 to 14:30') && recovery.includes('Break 30 min'));
   assert(recovery.includes('&lt;img') && !recovery.includes('<img'));
-  assert(recovery.includes('not group hours') && recovery.includes('not added as hourly invoice lines'));
+  assert(recovery.includes('not added to this invoice') && recovery.includes('add these hours to the group above'));
   assert.strictEqual((recovery.match(/data-saved-group-entry/g) || []).length, 3);
   assert.strictEqual(JSON.stringify(stored), untouched);
 
@@ -393,7 +393,7 @@ async function checkPayableRoutes() {
   await new Promise(resolve => setImmediate(resolve));
   assert.strictEqual(group.isGroupJob(card.job_id), false);
   assert.strictEqual(pageScope._restoreJobCardsDraft([hoursOnly])[0].hours, null, 'known ordinary route keeps its existing time requirements');
-  assert(group.routeHtml(card).includes('ordinary pay'));
+  assert(group.routeHtml(card).includes('Paid by the hour on this invoice'));
   for (const awaiting of ['needs_hours', 'awaiting_signoff']) {
     route = 'group'; currentGroups = [{group_id:'fixture-group',job_id:card.job_id,awaiting,client_signed:false}];
     group.load(true); await new Promise(resolve => setImmediate(resolve));

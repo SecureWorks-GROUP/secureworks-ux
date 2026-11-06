@@ -236,6 +236,7 @@ test('the client page stays empty when the action is unknown and never shows pay
 });
 
 test('the client signs and rates, and the page shows no crew pay', async ({ page }) => {
+  await page.setViewportSize({width:390,height:844});
   const posts = [];
   let signed = false;
   await page.route('**/functions/v1/ops-api**', async (route) => {
@@ -301,7 +302,9 @@ test('the client signs and rates, and the page shows no crew pay', async ({ page
   await page.mouse.down();
   await page.mouse.move(box.x + 80, box.y + 70);
   await page.mouse.up();
-  await page.getByRole('button', { name: 'Sign' }).click();
+  await page.screenshot({path:test.info().outputPath('client-confirmation-mobile.png'),fullPage:true});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+  await page.getByRole('button', { name: 'Sign', exact:true }).click();
   await expect(page.locator('[data-group-sign-ratings]')).toBeVisible();
   const sign = posts.find((p) => p.action === 'group_work_order_client_sign');
   expect(sign.body.share_token).toBe('abc');

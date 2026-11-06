@@ -124,7 +124,7 @@ var GroupWorkOrderCore = (function () {
     } else {
       var view = closedShare(raw);
       h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
-      if (view.pot_total != null) h += '<p data-group-wo-total>' + (allInBasis(view.pay_basis) ? 'Pay + super pool ' : 'Total ') + esc(money(view.pot_total)) + '</p>';
+      if (view.pot_total != null) h += '<p data-group-wo-total>' + (allInBasis(view.pay_basis) ? 'Crew total (pay and super) ' : 'Crew total ') + esc(money(view.pot_total)) + '</p>';
       if (view.my_budget != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_budget)) + '</p><p data-group-wo-split>Pay ' + esc(money(view.my_cash_pay)) + ' · ' + (view.pay_basis === 'all_in_12_v2' ? 'Super 12% ' : 'Super ') + esc(money(view.my_super)) + '</p>';
       else if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
       if (view.needs_hours) h += '<p data-group-wo-needs-hours>Save your hours to see your share.</p>';
@@ -132,12 +132,12 @@ var GroupWorkOrderCore = (function () {
         awaiting_signoff: 'The office needs to record client sign-off before your share can be finalised.',
         awaiting_others: 'Waiting for the remaining crew hours.',
         awaiting_rate: 'The office needs to confirm crew rates.',
-        awaiting_crew_approval: view.my_hours_approved ? 'Waiting for the rest of the crew to approve the hours.' : 'Approve everyone’s hours to unlock the shares.',
+        awaiting_crew_approval: view.my_hours_approved ? 'Waiting for the rest of the crew to confirm their hours.' : 'Confirm your hours to unlock the shares.',
         ready: 'Hours and sign-off are ready. Your share has not been finalised yet.',
         frozen: 'Your share is finalised.'
       };
       if (waiting[view.awaiting]) h += '<p data-group-wo-status>' + esc(waiting[view.awaiting]) + '</p>';
-      if (needsMyApproval(view)) h += '<button type="button" data-group-wo-action="approve-hours">Approve everyone’s hours</button>';
+      if (needsMyApproval(view)) h += '<button type="button" data-group-wo-action="approve-hours">Confirm my hours</button>';
       if (view.awaiting !== 'frozen') h += hoursForm();
     }
     if (message && mode !== 'error') h += '<p data-group-wo-msg>' + esc(message) + '</p>';

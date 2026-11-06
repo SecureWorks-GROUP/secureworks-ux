@@ -73,7 +73,7 @@ test('trade bills: an invoice carrying a deduction shows the amount payable with
 
   // No new row, wording or figure for a trade with no deduction: the cell is
   // the one string it always was, and the status cell carries no note.
-  for (const [name, total, status] of [['Plain Trade', '$440.00', 'pushed to xero'], ['Older Trade', '$330.00', 'paid']]) {
+  for (const [name, total, status] of [['Plain Trade', '$440.00', 'Draft bill in Xero'], ['Older Trade', '$330.00', 'Paid']]) {
     const cells = rows.filter({ hasText: name }).locator('td');
     expect(await cells.nth(3).innerHTML()).toBe(total);
     expect(await cells.nth(5).innerHTML()).toBe(status);
@@ -136,4 +136,91 @@ test('trade bills: an office line added in Xero is named, with what Xero pays; a
   for (const name of ['Same Trade', 'Unread Trade']) {
     expect(await rows.filter({ hasText: name }).locator('td').nth(3).innerHTML()).toBe('$440.00');
   }
+});
+
+// Trade invoicing W2 (6 Nov 2026): a failed load never leaves an old table up,
+// no-week invoices (group shares, work orders) are listed, Week Ending is the
+// week end, Xero's voided or deleted bill reads plainly, typed text is escaped,
+// and Approve and push asks first and cannot be pressed twice.
+test('trade bills: no-week rows, week ending, Xero status and escaping', async ({ page }) => {
+  await bootOps(page);
+  await page.evaluate(() => {
+    window.renderTradeBillTable([
+      { id: 'inv-week', users: { name: 'Week Trade' }, week_start: '2026-10-05', total_hours: 8, total_inc: 440, status: 'pushed_to_xero', xero_bill_status: 'VOIDED' },
+      { id: 'inv-del', users: { name: 'Deleted Trade' }, week_start: '2026-10-05', week_end: '2026-10-11', total_hours: 8, total_inc: 440, status: 'paid', xero_bill_status: 'DELETED' },
+      { id: 'inv-share', users: { name: '<b>Share</b> Trade' }, total_hours: 0, total_inc: 900, status: 'pending_ops_review', query_note: '<img src=x onerror=window.__xss=1>' }
+    ]);
+  });
+  const rows = page.locator('#tradeBillTable tbody tr');
+  const week = rows.filter({ hasText: 'Week Trade' });
+  await expect(week.locator('td').nth(1)).toHaveText('2026-10-11');
+  await expect(week.locator('[data-trade-bill-status]')).toHaveText('Voided in Xero');
+  await expect(rows.filter({ hasText: 'Deleted Trade' }).locator('[data-trade-bill-status]')).toHaveText('Deleted in Xero');
+  const share = rows.filter({ hasText: '<b>Share</b> Trade' });
+  await expect(share.locator('[data-trade-bill-no-week]')).toHaveText('No week');
+  await expect(share).toContainText('<img src=x onerror=window.__xss=1>');
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+});
+
+test('trade bills: a failed load clears the table and offers a retry', async ({ page }) => {
+  await installOpsSessionStub(page);
+  let fail = true;
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (url.startsWith('file://')) return route.continue();
+    if (/action=list_trade_invoices/.test(url)) {
+      if (fail) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'down' }) });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invoices: [{ id: 'inv-1', users: { name: 'Back Trade' }, week_start: '2026-10-05', total_hours: 8, total_inc: 440, status: 'paid' }], rates: [] }) });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(OPS_FILE);
+  await page.waitForFunction(() => typeof window.loadTradeBills === 'function');
+  await page.evaluate(() => window.renderTradeBillTable([{ id: 'old', users: { name: 'Stale Trade' }, week_start: '2026-09-28', total_hours: 1, total_inc: 10, status: 'paid' }]));
+  await page.evaluate(() => window.loadTradeBills());
+  const err = page.locator('[data-trade-bills-error]');
+  await expect(err).toContainText('Trade bills did not load');
+  await expect(page.locator('#tradeBillTable tbody')).not.toContainText('Stale Trade');
+  fail = false;
+  // The Trade Bills tab is not open in this boot; press the button itself.
+  await page.evaluate(() => document.querySelector('[data-trade-bills-error] button').click());
+  await expect(page.locator('#tradeBillTable tbody')).toContainText('Back Trade');
+});
+
+test('trade bills: Approve and push asks first, and a second tap sends nothing', async ({ page }) => {
+  await installOpsSessionStub(page);
+  const posts = [];
+  let release;
+  const held = new Promise((r) => { release = r; });
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (url.startsWith('file://')) return route.continue();
+    const m = url.match(/action=([a-z_]+)/);
+    const action = m ? m[1] : '';
+    if (action === 'approve_trade_invoice' || action === 'push_trade_invoice_to_xero') {
+      posts.push(action);
+      if (action === 'approve_trade_invoice') await held;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(OPS_FILE);
+  await page.waitForFunction(() => typeof window.approveTradeInvoice === 'function');
+  await page.evaluate(() => window.renderTradeBillTable([{ id: 'inv-a', users: { name: 'Approve Trade' }, week_start: '2026-10-05', total_hours: 8, total_inc: 440, status: 'pending_ops_review' }]));
+  const btn = page.locator('[data-trade-bill-approve]');
+
+  const press = () => page.evaluate(() => document.querySelector('[data-trade-bill-approve]').click());
+  page.once('dialog', (d) => d.dismiss());
+  await press();
+  await page.waitForTimeout(200);
+  expect(posts).toEqual([]);
+
+  page.once('dialog', (d) => d.accept());
+  await press();
+  await expect(btn).toBeDisabled();
+  await page.evaluate(() => window.approveTradeInvoice('inv-a', document.querySelector('[data-trade-bill-approve]')));
+  release();
+  await expect.poll(() => posts.length).toBe(2);
+  await page.waitForTimeout(200);
+  expect(posts).toEqual(['approve_trade_invoice', 'push_trade_invoice_to_xero']);
 });

@@ -112,7 +112,7 @@ async function shot(page, name) {
   await page.screenshot({ path: `${shots}/${name}.png` });
 }
 
-test('the group sits in its own job card and Henry approves everyone’s hours', async ({ appPage: page }) => {
+test('the group sits in its own job card and Henry confirms his own hours', async ({ appPage: page }) => {
   const f = await fixtures(page, 'approve');
   const card = await open(page);
   // One place for the group: the job's card, not a separate box.
@@ -122,19 +122,19 @@ test('the group sits in its own job card and Henry approves everyone’s hours',
   await expect(card.getByRole('button', { name: 'Hours', exact: true })).toBeDisabled();
   await expect(card.getByRole('button', { name: 'Commission', exact: true })).toBeDisabled();
   const rows = card.locator('[data-group-crew-row]');
-  await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h\s*Your turn/, /Isaac\s*18h\s*✓ Approved/, /Ryan\s*18\.5h\s*✓ Approved/]);
+  await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h$/, /Isaac\s*18h\s*✓ Confirmed/, /Ryan\s*18\.5h\s*✓ Confirmed/]);
   await expect(card.locator('[data-group-signed="no"]')).toContainText('Not signed yet');
-  await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when all hours are approved and the client has signed.');
+  await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the crew’s hours are confirmed and the client has signed.');
   await expect(card.locator('[data-group-allocation]')).toHaveCount(0);
   await expect(card).not.toContainText('911.56');
   await noOtherPay(card);
   await shot(page, 'v2-1-approve-hours');
 
-  await card.getByRole('button', { name: /Approve everyone.s hours/ }).click();
+  await card.getByRole('button', { name: 'Confirm my hours' }).click();
   await expect.poll(() => f.posts.length).toBe(1);
   expect(f.posts[0]).toEqual({ action: 'sign_group_work_order', body: { group_id: groupId, signer_name: 'Henry Fence' } });
-  await expect(rows.first()).toHaveText(/Henry\s*\(you\)\s*18h\s*✓ Approved/);
-  await expect(card.getByRole('button', { name: /Approve everyone/ })).toHaveCount(0);
+  await expect(rows.first()).toHaveText(/Henry\s*\(you\)\s*18h\s*✓ Confirmed/);
+  await expect(card.getByRole('button', { name: 'Confirm my hours' })).toHaveCount(0);
   await expect(card.locator('[data-group-pill]')).toHaveText('Needs sign-off');
   await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the client has signed.');
 });
@@ -192,7 +192,7 @@ test('with every hour approved and the client signed, Henry’s share unlocks an
   const f = await fixtures(page, 'ready');
   const card = await open(page);
   await expect(card.locator('[data-group-signed="client"]')).toContainText('✓ Client signed off');
-  await expect(card.locator('[data-group-crew-row]')).toHaveText([/Henry.*18h\s*✓ Approved/, /Isaac.*18h\s*✓ Approved/, /Ryan.*18\.5h\s*✓ Approved/]);
+  await expect(card.locator('[data-group-crew-row]')).toHaveText([/Henry.*18h\s*✓ Confirmed/, /Isaac.*18h\s*✓ Confirmed/, /Ryan.*18\.5h\s*✓ Confirmed/]);
   await expect(card.locator('[data-group-allocation]')).toHaveText(/Your share\s*\$911.56/);
   await expect(card.locator('[data-group-pay]')).toHaveText(/Pay\s*\$813.89/);
   await expect(card.locator('[data-group-super]')).toHaveText(/Super 12%, paid by us\s*\$97.67/);
@@ -260,12 +260,12 @@ test('once the whole crew is in, the card says sent for payment, never paid', as
   await expect(dialog.locator('[data-group-released]')).toContainText('Sent for payment.');
 });
 
-test('when the office approves the hours for the crew, each row says so and Henry has nothing to approve', async ({ appPage: page }) => {
+test('when the office approves the hours for the crew, each row is confirmed and Henry has nothing to confirm', async ({ appPage: page }) => {
   await fixtures(page, 'officeHours');
   const card = await open(page);
   const rows = card.locator('[data-group-crew-row]');
-  await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h\s*✓ Office approved/, /Isaac\s*18h\s*✓ Office approved/, /Ryan\s*18\.5h\s*✓ Office approved/]);
-  await expect(card.getByRole('button', { name: /Approve everyone/ })).toHaveCount(0);
+  await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h\s*✓ Confirmed/, /Isaac\s*18h\s*✓ Confirmed/, /Ryan\s*18\.5h\s*✓ Confirmed/]);
+  await expect(card.getByRole('button', { name: 'Confirm my hours' })).toHaveCount(0);
   await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the client has signed.');
   await noOtherPay(card);
 });

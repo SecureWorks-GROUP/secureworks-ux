@@ -1,12 +1,17 @@
 // Group work orders on the weekly invoice. A group job shows its panel inside
 // its own job card; a group with no card this week keeps a compact card in the
-// group section. Crew see each other's hours, never rates or pay. The crew
-// approve each other's hours and the client signs on site; then the share
-// unlocks. Server owns prices and gates.
+// group section. Crew see each other's hours, never rates or pay. A member
+// logs their own hours for any day here, through the same group hours action
+// the job page uses. The client signs on site; then the share unlocks. Server
+// owns prices and gates. A failed group read only holds the group jobs: the
+// trade's ordinary jobs can still be invoiced.
 (function () {
   'use strict';
   var options = {}, submitted = {};
   var api, changed, owner = '', state = 'idle', loaded = false, groups = [], jobIds = [], payableRoutes = [], selected = {}, busy = '', generation = 0, sign = null;
+  // Jobs my_hours says are paid through a group (with their booked days), and
+  // the hours a trade is typing per group, kept across re-renders.
+  var routeJobs = [], hoursDraft = {};
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function money(n) { return Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function hrs(n) { var v = Number(n); return n != null && n !== '' && isFinite(v) ? (Math.round(v * 100) / 100) + 'h' : '–'; }
@@ -17,7 +22,7 @@
     if (owner !== String(userId || '')) { owner = String(userId || ''); reset(); }
   }
   function reset() {
-    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; payableRoutes = []; selected = {}; busy = ''; sign = null;
+    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; payableRoutes = []; selected = {}; busy = ''; sign = null; routeJobs = []; hoursDraft = {};
     var open = document.querySelectorAll('dialog[data-group-sign-dialog],dialog[data-group-status-dialog]');
     for (var i = 0; i < open.length; i++) if (open[i].open) open[i].close();
   }
@@ -36,7 +41,14 @@
       changed();
     }).catch(function() { if (seq === generation) { state = 'error'; changed(); } });
   }
-  function isGroupJob(id) { return id != null && jobIds.some(function(jobId) { return String(jobId) === String(id); }); }
+  function isGroupJob(id) {
+    if (id == null) return false;
+    return jobIds.some(function(jobId) { return String(jobId) === String(id); })
+      || routeJobs.some(function(r) { return String(r.job_id) === String(id); });
+  }
+  function setRouteJobs(list) { routeJobs = Array.isArray(list) ? list.filter(function(r) { return r && r.job_id != null; }) : []; }
+  function routeJob(jobId) { return routeJobs.find(function(r) { return String(r.job_id) === String(jobId); }) || null; }
+  function settled() { return state === 'ready' || state === 'error'; }
   function allInBasis(g) { return g.pay_basis === 'all_in_12_6_v1' || g.pay_basis === 'all_in_12_v2'; }
 
   // The crew approve each other's hours; the client (or the office) signs.
@@ -71,7 +83,7 @@
   }
 
   // A submitted share never rides on another invoice, even from a restored draft.
-  function items() { return groups.filter(function(g) { return selected[g.group_id] && selectable(g); }).map(function(g) {
+  function items() { if (state !== 'ready') return []; return groups.filter(function(g) { return selected[g.group_id] && selectable(g); }).map(function(g) {
     return { type: 'group share', group_id: g.group_id, job_id: g.job_id, job_number: g.job_number, quantity: 1, rate: Number(g.my_share) };
   }); }
   function selectedIds() { return Object.keys(selected).filter(function(id) { return selected[id]; }); }
@@ -129,7 +141,16 @@
     + '.gw-pad canvas{display:block;width:100%;height:100%;touch-action:none}'
     + '.gw-pad span{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--sw-text-sec);pointer-events:none}'
     + '.gw-pad.drawn span{display:none}'
-    + '.gw-err{margin-top:8px;font-size:13px;font-weight:600;color:var(--sw-red,#E74C3C)}';
+    + '.gw-err{margin-top:8px;font-size:13px;font-weight:600;color:var(--sw-red,#E74C3C)}'
+    + '.gw-hours{margin-top:10px;padding:10px;border:1px solid var(--sw-border);border-radius:10px;background:var(--sw-bg,#F6F8F9)}'
+    + '.gw-hgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}'
+    + '.gw-hgrid label{font-size:12px;font-weight:600;color:var(--sw-mid)}'
+    + '.gw-hgrid .gw-field{margin-top:3px}'
+    + '.gw-hgrid .gw-wide{grid-column:1/-1}'
+    + '.gw-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}'
+    + '.gw-chip{border:1px solid var(--sw-border);background:var(--sw-card);border-radius:999px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color:var(--sw-text)}'
+    + '.gw-chip.on{border-color:var(--sw-orange-deep,#C7431B);color:var(--sw-orange-deep,#C7431B);font-weight:700}'
+    + '.gw-ok{margin-top:8px;font-size:13px;font-weight:600;color:#1E8A4C}';
   function ensureCss() {
     if (document.querySelector('style[data-gw-style]')) return;
     var style = document.createElement('style');
@@ -165,7 +186,7 @@
       return pill('Submitted','info','data-group-pill');
     }
     if (g.awaiting === 'needs_join') return pill('Join to invoice','info','data-group-pill');
-    if (myTurn(g)) return pill('Approve hours','wait','data-group-pill');
+    if (myTurn(g)) return pill('Confirm hours','wait','data-group-pill');
     if (!signed(g) && g.awaiting !== 'needs_hours') return pill('Needs sign-off','wait','data-group-pill');
     if (!hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
     if (g.awaiting === 'frozen') return pill('Ready to invoice','ok','data-group-pill');
@@ -192,26 +213,75 @@
   }
   function head(g) {
     return '<div class="gw-head"><div><div class="gw-title">'+esc(g.job_number)+(g.client_name ? ' · '+esc(g.client_name) : '')+'</div>'
-      + '<div class="gw-meta">'+esc(g.site_suburb || 'Group job')+(g.pot_total != null ? ' · pool $'+money(g.pot_total) : '')+'</div></div>'+(g.group_id ? headPill(g) : '')+'</div>';
+      + '<div class="gw-meta">'+esc(g.site_suburb || 'Group job')+(g.pot_total != null ? ' · crew total $'+money(g.pot_total) : '')+'</div></div>'+(g.group_id ? headPill(g) : '')+'</div>';
   }
   function sec(n, label, body, attr) { return '<div class="gw-sec" '+(attr||'')+'><div class="gw-label">'+n+' · '+esc(label)+'</div>'+body+'</div>'; }
 
-  // 1 · Crew hours: names and hours only, and who has approved.
+  // 1 · Crew hours: names and hours only. Each trade confirms their own
+  // hours (owner, 6 Nov 2026); nobody approves anyone else's. The button
+  // shows only while a server still asks this trade to confirm.
   function approveBtn(g) {
     if (!myTurn(g)) return '';
-    return '<button type="button" class="btn btn-primary gw-btn" data-group-approve="'+esc(g.group_id)+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.approve(this.getAttribute(\'data-group-approve\'))">'+(busy === g.group_id ? 'Approving…' : 'Approve everyone’s hours')+'</button>';
+    return '<button type="button" class="btn btn-primary gw-btn" data-group-approve="'+esc(g.group_id)+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.approve(this.getAttribute(\'data-group-approve\'))">'+(busy === g.group_id ? 'Confirming…' : 'Confirm my hours')+'</button>';
+  }
+  // A member logs their own hours for any day on the job; booked days are
+  // offered as quick picks. One save per day: saving a day again replaces it.
+  function canLog(g) { return !!g.group_id && !g.submitted && ['frozen','needs_join','awaiting_office'].indexOf(g.awaiting) === -1; }
+  function bookedDays(g) {
+    var r = routeJob(g.job_id);
+    return r && Array.isArray(r.booked_dates) ? r.booked_dates.filter(function(d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d)); }) : [];
+  }
+  function dayLabel(day) {
+    var d = new Date(String(day) + 'T00:00:00');
+    if (isNaN(d.getTime())) return String(day);
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()] + ' ' + d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  }
+  function draftOf(id) { return hoursDraft[id] || (hoursDraft[id] = { work_date: '', start_time: '', finish_time: '', break_minutes: '', error: '', saved: '', saving: false }); }
+  function hoursForm(g) {
+    if (!canLog(g)) return '';
+    var id = esc(g.group_id), d = draftOf(g.group_id), days = bookedDays(g);
+    var h = '<div class="gw-hours" data-group-hours-form="'+id+'"><div class="gw-label" style="margin:0">Add your hours</div>'
+      + '<div class="gw-sub">Any day you worked on this job. Saving confirms these are your hours. Saving a day again replaces it.</div>';
+    if (days.length) {
+      h += '<div class="gw-chips" data-group-hours-days>';
+      days.forEach(function(day) { h += '<button type="button" class="gw-chip'+(d.work_date === day ? ' on' : '')+'" data-group-hours-day="'+esc(day)+'" onclick="GroupWorkOrderInvoice.hoursInput(this.closest(\'[data-group-hours-form]\').getAttribute(\'data-group-hours-form\'),\'work_date\',this.getAttribute(\'data-group-hours-day\'),true)">'+esc(dayLabel(day))+'</button>'; });
+      h += '</div>';
+    }
+    function field(key, label, type, extra) {
+      return '<label'+(extra || '')+'>'+label+'<input class="gw-field" type="'+type+'" data-group-hours-field="'+key+'" value="'+esc(d[key])+'"'+(type === 'number' ? ' inputmode="numeric" min="0" step="5"' : '')+' oninput="GroupWorkOrderInvoice.hoursInput(this.closest(\'[data-group-hours-form]\').getAttribute(\'data-group-hours-form\'),this.getAttribute(\'data-group-hours-field\'),this.value)"'+(d.saving ? ' disabled' : '')+'></label>';
+    }
+    h += '<div class="gw-hgrid">'+field('work_date','Date worked','date',' class="gw-wide"')+field('start_time','Start','time')+field('finish_time','Finish','time')+field('break_minutes','Break (min)','number',' class="gw-wide"')+'</div>';
+    if (d.error) h += '<div class="gw-err" role="alert" data-group-hours-error>'+esc(d.error)+'</div>';
+    else if (d.saved) h += '<div class="gw-ok" role="status" data-group-hours-saved>'+esc(d.saved)+'</div>';
+    h += '<button type="button" class="btn btn-primary gw-btn" data-group-hours-save="'+id+'"'+(d.saving || busy ? ' disabled' : '')+' onclick="GroupWorkOrderInvoice.saveHours(this.getAttribute(\'data-group-hours-save\'))">'+(d.saving ? 'Saving…' : 'Save my hours')+'</button></div>';
+    return h;
+  }
+  function parseHours(d) {
+    var core = window.GroupWorkOrderCore;
+    if (core && typeof core.parseHours === 'function') return core.parseHours(d);
+    if (!d.work_date || !d.start_time || !d.finish_time) return { error: 'Enter the date, the start and the finish.' };
+    var br = String(d.break_minutes == null ? '' : d.break_minutes).trim();
+    if (br && (!isFinite(Number(br)) || Number(br) < 0)) return { error: 'Break minutes must be zero or more.' };
+    return { work_date: d.work_date, start_time: d.start_time, finish_time: d.finish_time, break_minutes: br ? Math.round(Number(br)) : null };
+  }
+  function hoursBody(id, parsed) {
+    var core = window.GroupWorkOrderCore;
+    if (core && typeof core.hoursBody === 'function') return core.hoursBody(id, parsed);
+    var body = { group_id: id, work_date: parsed.work_date, start_time: parsed.start_time, finish_time: parsed.finish_time };
+    if (parsed.break_minutes != null) body.break_minutes = parsed.break_minutes;
+    return body;
   }
   function crewHtml(g) {
     var crew = crewHours(g), ask = asksApproval(g);
-    if (!crew.length) return g.awaiting === 'needs_hours' ? '<div class="gw-locked" data-group-acceptance>Add your hours before your share can be calculated.</div>' : approveBtn(g);
+    if (!crew.length) return (g.awaiting === 'needs_hours' && !canLog(g) ? '<div class="gw-locked" data-group-acceptance>Add your hours before your share can be calculated.</div>' : '') + hoursForm(g) + approveBtn(g);
     var h = '<div data-group-crew-hours>';
     crew.forEach(function(c) {
       var tag = '';
-      if (ask) tag = approvedRow(g, c) ? pill(c.approved_by_office ? '✓ Office approved' : '✓ Approved','ok') : c.me ? pill('Your turn','wait') : pill('Waiting','no');
-      h += '<div class="gw-crewrow'+(ask ? '' : ' plain')+'" data-group-crew-row'+(c.me ? ' data-me' : '')+'><span class="gw-name"><b>'+esc(c.name)+'</b>'+(c.me ? ' <small>(you)</small>' : '')+'</span>'
-        + '<span class="gw-hrs">'+esc(hrs(c.hours))+'</span>'+(ask ? '<span class="gw-tag">'+tag+'</span>' : '')+'</div>';
+      if (ask && approvedRow(g, c)) tag = pill('✓ Confirmed','ok');
+      h += '<div class="gw-crewrow'+(tag ? '' : ' plain')+'" data-group-crew-row'+(c.me ? ' data-me' : '')+'><span class="gw-name"><b>'+esc(c.name)+'</b>'+(c.me ? ' <small>(you)</small>' : '')+'</span>'
+        + '<span class="gw-hrs">'+esc(hrs(c.hours))+'</span>'+(tag ? '<span class="gw-tag">'+tag+'</span>' : '')+'</div>';
     });
-    return h + '</div>' + approveBtn(g);
+    return h + '</div>' + hoursForm(g) + approveBtn(g);
   }
   // 2 · Client sign-off: a plain green tick once signed.
   function signHtml(g) {
@@ -238,8 +308,8 @@
       return h + crewLine(g);
     }
     if (!unlocked(g)) {
-      var text = !signed(g) && !hoursOk(g) ? 'Unlocks when all hours are approved and the client has signed.'
-        : !signed(g) ? 'Unlocks when the client has signed.' : 'Unlocks when all hours are approved.';
+      var text = !signed(g) && !hoursOk(g) ? 'Unlocks when the crew’s hours are confirmed and the client has signed.'
+        : !signed(g) ? 'Unlocks when the client has signed.' : 'Unlocks when the crew’s hours are confirmed.';
       return '<div class="gw-locked" data-group-locked>'+text+'</div>';
     }
     if (g.awaiting === 'frozen' && Number(g.my_share) > 0) {
@@ -257,7 +327,7 @@
       h += '<button type="button" class="btn btn-primary gw-btn" data-invoice-group-finalise="'+id+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.finalise(this.getAttribute(\'data-invoice-group-finalise\'))">'+(busy === g.group_id ? 'Finalising…' : 'Finalise group shares')+'</button>';
       return h + crewLine(g);
     }
-    var messages = {needs_hours:'Add your hours before your share can be calculated.', awaiting_others:'Waiting for the rest of the crew’s hours.', awaiting_rate:'The office needs to confirm a crew pay rate.', awaiting_signoff:'Needs a current sign-off before shares can be finalised.', awaiting_office:'Already finalised. Ask the office to check your share.'};
+    var messages = {needs_hours:'Add your hours in step 1 to see your share.', awaiting_others:'Waiting for the rest of the crew’s hours.', awaiting_rate:'The office needs to confirm a crew pay rate.', awaiting_signoff:'Needs a current sign-off before shares can be finalised.', awaiting_office:'Already finalised. Ask the office to check your share.'};
     return '<div class="gw-locked" data-group-acceptance>'+esc(messages[g.awaiting] || 'Not ready to invoice yet.')+'</div>';
   }
   function links(g) {
@@ -272,7 +342,7 @@
       return '<button type="button" class="btn btn-primary gw-btn" data-invoice-group-join="'+esc(g.group_id)+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.join(this.getAttribute(\'data-invoice-group-join\'))">Join group work order</button>'+links(g);
     }
     var n = 0, h = '';
-    if (crewHours(g).length || g.awaiting === 'needs_hours' || myTurn(g)) h += sec(++n, 'Crew hours', crewHtml(g), 'data-group-step="hours"');
+    if (crewHours(g).length || g.awaiting === 'needs_hours' || myTurn(g) || canLog(g)) h += sec(++n, 'Crew hours', crewHtml(g), 'data-group-step="hours"');
     h += sec(++n, 'Client sign-off', signHtml(g), 'data-group-step="signoff"');
     h += sec(++n, 'Your share', shareHtml(g), 'data-group-step="share"');
     return h + links(g);
@@ -291,21 +361,21 @@
   function routeHtml(card) {
     var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
     if (!route || route.route !== 'hours' || card.job_type !== 'patio') return '';
-    return '<p data-invoice-pay-route="hours" class="gw-locked">Current invoice route: ordinary pay.</p>';
+    return '<p data-invoice-pay-route="hours" class="gw-locked">Paid by the hour on this invoice.</p>';
   }
 
   // Keep every saved day, including excluded and blank entries. These are
   // recovery notes, not submitted group hours or an entitlement calculation.
   function savedEntriesHtml(cards) {
     if (!cards || !cards.length) return '';
-    var h = '<div data-saved-group-hours class="gw-sec"><strong>Saved draft entries</strong>'
-      + '<p class="gw-locked">Kept for review. These entries are not group hours and are not added as hourly invoice lines. Record the actual hours on the group work order.</p>';
+    var h = '<div data-saved-group-hours class="gw-sec"><strong>Times you saved earlier</strong>'
+      + '<p class="gw-locked">Kept so nothing is lost. They are not added to this invoice. This job is paid through the group, so add these hours to the group above.</p>';
     cards.forEach(function(c) {
       var date = c.work_date || c.scheduled_date || 'Date not entered';
       var time = c.start_time || c.finish_time ? (c.start_time || '?') + ' to ' + (c.finish_time || '?') : 'Times not entered';
       var hours = c.hours == null || c.hours === '' ? 'Hours not entered' : hrs(c.hours);
       h += '<div data-saved-group-entry style="padding:8px 0;border-bottom:1px solid var(--sw-border);overflow-wrap:anywhere">'
-        + '<div><b>' + esc(date) + '</b> · ' + esc(c.included === false ? 'Excluded from draft' : 'Saved estimate') + '</div>'
+        + '<div><b>' + esc(date) + '</b> · ' + esc(c.included === false ? 'Not ticked' : 'Saved') + '</div>'
         + '<div>' + esc(time) + ' · ' + esc(hours) + (c.break_minutes != null ? ' · Break ' + esc(c.break_minutes) + ' min' : '') + '</div>'
         + (c.description ? '<div>' + esc(c.description) + '</div>' : '') + '</div>';
     });
@@ -335,17 +405,40 @@
     }
     return list.map(function(g, i) { return '<div data-invoice-group="'+esc(g.group_id)+'" data-group-in-card data-invoice-pay-route="group">'+head(g)+(i === 0 ? (toggle || '') : '')+panel(g)+'</div>'; }).join('');
   }
-  // The group section: only groups with no job card this week.
+  // A job this week that is paid through a group but has no group to show:
+  // name it and say the next step, never offer it as an hours card.
+  function routeJobCard(r, readFailed) {
+    var d = r.discovery || {};
+    var step = readFailed ? 'This job is paid through its group work order. Try again to load it.'
+      : (r.next_step || (d.state === 'setup_required' && d.message) || 'This job is paid through its group work order.');
+    var h = '<div class="gw-card" data-group-route-job="'+esc(r.job_id)+'" data-invoice-pay-route="'+esc(r.route || 'group')+'">'
+      + head({ job_number: r.job_number, client_name: r.client_name, site_suburb: r.site_suburb, job_id: r.job_id })
+      + '<div class="gw-locked" data-group-next-step style="margin-top:10px">'+esc(step)+'</div>';
+    if (!readFailed && d.state === 'create') {
+      h += '<button type="button" class="btn btn-primary gw-btn" data-invoice-group-create="'+esc(r.job_id)+'"'+(busy ? ' disabled' : '')+' onclick="GroupWorkOrderInvoice.create(this.getAttribute(\'data-invoice-group-create\'))">'+(busy === String(r.job_id) ? 'Creating…' : 'Create group work order')+'</button>';
+    }
+    return h + links({ job_id: r.job_id }) + '</div>';
+  }
+  // The group section: groups and group-paid jobs with no job card this week.
   function html(cardJobIds) {
     ensureCss();
     var shown = {};
     (cardJobIds || []).forEach(function(id) { if (id != null) shown[String(id)] = true; });
     var h = '<section data-invoice-groups style="margin:16px 0"><div class="inv-section-label">Group work orders</div>';
     if (!loaded && (state === 'idle' || state === 'loading')) return h + '<p class="gw-locked">Checking your group work orders…</p></section>';
-    if (state === 'error') return h + '<p role="alert">Your group work orders could not be checked. Retry before submitting.</p><button type="button" class="btn btn-secondary" onclick="GroupWorkOrderInvoice.retry()">Retry group work orders</button></section>';
+    var waiting = routeJobs.filter(function(r) {
+      return !shown[String(r.job_id)] && (state === 'error' || !groups.some(function(g) { return String(g.job_id) === String(r.job_id); }));
+    });
+    if (state === 'error') {
+      h += '<div data-group-read-failed><p role="alert">Your group jobs could not be loaded. Your other jobs can still be invoiced.</p>'
+        + '<button type="button" class="btn btn-secondary" data-group-retry onclick="GroupWorkOrderInvoice.retry()">Try again</button></div>';
+      waiting.forEach(function(r) { h += routeJobCard(r, true); });
+      return h + '</section>';
+    }
     var rest = groups.filter(function(g) { return !shown[String(g.job_id)]; });
-    if (!rest.length) return '';
+    if (!rest.length && !waiting.length) return '';
     rest.forEach(function(g) { h += '<div class="gw-card" data-invoice-group="'+esc(g.group_id)+'">'+head(g)+panel(g)+'</div>'; });
+    waiting.forEach(function(r) { h += routeJobCard(r, false); });
     return h + '</section>';
   }
 
@@ -491,7 +584,33 @@
   }
 
   window.GroupWorkOrderInvoice = { use: use, load: load, html: html, jobCardHtml: jobCardHtml, discoveryHtml: discoveryHtml, routeHtml: routeHtml, savedEntriesHtml: savedEntriesHtml, isGroupJob: isGroupJob, items: items, total: total,
-    selectedIds: selectedIds, restore: restore, routesReady: function() { return state === 'ready'; }, ready: function() { return state === 'ready' && !busy; }, reset: reset,
+    selectedIds: selectedIds, restore: restore, setRouteJobs: setRouteJobs,
+    // routesReady: the group read succeeded. routesSettled: it finished, ok or
+    // not; ordinary job cards render and submit once it has settled.
+    routesReady: function() { return state === 'ready'; }, routesSettled: settled, readFailed: function() { return state === 'error'; },
+    ready: function() { return settled() && !busy; }, reset: reset,
+    hoursInput: function(id, key, value, rerender) {
+      if (['work_date','start_time','finish_time','break_minutes'].indexOf(key) === -1) return;
+      var d = draftOf(id);
+      if (d.saving) return;
+      d[key] = String(value == null ? '' : value); d.error = ''; d.saved = '';
+      if (rerender) changed();
+    },
+    saveHours: function(id) {
+      var g = find(id), d = draftOf(id);
+      if (!g || !canLog(g) || d.saving || busy || !api) return;
+      var parsed = parseHours(d);
+      if (parsed.error) { d.error = parsed.error; changed(); return; }
+      d.saving = true; d.error = ''; d.saved = ''; changed();
+      api('submit_group_work_order_hours', null, hoursBody(id, parsed)).then(function(res) {
+        if (res && res.ok === false) throw new Error(res.error || res.message || 'Your hours were not saved. Try again.');
+        hoursDraft[id] = { work_date: '', start_time: '', finish_time: '', break_minutes: '', error: '', saved: 'Saved ' + dayLabel(parsed.work_date) + '.', saving: false };
+        load(true);
+      }).catch(function(err) {
+        // Keep what the trade typed and say why it did not save.
+        d.saving = false; d.error = (err && err.message) || 'Your hours were not saved. Try again.'; changed();
+      });
+    },
     retry: function() { load(true); changed(); },
     openSign: openSign,
     status: function(id) {
@@ -509,14 +628,14 @@
       var name = (typeof options.userName === 'function' && options.userName()) || (me && me.name) || '';
       busy = id; changed();
       api('sign_group_work_order', null, {group_id:id, signer_name:String(name)}).then(function(res) {
-        if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
+        if (!res || res.ok !== true) throw new Error('Your hours were not confirmed. Try again.');
         busy = ''; load(true);
-      }).catch(function(err) { busy = ''; say(err.message || 'Could not approve the hours.', true); changed(); });
+      }).catch(function(err) { busy = ''; say(err.message || 'Your hours were not confirmed. Try again.', true); changed(); });
     },
     create: function(jobId) {
-      var route = payableRoutes.find(function(r) { return String(r.job_id) === String(jobId); });
+      var route = payableRoutes.find(function(r) { return String(r.job_id) === String(jobId); }) || routeJob(jobId);
       if (busy || !route || !route.discovery || route.discovery.state !== 'create') return;
-      busy = jobId; changed();
+      busy = String(jobId); changed();
       api('create_group_work_order', null, {job_id:jobId}).then(function() {busy='';load(true);})
         .catch(function(err) {busy='';say(err.message || 'Could not create the group work order.',true);changed();});
     },

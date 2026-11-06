@@ -116,7 +116,7 @@ test('a trade sees only the total and their share, and nothing while the action 
     return GroupWorkOrderTrade.paint('job-1');
   });
   const card = page.locator('#gwoMount');
-  await expect(card).toContainText('Total $1,000.00');
+  await expect(card).toContainText('Crew total $1,000.00');
   await expect(card).toContainText('Your share $400.00');
   await expect(card).not.toContainText('5000');
   await expect(card).not.toContainText('7777');

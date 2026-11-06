@@ -6456,7 +6456,7 @@ __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
 __swOpsStampAssets([
   {t:'js', u:'shared/job-work-order.js?v=4'},
   {t:'js', u:'modules/ops-job-work-order.js?v=5'},
-  {t:'js', u:'shared/group-work-order.js?v=office-hours-20261030'},
+  {t:'js', u:'shared/group-work-order.js?v=invoice-hours-20261106'},
   {t:'js', u:'modules/ops-group-work-order.js?v=office-hours-20261030'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
@@ -20941,14 +20941,63 @@ function swTradeInvoiceDeductionNoteHtml(inv, queryNoteShown) {
 }
 // </trade-recurring-deduction-ops>
 
+// Trade Bills writes names, notes and numbers the trades and the office typed.
+function swTradeBillEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+// The Sunday that ends an invoice week. Older rows carry only week_start.
+function swTradeBillWeekEnding(inv) {
+  var end = String((inv && (inv.week_end || inv.week_ending)) || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(end)) return end;
+  var start = String((inv && inv.week_start) || '').slice(0, 10);
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start);
+  if (!m) return '';
+  var d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 6));
+  return d.toISOString().slice(0, 10);
+}
+// One plain status per row. What Xero says about the bill outranks our own
+// row: a voided or deleted bill must never read as a live, green bill.
+var SW_TRADE_BILL_STATUS = {
+  draft: ['Draft', 'mid'], pending_ops_review: ['Needs checking', 'orange'], 'ops-reject': ['Sent back to trade', 'red'],
+  pending_acknowledgment: ['Waiting on trade to confirm', 'orange'], acknowledged: ['Confirmed by trade', 'orange'],
+  approved: ['Approved', 'green'], pushed_to_xero: ['Draft bill in Xero', 'green'], pushed: ['Draft bill in Xero', 'green'],
+  paid: ['Paid', 'green'], failed: ['Failed', 'red']
+};
+function swTradeBillStatus(inv) {
+  var bill = String((inv && inv.xero_bill_status) || '').toUpperCase();
+  if (bill === 'VOIDED') return { label: 'Voided in Xero', tone: 'red', xero: 'VOIDED' };
+  if (bill === 'DELETED') return { label: 'Deleted in Xero', tone: 'red', xero: 'DELETED' };
+  if (bill === 'PAID') return { label: 'Paid in Xero', tone: 'green', xero: 'PAID' };
+  var own = SW_TRADE_BILL_STATUS[String((inv && inv.status) || '')];
+  if (bill === 'AUTHORISED' && (!own || own[1] === 'green')) return { label: 'Approved in Xero', tone: 'green', xero: 'AUTHORISED' };
+  if (own) return { label: own[0], tone: own[1], xero: bill || '' };
+  return { label: String((inv && inv.status) || 'Unknown').replace(/[_-]/g, ' '), tone: 'mid', xero: bill || '' };
+}
+
+var _tradeBillsLoadSeq = 0;
 async function loadTradeBills() {
+  var seq = ++_tradeBillsLoadSeq;
   try {
     var data = await opsFetch('list_trade_invoices');
-    renderTradeBillTable(data.invoices || []);
+    if (seq !== _tradeBillsLoadSeq) return;
+    if (!data || !Array.isArray(data.invoices)) throw new Error('Trade bills did not come back.');
+    renderTradeBillTable(data.invoices);
     renderTradeRatesPanel(data.rates || []);
   } catch (e) {
+    if (seq !== _tradeBillsLoadSeq) return;
     console.error('loadTradeBills error:', e);
+    renderTradeBillLoadError(e);
   }
+}
+
+// A failed load clears the table: an old list must never look current.
+function renderTradeBillLoadError(e) {
+  var tbody = document.getElementById('tradeBillTableBody');
+  if (!tbody) return;
+  var why = e && e.message ? ' (' + swTradeBillEsc(String(e.message).slice(0, 160)) + ')' : '';
+  tbody.innerHTML = '<tr data-trade-bills-error><td colspan="6" style="text-align:center;padding:24px;color:var(--sw-red);font-weight:600">'
+    + 'Trade bills did not load' + why + '. Nothing shown here is current.'
+    + ' <button type="button" onclick="loadTradeBills()" style="margin-left:8px;padding:4px 10px;border:1px solid var(--sw-border);border-radius:6px;background:var(--sw-card);cursor:pointer;font-weight:600">Try again</button></td></tr>';
 }
 
 function renderTradeBillTable(invoices) {
@@ -20966,38 +21015,41 @@ function renderTradeBillTable(invoices) {
   });
   var html = '';
   ordered.forEach(function(inv) {
-    var tradeName = (inv.users && inv.users.name) || '—';
-    // LIVE schema: week_start / total_inc / total_hours / relational lines. [D3]
-    var we = inv.week_start || inv.week_ending || '';
+    var tradeName = swTradeBillEsc((inv.users && inv.users.name) || '—');
+    // LIVE schema: week_start / week_end / total_inc / total_hours / relational lines. [D3]
+    // Group shares and work-order invoices have no week.
+    var weekEnd = swTradeBillWeekEnding(inv);
+    var we = weekEnd ? swTradeBillEsc(weekEnd) : '<span data-trade-bill-no-week style="color:var(--sw-text-sec)">No week</span>';
     var hours = inv.total_hours != null ? Number(inv.total_hours)
       : (Array.isArray(inv.lines) ? inv.lines.reduce(function(s, li) { return s + (Number(li.total_hours) || 0); }, 0) : 0);
     var total = inv.total_inc != null ? Number(inv.total_inc) : Number(inv.total || 0);
     var isReview = inv.status === 'pending_ops_review';
-    var isPaid = (inv.status === 'pushed_to_xero' || inv.status === 'paid' || inv.status === 'approved' || inv.status === 'pushed');
-    var statusClass = isPaid ? 'color:var(--sw-green)' : (inv.status === 'draft' ? 'color:var(--sw-mid)' : (isReview ? 'color:var(--sw-orange)' : 'color:var(--sw-red)'));
-    var statusLabel = (inv.status || '').replace(/_/g, ' ').replace(/-/g, ' ');
+    var st = swTradeBillStatus(inv);
+    var statusClass = 'color:var(--sw-' + st.tone + ')';
+    var statusLabel = swTradeBillEsc(st.label);
     var badge = isReview ? '<span style="background:var(--sw-orange);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px">NEEDS VERIFICATION</span>' : '';
     var billLink = inv.xero_bill_id
-      ? '<a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + inv.xero_bill_id + '" target="_blank" style="color:var(--sw-blue);text-decoration:none">' + (inv.invoice_number || 'View') + ' &#8599;</a>'
-      : (inv.invoice_number || '—');
+      ? '<a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + encodeURIComponent(String(inv.xero_bill_id)) + '" target="_blank" rel="noopener" style="color:var(--sw-blue);text-decoration:none">' + swTradeBillEsc(inv.invoice_number || 'View') + ' &#8599;</a>'
+      : swTradeBillEsc(inv.invoice_number || '—');
+    var idArg = swTradeBillEsc(String(inv.id || '').replace(/[^A-Za-z0-9-]/g, ''));
     html += '<tr' + (isReview ? ' style="background:rgba(241,90,41,0.05)"' : '') + '>';
     html += '<td>' + tradeName + swTradeInvoiceWhenHtml(inv) + '</td>';
     html += '<td>' + we + badge + '</td>';
     html += '<td>' + hours.toFixed(1) + '</td>';
     html += '<td>' + swTradeInvoiceTotalHtml(inv, total) + '</td>';
     html += '<td>' + billLink + '</td>';
-    html += '<td style="' + statusClass + ';font-weight:600;text-transform:capitalize">' + statusLabel;
+    html += '<td data-trade-bill-status="' + swTradeBillEsc(st.xero || inv.status || '') + '" style="' + statusClass + ';font-weight:600">' + statusLabel;
     html += swTradeInvoiceDeductionNoteHtml(inv, isReview && !!inv.query_note);
     if (isReview) {
-      if (inv.query_note) html += '<div style="font-size:10px;color:var(--sw-text-sec);font-weight:400;text-transform:none;margin-top:2px">' + inv.query_note + '</div>';
+      if (inv.query_note) html += '<div style="font-size:10px;color:var(--sw-text-sec);font-weight:400;text-transform:none;margin-top:2px;white-space:pre-wrap">' + swTradeBillEsc(inv.query_note) + '</div>';
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
-      html += '<button onclick="approveTradeInvoice(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-green);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Approve &amp; push</button>';
-      html += '<button onclick="rejectTradeInvoice(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-red);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Reject</button>';
+      html += '<button data-trade-bill-approve="' + idArg + '" data-trade-name="' + tradeName + '" data-total="' + total.toFixed(2) + '" onclick="approveTradeInvoice(\'' + idArg + '\', this)"' + (_tradeBillApproving[inv.id] ? ' disabled' : '') + ' style="padding:4px 10px;background:var(--sw-green);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">' + (_tradeBillApproving[inv.id] ? 'Approving…' : 'Approve &amp; push') + '</button>';
+      html += '<button onclick="rejectTradeInvoice(\'' + idArg + '\')" style="padding:4px 10px;background:var(--sw-red);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Reject</button>';
       html += '</div>';
     }
     if ((inv.status === 'approved' || inv.status === 'acknowledged') && !inv.xero_bill_id) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
-      html += '<button onclick="retryPushToXero(\'' + inv.id + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry: add to Xero as a draft</button>';
+      html += '<button onclick="retryPushToXero(\'' + idArg + '\')" style="padding:4px 10px;background:var(--sw-blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Retry: add to Xero as a draft</button>';
       html += '</div>';
     }
     html += '</td>';
@@ -21008,15 +21060,25 @@ function renderTradeBillTable(invoices) {
 
 // Approve a pending_ops_review trade invoice, then fire the Xero push (the push
 // gate accepts status 'approved'). One tap for Shaun. [F6 Option A]
-function approveTradeInvoice(invoiceId) {
+// One press per invoice: a confirm first, then the button stays disabled until
+// both calls settle, so a double tap cannot approve or push twice.
+var _tradeBillApproving = {};
+function approveTradeInvoice(invoiceId, btn) {
+  if (!invoiceId || _tradeBillApproving[invoiceId]) return;
+  var who = btn && btn.getAttribute('data-trade-name') ? btn.getAttribute('data-trade-name') : 'this trade';
+  var amount = btn && btn.getAttribute('data-total') ? ' for $' + btn.getAttribute('data-total') : '';
+  if (!window.confirm('Approve the invoice from ' + who + amount + ' and create its draft bill in Xero?')) return;
+  _tradeBillApproving[invoiceId] = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
   opsPost('approve_trade_invoice', { invoice_id: invoiceId }).then(function() {
     return opsPost('push_trade_invoice_to_xero', { invoice_id: invoiceId });
   }).then(function() {
     showToast('Approved. Draft in Xero', 'success');
-    loadTradeBills();
   }).catch(function(e) {
     // Approve may have succeeded even if the push failed — reload to reflect state.
     showToast('Error: ' + (e && e.message ? e.message : 'approve/push failed'), 'warning');
+  }).finally(function() {
+    delete _tradeBillApproving[invoiceId];
     loadTradeBills();
   });
 }
@@ -21053,8 +21115,10 @@ function renderTradeRatesPanel(rates) {
   var html = '<div style="display:flex;gap:8px;flex-wrap:wrap">';
   rates.forEach(function(r) {
     var name = r.users?.name || 'Unknown';
-    html += '<div style="background:var(--sw-card);padding:8px 12px;border-radius:8px;box-shadow:var(--sw-shadow);font-size:13px;cursor:pointer" onclick="openRateModal(\'' + r.user_id + '\',\'' + name.replace(/'/g, "\\'") + '\',' + r.hourly_rate + ')">';
-    html += '<span style="font-weight:600">' + name + '</span>';
+    var nameArg = swTradeBillEsc(String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+    var userArg = swTradeBillEsc(String(r.user_id || '').replace(/[^A-Za-z0-9-]/g, ''));
+    html += '<div style="background:var(--sw-card);padding:8px 12px;border-radius:8px;box-shadow:var(--sw-shadow);font-size:13px;cursor:pointer" onclick="openRateModal(\'' + userArg + '\',\'' + nameArg + '\',' + (Number(r.hourly_rate) || 0) + ')">';
+    html += '<span style="font-weight:600">' + swTradeBillEsc(name) + '</span>';
     html += ' <span style="color:var(--sw-green);font-weight:700">$' + Number(r.hourly_rate).toFixed(2) + '/hr</span>';
     html += '</div>';
   });

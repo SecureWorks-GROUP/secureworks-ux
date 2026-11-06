@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=discovery-20261106"></script>
-  <script src="modules/trade-group-work-order.js?v=discovery-20261106"></script>
-  <script src="modules/trade-group-invoice.js?v=draft-route-20261106"></script>
+  <script src="shared/group-work-order.js?v=invoice-hours-20261106"></script>
+  <script src="modules/trade-group-work-order.js?v=invoice-hours-20261106"></script>
+  <script src="modules/trade-group-invoice.js?v=invoice-hours-20261106"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -5721,8 +5721,32 @@
   var _offlineInvoiceWorkOrderById = {};
 
   function _workOrderDirectInvoiceAllowed(wo) {
-    return !!(wo && wo.already_invoiced !== true && wo.can_invoice === true);
+    return !!(wo && wo.already_invoiced !== true && wo.can_invoice === true && wo.can_invoice_direct !== false);
   }
+
+  // A work order the office has not marked complete (or has no finish day)
+  // cannot be invoiced on its own. The card says why and offers the way on:
+  // the trade's hours on the Weekly Invoice for the week of their booking.
+  function _workOrderDirectBlockHtml(wo) {
+    if (!wo || wo.already_invoiced === true || !wo.direct_invoice_block_reason) return '';
+    var msg = wo.direct_invoice_block_message || 'This work order cannot be invoiced on its own yet. Ask the office to mark it complete.';
+    var h = '<div data-wo-direct-block="' + esc(wo.direct_invoice_block_reason) + '" style="font-size:13px;color:var(--sw-text-sec);margin-top:10px">' + esc(msg) + '</div>';
+    if (wo.hours_week_ending && /^\d{4}-\d{2}-\d{2}$/.test(String(wo.hours_week_ending))) {
+      h += '<button type="button" data-wo-bill-hours="' + esc(wo.hours_week_ending) + '" onclick="openHoursWeek(this.getAttribute(\'data-wo-bill-hours\'))" style="width:100%;padding:12px;background:var(--sw-card);color:var(--sw-dark);border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px;min-height:44px">Bill my hours for the week ending ' + esc(formatWeekEndingShort(wo.hours_week_ending)) + '</button>';
+    }
+    return h;
+  }
+  function formatWeekEndingShort(day) {
+    var d = new Date(String(day) + 'T00:00:00');
+    if (isNaN(d.getTime())) return String(day || '');
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  window.openHoursWeek = function(weekEnd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekEnd || ''))) return;
+    _hoursWeekEnd = String(weekEnd);
+    showView('hours');
+  };
 
   function _offlineInvoiceWorkOrdersReadComplete(res) {
     if (typeof _workOrdersHydratePayloadComplete === 'function') {
@@ -14149,11 +14173,13 @@
         } else if (isPerMetreUser() && match.can_add_to_weekly_invoice) {
           authorizeWorkOrders([match]);
           ch += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(match.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(match)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Add to Weekly Invoice</button>';
-        } else if (match.can_invoice) {
+        } else if (match.can_invoice && match.can_invoice_direct !== false) {
           authorizeWorkOrders([match]);
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
+        } else if (match.direct_invoice_block_reason) {
+          ch += _workOrderDirectBlockHtml(match);
         } else {
-          ch += '<div style="font-size:12px;color:#92400e;margin-top:10px">Not ready -- job not complete</div>';
+          ch += '<div style="font-size:12px;color:#92400e;margin-top:10px">Not ready yet. The job is not finished.</div>';
         }
 
         el.innerHTML = ch;
@@ -20986,7 +21012,7 @@
     var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
-      _hoursData = data;
+      _hoursData = data; _noteInvoiceGroupRoutes(data);
       _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       _invGst = _invoiceGstDefault(data);
@@ -21184,7 +21210,7 @@
     var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
-      _hoursData = data;
+      _hoursData = data; _noteInvoiceGroupRoutes(data);
       _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       openInvoiceBuilder();
@@ -21381,7 +21407,7 @@
       var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
       api('my_hours', { week_ending: toEnd }).then(function(data) {
         if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx) || !_invoiceBuilderOpen) return;
-        _hoursData = data;
+        _hoursData = data; _noteInvoiceGroupRoutes(data);
         _noteRunningInvoiceDraftFlag(data);
         _tradeRate = data.rate;
         buildJobCards();
@@ -22090,9 +22116,9 @@
     var state = _weeklyWoInvoice;
     var selectedCount = state.workOrders.filter(function(workOrder) { return state.selected[String(workOrder.id)] === true; }).length;
     var html = '<div class="wwi-shell">';
-    html += '<div class="wwi-toolbar"><h2>Weekly Invoice</h2><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div>';
+    html += '<div class="wwi-toolbar"><h2>Work Order Invoice</h2><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div>';
     html += '<div class="hours-week-nav"><button aria-label="Previous invoice week" onclick="shiftWeeklyWorkOrderWeek(-1)">&larr;</button><div class="hours-week-label">' + formatWeekRange(_hoursWeekEnd) + '</div><button aria-label="Next invoice week" onclick="shiftWeeklyWorkOrderWeek(1)">&rarr;</button></div>';
-    html += '<div class="wwi-intro"><strong>SecureWorks calculates this invoice.</strong> Select the completed work orders and deductions that belong to the week. Prices, deduction rates, job subtotals and TO BE PAID are confirmed by the server when you save.</div>';
+    html += '<div class="wwi-intro"><strong>SecureWorks calculates this invoice.</strong> Select the completed work orders and deductions that belong to the week. Prices, deductions and the amount to be paid are worked out by SecureWorks when you tap Save &amp; calculate.</div>';
 
     if (state.workOrders.length === 0) {
       html += '<div class="hours-no-data">No completed work orders available for this week</div>';
@@ -22159,7 +22185,7 @@
     html += '<div data-weekly-invoice-result>' + _weeklyInvoicePreviewHtml(state.preview) + '</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy || (state.saveUnresolved && !state.draftId) ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : (state.saveUnresolved && !state.draftId ? 'Confirming...' : 'Save & calculate')) + '</button>';
     html += '<button class="hours-submit-btn" data-weekly-invoice-submit ' + (state.busy || state.dirty || !state.preview ? 'disabled ' : '') + 'onclick="submitWeeklyWorkOrderInvoice()">Submit Invoice</button></div>';
-    html += '<div class="wwi-count">Submitting creates a draft bill in Xero. If a selection changes, save again before submitting.</div>';
+    html += '<div class="wwi-count">Submit sends this invoice to the office to check and pay. If you change a selection, save again before you submit.</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openVerificationInbox()">Review Crew Hours</button><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button></div></div>';
     container.innerHTML = html;
   }
@@ -22260,7 +22286,7 @@
     var preview = state.preview;
     var payable = _weeklyInvoiceMoney(preview.to_be_paid);
     var ctx = _invoiceApiContext();
-    _confirmOneInvoiceForWeek(state.weekEnd, 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '. A DRAFT bill will be created in Xero.').then(function(ok) {
+    _confirmOneInvoiceForWeek(state.weekEnd, 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '. It goes to the office to check and pay.').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       if (!_weeklyStateCurrent(state, revision)) {
@@ -22340,6 +22366,7 @@
     html += '<div class="inv-header"><div class="inv-header-row title">' + esc(inv.invoice_number || 'Weekly Invoice') + '</div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end || _hoursWeekEnd) + '</span></div>';
     html += _invoiceDetailStatusHtml(inv) + '</div>';
+    html += _invoiceOfficeNoteHtml(inv);
     if (_invoiceXeroPushPending(inv)) html += '<div class="wwi-warning">Invoice saved with exact totals. Xero sync is pending; do not submit it again.</div>';
     html += _weeklyInvoicePreviewHtml(inv);
     if (inv.notes) html += '<div class="wwi-panel"><div class="wwi-panel-title">Notes</div><div class="wwi-count">' + esc(inv.notes) + '</div></div>';
@@ -22622,12 +22649,13 @@
 
     // Header
     html += '<div class="inv-header">';
-    html += '<div class="inv-header-row title">' + (inv.invoice_number || 'Invoice') + '</div>';
+    html += '<div class="inv-header-row title">' + esc(inv.invoice_number || 'Invoice') + '</div>';
     html += '<div class="inv-header-row"><span>From</span><span style="color:#fff;font-weight:600">' + esc(tradeName) + '</span></div>';
     html += '<div class="inv-header-row"><span>To</span><span style="color:#fff;font-weight:600">SecureWorks Group Pty Ltd</span></div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end) + '</span></div>';
     html += _invoiceDetailStatusHtml(inv);
     html += '</div>';
+    html += _invoiceOfficeNoteHtml(inv);
 
     // Labour lines
     var labourLines = lines.filter(function(l) { return !l.line_type || l.line_type === 'labour'; });
@@ -22847,7 +22875,8 @@
       if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid (Xero)' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
       if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
       if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
-      if (ours === 'ops-reject' || ours === 'failed' || ours === 'rejected') return { label: 'Not accepted', cls: 'void' };
+      if (ours === 'ops-reject' || ours === 'rejected') return { label: 'Sent back', cls: 'void' };
+      if (ours === 'failed') return { label: 'Not accepted', cls: 'void' };
       if (ours === 'pending_ops_review' || ours === 'queried') return { label: 'Under review', cls: 'review' };
       if (Number(row.amount_paid || 0) > 0) return { label: 'Part paid', cls: 'owed' };
       if (bill === 'AUTHORISED') return { label: 'Approved in Xero', cls: 'owed' };
@@ -23111,11 +23140,11 @@
 
     invoices.forEach(function(inv) {
       var row = _invoiceHistoryMoneyRow(inv);
-      var dateLabel = row.week_end ? 'Week ending ' + formatDateShort(row.week_end) : (inv.invoice_number || 'Expense Invoice');
+      var dateLabel = esc(row.week_end ? 'Week ending ' + formatDateShort(row.week_end) : (inv.invoice_number || 'Expense Invoice'));
       var onclick = inv.status === 'draft' ? 'openInvoiceDraft(\'' + inv.id + '\')' : 'viewInvoiceDetail(\'' + inv.id + '\')';
       html += '<div class="inv-history-item" data-inv-history="' + esc(inv.id) + '" onclick="' + onclick + '">';
       html += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
-      html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
+      html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(inv.invoice_number || inv.xero_bill_number || '') + '</div>' + _invoiceOfficeNoteHtml(inv, true) + '</div>';
       html += _invoiceHistoryRightHtml(row);
       html += '</div>';
     });
@@ -23428,6 +23457,17 @@
       h += '<div class="mm-inv-sub" data-inv-xero-change>' + esc(MyMoneyCore.xeroChangeLabel(line)) + ' (in Xero)</div>';
     });
     return h;
+  }
+
+  // Why the office sent an invoice back or queried a line, in its own words.
+  // ops-api sends only the office's text as `office_note`, never system notes.
+  function _invoiceOfficeNoteHtml(inv, short) {
+    var note = String((inv && inv.office_note) || '').trim();
+    if (!note) return '';
+    if (short && note.length > 140) note = note.slice(0, 137).replace(/\s+\S*$/, '') + '…';
+    if (short) return '<div class="mm-inv-sub" data-inv-office-note style="white-space:pre-wrap;color:#B9631A">Office: ' + esc(note) + '</div>';
+    return '<div data-inv-office-note role="status" style="margin:10px 0;padding:10px 12px;border-radius:10px;border-left:3px solid #E67E22;background:#FDF1E5;font-size:13px;color:var(--sw-text)">'
+      + '<b>From the office</b><div style="margin-top:4px;white-space:pre-wrap">' + esc(note) + '</div></div>';
   }
 
   function _invoiceDetailStatusHtml(inv) {
@@ -23859,7 +23899,7 @@
     var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: weekEnd }).then(function(data) {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
-      _hoursData = data;
+      _hoursData = data; _noteInvoiceGroupRoutes(data);
       _noteRunningInvoiceDraftFlag(data);
       _tradeRate = data.rate;
       if (data && (String(data.invoice_type || '') === 'per_metre' || data.is_per_metre === true)) {
@@ -23885,6 +23925,7 @@
   function _applyInvDraft(draft) {
     if (window.GroupWorkOrderInvoice) {
       GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }, userName:function() { return (_user && _user.name) || ''; }, toast:toast});
+      _noteInvoiceGroupRoutes(_hoursData);
       GroupWorkOrderInvoice.restore(draft.groupIds || []);
     }
     _invRows = draft.rows || [];
@@ -24277,7 +24318,7 @@
     opts = opts || {};
     if (!runningInvoiceDraftOn()) return Promise.resolve(false);
     if (_invRunningHydrating && opts.quiet) return Promise.resolve(false);
-    if (jobCentricEnabled() && !invoiceGroupsReady()) { if (!opts.quiet) toast('Wait for your group work orders to be checked before saving.', true); return Promise.resolve(false); }
+    if (jobCentricEnabled() && !invoiceGroupsReady()) { if (!opts.quiet) toast('Wait a moment while your group jobs are checked, then save.', true); return Promise.resolve(false); }
     var core = window.TradeInvoiceRunningDraft;
     if (!core) return Promise.resolve(false);
     _syncRowsFromDOM();
@@ -25547,7 +25588,19 @@
       // phantom/unlinked — auto-include silently blocks submit. Render them
       // unchecked so the trade cannot accidentally submit a blank card.
       var isBlankJob = !job.job_number && !job.client_name;
-      _jobCards.push(_newJobCard({
+      // After the office sent an invoice back, the week reopens with what the
+      // trade entered last time, so they fix it instead of typing it again.
+      var prev = a.previous_entry && typeof a.previous_entry === 'object' ? a.previous_entry : null;
+      var prevFields = prev ? {
+        work_date: prev.work_date || '',
+        start_time: prev.start_time || '',
+        finish_time: prev.finish_time || '',
+        break_minutes: Number(prev.break_minutes) > 0 ? Number(prev.break_minutes) : 0,
+        description: prev.description || '',
+        previous_invoice_number: prev.invoice_number || '',
+        previous_office_note: prev.office_note || ''
+      } : {};
+      _jobCards.push(_newJobCard(Object.assign({
         assignment_id: a.id,
         job_id: a.job_id || (job && job.id) || null,
         job_number: job.job_number || '',
@@ -25566,8 +25619,27 @@
         description: '',
         included: !isBlankJob,
         _blank_job: isBlankJob
-      }));
+      }, prevFields)));
     });
+  }
+
+  // The office's reasons for the invoices whose entries were brought back.
+  function _sentBackNoticeHtml() {
+    var seen = {}, notes = [];
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.previous_invoice_number) return;
+      var key = c.previous_invoice_number;
+      if (seen[key]) return;
+      seen[key] = true;
+      notes.push({ number: key, note: c.previous_office_note || '' });
+    });
+    if (!notes.length) return '';
+    var h = '<div data-invoice-sent-back role="status" style="margin:10px 0;padding:10px 12px;border-radius:10px;border-left:3px solid #E67E22;background:#FDF1E5;font-size:13px;color:var(--sw-text)">'
+      + '<b>The office sent an invoice back.</b> Your times from it are filled in below. Check them, fix what the office asked, and submit again.';
+    notes.forEach(function(n) {
+      h += '<div style="margin-top:6px"><b>' + esc(n.number) + '</b>' + (n.note ? ': <span style="white-space:pre-wrap">' + esc(n.note) + '</span>' : '') + '</div>';
+    });
+    return h + '</div>';
   }
 
   // The boxes on an hours card: date worked, start, finish and break, then the
@@ -25760,7 +25832,7 @@
   // that job (Captain 2026-10-13) bill instead. A searched-in card keeps its own.
   function _pinAssignedCardRates() {
     // Wait for routing before replacing a saved rate on a possible group job.
-    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) return;
+    if (!invoiceRoutesSettled()) return;
     var data = _hoursData || {};
     var usualRate = Number(data.rate || _tradeRate || 0);
     var editable = _assignedRateEditable();
@@ -25789,7 +25861,15 @@
   function invoiceGroupJob(c) { return !!(window.GroupWorkOrderInvoice && c && GroupWorkOrderInvoice.isGroupJob(c.job_id)); }
   function invoiceGroupItems() { return window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.items() : []; }
   function invoiceGroupTotal() { return window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.total() : 0; }
+  // Ready once the group read has finished, even if it failed: a failed read
+  // only holds the group jobs, never the trade's ordinary jobs.
   function invoiceGroupsReady() { return !window.GroupWorkOrderInvoice || GroupWorkOrderInvoice.ready(); }
+  function invoiceRoutesSettled() { return !window.GroupWorkOrderInvoice || (GroupWorkOrderInvoice.routesSettled ? GroupWorkOrderInvoice.routesSettled() : GroupWorkOrderInvoice.routesReady()); }
+  // my_hours names the jobs this week that are paid through a group, so they
+  // are never shown as hours cards, even before or without the group read.
+  function _noteInvoiceGroupRoutes(data) {
+    if (window.GroupWorkOrderInvoice && GroupWorkOrderInvoice.setRouteJobs) GroupWorkOrderInvoice.setRouteJobs((data && data.group_route_jobs) || []);
+  }
   function refreshInvoiceGroups() {
     if (!_invoiceBuilderOpen) return;
     _syncJobCardsFromDOM(); _syncRowsFromDOM(); _syncInvLumpLinesFromDOM();
@@ -25810,8 +25890,8 @@
       + GroupWorkOrderInvoice.savedEntriesHtml(_jobCards.filter(function(entry) { return String(entry.job_id) === String(c.job_id); })) + '</div>';
   }
   function renderJobCardsHtml() {
-    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) {
-      return '<p data-invoice-routes-pending role="status">Checking invoice routes. Your saved entries are kept.</p>';
+    if (!invoiceRoutesSettled()) {
+      return '<p data-invoice-routes-pending role="status">Checking which jobs are paid through a group. Your entries are kept.</p>';
     }
     _pinAssignedCardRates();
     var data = _hoursData || {};
@@ -25822,6 +25902,7 @@
 
     var html = '';
     html += '<div class="inv-section-label" style="margin-top:16px">Your jobs this week</div>';
+    html += _sentBackNoticeHtml();
     if (isPerMetreUser()) {
       html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">A work-order allocation on the job is another option here. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it.</div>';
       if (_pmWoHydrateState === 'pending') {
@@ -26205,7 +26286,7 @@
   // the onchange event (common on mobile where onchange fires on blur).
   function _syncJobCardsFromDOM(skipTime) {
     // No ordinary inputs are shown until the server resolves the job routes.
-    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) return;
+    if (!invoiceRoutesSettled()) return;
     _jobCards.forEach(function(c, i) {
       var idx = (c._idx != null) ? c._idx : i;
       // The group panel has no ordinary inputs. Preserve the recovery entries.
@@ -27548,7 +27629,7 @@
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
     var ctx = _invoiceApiContext();
-    if (!invoiceGroupsReady()) { toast('Check your group work orders before submitting.', true); return; }
+    if (!invoiceGroupsReady()) { toast('Wait a moment while your group jobs are checked, then submit.', true); return; }
     if (_jobCentricSubmitBlockedByHydrate()) {
       toast(_pmWoHydrateState === 'error'
         ? 'Work-order amounts did not load. Retry before submitting a work-order card.'
@@ -27962,6 +28043,7 @@
 
     if (!isExpense && jobCentricEnabled() && window.GroupWorkOrderInvoice) {
       GroupWorkOrderInvoice.use(function(action, params, body) { return api(action, params, body); }, refreshInvoiceGroups, _user && _user.id, {gstOn:function() { return _invGst; }, userName:function() { return (_user && _user.name) || ''; }, toast:toast});
+      _noteInvoiceGroupRoutes(_hoursData);
       GroupWorkOrderInvoice.load();
       // A group job's panel sits in its own job card; the section keeps the rest.
       html += GroupWorkOrderInvoice.html(_jobCards.map(function(c) { return c.job_id; }));
@@ -30639,10 +30721,12 @@
         html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);border-radius:8px;padding:10px;font-size:13px;font-weight:600;margin-top:10px">&#10003; Invoiced</div>';
       } else if (isPerMetreUser() && wo.can_add_to_weekly_invoice) {
         html += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(wo.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(wo)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Add to Weekly Invoice</button>';
-      } else if (wo.can_invoice) {
+      } else if (wo.can_invoice && wo.can_invoice_direct !== false) {
         html += '<button id="woBtn' + wo.id + '" onclick="invoiceWorkOrder(\'' + wo.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Invoice This Work Order</button>';
+      } else if (wo.direct_invoice_block_reason) {
+        html += _workOrderDirectBlockHtml(wo);
       } else {
-        html += '<div style="font-size:12px;color:#92400e;margin-top:8px">Not ready — job not complete</div>';
+        html += '<div style="font-size:12px;color:#92400e;margin-top:8px">Not ready yet. The job is not finished.</div>';
       }
 
       html += '</div>';

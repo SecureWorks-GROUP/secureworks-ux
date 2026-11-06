@@ -425,7 +425,7 @@ test.describe('Fencing manager visibility', () => {
     await page.locator('[data-view="hours"]').click();
     await expect(page.locator('[data-financial-hub]')).toBeVisible();
     await page.locator('[data-work-order-weekly-invoice]').click();
-    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
     await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
     await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();

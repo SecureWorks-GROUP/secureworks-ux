@@ -291,7 +291,11 @@ test('the client signs and rates, and the page shows no crew pay', async ({ page
   await expect(page.getByRole('button', { name: 'Send' })).toHaveCount(0);
 
   await page.locator('[data-group-sign-name]').fill('Pat Client');
+  await page.locator('[data-group-sign-work]').fill('Installed the agreed fence');
+  await page.locator('[data-group-sign-date]').fill('2026-11-06');
+  await page.locator('[data-group-sign-accepts]').selectOption('true');
   const pad = page.locator('[data-group-sign-pad]');
+  await pad.scrollIntoViewIfNeeded();
   const box = await pad.boundingBox();
   await page.mouse.move(box.x + 20, box.y + 40);
   await page.mouse.down();
@@ -303,6 +307,9 @@ test('the client signs and rates, and the page shows no crew pay', async ({ page
   expect(sign.body.share_token).toBe('abc');
   expect(sign.body.signer_name).toBe('Pat Client');
   expect(sign.body.signed_via).toBe('share_link');
+  expect(sign.body.work_done).toBe('Installed the agreed fence');
+  expect(sign.body.client_confirmed_on).toBe('2026-11-06');
+  expect(sign.body.happy).toBe(true);
   expect(String(sign.body.signature_png || '')).toContain('data:image/png');
   expect(sign.body.pot_total).toBeUndefined();
   expect(sign.body.send).toBeUndefined();
@@ -405,29 +412,81 @@ test('the office sees every share, and a trade role or an unknown action sees no
 });
 
 
-test('office records existing client approval without creating a signature or submitting pay', async ({ page }) => {
+test('office records client written confirmation with attribution and never waives or submits pay', async ({ page }) => {
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
   await page.evaluate(() => {
     _currentJobId = 'job-office';
-    _currentJobData = {job:{id:'job-office'},group_work_order_enabled:true};
+    _currentJobData = {job:{id:'job-office',type:'patio'},group_work_order_enabled:true};
     document.getElementById('jobDetailView').classList.add('active');
     window.SECUREWORKS_CLOUD = {auth:{getRole:()=> 'owner'}};
-    window.__officeWrites = [];
-    window.__approved = false;
-    window.opsFetch = async () => ({group_id:'group-office',pot_total:2160,
-      participants:[{user_id:'crew',name:'Test Crew'}],hours:[{user_id:'crew',hours:18}],
-      client_signed:window.__approved,client_signoff_method:window.__approved?'office_waiver':null,
-      client_signoff_reason:window.__approved?'Owner confirmed prior approval':null,shares:[]});
-    window.opsPost = async (action,body) => {window.__officeWrites.push({action,body});window.__approved=true;return {ok:true};};
+    window.__officeWrites = []; window.__confirmation = null;
+    window.opsFetch = async (action) => {
+      if(action==='client_signoff_office') return {job_id:'job-office',form:{job_number:'ZZTEST-PATIO',address:'12 Invented Street',client_name:'Invented Client'},can_record_copy:true,counts_for_group:!!window.__confirmation,current:window.__confirmation};
+      return {group_id:'group-office',pot_total:1200,participants:[{user_id:'crew',name:'Test Crew'}],hours:[{user_id:'crew',hours:18}],client_signed:!!window.__confirmation,client_signoff_method:window.__confirmation?'office_on_behalf':null,shares:[]};
+    };
+    window.opsPost = async () => {throw Error('Unexpected ordinary write');};
+    window.opsPostJwt = async (action,body) => {
+      window.__officeWrites.push({action,body});
+      window.__confirmation={id:'record-1',method:'office_on_behalf',signed_name:body.signed_name,happy:body.client_accepts,client_confirmed_on:body.client_confirmed_on,created_at:'2026-11-06T06:00:00Z',entered_by_name:'Synthetic Office',work_done:body.work_done,outstanding_items:body.outstanding_items,confirmation_reference:body.confirmation_reference};
+      return {recorded:true,signoff_id:'record-1'};
+    };
     GroupWorkOrderOffice.paint(_currentJobData);
   });
-  await expect(page.locator('[data-office-group-wo-card]')).toContainText('Test Crew: 18 hours saved');
-  await page.locator('[data-office-signoff-reason]').fill('Owner confirmed prior approval');
-  await page.getByRole('button',{name:'Record office sign-off'}).click();
-  await expect(page.locator('[data-office-group-override]')).toContainText('Owner confirmed prior approval');
+  const section=page.locator('[data-office-client-signoff]');
+  await expect(section).toContainText('12 Invented Street');
+  expect(await page.evaluate(()=>window.__officeWrites)).toEqual([]);
   await expect(page.locator('[data-office-signoff-form]')).toHaveCount(0);
-  expect(await page.evaluate(()=>window.__officeWrites)).toEqual([{action:'waive_client_signoff',body:{job_id:'job-office',reason:'Owner confirmed prior approval'}}]);
+  await section.locator('summary').click();
+  await section.locator('[name=signed_name]').fill('Invented Client');
+  await section.locator('[name=client_confirmed_on]').fill('2026-11-06');
+  await section.locator('[name=work_done]').fill('Installed the agreed patio');
+  await section.locator('[name=outstanding_items]').fill('Touch-up discussed');
+  await section.locator('[name=client_accepts]').selectOption('true');
+  await section.locator('[name=confirmation_kind]').selectOption('written_confirmation');
+  await expect(section.locator('[data-client-so-file]')).toBeHidden();
+  await section.locator('[name=confirmation_reference]').fill('Client email 6 Nov: invented reference');
+  await section.locator('[name=current_client_confirmation]').check();
+  await section.getByRole('button',{name:'Record client confirmation',exact:true}).click();
+  await expect(section.locator('[data-client-so-current]')).toContainText('Synthetic Office');
+  await section.screenshot({path:test.info().outputPath('office-client-confirmation.png')});
+  await expect(section).toContainText('Client email 6 Nov: invented reference');
+  const writes=await page.evaluate(()=>window.__officeWrites);
+  expect(writes).toHaveLength(1);expect(writes[0].action).toBe('record_client_signoff');
+  expect(writes[0].body).toMatchObject({job_id:'job-office',signed_name:'Invented Client',client_accepts:true,confirmation_kind:'written_confirmation',current_client_confirmation:true});
+  expect(writes[0].body.request_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(writes[0].body.captured_by).toBeUndefined();expect(writes[0].body.send).toBeUndefined();
+  await expect(page.locator('[data-office-group-wo-card]')).toContainText('Client sign-off recorded');
+});
+
+test('office signed-copy form retains entries on refusal and downloads the price-free form',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/ops.html');await revealOpsStaticFixture(page);
+  await page.evaluate(()=>{
+    _currentJobId='job-copy';_currentJobData={job:{id:'job-copy',type:'patio'}};
+    document.getElementById('jobDetailView').classList.add('active');
+    window.__officeWrites=[];window.__reads=[];
+    window.opsFetch=async(action)=>{window.__reads.push(action);if(action==='client_signoff_form_pdf')return {content_type:'application/pdf',file_name:'Client-signoff-ZZTEST.pdf',file_base64:btoa('%PDF-1.4 invented proof')};return {form:{job_number:'ZZTEST-PATIO',address:'12 Invented Street'},can_record_copy:true,counts_for_group:false};};
+    window.opsPostJwt=async(action,body)=>{window.__officeWrites.push({action,body});throw Error('Recording could not be confirmed');};
+    ClientSignoffOffice.paint({job:{id:'job-copy',type:'patio'}});
+  });
+  const section=page.locator('[data-office-client-signoff]');
+  const download=page.waitForEvent('download');await section.getByRole('button',{name:'Download blank PDF form'}).click();expect((await download).suggestedFilename()).toBe('Client-signoff-ZZTEST.pdf');
+  expect(await page.evaluate(()=>window.__officeWrites)).toEqual([]);
+  await section.locator('summary').click();
+  await section.locator('[name=signed_name]').fill('Invented Client');await section.locator('[name=client_confirmed_on]').fill('2026-11-06');await section.locator('[name=work_done]').fill('Agreed work');await section.locator('[name=client_accepts]').selectOption('false');
+  await expect(section.locator('[data-client-so-reference]')).toBeHidden();
+  await section.locator('[name=signed_file]').setInputFiles({name:'signed-client.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 invented client copy')});
+  await section.locator('[name=current_client_confirmation]').check();
+  await section.getByRole('button',{name:'Record client confirmation',exact:true}).click();
+  await expect(section.locator('[role=status]')).toContainText('Your entries are kept');
+  await section.screenshot({path:test.info().outputPath('office-client-copy-mobile.png')});
+  expect(await section.evaluate(el=>el.scrollWidth>el.clientWidth)).toBe(false);
+  await expect(section.locator('[name=signed_name]')).toHaveValue('Invented Client');
+  const write=await page.evaluate(()=>window.__officeWrites[0]);expect(write.action).toBe('record_client_signoff');expect(write.body.client_accepts).toBe(false);expect(write.body.file_name).toBe('signed-client.pdf');expect(write.body.file_base64).toBe(Buffer.from('%PDF-1.4 invented client copy').toString('base64'));
+  await section.getByRole('button',{name:'Record client confirmation',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__officeWrites.length)).toBe(2);
+  expect(await page.evaluate(()=>window.__officeWrites[1].body.request_id)).toBe(write.body.request_id);
 });
 
 test('office approves the crew’s hours for them with a reason, and a refusal is shown in words', async ({ page }) => {

@@ -1,8 +1,9 @@
 // Ops Dash NEW tag: a job card shows a small orange NEW tab in its lower-right
 // corner for its first 36 hours on the pipeline (search `// <kanban-new-tag>`
 // in ops.html). Arrival is accepted_at, else created_at for a job put straight
-// onto the pipeline; a job that already holds an earlier later-stage time was
-// moved back, not newly arrived. Every time is relative to the test's own
+// onto the pipeline; a job that already holds an earlier later-stage time, or
+// shows a paid deposit, an order, a work order or crew, was moved back, not
+// newly arrived. Every time is relative to the test's own
 // clock, so the fixtures never date-rot.
 //
 // Static fixtures (no network): cards are rendered straight through the real
@@ -69,6 +70,17 @@ test.describe('kanban NEW tag', () => {
     await expect(moved.locator('.kanban-new-tag')).toHaveCount(0);
     await expect(back.locator('.kanban-new-tag')).toHaveCount(0);
     await expect(quick.locator('.kanban-new-tag')).toHaveCount(1);
+  });
+
+  test('an old fencing job dragged back to Accepted after Order Materials is not new', async ({ page }) => {
+    // Order Materials records no stage time, so only the feed's progress shows it moved on.
+    const paid = await renderCard(page, job('n-paid', { deposit_paid: true }), { accepted_at: 1, created_at: 24 * 21 });
+    const ordered = await renderCard(page, job('n-po', { po_count: 1 }), { accepted_at: 1, created_at: 24 * 21 });
+    const wo = await renderCard(page, job('n-wo', { wo_count: 1 }), { accepted_at: 1, created_at: 24 * 21 });
+    const crewed = await renderCard(page, job('n-crew', { assignment_count: 2 }), { accepted_at: 1, created_at: 24 * 21 });
+    const untouched = await renderCard(page, job('n-untouched', { deposit_paid: false, po_count: 0, wo_count: 0, assignment_count: 0 }), { accepted_at: 1, created_at: 24 * 21 });
+    for (const card of [paid, ordered, wo, crewed]) await expect(card.locator('.kanban-new-tag')).toHaveCount(0);
+    await expect(untouched.locator('.kanban-new-tag')).toHaveCount(1);
   });
 
   test('sales drawer quotes are not on the pipeline yet; a new repair is', async ({ page }) => {

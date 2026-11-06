@@ -1,7 +1,7 @@
 // Office view of a group work order: the pot, every share, and the client's
 // ratings. Paints nothing for a trade role, and nothing on any error.
 // The office read runs only after the server has said the switch is on.
-// Office sign-off records an attributed waiver; reopening the split is separate. Nothing here sends.
+// Client confirmation is recorded in the companion form; reopening is separate. Nothing here sends.
 (function () {
   'use strict';
   var TRADE_ROLES = { installer: 1, lead_installer: 1, crew: 1, trade: 1, subcontractor: 1 };
@@ -48,6 +48,7 @@
   }
 
   function paint(data) {
+    if (window.ClientSignoffOffice) ClientSignoffOffice.paint(TRADE_ROLES[role()] ? null : data);
     var C = core();
     var el = host();
     if (!el) return;
@@ -114,27 +115,7 @@
   function onSubmit(ev) {
     var hoursForm = ev.target && ev.target.closest && ev.target.closest('[data-office-hours-form]');
     if (hoursForm) { onHoursSubmit(ev, hoursForm); return; }
-    var form = ev.target && ev.target.closest && ev.target.closest('[data-office-signoff-form]');
-    if (!form) return;
-    ev.preventDefault();
-    var box = form.closest('[data-office-group-wo]');
-    if (!box || typeof opsPost !== 'function') return;
-    var jobId = box.getAttribute('data-job-id');
-    if (!currentJob(jobId)) return;
-    var reason = (form.querySelector('[data-office-signoff-reason]').value || '').trim();
-    var msg = box.querySelector('[data-office-group-message]');
-    var btn = form.querySelector('button');
-    if (reason.length < 3) { msg.textContent = 'Record who confirmed the approval and why the office is signing off.'; return; }
-    btn.disabled = true;
-    msg.textContent = 'Recording office sign-off...';
-    opsPost('waive_client_signoff', { job_id: jobId, reason: reason }).then(function () {
-      if (!currentJob(jobId)) return;
-      paint((typeof _currentJobData !== 'undefined' && _currentJobData) || null);
-    }).catch(function () {
-      if (!currentJob(jobId)) return;
-      btn.disabled = false;
-      msg.textContent = 'The sign-off could not be confirmed. Refresh the job to check before trying again.';
-    });
+
   }
 
   if (!bound) {

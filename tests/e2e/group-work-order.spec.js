@@ -385,11 +385,12 @@ test('the office sees every share, and a trade role or an unknown action sees no
     window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return 'installer'; } } };
     window.__posts = [];
     window.__mode = 'on';
-    GroupWorkOrderOffice.paint({ job: { id: 'job-1' }, group_work_order_enabled: true });
+    GroupWorkOrderOffice.paint({ job: { id: 'job-1', type:'patio' }, group_work_order_enabled: true });
   });
   expect(await page.evaluate(() => window.__posts.length)).toBe(0);
   await expect(page.locator('[data-office-group-wo]')).toBeEmpty();
   await expect(page.locator('#jdOverview')).not.toContainText('Agreed labour');
+  await expect(page.locator('[data-office-client-signoff]')).toBeEmpty();
 
   await page.evaluate(() => {
     window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return ''; } } };

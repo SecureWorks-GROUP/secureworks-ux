@@ -48,7 +48,7 @@
   }
 
   function paint(data) {
-    if (window.ClientSignoffOffice) ClientSignoffOffice.paint(data);
+    if (window.ClientSignoffOffice) ClientSignoffOffice.paint(TRADE_ROLES[role()] ? null : data);
     var C = core();
     var el = host();
     if (!el) return;

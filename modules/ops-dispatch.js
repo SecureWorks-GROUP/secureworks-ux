@@ -2515,6 +2515,16 @@
     }).join('') + '</div>';
   }
 
+  // A supplier reply that said too little to move the order on (no PDF, date
+  // or price; Shaun 6 Nov 2026): "Replied Fri 6/11 3:12pm: "All good Shaun"".
+  // From material_stage_reply_note / reply_note; absent from an older server.
+  function replyNoteWords(n) {
+    if (!isObj(n)) return '';
+    var at = parseStamp(n.received_at) ? ' ' + stampText(n.received_at) : '';
+    var words = text(n.snippet);
+    return 'Replied' + at + (words ? ': "' + words + '"' : '');
+  }
+
   // Who or what put the order where it is, for the row's small line.
   function mpWho(o) {
     var p = v2PayFrom(o.payment, o.material_stage);
@@ -2523,6 +2533,7 @@
     if (src === 'payment' && p && p.pay_on) return payOnWord(p.pay_on) + (p.pay_on_set_at ? ', set ' + stampText(p.pay_on_set_at) : '');
     if (src === 'reply') return 'Replied' + (isObj(o.material_stage_reply) && parseStamp(o.material_stage_reply.received_at) ? ' ' + stampText(o.material_stage_reply.received_at) : '');
     if (src === 'set') return 'Set by hand' + (o.material_stage_set_at ? ' ' + stampText(o.material_stage_set_at) : '');
+    if (text(o.material_stage) === 'sent' && isObj(o.material_stage_reply_note)) return replyNoteWords(o.material_stage_reply_note);
     return '';
   }
 
@@ -4803,6 +4814,9 @@
       // payment step is holding, and a pickup on the install's first day that
       // skips Materials ready. All absent from an older server.
       reply: r ? { email_id: text(r.email_id) || null, received_at: text(r.received_at) || null } : null,
+      // A reply that said too little to move a box at Sent (no PDF, date or
+      // price): shown as a note. Absent from an older server.
+      reply_note: isObj(m.reply_note) ? m.reply_note : null,
       held_by_payment: m.held_by_payment === true, skips_ready: m.skips_ready === true
     };
   }
@@ -5362,6 +5376,7 @@
 
   // Who or what put the box at its stage.
   function v2StageWho(b, s) {
+    if (s.key === 'sent' && s.source !== 'set' && s.reply_note) return replyNoteWords(s.reply_note);
     if (s.source === 'set') return 'Set' + (s.set_by_email ? ' by ' + s.set_by_email : '') + (s.set_at ? ', ' + stampText(s.set_at) : '');
     if (s.source === 'reply') return 'Moved here by their reply' + (s.reply && s.reply.received_at ? ', ' + stampText(s.reply.received_at) : '');
     if (s.source === 'payment') {

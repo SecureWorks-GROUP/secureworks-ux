@@ -51,6 +51,10 @@ var GroupWorkOrderCore = (function () {
   // not-found is an error and never reaches here.
   function tradeMode(res) {
     if (!res || res.enabled === false) return 'off';
+    if (res.discovery) {
+      if (res.discovery.state === 'create' || res.discovery.state === 'join') return res.discovery.state;
+      if (res.discovery.state === 'setup_required') return 'setup';
+    }
     if (res.enabled === true && !res.group_id) return res.participant === false ? 'join' : 'create';
     if (res.group_id || res.needs_hours === true || res.pot_total != null || res.my_share != null) {
       return res.needs_hours ? 'hours' : 'share';
@@ -107,7 +111,9 @@ var GroupWorkOrderCore = (function () {
     if (mode === 'off') return '';
     var h = '<section data-group-wo aria-label="Group work order">';
     h += '<div class="gwo-title">Group work order</div>';
-    if (mode === 'create') {
+    if (mode === 'setup') {
+      h += '<p data-group-wo-setup>' + esc((raw.discovery && raw.discovery.message) || 'The office needs to check the group work order setup.') + '</p>';
+    } else if (mode === 'create') {
       h += '<p>No group on this job yet.</p>';
       h += '<button type="button" data-group-wo-action="create">Create</button>';
     } else if (mode === 'join') {

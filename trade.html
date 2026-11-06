@@ -32,9 +32,9 @@
   <script src="shared/cloud.js?v=password-reset-20261024"></script>
   <!-- Job work order (docs/job-work-order-screens.md): live for every allocated trade, no switch. -->
   <script src="shared/job-work-order.js?v=4"></script>
-  <script src="shared/group-work-order.js?v=office-hours-20261030"></script>
-  <script src="modules/trade-group-work-order.js?v=crew-sign-20261103"></script>
-  <script src="modules/trade-group-invoice.js?v=payable-route-20261106"></script>
+  <script src="shared/group-work-order.js?v=discovery-20261106"></script>
+  <script src="modules/trade-group-work-order.js?v=discovery-20261106"></script>
+  <script src="modules/trade-group-invoice.js?v=discovery-20261106"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -26008,6 +26008,7 @@
           html += '</div>';
           html += _renderCardLumpLinesHtml(c);
         }
+        if (window.GroupWorkOrderInvoice) html += GroupWorkOrderInvoice.discoveryHtml(c);
         // Description: auto-filled for commission; optional annotation for WO; required for hours.
         var commAutoDesc = cardMode === 'commission' ? ('Commission — ' + esc(c.job_number || '') + ' — ' + esc(c.client_name || '')) : '';
         var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional — breakdown auto-added)' : 'Description of work');

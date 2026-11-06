@@ -185,8 +185,11 @@
       call('join_group_work_order', null, { job_id: jobId }).then(function () {
         armed = true;
         return paint(jobId);
-      }).catch(function (e) { showMsg(el, e.message || 'Could not update the group work order.'); })
-        .finally(function () { el._groupBusy = false; btn.disabled = false; });
+      }).catch(function (e) {
+        // The office removed this person: say so in place of the Join button.
+        if (core.removalRefusal(e)) { render(el, 'removed', el._groupShare); return; }
+        showMsg(el, e.message || 'Could not update the group work order.');
+      }).finally(function () { el._groupBusy = false; btn.disabled = false; });
       return;
     }
     if (action === 'save-hours') {

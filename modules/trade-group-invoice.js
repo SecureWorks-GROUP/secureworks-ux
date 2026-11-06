@@ -1,6 +1,6 @@
-// Group work orders on the weekly invoice. A group job shows its panel inside
-// its own job card; a group with no card this week keeps a compact card in the
-// group section. Crew see each other's hours, never rates or pay. A member
+// Group work orders on the weekly invoice. Every group shows once, in the
+// group section, with its one hours form; a group job's card in the job list
+// only links to it. Crew see each other's hours, never rates or pay. A member
 // logs their own hours for any day here, through the same group hours action
 // the job page uses. The client signs on site; then the share unlocks. Server
 // owns prices and gates. A failed group read only holds the group jobs: the
@@ -12,6 +12,9 @@
   // Jobs my_hours says are paid through a group (with their booked days), and
   // the hours a trade is typing per group, kept across re-renders.
   var routeJobs = [], hoursDraft = {};
+  // This session only: groups whose join the server refused because the office
+  // removed this person, and not-happy sign-offs recorded from this phone.
+  var removedHere = {}, notHappyHere = {};
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function money(n) { return Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function hrs(n) { var v = Number(n); return n != null && n !== '' && isFinite(v) ? (Math.round(v * 100) / 100) + 'h' : '–'; }
@@ -22,7 +25,7 @@
     if (owner !== String(userId || '')) { owner = String(userId || ''); reset(); }
   }
   function reset() {
-    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; payableRoutes = []; selected = {}; busy = ''; sign = null; routeJobs = []; hoursDraft = {};
+    generation++; state = 'idle'; loaded = false; groups = []; jobIds = []; payableRoutes = []; selected = {}; busy = ''; sign = null; routeJobs = []; hoursDraft = {}; removedHere = {}; notHappyHere = {};
     var open = document.querySelectorAll('dialog[data-group-sign-dialog],dialog[data-group-status-dialog]');
     for (var i = 0; i < open.length; i++) if (open[i].open) open[i].close();
   }
@@ -70,6 +73,34 @@
     if (s && typeof s === 'object') return { kind: s.kind === 'office' ? 'office' : 'client', name: s.name || '', at: s.at || '', happy: s.happy };
     if (!signed(g)) return null;
     return { kind: g.release && g.release.signoff === 'office' ? 'office' : 'client', name: '', at: '', happy: null };
+  }
+  function core() { return window.GroupWorkOrderCore || null; }
+  var REMOVED_LINE = 'The office removed you from this group. Ask the office if this is wrong.';
+  function removed(g) {
+    if (removedHere[g.group_id]) return true;
+    var c = core();
+    if (c && typeof c.removedByOffice === 'function') return c.removedByOffice(g);
+    var d = g.discovery || {};
+    return g.removed_by_office === true || d.state === 'removed' || /removed/i.test(String(d.reason || ''));
+  }
+  function removalRefusal(err) {
+    var c = core();
+    if (c && typeof c.removalRefusal === 'function') return c.removalRefusal(err);
+    return !!err && (/removed/i.test(String(err.code || '')) || /removed/i.test(String((err.body && err.body.code) || '')));
+  }
+  // Not a member and not offered a join: the server's own reason, nothing else.
+  // A member's row carries crew hours or a submitted share; this never hides those.
+  function notMember(g) {
+    var d = g.discovery;
+    return !!(d && d.state && d.state !== 'member' && d.state !== 'join') && !g.submitted && !crewHours(g).length;
+  }
+  // The client said they are not happy. The share stays locked; the office
+  // sorts it out. A not-happy sign-off never counts, so the server may still
+  // say "not signed"; this phone remembers its own until the page reloads.
+  function notHappy(g) {
+    if (signed(g)) return false;
+    var s = g.client_signoff;
+    return !!notHappyHere[g.group_id] || (!!s && typeof s === 'object' && s.happy === false) || g.client_not_happy === true;
   }
   function when(at) {
     var d = new Date(at);
@@ -150,7 +181,14 @@
     + '.gw-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}'
     + '.gw-chip{border:1px solid var(--sw-border);background:var(--sw-card);border-radius:999px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color:var(--sw-text)}'
     + '.gw-chip.on{border-color:var(--sw-orange-deep,#C7431B);color:var(--sw-orange-deep,#C7431B);font-weight:700}'
-    + '.gw-ok{margin-top:8px;font-size:13px;font-weight:600;color:#1E8A4C}';
+    + '.gw-ok{margin-top:8px;font-size:13px;font-weight:600;color:#1E8A4C}'
+    + '.gw-unhappy{padding:10px 12px;border-radius:10px;background:#FDF1E5;border:1px solid rgba(230,126,34,.4)}'
+    + '.gw-unhappy b{display:block;color:#B9631A;font-size:15px;font-weight:800}'
+    + '.gw-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}'
+    + '.gw-choice button{min-height:44px;border:1px solid var(--sw-border);border-radius:10px;background:var(--sw-card);font:inherit;font-size:14px;font-weight:700;color:var(--sw-text);cursor:pointer}'
+    + '.gw-choice button.on[data-gw-happy="yes"]{border-color:#27AE60;background:#E8F6EE;color:#1E8A4C}'
+    + '.gw-choice button.on[data-gw-happy="no"]{border-color:#E67E22;background:#FDF1E5;color:#B9631A}'
+    + '.gw-jump{margin-top:10px}';
   function ensureCss() {
     if (document.querySelector('style[data-gw-style]')) return;
     var style = document.createElement('style');
@@ -185,7 +223,10 @@
       if (s.review === 'rejected') return pill('Sent back','bad','data-group-pill');
       return pill('Submitted','info','data-group-pill');
     }
+    if (removed(g)) return pill('Removed by office','no','data-group-pill');
+    if (notMember(g)) return pill('Office to check','no','data-group-pill');
     if (g.awaiting === 'needs_join') return pill('Join to invoice','info','data-group-pill');
+    if (notHappy(g)) return pill('Office to sort out','wait','data-group-pill');
     if (myTurn(g)) return pill('Confirm hours','wait','data-group-pill');
     if (!signed(g) && g.awaiting !== 'needs_hours') return pill('Needs sign-off','wait','data-group-pill');
     if (!hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
@@ -226,7 +267,7 @@
   }
   // A member logs their own hours for any day on the job; booked days are
   // offered as quick picks. One save per day: saving a day again replaces it.
-  function canLog(g) { return !!g.group_id && !g.submitted && ['frozen','needs_join','awaiting_office'].indexOf(g.awaiting) === -1; }
+  function canLog(g) { return !!g.group_id && !g.submitted && !removed(g) && !notMember(g) && ['frozen','needs_join','awaiting_office'].indexOf(g.awaiting) === -1; }
   function bookedDays(g) {
     var r = routeJob(g.job_id);
     return r && Array.isArray(r.booked_dates) ? r.booked_dates.filter(function(d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d)); }) : [];
@@ -294,6 +335,14 @@
       return '<div class="gw-signed" data-group-signed="'+(office ? 'office' : 'client')+'"><b>✓ '+(office ? 'Office' : 'Client')+' signed off</b>'
         + (bits.length ? '<div class="gw-sub">'+bits.join(' · ')+'</div>' : '')+'</div>';
     }
+    if (notHappyHere[g.group_id] === 'unsure') {
+      return '<div class="gw-unhappy" data-group-signed="not-happy-unsure"><b>Not-happy sign-off not confirmed</b>'
+        + '<div class="gw-sub">It may not have been recorded. Ask the office to check it before anyone signs again.</div></div>';
+    }
+    if (notHappy(g)) {
+      return '<div class="gw-unhappy" data-group-signed="not-happy"><b>Client not happy with the work</b>'
+        + '<div class="gw-sub">The office will sort it out with the client. Your share stays locked until then.</div></div>';
+    }
     return '<div class="gw-line" data-group-signed="no"><span>Not signed yet</span>'+pill('Waiting','no')+'</div>'
       + '<button type="button" class="btn btn-secondary gw-btn" data-group-sign-open="'+esc(g.group_id)+'" onclick="GroupWorkOrderInvoice.openSign(this.getAttribute(\'data-group-sign-open\'))">Hand phone to client to sign</button>'
       + '<div class="gw-sub gw-hint">Client can’t sign? The office can sign off instead.</div>';
@@ -308,6 +357,7 @@
       return h + crewLine(g);
     }
     if (!unlocked(g)) {
+      if (notHappy(g)) return '<div class="gw-locked" data-group-locked>Locked while the office sorts it out with the client.</div>';
       var text = !signed(g) && !hoursOk(g) ? 'Unlocks when the crew’s hours are confirmed and the client has signed.'
         : !signed(g) ? 'Unlocks when the client has signed.' : 'Unlocks when the crew’s hours are confirmed.';
       return '<div class="gw-locked" data-group-locked>'+text+'</div>';
@@ -338,6 +388,8 @@
     return h;
   }
   function panel(g) {
+    if (removed(g)) return '<div class="gw-locked" data-group-removed style="margin-top:10px">'+esc(REMOVED_LINE)+'</div>'+links(g);
+    if (notMember(g)) return '<div class="gw-locked" data-group-not-member style="margin-top:10px">'+esc((g.discovery && g.discovery.message) || 'The office needs to check this group.')+'</div>'+links(g);
     if (g.awaiting === 'needs_join') {
       return '<button type="button" class="btn btn-primary gw-btn" data-invoice-group-join="'+esc(g.group_id)+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.join(this.getAttribute(\'data-invoice-group-join\'))">Join group work order</button>'+links(g);
     }
@@ -348,7 +400,8 @@
     return h + links(g);
   }
 
-  // Inside a job card: the card's mode toggle sits under the head.
+  // A group job in the job list: the card's mode toggle sits under the head,
+  // and a link goes to the group's one panel in the group section.
   function discoveryHtml(card) {
     var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
     var d = route && route.discovery;
@@ -403,7 +456,21 @@
       return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id }) + (toggle || '')
         + '<div class="gw-locked" style="margin-top:12px">Paid from the group work order.</div>' + links({ job_id: card.job_id });
     }
-    return list.map(function(g, i) { return '<div data-invoice-group="'+esc(g.group_id)+'" data-group-in-card data-invoice-pay-route="group">'+head(g)+(i === 0 ? (toggle || '') : '')+panel(g)+'</div>'; }).join('');
+    return list.map(function(g, i) {
+      var id = esc(g.group_id);
+      return '<div data-invoice-group-link="'+id+'" data-invoice-pay-route="group">'+head(g)+(i === 0 ? (toggle || '') : '')
+        + '<div class="gw-locked" style="margin-top:10px">Paid through its group work order. Add your hours there, under Group work orders above.</div>'
+        + '<button type="button" class="gw-link gw-jump" data-invoice-group-goto="'+id+'" onclick="GroupWorkOrderInvoice.goTo(this.getAttribute(\'data-invoice-group-goto\'))">Go to the group work order</button></div>';
+    }).join('');
+  }
+  function goTo(id) {
+    var cards = document.querySelectorAll('section[data-invoice-groups] [data-invoice-group]');
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute('data-invoice-group') !== String(id)) continue;
+      if (typeof cards[i].scrollIntoView === 'function') cards[i].scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (typeof cards[i].focus === 'function') cards[i].focus({ preventScroll: true });
+      return;
+    }
   }
   // A job this week that is paid through a group but has no group to show:
   // name it and say the next step, never offer it as an hours card.
@@ -419,7 +486,8 @@
     }
     return h + links({ job_id: r.job_id }) + '</div>';
   }
-  // The group section: groups and group-paid jobs with no job card this week.
+  // The group section: every group, each once with its one hours form, and
+  // group-paid jobs with no group and no job card this week.
   function html(cardJobIds) {
     ensureCss();
     var shown = {};
@@ -435,9 +503,8 @@
       waiting.forEach(function(r) { h += routeJobCard(r, true); });
       return h + '</section>';
     }
-    var rest = groups.filter(function(g) { return !shown[String(g.job_id)]; });
-    if (!rest.length && !waiting.length) return '';
-    rest.forEach(function(g) { h += '<div class="gw-card" data-invoice-group="'+esc(g.group_id)+'">'+head(g)+panel(g)+'</div>'; });
+    if (!groups.length && !waiting.length) return '';
+    groups.forEach(function(g) { h += '<div class="gw-card" tabindex="-1" data-invoice-group="'+esc(g.group_id)+'">'+head(g)+panel(g)+'</div>'; });
     waiting.forEach(function(r) { h += routeJobCard(r, false); });
     return h + '</section>';
   }
@@ -454,7 +521,9 @@
     return h + '<button type="button" class="btn btn-secondary" style="width:100%;margin-top:12px" onclick="this.closest(\'dialog\').close()">Close</button>';
   }
 
-  // On-site sign sheet: five ratings, an optional note, a signature and a name.
+  // On-site sign sheet. The client first says whether they are happy with the
+  // work. Happy: five ratings and an optional note. Not happy: a short reason
+  // instead, and no ratings. Both take a signature and a name.
   var RATINGS = [['sales_process','Sales and quote'],['communication','Communication'],['cleanliness','Cleanliness'],['punctuality','Punctuality'],['crew','The crew']];
   function signSheet(g) {
     var names = crewHours(g).map(function(c) { return c.name; });
@@ -463,31 +532,54 @@
       + '<div class="gw-sub">'+esc(g.job_number)+(g.site_suburb ? ' · '+esc(g.site_suburb) : '')+'</div>'
       + (names.length ? '<div class="gw-sub">SecureWorks crew: '+esc(names.join(', '))+'</div>' : '')+'</div>'
       + '<button type="button" class="gw-x" aria-label="Close" data-gw-sign-close>✕</button></div>';
-    h += '<div class="gw-label">How did we go?</div>';
+    h += '<div class="gw-label" id="gwHappyLabel">Is the client happy with the work?</div>'
+      + '<div class="gw-choice" role="radiogroup" aria-labelledby="gwHappyLabel">'
+      + '<button type="button" role="radio" aria-checked="false" data-gw-happy="yes">Happy with the work</button>'
+      + '<button type="button" role="radio" aria-checked="false" data-gw-happy="no">Not happy</button></div>';
+    h += '<div data-gw-unhappy-box hidden style="margin-top:14px"><label class="gw-label" for="gwSignReason" style="display:block">What is the client not happy with?</label>'
+      + '<textarea class="gw-field" id="gwSignReason" data-gw-sign-reason rows="3" maxlength="2000" placeholder="A short reason, in the client’s words"></textarea>'
+      + '<div class="gw-sub">The office will sort it out with the client. The crew’s shares stay locked until then.</div></div>';
+    h += '<div data-gw-happy-box hidden style="margin-top:14px"><div class="gw-label">How did we go?</div>';
     RATINGS.forEach(function(pair) {
       h += '<div class="gw-rate"><span id="gwRate_'+pair[0]+'">'+esc(pair[1])+'</span><span class="gw-stars" role="radiogroup" aria-labelledby="gwRate_'+pair[0]+'" data-gw-rating="'+pair[0]+'">';
       for (var n = 1; n <= 5; n++) h += '<button type="button" role="radio" aria-checked="false" aria-label="'+esc(pair[1])+' '+n+' of 5" data-gw-star="'+pair[0]+'" data-n="'+n+'">★</button>';
       h += '</span></div>';
     });
     h += '<label class="gw-label" for="gwSignNote" style="display:block;margin-top:14px">Anything to tell us?</label>'
-      + '<textarea class="gw-field" id="gwSignNote" data-gw-sign-note rows="2" maxlength="2000" placeholder="Notes for the team (optional)"></textarea>';
+      + '<textarea class="gw-field" id="gwSignNote" data-gw-sign-note rows="2" maxlength="2000" placeholder="Notes for the team (optional)"></textarea></div>';
     h += '<div class="gw-labrow" style="margin-top:14px"><span class="gw-label" style="margin:0">Signature</span><button type="button" class="gw-link" data-gw-sign-clear>Clear</button></div>'
       + '<div class="gw-pad" data-gw-pad style="margin-top:4px"><canvas data-gw-sign-pad aria-label="Client signature"></canvas><span>Sign here</span></div>';
     h += '<label class="gw-label" for="gwSignName" style="display:block;margin-top:14px">Client’s name</label>'
       + '<input class="gw-field" id="gwSignName" data-gw-sign-name autocomplete="name" value="'+esc(g.client_name || '')+'">';
     h += '<div class="gw-err" data-gw-sign-err role="alert" hidden></div>';
-    h += '<button type="button" class="btn btn-primary gw-btn" style="margin-top:14px" data-gw-sign-submit disabled>I’m happy with the work. Sign off</button>';
+    h += '<button type="button" class="btn btn-primary gw-btn" style="margin-top:14px" data-gw-sign-submit disabled>'+signLabel(null)+'</button>';
     return h;
   }
-  // Every rating tapped (never defaulted), a signature and a name.
+  function signLabel(happy) { return happy === false ? 'Record that the client is not happy' : 'Sign off: happy with the work'; }
+  function signReason(d) { var el = d.querySelector('[data-gw-sign-reason]'); return el ? el.value.trim() : ''; }
+  // A choice made (never defaulted), a signature and a name. Happy: every
+  // rating tapped. Not happy: a reason of at least a few letters.
   function signReady(d) {
     var name = d.querySelector('[data-gw-sign-name]');
-    return !!sign && !sign.busy && sign.drawn && !!name && name.value.trim().length > 0
-      && RATINGS.every(function(pair) { return sign.ratings[pair[0]] >= 1; });
+    if (!sign || sign.busy || sign.locked || !sign.drawn || !name || !name.value.trim().length) return false;
+    if (sign.happy === false) return signReason(d).length >= 3;
+    return sign.happy === true && RATINGS.every(function(pair) { return sign.ratings[pair[0]] >= 1; });
   }
   function signRefresh(d) {
     var btn = d.querySelector('[data-gw-sign-submit]');
     if (btn) btn.disabled = !signReady(d);
+  }
+  function pickHappy(d, happy) {
+    sign.happy = happy;
+    d.querySelectorAll('[data-gw-happy]').forEach(function(b) {
+      var on = (b.getAttribute('data-gw-happy') === 'yes') === happy;
+      b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    d.querySelector('[data-gw-happy-box]').hidden = happy !== true;
+    d.querySelector('[data-gw-unhappy-box]').hidden = happy !== false;
+    var btn = d.querySelector('[data-gw-sign-submit]');
+    if (btn && !sign.busy) btn.textContent = signLabel(happy);
+    signRefresh(d);
   }
   function signPad(d) {
     var canvas = d.querySelector('[data-gw-sign-pad]'), wrap = d.querySelector('[data-gw-pad]');
@@ -518,15 +610,18 @@
   }
   function openSign(id) {
     var g = find(id);
-    if (!g || signed(g) || busy || !api) return;
+    if (!g || signed(g) || notHappy(g) || removed(g) || notMember(g) || busy || !api) return;
     var d = dialogEl('data-group-sign-dialog', 'gw-sheet');
-    sign = { id: id, ratings: {}, drawn: false, busy: false };
+    // One capture id per sign-off attempt, reused on any retry of it, so the
+    // server saves the attempt once however many times it is pressed.
+    sign = { id: id, captureId: captureId(), ratings: {}, drawn: false, busy: false, locked: false, happy: null };
     d.innerHTML = signSheet(g);
     d.onclick = function(e) {
       var t = e.target && e.target.closest ? e.target : null;
       if (!t || !sign) return;
-      var star = t.closest('[data-gw-star]');
-      if (star && !sign.busy) {
+      var star = t.closest('[data-gw-star]'), choice = t.closest('[data-gw-happy]');
+      if (choice) { if (!sign.busy && !sign.locked) pickHappy(d, choice.getAttribute('data-gw-happy') === 'yes'); }
+      else if (star && !sign.busy) {
         var key = star.getAttribute('data-gw-star'), n = Number(star.getAttribute('data-n'));
         sign.ratings[key] = n;
         d.querySelectorAll('[data-gw-star="'+key+'"]').forEach(function(b) {
@@ -544,33 +639,59 @@
     show(d);
     signPad(d);
   }
+  function captureId() {
+    var c = window.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    var b = new Uint8Array(16);
+    if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+    else for (var i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+    b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    var hex = Array.prototype.map.call(b, function(x) { return (x + 256).toString(16).slice(1); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
   function submitSign(d) {
     if (!signReady(d)) return;
     var g = find(sign.id);
     if (!g) return;
     var err = d.querySelector('[data-gw-sign-err]'), btn = d.querySelector('[data-gw-sign-submit]');
-    var r = sign.ratings, current = sign;
+    var r = sign.ratings, current = sign, happy = sign.happy === true;
     var body = {
       group_id: g.group_id,
       signer_name: d.querySelector('[data-gw-sign-name]').value.trim(),
       signature_png: sign.png(),
-      happy: true,
-      satisfaction_rating: r.crew,
-      ratings: { sales_process: r.sales_process, communication: r.communication, cleanliness: r.cleanliness, punctuality: r.punctuality, crew: r.crew },
-      note: d.querySelector('[data-gw-sign-note]').value.trim()
+      happy: happy,
+      capture_id: sign.captureId
     };
-    sign.busy = true; err.hidden = true; btn.disabled = true; btn.textContent = 'Signing…';
+    if (happy) {
+      body.satisfaction_rating = r.crew;
+      body.ratings = { sales_process: r.sales_process, communication: r.communication, cleanliness: r.cleanliness, punctuality: r.punctuality, crew: r.crew };
+      body.note = d.querySelector('[data-gw-sign-note]').value.trim();
+    } else {
+      // Stored like the client's own confirmation form; no ratings, no feedback.
+      body.outstanding_items = signReason(d);
+    }
+    sign.busy = true; err.hidden = true; btn.disabled = true; btn.textContent = happy ? 'Signing…' : 'Recording…';
     api('capture_group_client_signoff', null, body).then(function(res) {
       if (!res || res.ok !== true) throw new Error((res && (res.error || res.message)) || 'The sign-off was not saved. Try again.');
       current.busy = false; sign = null;
+      if (!happy) notHappyHere[g.group_id] = true;
       if (d.open) d.close();
-      say('Signed off. Thank you.');
+      say(happy ? 'Signed off. Thank you.' : 'Recorded. The office will sort it out with the client.');
       load(true);
     }).catch(function(e) {
       current.busy = false;
       if (sign !== current) return;
-      err.textContent = (e && e.message) || 'The sign-off was not saved. Try again.'; err.hidden = false;
-      btn.textContent = 'I’m happy with the work. Sign off'; signRefresh(d);
+      var why = (e && e.message) || 'The sign-off was not saved.';
+      if (happy) {
+        err.textContent = why; err.hidden = false;
+        btn.textContent = signLabel(true); signRefresh(d);
+        return;
+      }
+      // A not-happy record never counts, so a second press could store a
+      // second one. Say what came back and leave it to the office.
+      current.locked = true; notHappyHere[g.group_id] = 'unsure'; changed();
+      err.textContent = why + ' It may not have been recorded. Do not send it again: ask the office to check.'; err.hidden = false;
+      btn.textContent = signLabel(false); btn.disabled = true;
     });
   }
   function submittedNote(g, res) {
@@ -612,6 +733,7 @@
       });
     },
     retry: function() { load(true); changed(); },
+    goTo: goTo,
     openSign: openSign,
     status: function(id) {
       var g = find(id);
@@ -641,9 +763,15 @@
     },
     join: function(id) {
       var g=find(id);
-      if(busy || !g || g.awaiting!=='needs_join') return;
+      if(busy || !g || g.awaiting!=='needs_join' || removed(g)) return;
       busy=id; changed();
-      api('join_group_work_order',null,{group_id:id}).then(function() {busy='';load(true);}).catch(function(err) {busy='';say(err.message || 'Could not join the group.',true);changed();});
+      api('join_group_work_order',null,{group_id:id}).then(function() {busy='';load(true);}).catch(function(err) {
+        busy='';
+        // The office removed this person: the plain line replaces the button.
+        if (removalRefusal(err)) removedHere[id] = true;
+        else say(err.message || 'Could not join the group.',true);
+        changed();
+      });
     },
     submit: function(id) {
       var g = find(id);

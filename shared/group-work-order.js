@@ -46,11 +46,30 @@ var GroupWorkOrderCore = (function () {
     return false;
   }
 
+  // The office took this person off the group. A newer server says so on the
+  // read (a discovery reason naming the removal, or a flag) and refuses the
+  // join with a code naming it; an older server says neither, so the join
+  // refusal is the only signal there. Never offer Join to a removed member.
+  var REMOVED_LINE = 'The office removed you from this group. Ask the office if this is wrong.';
+  function removedByOffice(res) {
+    if (!res || typeof res !== 'object') return false;
+    if (res.removed_by_office === true || res.office_removed === true) return true;
+    var d = res.discovery && typeof res.discovery === 'object' ? res.discovery : {};
+    return d.state === 'removed' || /removed/i.test(String(d.reason || ''));
+  }
+  // The trade app stamps a generic code on every 403, so read the server's
+  // own code from the answer body as well.
+  function removalRefusal(err) {
+    if (!err) return false;
+    return /removed/i.test(String(err.code || '')) || /removed/i.test(String((err.body && err.body.code) || ''));
+  }
+
   // Create and Join only from a successful read that says the switch is on.
   // A share payload (group id or the two amounts) is that read. A bare
   // not-found is an error and never reaches here.
   function tradeMode(res) {
     if (!res || res.enabled === false) return 'off';
+    if (removedByOffice(res)) return 'removed';
     if (res.discovery) {
       if (res.discovery.state === 'create' || res.discovery.state === 'join') return res.discovery.state;
       if (res.discovery.state === 'setup_required') return 'setup';
@@ -111,7 +130,9 @@ var GroupWorkOrderCore = (function () {
     if (mode === 'off') return '';
     var h = '<section data-group-wo aria-label="Group work order">';
     h += '<div class="gwo-title">Group work order</div>';
-    if (mode === 'setup') {
+    if (mode === 'removed') {
+      h += '<p data-group-wo-removed>' + esc(REMOVED_LINE) + '</p>';
+    } else if (mode === 'setup') {
       h += '<p data-group-wo-setup>' + esc((raw.discovery && raw.discovery.message) || 'The office needs to check the group work order setup.') + '</p>';
     } else if (mode === 'create') {
       h += '<p>No group on this job yet.</p>';
@@ -303,6 +324,9 @@ var GroupWorkOrderCore = (function () {
     switchOn: switchOn,
     isOff: isOff,
     tradeMode: tradeMode,
+    REMOVED_LINE: REMOVED_LINE,
+    removedByOffice: removedByOffice,
+    removalRefusal: removalRefusal,
     errCode: errCode,
     closedShare: closedShare,
     needsMyApproval: needsMyApproval,

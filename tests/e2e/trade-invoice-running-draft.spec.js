@@ -163,7 +163,10 @@ test('group route keeps every saved day and excluded hour through Save and reope
   await openWeek(page);
   await expect(page.locator('[data-group-job-card]')).toHaveCount(1);
   await expect(page.locator('[data-saved-group-entry]')).toHaveCount(2);
-  await expect(page.locator('[data-group-job-card]')).toContainText('Add your hours');
+  // The hours form is the group section's; the job card links to it.
+  await expect(page.locator('section[data-invoice-groups] [data-group-hours-form]')).toHaveCount(1);
+  await expect(page.locator('[data-group-job-card] [data-group-hours-form]')).toHaveCount(0);
+  await expect(page.locator('[data-group-job-card]')).toContainText('Go to the group work order');
   await expect(page.locator('[data-group-job-card]')).toContainText('Not ticked');
   await page.locator('#invSaveBtn').click();
   await expect(page.locator('#invSaveState')).toContainText('Saved');

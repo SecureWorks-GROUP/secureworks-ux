@@ -1594,6 +1594,15 @@
       margin-top: 4px;
     }
     .kanban-days.stale { color: var(--sw-red); font-weight: 600; }
+    /* Lower-right NEW tab on a job card's first 36 hours on the pipeline
+       (// <kanban-new-tag>). The card's last line keeps clear of it. */
+    .kanban-card > .kanban-new-tag {
+      position: absolute; bottom: 0; right: 0; z-index: 2;
+      font-size: 7px; font-weight: 700; letter-spacing: .8px; line-height: 1.3;
+      padding: 3px 8px 3px 9px; border-radius: 8px 0 0 0;
+      background: var(--sw-orange); color: #fff; pointer-events: none;
+    }
+    .kanban-card.kanban-card-new > :last-child { padding-right: 40px; }
     .kanban-substage-header {
       font-size: 10px;
       font-weight: 600;
@@ -18451,8 +18460,32 @@ function asbestosCardBadgeHtml(jobType, existingFenceType) {
 }
 // </asbestos-card-badge>
 
+// <kanban-new-tag> A job's first 36 hours on the pipeline. It arrives when a
+// client accepts the quote (accepted_at) or, for a job put straight onto the
+// pipeline, when it was made (created_at). Every viewer reads the same feed, so
+// everyone sees the same tag. A later move does not restart it: a job dragged
+// back to Accepted gets a fresh accepted_at, but it already holds an earlier
+// stage time (approvals, deposit, ...), so it is not new. Sales drawer cards
+// have not arrived yet.
+var KANBAN_NEW_TAG_MS = 36 * 3600000;
+var KANBAN_LATER_STAGE_TIMES = ['approvals_at', 'deposit_at', 'processing_at', 'scheduled_at', 'completed_at'];
+function isNewPipelineJob(j, status, now) {
+  if (!j || (SALES_DRAWER_STAGES.indexOf(status) >= 0 && !isRepairJob(j))) return false;
+  var arrived = Date.parse(j.accepted_at || j.created_at || '');
+  if (!isFinite(arrived)) return false;
+  var age = (now == null ? Date.now() : now) - arrived;
+  if (age >= KANBAN_NEW_TAG_MS) return false;
+  for (var i = 0; i < KANBAN_LATER_STAGE_TIMES.length; i++) {
+    var t = Date.parse(j[KANBAN_LATER_STAGE_TIMES[i]] || '');
+    if (isFinite(t) && t < arrived) return false;
+  }
+  return true;
+}
+
 function renderKanbanCard(j, status) {
-  var html = '<div class="kanban-card" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
+  var isNew = isNewPipelineJob(j, status);
+  var html = '<div class="kanban-card' + (isNew ? ' kanban-card-new' : '') + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
+  if (isNew) html += '<span class="kanban-new-tag" title="New on the pipeline in the last 36 hours">NEW</span>';
   html += '<div class="kanban-card-header">';
   html += '<span class="kanban-client">' + asbestosCardBadgeHtml(j.type, j.existing_fence_type) + (j.client_name || 'Unknown') + '</span>';
   if (j.value) html += '<span class="kanban-value">' + fmt$(j.value) + '</span>';

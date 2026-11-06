@@ -66,3 +66,11 @@ test('weekly Create is explicit, deduplicated while pending and refreshes the ro
   assert.equal(group.isGroupJob('fixture-job'),true);
   assert.equal(calls.filter(call=>call.action==='create_group_work_order').length,1);
 });
+
+
+test('office client confirmation distinguishes historical waivers and escapes all evidence',()=>{
+ const ui=require('../../shared/client-signoff.js');
+ const html=ui.officeHtml({form:{job_number:'ZZTEST',address:'<script>bad</script>'},current:{method:'office_waiver',created_at:'2026-01-01',entered_by_name:'<img src=x>',confirmation_reference:'<b>client note</b>'},counts_for_group:false,can_record_copy:true});
+ assert.match(html,/Historical office waiver/);assert.match(html,/current client confirmation/);assert.match(html,/Client-signed copy/);assert.match(html,/Client’s written confirmation/);assert.doesNotMatch(html,/<script>|<img|<b>client note/);assert.doesNotMatch(html,/data-office-signoff-form|waive_client_signoff|agreed_labour|\$/);
+ const frozen=ui.officeHtml({form:{job_number:'ZZTEST'},split_frozen:true,can_record_copy:false});assert.match(frozen,/Reopening it will require fresh client confirmation/);assert.doesNotMatch(frozen,/data-client-so-form/);
+});

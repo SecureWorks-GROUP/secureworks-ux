@@ -123,7 +123,7 @@ var GroupWorkOrderCore = (function () {
       h += '<p data-group-wo-msg>' + esc(message || 'That could not be read.') + '</p>';
     } else {
       var view = closedShare(raw);
-      h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
+      h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for the client’s confirmation.') + '</p>';
       if (view.pot_total != null) h += '<p data-group-wo-total>' + (allInBasis(view.pay_basis) ? 'Crew total (pay and super) ' : 'Crew total ') + esc(money(view.pot_total)) + '</p>';
       if (view.my_budget != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_budget)) + '</p><p data-group-wo-split>Pay ' + esc(money(view.my_cash_pay)) + ' · ' + (view.pay_basis === 'all_in_12_v2' ? 'Super 12% ' : 'Super ') + esc(money(view.my_super)) + '</p>';
       else if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
@@ -175,9 +175,16 @@ var GroupWorkOrderCore = (function () {
     if (read.site_suburb) who += ' · ' + read.site_suburb;
     h += '<p data-group-sign-job>' + esc(who) + '</p>';
     if (read.job_type) h += '<p data-group-sign-type>' + esc(read.job_type) + '</p>';
+    if (read.form && read.form.address) h += '<p data-group-sign-address>' + esc(read.form.address) + '</p>';
+    h += '<button type="button" data-group-sign-pdf>Download a paper sign-off form</button>';
     h += '<p data-group-sign-notice>' + esc(read.office_only_notice || NOTICE) + '</p>';
     if (!read.client_signed) {
-      h += '<label>Your name <input data-group-sign-name aria-label="Your name"></label>';
+      h += '<label>Your name <input data-group-sign-name aria-label="Your name" maxlength="120"></label>';
+      h += '<label>Work completed <textarea data-group-sign-work maxlength="10000"></textarea></label>';
+      h += '<label>Outstanding items or comments <textarea data-group-sign-outstanding maxlength="10000"></textarea></label>';
+      h += '<label>Date confirmed <input data-group-sign-date type="date"></label>';
+      h += '<label>Do you accept the work described above?<select data-group-sign-accepts><option value="">Choose an answer</option><option value="true">Yes</option><option value="false">No</option></select></label>';
+
       h += '<canvas data-group-sign-pad width="320" height="140"></canvas>';
       h += '<div><button type="button" data-group-sign-clear>Clear</button> ';
       h += '<button type="button" data-group-sign-submit>Sign</button></div>';
@@ -233,9 +240,9 @@ var GroupWorkOrderCore = (function () {
     var h = '<section data-office-group-wo-card aria-label="Group work order">';
     h += '<div class="gwo-title">Group work order</div>';
     if (finiteOrNull(read.pot_total) != null) h += '<p data-office-group-total>Total ' + esc(money(read.pot_total)) + '</p>';
-    h += '<p>' + (read.client_signed ? 'Client sign-off recorded.' : 'Waiting for client sign-off or an office override.') + '</p>';
+    h += '<p>' + (read.client_signed ? (read.client_signoff_method === 'office_waiver' ? 'Historical office approval recorded.' : 'Client sign-off recorded.') : 'Waiting for the client’s confirmation.') + '</p>';
     if (read.client_signoff_method === 'office_waiver') {
-      h += '<p data-office-group-override>Recorded by the office: ' + esc(read.client_signoff_reason || '') + '</p>';
+      h += '<p data-office-group-override>Historical office approval: ' + esc(read.client_signoff_reason || '') + '</p>';
     }
     var people = Array.isArray(read.participants) ? read.participants : [];
     var hours = Array.isArray(read.hours) ? read.hours : [];
@@ -259,12 +266,7 @@ var GroupWorkOrderCore = (function () {
       h += '<p>This approves everyone\'s hours on behalf of the crew. It is not a crew signature. Anyone on this crew cannot approve it.</p>';
       h += '<button type="submit">Approve hours for the crew</button></form>';
     }
-    if (!read.client_signed) {
-      h += '<form data-office-signoff-form>';
-      h += '<label>Reason for office sign-off <textarea data-office-signoff-reason required minlength="3" maxlength="2000" placeholder="Who confirmed the client approval, and when?"></textarea></label>';
-      h += '<p>This records an office override. It does not create a client signature or submit invoices.</p>';
-      h += '<button type="submit">Record office sign-off</button></form>';
-    }
+    if (!read.client_signed) h += '<p>Use Client sign-off above to record the client’s signed copy or written confirmation. A general office waiver does not unlock a new group.</p>';
     h += '<p data-office-group-message role="status" aria-live="polite"></p>';
     var shares = Array.isArray(read.shares) ? read.shares : [];
     if (!shares.length) h += '<p data-office-group-shares>' + (read.client_signed ? 'Sign-off recorded. Shares have not been finalised yet.' : 'Shares are waiting for sign-off.') + '</p>';

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign the job</title>
   <script src="shared/group-work-order.js?v=invoice-hours-20261106"></script>
+  <script src="shared/client-signoff.js?v=20261106"></script>
   <style>
     body { margin: 0; font-family: Helvetica, Arial, sans-serif; background: #f4f6f8; color: #293C46; }
     #groupSign { max-width: 420px; margin: 0 auto; padding: 24px 16px 48px; }
@@ -12,8 +13,8 @@
     [data-group-sign] p { font-size: 14px; line-height: 1.4; }
     [data-group-sign-notice] { background: #fff; border: 1px solid #d4dee4; padding: 10px 12px; }
     label { display: block; font-size: 13px; font-weight: 700; margin-top: 14px; }
-    input, textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; font: inherit; }
-    canvas { display: block; margin-top: 12px; background: #fff; border: 1px solid #293C46; touch-action: none; }
+    input, textarea, select { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; font: inherit; font-size:16px; }
+    canvas { display: block; margin-top: 12px; background: #fff; border: 1px solid #293C46; touch-action: none; max-width:100%; height:auto; }
     button { margin-top: 12px; padding: 10px 14px; font-weight: 700; }
     fieldset { border: 1px solid #d4dee4; margin: 12px 0; }
     fieldset label { font-weight: 500; display: inline-block; margin-right: 8px; }
@@ -111,7 +112,7 @@
       var host = document.getElementById('groupSign');
       token = params();
       if (!core || !host || !token) return;
-      ops('group_work_order_public', { token: token }).then(paint).catch(function (e) {
+      return ops('group_work_order_public', { token: token }).then(paint).catch(function (e) {
         if (core.isOff(null, e)) { host.innerHTML = ''; return; }
         host.innerHTML = '';
       });
@@ -120,14 +121,28 @@
     document.getElementById('groupSign').addEventListener('click', function (ev) {
       var core = window.GroupWorkOrderCore;
       if (!core) return;
+      var paper = ev.target.closest('[data-group-sign-pdf]');
+      if (paper) {
+        paper.disabled = true;
+        ops('group_work_order_public', {token:token,format:'pdf'}).then(function(file) {
+          ClientSignoffUI.downloadFile(file);
+        }).catch(function(e) { msg(e.message || 'The form could not be downloaded.'); })
+          .finally(function() { paper.disabled = false; });
+        return;
+      }
       if (ev.target.closest('[data-group-sign-submit]')) {
         var name = (document.querySelector('[data-group-sign-name]') || {}).value || '';
         name = String(name).trim();
         if (!name) { msg('Enter your name with your signature.'); return; }
         var pad = document.querySelector('[data-group-sign-pad]');
-        var body = { share_token: token, signer_name: name, signed_via: 'share_link' };
+        var work = String(document.querySelector('[data-group-sign-work]').value || '').trim();
+        var day = document.querySelector('[data-group-sign-date]').value;
+        var accepts = document.querySelector('[data-group-sign-accepts]').value;
+        if (!work || !day || !accepts) {msg('Enter the work completed, confirmation date and whether you accept the work.');return;}
+        if (!drew) {msg('Add your signature before recording your confirmation.');return;}
+        var body = { share_token: token, signer_name: name, signed_via: 'share_link',form_version:'client-confirmation-v1',work_done:work,client_confirmed_on:day,happy:accepts==='true',outstanding_items:document.querySelector('[data-group-sign-outstanding]').value || '' };
         if (drew && pad) body.signature_png = pad.toDataURL('image/png');
-        ops('group_work_order_client_sign', null, body).then(function () { load(); }).catch(function (e) {
+        ops('group_work_order_client_sign', null, body).then(function (result) { return load().then(function(){if(result.client_signed===false)msg('Your confirmation was recorded. The office will review the work that you have not accepted.');}); }).catch(function (e) {
           if (core.isOff(null, e)) { document.getElementById('groupSign').innerHTML = ''; return; }
           msg((e && e.message) || 'That signature could not be saved.');
         });

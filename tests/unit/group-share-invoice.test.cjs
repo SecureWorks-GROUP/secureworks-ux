@@ -23,3 +23,46 @@ test('ready split freezes only on explicit click and rereads server',async()=>{c
 
 test('before freezing, explains weighted pool rather than hourly entitlement',async()=>{const s=setup({...frozen,awaiting:'ready',pot_total:2160},()=>Promise.resolve({}));await s.paint();const html=s.controls[0].innerHTML;assert.match(html,/\$2160\.00 excluding GST/);assert.match(html,/hours × agreed rates as weights/);assert.match(html,/do not guarantee hourly payment/);assert.equal(s.calls.length,1)});
 test('missing or unsafe pool values never invent or inject an amount',async()=>{for(const pot of [undefined,null,NaN,Infinity,-1,'<img src=x onerror=alert(1)>']){const s=setup({...frozen,awaiting:'ready',pot_total:pot},()=>Promise.resolve({}));await s.paint();const html=s.controls[0].innerHTML;assert.doesNotMatch(html,/Approved work-order pool:|<img|NaN|Infinity/);assert.match(html,/hours × agreed rates as weights/);assert.equal(s.calls.length,1)}});
+
+
+test('shared discovery shows Create and Join before any participant price read',()=>{
+  const core=require('../../shared/group-work-order.js');
+  for (const type of ['fencing','patio']) {
+    for (const state of ['create','join']) {
+      const response={enabled:true,job_type:type,group_id:state==='join'?'fixture-group':null,participant:false,discovery:{state}};
+      assert.equal(core.tradeMode(response),state);
+      const html=core.tradeHtml(core.tradeMode(response),response);
+      assert.match(html,new RegExp('data-group-wo-action="'+state+'"'));
+      assert.doesNotMatch(html,/\$|Save hours|data-group-wo-total/);
+    }
+  }
+  const held={enabled:true,group_id:'fixture-group',discovery:{state:'setup_required',message:'The office needs to reopen this group.'}};
+  assert.equal(core.tradeMode(held),'setup');
+  const html=core.tradeHtml('setup',held);
+  assert.match(html,/needs to reopen/);
+  assert.doesNotMatch(html,/data-group-wo-action|Save hours|\$/);
+});
+
+test('weekly Create is explicit, deduplicated while pending and refreshes the route',async()=>{
+  const calls=[]; let finish, grouped=false;
+  const scope={window:{},document:{querySelector:()=>true,querySelectorAll:()=>[]}};
+  vm.runInNewContext(fs.readFileSync('modules/trade-group-invoice.js','utf8'),scope);
+  const group=scope.window.GroupWorkOrderInvoice;
+  group.use((action,params,body)=>{
+    calls.push({action,body});
+    if(action==='create_group_work_order')return new Promise(resolve=>{finish=()=>{grouped=true;resolve({group_id:'fixture-group'})}});
+    return Promise.resolve({enabled:true,groups:grouped?[{group_id:'fixture-group',job_id:'fixture-job',awaiting:'needs_hours'}]:[],
+      payable_routes:[{job_id:'fixture-job',route:grouped?'group':'hours',group_id:grouped?'fixture-group':null,discovery:{state:grouped?'member':'create'}}]});
+  },()=>{},'fixture-user');
+  group.load();await settle();
+  assert.equal(group.isGroupJob('fixture-job'),false);
+  assert.match(group.discoveryHtml({job_id:'fixture-job'}),/Create group work order/);
+  assert.equal(calls.length,1,'rendering creates nothing');
+  group.create('unallocated-job');assert.equal(calls.length,1);
+  group.create('fixture-job');group.create('fixture-job');
+  assert.equal(calls.length,2);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1])),{action:'create_group_work_order',body:{job_id:'fixture-job'}});
+  finish();await settle();
+  assert.equal(group.isGroupJob('fixture-job'),true);
+  assert.equal(calls.filter(call=>call.action==='create_group_work_order').length,1);
+});

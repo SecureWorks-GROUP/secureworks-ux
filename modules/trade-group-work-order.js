@@ -1,6 +1,6 @@
 // Trade group work order: create, join, save hours, approve the crew's hours,
 // see Total and Your share.
-// Paints nothing on any error, or until the server has said the switch is on.
+// Keeps setup and read failures visible after the server enables the feature.
 // The share read is not requested on a job open unless that switch is on.
 // Never posts a client send. Loaded by trade.html.
 (function () {
@@ -61,14 +61,17 @@
       el.setAttribute('data-group-id', (res && res.group_id) || '');
       render(el, mode, res);
     }).catch(function (e) {
-      armed = false;
       var box = slot(jobId);
-      if (box) box.innerHTML = '';
+      if (!box) return;
+      if ([401,403,404].indexOf(Number(e && e.status)) >= 0 || core.errCode(e) === 'unknown_action') {
+        armed = false; box.innerHTML = ''; return;
+      }
+      render(box, 'error', {}, 'Group work orders could not be checked. Reopen this job to retry.');
     });
   }
 
-  function render(el, mode, res) {
-    el.innerHTML = C().tradeHtml(mode, res);
+  function render(el, mode, res, message) {
+    el.innerHTML = C().tradeHtml(mode, res, message);
     el._groupShare = res;
     var card = el.querySelector('[data-group-wo]');
     if (!card || !res || res.group_share_office_review_required !== true) return;
@@ -167,17 +170,23 @@
       return;
     }
     if (action === 'create') {
+      if (el._groupBusy || !el._groupShare || core.tradeMode(el._groupShare) !== 'create') return;
+      el._groupBusy = true; btn.disabled = true;
       call('create_group_work_order', null, { job_id: jobId }).then(function () {
         armed = true;
         return paint(jobId);
-      }).catch(function () { el.innerHTML = ''; });
+      }).catch(function (e) { showMsg(el, e.message || 'Could not update the group work order.'); })
+        .finally(function () { el._groupBusy = false; btn.disabled = false; });
       return;
     }
     if (action === 'join') {
+      if (el._groupBusy || !el._groupShare || core.tradeMode(el._groupShare) !== 'join') return;
+      el._groupBusy = true; btn.disabled = true;
       call('join_group_work_order', null, { job_id: jobId }).then(function () {
         armed = true;
         return paint(jobId);
-      }).catch(function () { el.innerHTML = ''; });
+      }).catch(function (e) { showMsg(el, e.message || 'Could not update the group work order.'); })
+        .finally(function () { el._groupBusy = false; btn.disabled = false; });
       return;
     }
     if (action === 'save-hours') {

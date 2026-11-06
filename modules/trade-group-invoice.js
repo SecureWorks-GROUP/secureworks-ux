@@ -279,6 +279,14 @@
   }
 
   // Inside a job card: the card's mode toggle sits under the head.
+  function discoveryHtml(card) {
+    var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
+    var d = route && route.discovery;
+    if (!d || (d.state !== 'create' && d.state !== 'setup_required')) return '';
+    if (d.state === 'setup_required') return '<p data-group-discovery style="font-size:12px;color:var(--sw-text-sec)">' + esc(d.message || 'The office needs to check the group setup.') + '</p>';
+    return '<div data-group-discovery style="margin-top:10px"><button type="button" class="gw-link" data-invoice-group-create="' + esc(card.job_id) + '" onclick="GroupWorkOrderInvoice.create(this.getAttribute(\'data-invoice-group-create\'))"' + (busy ? ' disabled' : '') + '>Create group work order</button></div>';
+  }
+
   function jobCardHtml(card, toggle) {
     ensureCss();
     var list = groups.filter(function(g) { return String(g.job_id) === String(card.job_id); });
@@ -286,13 +294,15 @@
       var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
       if (route && route.route === 'group_setup_required') {
         var detail = route.setup_reason === 'group_missing'
-          ? 'The approved work-order amount is ready. The office needs to set up the crew group before you invoice your share.'
+          ? (route.discovery && route.discovery.state === 'create'
+            ? 'The approved work-order amount is ready. Create the crew group below, then record your hours on it.'
+            : 'The approved work-order amount is ready. The office needs to set up the crew group before you invoice your share.')
           : route.setup_reason === 'work_order_not_approved'
           ? 'The office needs to approve the job work order before setting up the crew group.'
           : 'The office needs to set the job work-order amount before setting up the crew group.';
         return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id })
           + '<div class="gw-locked" data-group-setup-required style="margin-top:12px"><strong>Group work order needs setting up</strong><p>' + detail + '</p><p>Your other jobs can still be invoiced.</p></div>'
-          + links({ job_id: card.job_id });
+          + discoveryHtml(card) + links({ job_id: card.job_id });
       }
       return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id }) + (toggle || '')
         + '<div class="gw-locked" style="margin-top:12px">Paid from the group work order.</div>' + links({ job_id: card.job_id });
@@ -454,7 +464,7 @@
     return res.group_release && res.group_release.released === true ? 'Sent for payment with the whole crew.' : 'Saved. Paid together once the whole crew is in.';
   }
 
-  window.GroupWorkOrderInvoice = { use: use, load: load, html: html, jobCardHtml: jobCardHtml, isGroupJob: isGroupJob, items: items, total: total,
+  window.GroupWorkOrderInvoice = { use: use, load: load, html: html, jobCardHtml: jobCardHtml, discoveryHtml: discoveryHtml, isGroupJob: isGroupJob, items: items, total: total,
     selectedIds: selectedIds, restore: restore, ready: function() { return state === 'ready' && !busy; }, reset: reset,
     retry: function() { load(true); changed(); },
     openSign: openSign,
@@ -476,6 +486,13 @@
         if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
         busy = ''; load(true);
       }).catch(function(err) { busy = ''; say(err.message || 'Could not approve the hours.', true); changed(); });
+    },
+    create: function(jobId) {
+      var route = payableRoutes.find(function(r) { return String(r.job_id) === String(jobId); });
+      if (busy || !route || !route.discovery || route.discovery.state !== 'create') return;
+      busy = jobId; changed();
+      api('create_group_work_order', null, {job_id:jobId}).then(function() {busy='';load(true);})
+        .catch(function(err) {busy='';say(err.message || 'Could not create the group work order.',true);changed();});
     },
     join: function(id) {
       var g=find(id);

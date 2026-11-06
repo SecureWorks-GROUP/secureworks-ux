@@ -34,7 +34,7 @@
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=discovery-20261106"></script>
   <script src="modules/trade-group-work-order.js?v=discovery-20261106"></script>
-  <script src="modules/trade-group-invoice.js?v=discovery-20261106"></script>
+  <script src="modules/trade-group-invoice.js?v=draft-route-20261106"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -23807,7 +23807,15 @@
     return (cards || []).map(function(raw) {
       var fields = Object.assign({}, raw || {});
       delete fields._idx;
-      return _newJobCard(fields);
+      var card = _newJobCard(fields);
+      // New ordinary cards derive billable hours from times. A restored group
+      // entry is a recovery record, including older hours without times.
+      // Preserve it while routing is pending too; it cannot be submitted then.
+      if (fields.hours != null && window.GroupWorkOrderInvoice &&
+          (!GroupWorkOrderInvoice.routesReady() || invoiceGroupJob(fields))) {
+        card.hours = fields.hours;
+      }
+      return card;
     });
   }
 
@@ -24160,7 +24168,8 @@
     var core = window.TradeInvoiceRunningDraft;
     return core.snapshot({
       groupIds: window.GroupWorkOrderInvoice ? GroupWorkOrderInvoice.selectedIds() : [],
-      jobCards: _serializeJobCardsDraft(_jobCards.filter(function(c) { return !invoiceGroupJob(c); })),
+      // Route changes affect billing, never the saved record of entered work.
+      jobCards: _serializeJobCardsDraft(_jobCards),
       invRows: _invRows,
       invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
       dismissedKeys: _invDismissedKeys || [],
@@ -25750,11 +25759,13 @@
   // for them). Only while ops-api honours it does a rate the trade typed for
   // that job (Captain 2026-10-13) bill instead. A searched-in card keeps its own.
   function _pinAssignedCardRates() {
+    // Wait for routing before replacing a saved rate on a possible group job.
+    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) return;
     var data = _hoursData || {};
     var usualRate = Number(data.rate || _tradeRate || 0);
     var editable = _assignedRateEditable();
     _jobCards.forEach(function(c) {
-      if (!c || c.manually_added) return;
+      if (!c || c.manually_added || invoiceGroupJob(c)) return;
       var typed = editable && c.typed_rate != null;
       c.rate = typed ? (Number(c.typed_rate) || 0) : (usualRate > 0 ? usualRate : 0);
       c.rate_source = (typed && c.rate !== usualRate) ? 'client_entered' : 'server_resolved';
@@ -25795,9 +25806,13 @@
       + '<button type="button" disabled aria-disabled="true" title="Paid from the group pool" style="' + seg + 'border-left:1px solid var(--sw-border);' + off + '">Commission</button>'
       + '</div>';
     return '<div class="jc-card" data-card="' + c._idx + '" data-group-job-card="' + esc(c.job_id) + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:12px;margin-bottom:8px;background:var(--sw-card)">'
-      + GroupWorkOrderInvoice.jobCardHtml(c, toggle) + '</div>';
+      + GroupWorkOrderInvoice.jobCardHtml(c, toggle)
+      + GroupWorkOrderInvoice.savedEntriesHtml(_jobCards.filter(function(entry) { return String(entry.job_id) === String(c.job_id); })) + '</div>';
   }
   function renderJobCardsHtml() {
+    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) {
+      return '<p data-invoice-routes-pending role="status">Checking invoice routes. Your saved entries are kept.</p>';
+    }
     _pinAssignedCardRates();
     var data = _hoursData || {};
     var rate = Number(data.rate || _tradeRate || 0);
@@ -26008,7 +26023,7 @@
           html += '</div>';
           html += _renderCardLumpLinesHtml(c);
         }
-        if (window.GroupWorkOrderInvoice) html += GroupWorkOrderInvoice.discoveryHtml(c);
+        if (window.GroupWorkOrderInvoice) html += GroupWorkOrderInvoice.routeHtml(c) + GroupWorkOrderInvoice.discoveryHtml(c);
         // Description: auto-filled for commission; optional annotation for WO; required for hours.
         var commAutoDesc = cardMode === 'commission' ? ('Commission — ' + esc(c.job_number || '') + ' — ' + esc(c.client_name || '')) : '';
         var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional — breakdown auto-added)' : 'Description of work');
@@ -26189,8 +26204,12 @@
   // lost when the trade taps "+ Add job" or changes mode without triggering
   // the onchange event (common on mobile where onchange fires on blur).
   function _syncJobCardsFromDOM(skipTime) {
+    // No ordinary inputs are shown until the server resolves the job routes.
+    if (window.GroupWorkOrderInvoice && !GroupWorkOrderInvoice.routesReady()) return;
     _jobCards.forEach(function(c, i) {
       var idx = (c._idx != null) ? c._idx : i;
+      // The group panel has no ordinary inputs. Preserve the recovery entries.
+      if (invoiceGroupJob(c)) return;
       if (c.commission_mode) {
         var commEl = document.querySelector('[data-cardcommamt="' + idx + '"]');
         if (commEl) {

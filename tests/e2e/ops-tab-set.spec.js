@@ -1,5 +1,5 @@
 // Guard for the Ops tab set (Captain 2026-10-06, `<ops-tab-set>` in ops.html):
-//  - the nav is Jobs, Calendar, Financials, Dispatch, Sales (plus the Debt tab,
+//  - the nav is Calendar, Jobs, Financials, Dispatch, Sales (plus the Debt tab,
 //    hidden until switched on), and a fresh open of
 //    the plain address lands on Jobs (an address that names a tab opens that tab);
 //  - Today, Inbox and Approvals are off the front end, and any old deep link or
@@ -55,14 +55,14 @@ async function bootOps(page, { hash = '', savedTab = null, responses = {}, delay
   return { apiCalls, requests };
 }
 
-test('the nav is Jobs, Calendar, Financials, Dispatch, Sales and Ops opens on Jobs', async ({ page }) => {
+test('the nav is Calendar, Jobs, Financials, Dispatch, Sales and Ops opens on Jobs', async ({ page }) => {
   await bootOps(page);
   // The Debt tab (data-debt-nav) sits after Financials but stays hidden until it is
   // switched on (?debt=1, localStorage sw_debt_ws or the backend's tab_visible).
   // Matching (data-recon-nav) sits after Debt and stays hidden unless ?recon=1 or sw_recon.
-  await expect(page.locator('.header-nav button:not([data-debt-nav]):not([data-recon-nav])')).toHaveText(['Jobs', 'Calendar', 'Financials', 'Dispatch', 'Sales']);
+  await expect(page.locator('.header-nav button:not([data-debt-nav]):not([data-recon-nav])')).toHaveText(['Calendar', 'Jobs', 'Financials', 'Dispatch', 'Sales']);
   const mobileOrder = await page.locator('.mobile-nav button').evaluateAll((els) => els.map((el) => el.dataset.view));
-  expect(mobileOrder).toEqual(['jobs', 'calendar', 'financials', 'debt', 'recon', 'dispatch', 'sales']);
+  expect(mobileOrder).toEqual(['calendar', 'jobs', 'financials', 'debt', 'recon', 'dispatch', 'sales']);
   await expect(page.locator('[data-debt-nav]')).toHaveCount(2);
   for (const debtNav of await page.locator('[data-debt-nav]').all()) await expect(debtNav).toBeHidden();
   await expect(page.locator('[data-recon-nav]')).toHaveCount(2);

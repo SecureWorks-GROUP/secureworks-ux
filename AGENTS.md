@@ -35,7 +35,7 @@ Any fixture whose app logic compares a date against "now"/"this week" (e.g. trad
 
 ## Ops Dash tab set (`ops.html`)
 
-Captain 2026-10-06: the nav is Jobs, Calendar, Financials, Dispatch, Sales. A
+Captain 2026-10-06: the nav is Calendar, Jobs, Financials, Dispatch, Sales. A
 fresh open of the plain address lands on Jobs. Every tab switch writes the tab
 into the address bar, so a refresh, a restored browser tab or a bookmark stays on
 the tab it names. Today, Inbox (AI annotations) and Approvals are hidden on the

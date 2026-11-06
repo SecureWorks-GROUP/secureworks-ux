@@ -4768,11 +4768,11 @@ __swOpsStampAssets([
   <div class="header">
     <div class="header-left">
       <div class="header-brand" onclick="showView('jobs')" style="cursor:pointer;">SecureWorks <span>Ops</span></div>
-      <!-- <ops-tab-set> Jobs, Calendar, Financials, Dispatch, Sales. Today, Inbox and
+      <!-- <ops-tab-set> Calendar, Jobs, Financials, Dispatch, Sales. Today, Inbox and
            Approvals are off the front end (Captain 2026-10-06); see OPS_HIDDEN_VIEWS. -->
       <div class="header-nav">
-        <button class="active" onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
+        <button class="active" onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
         <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none">Debt</button>
         <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none">Matching</button>
@@ -5417,8 +5417,8 @@ __swOpsStampAssets([
 
   <!-- Mobile Nav -->
   <div class="mobile-nav">
-    <button class="active" onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
+    <button class="active" onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
     <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 3v7l5 5"/></svg></span>Debt</button>
     <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h9l-3-3M16 13H7l3 3"/></svg></span>Matching</button>

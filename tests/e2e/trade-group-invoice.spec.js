@@ -107,7 +107,7 @@ test('all-inclusive group shows cash and super and submits one separate share fr
   const card=page.locator('[data-invoice-group]');
   expect(offsets).toEqual([0,1]);
   await expect(page.locator('[data-pm-wo-hydrate="error"]')).toHaveCount(0);
-  await expect(card).toContainText('pool $2,720.00');
+  await expect(card).toContainText('crew total $2,720.00');
   await expect(card.locator('[data-group-allocation]')).toHaveText(/Your share\s*\$911.56/);
   await expect(card.locator('[data-group-pay]')).toHaveText(/Pay\s*\$808.36/);
   await expect(card.locator('[data-group-super]')).toHaveText(/Super\s*\$103.20/);
@@ -136,7 +136,7 @@ test('future allocated group is discoverable and joinable before hours without e
  await expect(card).not.toContainText('2,160');
  await expect(card.getByRole('button',{name:'Join group work order',exact:true})).toBeVisible();
  await card.getByRole('button',{name:'Join group work order',exact:true}).click();
- await expect(card).toContainText('Add your hours before your share can be calculated.');
+ await expect(card.locator('[data-group-hours-form]')).toContainText('Any day you worked on this job');
  expect(writes).toEqual([{group_id:groupId}]);
  await expect(card.getByRole('button',{name:'Finalise group shares',exact:true})).toHaveCount(0);
 });

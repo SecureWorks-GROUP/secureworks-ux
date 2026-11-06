@@ -149,7 +149,7 @@ test('group route keeps every saved day and excluded hour through Save and reope
   await expect(card).toHaveCount(1);
   await expect(card.locator('[data-invoice-pay-route="group_setup_required"]')).toContainText('office needs to check');
   await expect(card.locator('[data-saved-group-entry]')).toHaveCount(2);
-  await expect(card).toContainText('Excluded from draft');
+  await expect(card).toContainText('Not ticked');
   await expect(card).toContainText('7h');
   await expect(card).toContainText('2.25h');
   await page.locator('#invSaveBtn').click();
@@ -164,7 +164,7 @@ test('group route keeps every saved day and excluded hour through Save and reope
   await expect(page.locator('[data-group-job-card]')).toHaveCount(1);
   await expect(page.locator('[data-saved-group-entry]')).toHaveCount(2);
   await expect(page.locator('[data-group-job-card]')).toContainText('Add your hours');
-  await expect(page.locator('[data-group-job-card]')).toContainText('Excluded from draft');
+  await expect(page.locator('[data-group-job-card]')).toContainText('Not ticked');
   await page.locator('#invSaveBtn').click();
   await expect(page.locator('#invSaveState')).toContainText('Saved');
   for(let i=0;i<2;i++)for(const key of Object.keys(original[i]))expect(builder.jobCards[i][key]).toEqual(original[i][key]);

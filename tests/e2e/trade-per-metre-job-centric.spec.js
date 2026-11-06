@@ -296,7 +296,7 @@ test('My Work Orders and Work Order Invoice recover from a failed read', async (
   await expect(page.locator('[data-weekly-wo-load-error]')).toBeVisible();
   failReads = false;
   await page.locator('[data-weekly-wo-retry]').click();
-  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
   await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
 });
 
@@ -326,7 +326,7 @@ test('a truncated work-order listing keeps the hub and weekly invoice on Retry',
   await expect(page.locator('[data-financial-hub]')).toBeVisible();
   await page.locator('[data-work-order-weekly-invoice]').click();
   await expect(page.locator('[data-weekly-wo-load-error]')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toHaveCount(0);
 });
 
 test('job-centric WO allocations survive a Financial reload', async ({ appPage: page }) => {
@@ -469,7 +469,7 @@ test('an empty work-order week offers the job-centric invoice builder', async ({
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();
   await page.locator('[data-work-order-weekly-invoice]').click();
-  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Next invoice week' }).click();
   await expect(page.getByText('No completed work orders available for this week')).toBeVisible();

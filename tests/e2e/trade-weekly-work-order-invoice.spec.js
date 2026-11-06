@@ -19,7 +19,7 @@ async function openWeeklyInvoice(page) {
   await page.locator('[data-view="hours"]').click();
   await expect(page.locator('[data-financial-hub]')).toBeVisible();
   await page.locator('[data-work-order-weekly-invoice]').click();
-  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
   await expect(page.locator('[data-weekly-work-order]')).toHaveCount(9);
 }
 
@@ -87,7 +87,7 @@ test('builds invoice #31 from source selections and renders only server-calculat
 
   await page.getByRole('button', { name: 'Submit Invoice' }).click();
   await expect(page.locator('#confirmMsg')).toContainText('$4,813.40');
-  await expect(page.locator('#confirmMsg')).toContainText('A DRAFT bill will be created in Xero.\n\nThis is your ONE invoice', { useInnerText: true });
+  await expect(page.locator('#confirmMsg')).toContainText('It goes to the office to check and pay.\n\nThis is your ONE invoice', { useInnerText: true });
   // One invoice per week: the submit confirm must be ticked deliberately.
   await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
@@ -111,7 +111,7 @@ test('reopens the server-owned weekly draft without flattening its work-order bl
   await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('TO BE PAID$4,813.40');
 
   await page.evaluate(() => window.openInvoiceDraft('henry-weekly-draft-31'));
-  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
   await expect(page.locator('[data-weekly-job-block]')).toHaveCount(9);
   await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('Grand total$5,163.40');
   await expect(page.getByRole('spinbutton', { name: 'Labour hours for Isaac' })).toHaveCount(0);
@@ -131,7 +131,7 @@ test.describe('weekly invoice response guards', () => {
     const priorCard = page.locator('[data-work-order-card]').filter({ hasText: 'WO-HENRY-PRIOR' });
     await priorCard.getByRole('button', { name: 'Add to Weekly Invoice' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
     await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
     await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
     await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]').getByRole('checkbox', { name: /Include/ })).toBeChecked();
@@ -252,7 +252,7 @@ test.describe('stale weekly submit response', () => {
     await submitResponse;
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
-    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toHaveCount(0);
     await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
   });

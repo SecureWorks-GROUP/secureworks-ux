@@ -82,9 +82,9 @@
     if (res.awaiting === 'ready' && res.client_signed === true) {
       var pot = res.pot_total;
       var poolLabel = typeof pot === 'number' && Number.isFinite(pot) && pot >= 0
-        ? 'Approved work-order pool: $' + pot.toFixed(2) + ' excluding GST. '
+        ? 'Crew total for this job: $' + pot.toFixed(2) + ' before GST. '
         : '';
-      controls.innerHTML = '<p>' + poolLabel + 'The approved work-order pool is split between the crew using hours × agreed rates as weights. These rates do not guarantee hourly payment. Finalising locks the hours, rates and shares before invoicing.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
+      controls.innerHTML = '<p>' + poolLabel + 'It is shared out by each person\u2019s hours and agreed rate. You are paid your share, not an hourly rate. Finalising locks everyone\u2019s hours and shares, so check them first.</p><button type="button" data-group-wo-action="freeze">Finalise group shares</button>';
     } else if (res.awaiting === 'frozen' && Number(res.my_share) > 0) {
       controls.innerHTML = twelve
         ? '<p>Submit your share. The whole crew is sent for payment together.</p><label><input type="checkbox" data-group-wo-gst> Add GST (only if registered)</label><button type="button" data-group-wo-action="invoice">Submit my group share</button>'
@@ -162,10 +162,10 @@
       el._groupBusy = true;
       btn.disabled = true;
       call('sign_group_work_order', null, { group_id: mine.group_id, signer_name: String(options.userName || '') }).then(function (res) {
-        if (!res || res.ok !== true) throw new Error('Your approval was not saved. Try again.');
+        if (!res || res.ok !== true) throw new Error('Your hours were not confirmed. Try again.');
         return paint(jobId);
       }).catch(function (e) {
-        if (slot(jobId) === el) showMsg(el, e.message || 'Your approval was not saved. Try again.');
+        if (slot(jobId) === el) showMsg(el, e.message || 'Your hours were not confirmed. Try again.');
       }).finally(function () { el._groupBusy = false; btn.disabled = false; });
       return;
     }
@@ -197,12 +197,18 @@
         break_minutes: (el.querySelector('[data-group-wo-break]') || {}).value
       });
       if (parsed.error) { showMsg(el, parsed.error); return; }
+      if (el._groupBusy) return;
       var groupId = el.getAttribute('data-group-id') || '';
+      el._groupBusy = true;
+      btn.disabled = true;
       call('submit_group_work_order_hours', null, core.hoursBody(groupId, parsed)).then(function (res) {
         if (core.isOff(res) || core.tradeMode(res) === 'off') { el.innerHTML = ''; return; }
         el.setAttribute('data-group-id', (res && res.group_id) || groupId);
-        render(el, core.tradeMode(res), res);
-      }).catch(function () { el.innerHTML = ''; });
+        render(el, core.tradeMode(res), res, 'Hours saved.');
+      }).catch(function (e) {
+        // Keep what the trade typed and say why it did not save.
+        if (slot(jobId) === el) showMsg(el, (e && e.message) || 'Your hours were not saved. Try again.');
+      }).finally(function () { el._groupBusy = false; btn.disabled = false; });
     }
   }
 

@@ -18469,12 +18469,11 @@ function asbestosCardBadgeHtml(jobType, existingFenceType) {
 // have not arrived yet.
 var KANBAN_NEW_TAG_MS = 36 * 3600000;
 var KANBAN_LATER_STAGE_TIMES = ['approvals_at', 'deposit_at', 'processing_at', 'scheduled_at', 'completed_at'];
-function isNewPipelineJob(j, status, now) {
+function isNewPipelineJob(j, status) {
   if (!j || (SALES_DRAWER_STAGES.indexOf(status) >= 0 && !isRepairJob(j))) return false;
   var arrived = Date.parse(j.accepted_at || j.created_at || '');
   if (!isFinite(arrived)) return false;
-  var age = (now == null ? Date.now() : now) - arrived;
-  if (age >= KANBAN_NEW_TAG_MS) return false;
+  if (Date.now() - arrived >= KANBAN_NEW_TAG_MS) return false;
   for (var i = 0; i < KANBAN_LATER_STAGE_TIMES.length; i++) {
     var t = Date.parse(j[KANBAN_LATER_STAGE_TIMES[i]] || '');
     if (isFinite(t) && t < arrived) return false;

@@ -287,6 +287,31 @@
     return '<div data-group-discovery style="margin-top:10px"><button type="button" class="gw-link" data-invoice-group-create="' + esc(card.job_id) + '" onclick="GroupWorkOrderInvoice.create(this.getAttribute(\'data-invoice-group-create\'))"' + (busy ? ' disabled' : '') + '>Create group work order</button></div>';
   }
 
+  // Canonical server routing is independent of the saved draft's old mode.
+  function routeHtml(card) {
+    var route = payableRoutes.find(function(r) { return String(r.job_id) === String(card.job_id); });
+    if (!route || route.route !== 'hours' || card.job_type !== 'patio') return '';
+    return '<p data-invoice-pay-route="hours" class="gw-locked">Current invoice route: ordinary pay.</p>';
+  }
+
+  // Keep every saved day, including excluded and blank entries. These are
+  // recovery notes, not submitted group hours or an entitlement calculation.
+  function savedEntriesHtml(cards) {
+    if (!cards || !cards.length) return '';
+    var h = '<div data-saved-group-hours class="gw-sec"><strong>Saved draft entries</strong>'
+      + '<p class="gw-locked">Kept for review. These entries are not group hours and are not added as hourly invoice lines. Record the actual hours on the group work order.</p>';
+    cards.forEach(function(c) {
+      var date = c.work_date || c.scheduled_date || 'Date not entered';
+      var time = c.start_time || c.finish_time ? (c.start_time || '?') + ' to ' + (c.finish_time || '?') : 'Times not entered';
+      var hours = c.hours == null || c.hours === '' ? 'Hours not entered' : hrs(c.hours);
+      h += '<div data-saved-group-entry style="padding:8px 0;border-bottom:1px solid var(--sw-border);overflow-wrap:anywhere">'
+        + '<div><b>' + esc(date) + '</b> · ' + esc(c.included === false ? 'Excluded from draft' : 'Saved estimate') + '</div>'
+        + '<div>' + esc(time) + ' · ' + esc(hours) + (c.break_minutes != null ? ' · Break ' + esc(c.break_minutes) + ' min' : '') + '</div>'
+        + (c.description ? '<div>' + esc(c.description) + '</div>' : '') + '</div>';
+    });
+    return h + '</div>';
+  }
+
   function jobCardHtml(card, toggle) {
     ensureCss();
     var list = groups.filter(function(g) { return String(g.job_id) === String(card.job_id); });
@@ -300,14 +325,15 @@
           : route.setup_reason === 'work_order_not_approved'
           ? 'The office needs to approve the job work order before setting up the crew group.'
           : 'The office needs to set the job work-order amount before setting up the crew group.';
+        if (route.discovery && route.discovery.state === 'setup_required' && route.discovery.message) detail = route.discovery.message;
         return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id })
-          + '<div class="gw-locked" data-group-setup-required style="margin-top:12px"><strong>Group work order needs setting up</strong><p>' + detail + '</p><p>Your other jobs can still be invoiced.</p></div>'
-          + discoveryHtml(card) + links({ job_id: card.job_id });
+          + '<div class="gw-locked" data-group-setup-required data-invoice-pay-route="group_setup_required" style="margin-top:12px"><strong>Group work order needs setting up</strong><p>' + esc(detail) + '</p><p>Your other jobs can still be invoiced.</p></div>'
+          + (route.discovery && route.discovery.state === 'setup_required' ? '' : discoveryHtml(card)) + links({ job_id: card.job_id });
       }
       return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id }) + (toggle || '')
         + '<div class="gw-locked" style="margin-top:12px">Paid from the group work order.</div>' + links({ job_id: card.job_id });
     }
-    return list.map(function(g, i) { return '<div data-invoice-group="'+esc(g.group_id)+'" data-group-in-card>'+head(g)+(i === 0 ? (toggle || '') : '')+panel(g)+'</div>'; }).join('');
+    return list.map(function(g, i) { return '<div data-invoice-group="'+esc(g.group_id)+'" data-group-in-card data-invoice-pay-route="group">'+head(g)+(i === 0 ? (toggle || '') : '')+panel(g)+'</div>'; }).join('');
   }
   // The group section: only groups with no job card this week.
   function html(cardJobIds) {
@@ -464,8 +490,8 @@
     return res.group_release && res.group_release.released === true ? 'Sent for payment with the whole crew.' : 'Saved. Paid together once the whole crew is in.';
   }
 
-  window.GroupWorkOrderInvoice = { use: use, load: load, html: html, jobCardHtml: jobCardHtml, discoveryHtml: discoveryHtml, isGroupJob: isGroupJob, items: items, total: total,
-    selectedIds: selectedIds, restore: restore, ready: function() { return state === 'ready' && !busy; }, reset: reset,
+  window.GroupWorkOrderInvoice = { use: use, load: load, html: html, jobCardHtml: jobCardHtml, discoveryHtml: discoveryHtml, routeHtml: routeHtml, savedEntriesHtml: savedEntriesHtml, isGroupJob: isGroupJob, items: items, total: total,
+    selectedIds: selectedIds, restore: restore, routesReady: function() { return state === 'ready'; }, ready: function() { return state === 'ready' && !busy; }, reset: reset,
     retry: function() { load(true); changed(); },
     openSign: openSign,
     status: function(id) {

@@ -305,11 +305,11 @@ async function checkPayableRoutes() {
   const group = scope.window.GroupWorkOrderInvoice;
   const card = { job_id: 'patio-fixture', job_number: 'PATIO-FIXTURE', included: true, hours: 4 };
   const before = JSON.stringify(card);
-  let reason = 'group_missing', writes = 0;
+  let reason = 'group_missing', writes = 0, route = 'group_setup_required', discovery, currentGroups = [];
   group.use(async (action, params, body) => {
     if (body) writes++;
     assert.strictEqual(action, 'my_group_work_orders');
-    return { enabled: true, groups: [], payable_routes: [{ job_id: card.job_id, route: 'group_setup_required', group_id: null, setup_reason: reason }] };
+    return { enabled: true, groups: currentGroups, payable_routes: [{ job_id: card.job_id, route, group_id: null, setup_reason: reason, discovery }] };
   }, () => {}, 'fixture-user');
   group.load();
   await new Promise(resolve => setImmediate(resolve));
@@ -328,6 +328,79 @@ async function checkPayableRoutes() {
   html = group.jobCardHtml(card);
   assert(html.includes('set the job work-order amount'));
   assert(!html.includes('approved work-order amount is ready'));
+  // Restoring, rendering and snapshotting never lose excluded or multi-day work.
+  const stored = [
+    {...card, included: false, hours: 7, rate: 31, work_date: '2026-10-27', start_time: '07:00', finish_time: '14:30', break_minutes: 30, description: 'Saved installation'},
+    {...card, hours: 2.25, work_date: '2026-10-28', description: '<img src=x>'},
+    {...card, hours: null, work_date: '', scheduled_date: '2026-10-29'}
+  ];
+  const untouched = JSON.stringify(stored);
+  const recovery = group.savedEntriesHtml(stored);
+  assert(recovery.includes('Excluded from draft'));
+  assert(recovery.includes('7h') && recovery.includes('2.25h') && recovery.includes('Hours not entered'));
+  assert(recovery.includes('07:00 to 14:30') && recovery.includes('Break 30 min'));
+  assert(recovery.includes('&lt;img') && !recovery.includes('<img'));
+  assert(recovery.includes('not group hours') && recovery.includes('not added as hourly invoice lines'));
+  assert.strictEqual((recovery.match(/data-saved-group-entry/g) || []).length, 3);
+  assert.strictEqual(JSON.stringify(stored), untouched);
+
+  // Drive the actual page snapshot and sync functions. A group card cannot
+  // be dropped or recomputed from absent ordinary input elements.
+  const page = fs.readFileSync(require.resolve('../trade.html'), 'utf8');
+  function pageFunction(name) {
+    const start = page.indexOf('  function ' + name + '(');
+    assert(start >= 0, name);
+    const next = page.indexOf('\n  }', start);
+    return page.slice(start, next + 4);
+  }
+  const pageScope = {
+    window: {TradeInvoiceRunningDraft: Core, GroupWorkOrderInvoice: group}, GroupWorkOrderInvoice: group,
+    _jobCards: stored, _invRows: [], _invLumpLines: [], _invDismissedKeys: ['kept'], _invManualLock: true,
+    _invNotes: '', _invGst: false, _hoursWeekStart: '2026-10-26', _hoursWeekEnd: '2026-11-01',
+    _serializeInvLumpLinesDraft: x => x, _defaultJobCardWoMode: () => false,
+    esc: value => String(value == null ? '' : value).replace(/</g, '&lt;'),
+    _hoursData: {rate: 99}, _tradeRate: 99, _assignedRateEditable: () => false,
+    document: {querySelector: () => { throw Error('Group sync must not read ordinary inputs'); }, getElementById: () => null}
+  };
+  vm.createContext(pageScope);
+  const timeStart = page.indexOf('  // <trade-time-entry>');
+  vm.runInContext(page.slice(timeStart, page.indexOf('  // </trade-time-entry>', timeStart)), pageScope);
+  for (const name of ['invoiceGroupJob', '_serializeJobCardsDraft', '_runningInvoiceSnapshot', '_syncJobCardsFromDOM', '_pinAssignedCardRates', '_groupJobCardHtml', '_jobCardSyncHours', '_newJobCard', '_restoreJobCardsDraft']) {
+    vm.runInContext(pageFunction(name), pageScope);
+  }
+  pageScope._pinAssignedCardRates();
+  pageScope._syncJobCardsFromDOM();
+  const wholeCard = pageScope._groupJobCardHtml(stored[0]);
+  assert.strictEqual((wholeCard.match(/data-saved-group-entry/g) || []).length, 3, 'one group card displays every saved day');
+  const hoursOnly = {...card, hours: 2.25, rate: 31, work_date: '2026-11-03', included: false};
+  const restoredHours = pageScope._restoreJobCardsDraft([hoursOnly])[0];
+  assert.strictEqual(restoredHours.hours, 2.25, 'restore keeps older typed hours without start/finish for group recovery');
+  assert.strictEqual(restoredHours.included, false);
+  assert(group.savedEntriesHtml([restoredHours]).includes('2.25h'));
+  assert.strictEqual(pageScope.TradeTimeEntryCore.check(restoredHours, '2026-11-06').ok, false, 'retention does not satisfy the billing time gate');
+  const snap = pageScope._runningInvoiceSnapshot();
+  const reopened = Core.snapshot(Core.saveBody(snap).draft_builder);
+  assert.strictEqual(JSON.stringify(reopened.jobCards), untouched, 'save/reopen keeps every entry and its inclusion choice');
+  assert.strictEqual(reopened.manualLock, true);
+  assert.deepStrictEqual(Array.from(reopened.dismissedKeys), ['kept']);
+  assert.strictEqual(group.items().length, 0, 'recovery notes do not bill ordinary hours');
+  discovery = {state: 'setup_required', message: 'Office review <script> required'};
+  group.load(true); await new Promise(resolve => setImmediate(resolve));
+  assert(group.jobCardHtml(card).includes('Office review &lt;script&gt; required'));
+  route = 'hours'; card.job_type = 'patio';
+  group.load(true);
+  assert.strictEqual(pageScope._restoreJobCardsDraft([hoursOnly])[0].hours, 2.25, 'pending route preserves recovery record');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(group.isGroupJob(card.job_id), false);
+  assert.strictEqual(pageScope._restoreJobCardsDraft([hoursOnly])[0].hours, null, 'known ordinary route keeps its existing time requirements');
+  assert(group.routeHtml(card).includes('ordinary pay'));
+  for (const awaiting of ['needs_hours', 'awaiting_signoff']) {
+    route = 'group'; currentGroups = [{group_id:'fixture-group',job_id:card.job_id,awaiting,client_signed:false}];
+    group.load(true); await new Promise(resolve => setImmediate(resolve));
+    html = group.jobCardHtml(card);
+    assert(html.includes(awaiting === 'needs_hours' ? 'Add your hours' : 'sign-off'));
+    assert.strictEqual(group.items().length, 0);
+  }
   assert.strictEqual(writes, 0);
 }
 checkPayableRoutes().then(() => console.log('trade invoice running draft: ok')).catch(error => { console.error(error); process.exitCode = 1; });

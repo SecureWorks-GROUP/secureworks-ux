@@ -122,3 +122,52 @@ test('the owner can delete an auto line, and a reload keeps the edit and leaves 
   await expect(page.locator('#invSubmitBtn')).toBeVisible();
   expect(feedRequests.some((entry) => entry.action === 'generate_trade_invoice')).toBe(false);
 });
+
+test('group route keeps every saved day and excluded hour through Save and reopening', async ({ appPage: page }) => {
+  const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
+  const week = perthWeekMonday(), job = 'fixture-saved-patio';
+  let grouped = false;
+  const posts = [];
+  let builder = {version:1,weekStart:week,weekEnd:addIsoDays(week,6),manualLock:true,invRows:[],invLumpLines:[],dismissedKeys:[],jobCards:[
+    {job_id:job,job_number:'PATIO-SAVED',job_type:'patio',included:false,work_date:week,scheduled_date:week,hours:7,rate:31,start_time:'07:00',finish_time:'14:30',break_minutes:30,description:'Saved installation'},
+    {job_id:job,job_number:'PATIO-SAVED',job_type:'patio',included:true,work_date:addIsoDays(week,1),scheduled_date:addIsoDays(week,1),hours:2.25,rate:31,description:'Second saved day'}
+  ]};
+  const original = JSON.parse(JSON.stringify(builder.jobCards));
+  await page.route('**/functions/v1/ops-api?**', async route => {
+    const req=route.request(), action=new URL(req.url()).searchParams.get('action');
+    const reply=body=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+    if(req.method()==='POST') posts.push({action,body:req.postDataJSON()});
+    if(action==='my_hours')return reply({assignments:[],rate:50,rate_resolved:true,invoice_type:'hourly',running_invoice_draft:true,week_start:week,week_ending:addIsoDays(week,6)});
+    if(action==='my_group_work_orders'){await new Promise(resolve=>setTimeout(resolve,150));return reply({enabled:true,groups:grouped?[{group_id:'fixture-group',job_id:job,job_number:'PATIO-SAVED',awaiting:'needs_hours',client_signed:false}]:[],payable_routes:[{job_id:job,route:grouped?'group':'group_setup_required',setup_reason:'group_missing',discovery:{state:'setup_required',message:'The office needs to check the group setup.'}}]});}
+    if(action==='get_running_invoice_draft')return reply({draft_id:'fixture-draft',draft_builder:builder,suggested:[],claimed:[]});
+    if(action==='save_running_invoice_draft'){builder=req.postDataJSON().draft_builder;return reply({draft_id:'fixture-draft',draft_builder:builder});}
+    return route.fallback();
+  });
+  await signIn(page, PERSONAS.installer);
+  await openWeek(page);
+  const card=page.locator('[data-group-job-card]');
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('[data-invoice-pay-route="group_setup_required"]')).toContainText('office needs to check');
+  await expect(card.locator('[data-saved-group-entry]')).toHaveCount(2);
+  await expect(card).toContainText('Excluded from draft');
+  await expect(card).toContainText('7h');
+  await expect(card).toContainText('2.25h');
+  await page.locator('#invSaveBtn').click();
+  await expect(page.locator('#invSaveState')).toContainText('Saved');
+  for(let i=0;i<2;i++)for(const key of Object.keys(original[i]))expect(builder.jobCards[i][key]).toEqual(original[i][key]);
+  grouped=true;
+  // Back clears the in-memory builder; clearing the local copy forces the
+  // reopen to use the server draft. Authentication reload is covered separately.
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.evaluate(()=>sessionStorage.clear());
+  await openWeek(page);
+  await expect(page.locator('[data-group-job-card]')).toHaveCount(1);
+  await expect(page.locator('[data-saved-group-entry]')).toHaveCount(2);
+  await expect(page.locator('[data-group-job-card]')).toContainText('Add your hours');
+  await expect(page.locator('[data-group-job-card]')).toContainText('Excluded from draft');
+  await page.locator('#invSaveBtn').click();
+  await expect(page.locator('#invSaveState')).toContainText('Saved');
+  for(let i=0;i<2;i++)for(const key of Object.keys(original[i]))expect(builder.jobCards[i][key]).toEqual(original[i][key]);
+  expect(posts.some(p=>p.action==='generate_trade_invoice')).toBe(false);
+  expect(posts.some(p=>p.action==='submit_group_work_order_hours')).toBe(false);
+});

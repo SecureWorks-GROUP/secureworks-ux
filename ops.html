@@ -18465,10 +18465,13 @@ function asbestosCardBadgeHtml(jobType, existingFenceType) {
 // pipeline, when it was made (created_at). Every viewer reads the same feed, so
 // everyone sees the same tag. A job dragged back to Accepted gets a fresh
 // accepted_at, so it counts as moved on, not new, when it holds an earlier stage
-// time (approvals, deposit, ...) or shows progress in the feed (deposit paid, an
-// order, a work order or crew). Still not detectable: a job dragged back after a
-// stage that records no time (awaiting deposit, order materials, ...) before any
-// of that progress lands on it. Sales drawer cards have not arrived yet.
+// time (approvals, deposit, ...) or, while in the Accepted column, shows progress
+// in the feed (deposit paid, an order, a work order or crew). Still not
+// detectable: a job dragged back after a stage that records no time (awaiting
+// deposit, order materials, ...) before any of that progress lands on it, or one
+// dragged back and moved on again within 36 hours. A genuinely new job still in
+// Accepted that already has crew or an order loses the tag. Sales drawer cards
+// have not arrived yet.
 var KANBAN_NEW_TAG_MS = 36 * 3600000;
 var KANBAN_LATER_STAGE_TIMES = ['approvals_at', 'deposit_at', 'processing_at', 'scheduled_at', 'completed_at'];
 function isNewPipelineJob(j, status) {
@@ -18476,7 +18479,7 @@ function isNewPipelineJob(j, status) {
   var arrived = Date.parse(j.accepted_at || j.created_at || '');
   if (!isFinite(arrived)) return false;
   if (Date.now() - arrived >= KANBAN_NEW_TAG_MS) return false;
-  if (j.deposit_paid || j.po_count > 0 || j.wo_count > 0 || j.assignment_count > 0) return false;
+  if (status === 'accepted' && (j.deposit_paid || j.po_count > 0 || j.wo_count > 0 || j.assignment_count > 0)) return false;
   for (var i = 0; i < KANBAN_LATER_STAGE_TIMES.length; i++) {
     var t = Date.parse(j[KANBAN_LATER_STAGE_TIMES[i]] || '');
     if (isFinite(t) && t < arrived) return false;

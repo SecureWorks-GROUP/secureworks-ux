@@ -2,8 +2,8 @@
 // corner for its first 36 hours on the pipeline (search `// <kanban-new-tag>`
 // in ops.html). Arrival is accepted_at, else created_at for a job put straight
 // onto the pipeline; a job that already holds an earlier later-stage time, or
-// shows a paid deposit, an order, a work order or crew, was moved back, not
-// newly arrived. Every time is relative to the test's own
+// sits in Accepted with a paid deposit, an order, a work order or crew, was
+// moved back, not newly arrived. Every time is relative to the test's own
 // clock, so the fixtures never date-rot.
 //
 // Static fixtures (no network): cards are rendered straight through the real
@@ -81,6 +81,15 @@ test.describe('kanban NEW tag', () => {
     const untouched = await renderCard(page, job('n-untouched', { deposit_paid: false, po_count: 0, wo_count: 0, assignment_count: 0 }), { accepted_at: 1, created_at: 24 * 21 });
     for (const card of [paid, ordered, wo, crewed]) await expect(card.locator('.kanban-new-tag')).toHaveCount(0);
     await expect(untouched.locator('.kanban-new-tag')).toHaveCount(1);
+  });
+
+  test('a new job that has moved on with real progress keeps its tag', async ({ page }) => {
+    // Accepted this morning, deposit paid, moved on to Order Materials automatically.
+    const paid = await renderCard(page, job('n-newpaid', { status: 'order_materials', deposit_paid: true }), { accepted_at: 3, created_at: 24 * 10 });
+    // Put on from the CLI an hour ago and booked straight onto the calendar.
+    const booked = await renderCard(page, job('n-newbooked', { status: 'scheduled', assignment_count: 1 }), { accepted_at: null, created_at: 1 });
+    await expect(paid.locator('.kanban-new-tag')).toHaveCount(1);
+    await expect(booked.locator('.kanban-new-tag')).toHaveCount(1);
   });
 
   test('sales drawer quotes are not on the pipeline yet; a new repair is', async ({ page }) => {

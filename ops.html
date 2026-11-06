@@ -21110,13 +21110,13 @@ function swTradeBillStuckHtml(inv, idArg) {
   }
   var who = swTradeBillEsc((inv.users && inv.users.name) || 'this trade');
   var radio = function(value, label) {
-    return '<label style="display:flex;gap:6px;align-items:flex-start;font-weight:400;margin-top:4px"><input type="radio" name="tbClear_' + idArg + '" value="' + value + '"' + (busy ? ' disabled' : '') + '> <span>' + label + '</span></label>';
+    return '<label style="display:flex;gap:6px;align-items:flex-start;font-weight:400;margin-top:4px"><input type="radio" name="tbClear_' + idArg + '" value="' + value + '" onchange="swTradeBillClearHideError(this)"' + (busy ? ' disabled' : '') + '> <span>' + label + '</span></label>';
   };
   return h + '<div data-trade-bill-clear-form="' + idArg + '" style="margin-top:6px;padding:8px;border:1px solid var(--sw-border);border-radius:8px;background:var(--sw-card);color:var(--sw-text);font-size:11px;text-transform:none;white-space:normal;max-width:300px">'
     + '<div style="font-weight:700">This invoice is stuck waiting on the trade. What should happen to it?</div>'
     + radio('release', 'Release it. ' + who + ' can invoice that week again. Xero is checked first.')
     + radio('send_to_xero', 'Send it on. It is approved and added to Xero as a draft bill.')
-    + '<label style="display:block;margin-top:6px;font-weight:600">Reason<input type="text" data-trade-bill-clear-reason maxlength="500" placeholder="Why, in a few words"' + (busy ? ' disabled' : '') + ' style="display:block;width:100%;box-sizing:border-box;margin-top:2px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font:inherit"></label>'
+    + '<label style="display:block;margin-top:6px;font-weight:600">Reason<input type="text" data-trade-bill-clear-reason maxlength="500" placeholder="Why, in a few words" oninput="swTradeBillClearHideError(this)"' + (busy ? ' disabled' : '') + ' style="display:block;width:100%;box-sizing:border-box;margin-top:2px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font:inherit"></label>'
     + '<div data-trade-bill-clear-error style="color:var(--sw-red);font-weight:600;margin-top:4px" hidden></div>'
     + '<div style="display:flex;gap:6px;margin-top:6px"><button type="button" data-trade-bill-clear-go="' + idArg + '" data-trade-name="' + who + '" onclick="clearStuckTradeInvoice(\'' + idArg + '\', this)"' + (busy ? ' disabled' : '') + ' style="padding:4px 10px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">' + (busy ? 'Clearing…' : 'Clear it') + '</button>'
     + '<button type="button" onclick="closeClearStuckTradeInvoice(\'' + idArg + '\')"' + (busy ? ' disabled' : '') + ' style="padding:4px 10px;background:var(--sw-card);color:var(--sw-text);border:1px solid var(--sw-border);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">Cancel</button></div></div>';
@@ -21125,6 +21125,11 @@ var _tradeBillLastRows = null;
 function swTradeBillRepaint() { if (_tradeBillLastRows) renderTradeBillTable(_tradeBillLastRows); }
 function openClearStuckTradeInvoice(id) { _tradeBillClearOpen[id] = true; delete _tradeBillClearResult[id]; swTradeBillRepaint(); }
 function closeClearStuckTradeInvoice(id) { if (_tradeBillClearing[id]) return; delete _tradeBillClearOpen[id]; swTradeBillRepaint(); }
+function swTradeBillClearHideError(el) {
+  var form = el && el.closest ? el.closest('[data-trade-bill-clear-form]') : null;
+  var err = form && form.querySelector('[data-trade-bill-clear-error]');
+  if (err) err.hidden = true;
+}
 function swTradeBillClearOutcome(res) {
   if (!res || res.ok !== true) return { ok: false, text: (res && (res.error || res.message)) || 'The invoice was not cleared. Nothing was changed that we know of. Reload before trying again.' };
   if (res.decision === 'release') return { ok: true, text: 'Released. The trade can invoice that week again.' };

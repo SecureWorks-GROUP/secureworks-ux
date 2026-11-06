@@ -65,6 +65,7 @@ test('only a stuck invoice is offered the button; release takes a choice, a reas
   await go.click();
   await expect(form.locator('[data-trade-bill-clear-error]')).toHaveText('Give a reason of at least 3 letters.');
   await form.getByLabel('Reason').fill('Old invoice, never reached Xero');
+  await expect(form.locator('[data-trade-bill-clear-error]')).toBeHidden();
   await page.screenshot({ path: test.info().outputPath('trade-bill-clear-form.png') });
 
   // Saying no to the confirm sends nothing.

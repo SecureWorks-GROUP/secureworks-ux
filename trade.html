@@ -10685,7 +10685,11 @@
   // is the opposite kind of write: it is a manager acting ON that crew, gated
   // server-side by the same authority as allocating the job, and a manager is
   // in view-only mode on precisely the jobs where they need it.
-  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true };
+  // A searched-in job is an extra_items line on the signed-in trade's OWN
+  // invoice. generate_trade_invoice binds its owner from auth, not the job's
+  // crew or a body user_id. A retained view-only detail must not block it;
+  // preview, invoice auth/confirmation and server guards still apply.
+  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true, generate_trade_invoice: true };
 
   function blockedForeignJobWrite(action, params, postBody) {
     if (FOREIGN_JOB_WRITE_EXEMPT_ACTIONS[String(action || '')]) return false;
@@ -24738,7 +24742,7 @@
 
   function loadInvoiceJobOptions(q) {
     q = tradeJobSearchQuery(q);
-    api('search_all_jobs', q ? { q: q } : undefined).then(function(res) {
+    api('search_all_jobs', q ? { q: q, invoice_picker: 1 } : { invoice_picker: 1 }).then(function(res) {
       var dl = document.getElementById('invJobList');
       if (!dl) return;
       _knownJobNumbers = [];
@@ -26340,7 +26344,7 @@
 
   function _jcRunJobSearch(di, q) {
     var current = function() { return tradeJobSearchQuery(_jcSearch.q) === q; };
-    api('search_all_jobs', { q: q }).then(function(res) {
+    api('search_all_jobs', { q: q, invoice_picker: 1 }).then(function(res) {
       if (!current()) return; // stale response — user kept typing
       _jcSearch.error = '';
       _jcSearch.results = (res.jobs || []).slice(0, 10);

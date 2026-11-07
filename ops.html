@@ -4997,6 +4997,7 @@ __swOpsStampAssets([
       <div class="filter-bar">
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
         <button class="pipeline-tab" onclick="setPipelineTab('patio')" data-pipeline="patio">Patio</button>
+        <button class="pipeline-tab" onclick="setPipelineTab('granny_flat')" data-pipeline="granny_flat">Granny flat build</button>
         <button class="pipeline-tab" onclick="setPipelineTab('repairs')" data-pipeline="repairs">Repairs</button>
         <button class="pipeline-tab" onclick="setPipelineTab('decking')" data-pipeline="decking">Decking</button>
         <button class="pipeline-tab" onclick="setPipelineTab('makesafes')" data-pipeline="makesafes">Make Safes</button>
@@ -13273,7 +13274,7 @@ async function loadMakesafeBoardReviewAffordances() {
 
 function setPipelineTab(tab) {
   _pipelineTab = tab;
-  var typeMap = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe', repairs: 'repair', misc: 'miscellaneous' };
+  var typeMap = { fencing: 'fencing', patio: 'patio', granny_flat: 'granny_flat', decking: 'decking', makesafes: 'makesafe', repairs: 'repair', misc: 'miscellaneous' };
   _jobFilter = typeMap[tab] || '';
   document.querySelectorAll('[data-pipeline]').forEach(function(el) {
     el.classList.toggle('active', el.dataset.pipeline === tab);
@@ -30768,7 +30769,7 @@ var QQ_TEMPLATES = {
   custom:          { description: '',                    quantity: 1,  unit: 'ea',  unit_price: 0,  cost_price: 0 },
 };
 
-var TYPE_LABELS = { miscellaneous: 'misc', repair: 'Repair' };
+var TYPE_LABELS = { miscellaneous: 'misc', repair: 'Repair', granny_flat: 'Granny flat build' };
 
 function typeBadgeLabel(type) {
   return TYPE_LABELS[type] || type || '';

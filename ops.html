@@ -21002,6 +21002,55 @@ function renderTradeBillLoadError(e) {
     + ' <button type="button" onclick="loadTradeBills()" style="margin-left:8px;padding:4px 10px;border:1px solid var(--sw-border);border-radius:6px;background:var(--sw-card);cursor:pointer;font-weight:600">Try again</button></td></tr>';
 }
 
+// <trade-bill-order-hours>
+// Row order (7 Nov 2026): invoices that need the office come first. Stuck
+// invoices (swTradeBillIsStuck, the rows with Clear stuck invoice) lead, oldest
+// week first, because the server lists newest week first and the oldest stuck
+// ones otherwise sit at the very bottom. Then the pending_ops_review invoices
+// waiting on Approve. Each keeps its own block so the two sets of buttons never
+// interleave. Every other row keeps the server's order.
+function swTradeBillOrder(invoices) {
+  var when = function(inv) {
+    return (swTradeBillWeekEnding(inv) || String((inv && inv.created_at) || '').slice(0, 10) || '9999-99-99')
+      + '|' + String((inv && inv.created_at) || '');
+  };
+  var rank = function(inv) { return swTradeBillIsStuck(inv) ? 0 : (inv && inv.status === 'pending_ops_review') ? 1 : 2; };
+  return invoices.map(function(inv, i) { return { inv: inv, i: i, r: rank(inv) }; }).sort(function(a, b) {
+    if (a.r !== b.r) return a.r - b.r;
+    if (a.r === 0) { var c = when(a.inv).localeCompare(when(b.inv)); if (c) return c; }
+    return a.i - b.i;
+  }).map(function(x) { return x.inv; });
+}
+// The Hours cell. Older invoices saved their own total_hours as 0 while their
+// labour lines carry the hours, so an empty or zero total is read from the
+// lines, the way the Times worked fold reads a line (total_hours, else
+// quantity). Only lines billed by the hour count: a work order, commission or
+// other per-item line carries its count in total_hours, not hours. Display only.
+var SW_TRADE_BILL_HOUR_UNITS = { hr: 1, h: 1, hrs: 1, hour: 1, hours: 1 };
+var SW_TRADE_BILL_ITEM_TYPES = { 'work order': 1, commission: 1, other: 1, 'group share': 1 };
+function swTradeBillLineType(li) { return String((li && li.line_type) || '').toLowerCase().replace(/_/g, ' ').trim(); }
+function swTradeBillLineIsHours(li) {
+  var unit = String((li && li.unit) || '').toLowerCase().trim();
+  if (unit) return !!SW_TRADE_BILL_HOUR_UNITS[unit];
+  return !SW_TRADE_BILL_ITEM_TYPES[swTradeBillLineType(li)];
+}
+function swTradeBillHours(inv) {
+  var lines = Array.isArray(inv && inv.lines) ? inv.lines : [];
+  var own = inv && inv.total_hours != null && inv.total_hours !== '' && isFinite(Number(inv.total_hours)) ? Number(inv.total_hours) : null;
+  if (own != null && own > 0) return { hours: own, source: 'invoice', perItem: false };
+  var fromLines = lines.reduce(function(s, li) {
+    if (!swTradeBillLineIsHours(li)) return s;
+    var h = li.total_hours != null && li.total_hours !== '' ? Number(li.total_hours) : Number(li.quantity);
+    return s + (isFinite(h) && h > 0 ? h : 0);
+  }, 0);
+  if (fromLines > 0) return { hours: fromLines, source: 'lines', perItem: false };
+  var perItem = lines.some(function(li) {
+    return !swTradeBillLineIsHours(li) && swTradeBillLineType(li) !== 'group share' && Number(li && li.line_total_ex) > 0;
+  });
+  return { hours: own || 0, source: own != null ? 'invoice' : 'none', perItem: perItem };
+}
+// </trade-bill-order-hours>
+
 function renderTradeBillTable(invoices) {
   var tbody = document.getElementById('tradeBillTableBody');
   _tradeBillLastRows = invoices;
@@ -21009,13 +21058,7 @@ function renderTradeBillTable(invoices) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--sw-text-sec)">No trade bills submitted yet</td></tr>';
     return;
   }
-  // Surface pending_ops_review first — these are the manual-hours invoices that
-  // need Shaun to verify against the schedule before the Xero push fires. [D3/F6]
-  var ordered = invoices.slice().sort(function(a, b) {
-    var ra = a.status === 'pending_ops_review' ? 0 : 1;
-    var rb = b.status === 'pending_ops_review' ? 0 : 1;
-    return ra - rb;
-  });
+  var ordered = swTradeBillOrder(invoices);
   var html = '';
   ordered.forEach(function(inv) {
     var tradeName = swTradeBillEsc((inv.users && inv.users.name) || '—');
@@ -21023,8 +21066,7 @@ function renderTradeBillTable(invoices) {
     // Group shares and work-order invoices have no week.
     var weekEnd = swTradeBillWeekEnding(inv);
     var we = weekEnd ? swTradeBillEsc(weekEnd) : '<span data-trade-bill-no-week style="color:var(--sw-text-sec)">No week</span>';
-    var hours = inv.total_hours != null ? Number(inv.total_hours)
-      : (Array.isArray(inv.lines) ? inv.lines.reduce(function(s, li) { return s + (Number(li.total_hours) || 0); }, 0) : 0);
+    var hrs = swTradeBillHours(inv);
     var total = inv.total_inc != null ? Number(inv.total_inc) : Number(inv.total || 0);
     var isReview = inv.status === 'pending_ops_review';
     var st = swTradeBillStatus(inv);
@@ -21038,7 +21080,8 @@ function renderTradeBillTable(invoices) {
     html += '<tr' + (isReview ? ' style="background:rgba(241,90,41,0.05)"' : '') + '>';
     html += '<td>' + tradeName + swTradeInvoiceWhenHtml(inv) + '</td>';
     html += '<td>' + we + badge + '</td>';
-    html += '<td>' + hours.toFixed(1) + '</td>';
+    html += '<td data-trade-bill-hours="' + hrs.source + '">' + hrs.hours.toFixed(1)
+      + (hrs.perItem ? '<div data-trade-bill-per-item style="font-size:10px;color:var(--sw-text-sec);font-weight:400;margin-top:2px">Billed per item, not hours</div>' : '') + '</td>';
     html += '<td>' + swTradeInvoiceTotalHtml(inv, total) + '</td>';
     html += '<td>' + billLink + '</td>';
     html += '<td data-trade-bill-status="' + swTradeBillEsc(st.xero || inv.status || '') + '" style="' + statusClass + ';font-weight:600">' + statusLabel;

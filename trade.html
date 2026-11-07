@@ -7077,6 +7077,16 @@
       showLoginError('Please enter your email and password');
       return;
     }
+    // <trade-login-cloud-ready>
+    // Log In can be pressed before initApp has picked up the cloud client.
+    // If the client has loaded, finish setting the app up now (so the login
+    // event is heard); if it has not, say so and leave the form as typed.
+    if (!cloud && window.SECUREWORKS_CLOUD) initApp();
+    if (!cloud || !cloud.auth || typeof cloud.auth.signIn !== 'function') {
+      showLoginError('Still loading. Wait a moment and try again.');
+      return;
+    }
+    // </trade-login-cloud-ready>
     var btn = document.getElementById('btnLogin');
     btn.disabled = true;
     btn.textContent = 'Logging in...';
@@ -34823,8 +34833,10 @@
 
   var _initRetries = 0;
   var _maxRetries = 25; // 25 x 200ms = 5 seconds
+  var _appInitDone = false; // doLogin may run initApp early; the timed call must not wire it twice
 
   function initApp() {
+    if (_appInitDone) return;
     cloud = window.SECUREWORKS_CLOUD;
     if (!cloud) {
       _initRetries++;
@@ -34835,6 +34847,7 @@
       setTimeout(initApp, 200);
       return;
     }
+    _appInitDone = true;
 
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
 

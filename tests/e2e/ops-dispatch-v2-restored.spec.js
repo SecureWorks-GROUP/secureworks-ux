@@ -621,7 +621,7 @@ test.describe('Dispatch v2: purchase orders in Sources, kept from v1', () => {
     });
     await root.locator('[data-dpc-tab="sources"]').click();
     const panel = root.locator('[data-dpc-region="panel"]');
-    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', 'Purchase orders']);
+    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', /^Documents/, 'Purchase orders']);
     const chip = panel.locator('[data-dpc-order-pdf="po-7"]');
     await expect(chip).toContainText('PO-2107.pdf');
     await expect(chip).toContainText('Acacia Steel Pty Ltd, Sent');
@@ -636,7 +636,7 @@ test.describe('Dispatch v2: purchase orders in Sources, kept from v1', () => {
     // A job with no old orders has no Purchase orders group.
     await root.locator('.dpc-job', { hasText: 'SWP-930002' }).click();
     await expect(root.locator('.dpc-jobhead h2')).toContainText('SWP-930002');
-    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices']);
+    await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', /^Documents/]);
   });
 
   test('a failed orders read says so in Sources with Retry', async ({ page }) => {

@@ -804,6 +804,67 @@
     });
   }
 
+  // ── Documents (Shaun, 11 Nov 2026) ──
+  // Every file on the job, under Invoices: supplier PDFs and order photos,
+  // our order sheets, plans, site files, reports, work orders, uploads. Each
+  // has the same trade switch as the job page's Files section
+  // (toggle_document_visibility). Client quotes and invoices are not repeated:
+  // they have their own lists above.
+  var FILES_LISTED_ABOVE = { quote: true, invoice: true };
+  var FILES_SHOWN = 8;
+  var FILE_TYPE_LABELS = {
+    material_order: 'Material order', supplier_quote: 'Supplier quote', work_order: 'Work order',
+    supplier_work_order: 'Work order', general: 'General', site_photo: 'Site photo', council_plans: 'Council plans',
+    engineering: 'Engineering', approval: 'Approval', client_reference: 'Client reference', asbestos: 'Asbestos',
+    swms: 'SWMS', makesafe_report: 'Make-safe report', other: 'Other'
+  };
+
+  function fileTypeLabel(type) {
+    var t = text(type).toLowerCase();
+    if (FILE_TYPE_LABELS[t]) return FILE_TYPE_LABELS[t];
+    if (!t) return 'File';
+    t = t.replace(/_/g, ' ');
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
+  // The trade app never shows a work order, whatever visible_to_trades says
+  // (trade.html: TRADE_MONEY_DOC_TYPES and isPricedWorkOrderDocument, which
+  // also catches a file named "work order" or "WO"; a video is let through).
+  // These get no switch: a switch that changes nothing would mislead.
+  function fileOfficeOnly(d) {
+    var type = text(d.type).toLowerCase();
+    if (type === 'work_order' || type === 'supplier_work_order') return true;
+    if (/\.(mp4|mov|m4v|avi|webm)(\?|$)/i.test(text(d.file_name) || text(d.storage_url))) return false;
+    var words = [d.type, d.kind, d.document_type, d.role, d.file_name, d.name, d.title, d.label, d.storage_url, d.pdf_url]
+      .filter(Boolean).join(' ');
+    return /work[\s_-]*order|\bwo\b/i.test(words);
+  }
+
+  // The job's files for the Documents list, newest first.
+  function sourceFiles(documents, yearNow) {
+    var files = documents.filter(function (d) {
+      return d && text(d.id) && !FILES_LISTED_ABOVE[text(d.type).toLowerCase()];
+    });
+    return newestFirst(files, 'created_at').map(function (d) {
+      var url = safeUrl(d.storage_url) || safeUrl(d.pdf_url);
+      var file = text(d.file_name);
+      var ext = (/\.([a-z0-9]{2,4})$/i.exec(file || (url.split('?')[0] || '')) || [])[1] || '';
+      var when = parseStamp(d.created_at);
+      var detail = [fileTypeLabel(d.type), when ? dayMonth(when, yearNow) : '', Number(d.version) > 1 ? 'v' + Number(d.version) : '']
+        .filter(Boolean).join(' · ');
+      return {
+        id: text(d.id),
+        name: file.replace(/\.[a-z0-9]{2,4}$/i, '') || fileTypeLabel(d.type),
+        detail: detail,
+        url: url,
+        ext: ext ? ext.toUpperCase() : 'FILE',
+        image: /^(jpe?g|png|gif|webp)$/i.test(ext),
+        officeOnly: fileOfficeOnly(d),
+        visible: d.visible_to_trades === true
+      };
+    });
+  }
+
   var STORY_LABELS = {
     first_contact: 'First contact', job_created: 'Job created', site_visit: 'Site visit', quote: 'Quote', status: 'Status',
     invoice: 'Invoice', payment: 'Payment', booking: 'Booking', booking_change: 'Booking change', system_email: 'System email',
@@ -1001,6 +1062,9 @@
     sending: {},
     replyMsg: {},
     pdfLoading: {},
+    // Documents in Sources: a switch saving (busy) or failed, by document id,
+    // and the jobs whose whole list is showing (all).
+    files: { busy: {}, failed: {}, all: {} },
     // v2 slices 2 and 3: which list is showing (opens on Active), the stage
     // sections folded shut, the latest board's stage lists, and the rail's
     // press state: the one open confirm line ({ jobId, to, label, offer }),
@@ -2900,7 +2964,83 @@
 
   // Sources: quotes and invoices from job_detail, then the job's old purchase
   // orders (if any) from the v1 materials read already made on job open.
-  function sourcesHtml() { return sourceDocsHtml() + poSourcesHtml(); }
+  function sourcesHtml() { return sourceDocsHtml() + filesHtml() + poSourcesHtml(); }
+
+  // Documents: every file on the job, newest first, each with its trade switch.
+  function filesHtml() {
+    var d = state.detail;
+    var jobId = state.jobId;
+    var h = '<h4 class="dpc-h4">Documents</h4>';
+    if (d.status === 'error') return h + failLine('Could not load documents.', 'detail', true);
+    if (d.status !== 'ok' || d.jobId !== jobId) return h + '<div class="dpc-empty dpc-empty-tight">Loading documents...</div>';
+    if (!Array.isArray(d.data.documents)) return h + failLine('Could not load documents.', 'detail', true);
+    var files = sourceFiles(d.data.documents);
+    if (!files.length) return h + '<div class="dpc-empty dpc-empty-tight">No files on this job yet.</div>';
+    h = '<h4 class="dpc-h4">Documents <span class="dpc-files-count">' + files.length + '</span></h4>';
+    var all = !!state.files.all[jobId] || files.length <= FILES_SHOWN;
+    (all ? files : files.slice(0, FILES_SHOWN)).forEach(function (f) { h += fileRowHtml(f); });
+    if (!all) h += '<button type="button" class="dpc-files-more" data-dpc-files-all>Show all ' + files.length + '</button>';
+    return h;
+  }
+
+  function fileRowHtml(f) {
+    var busy = !!state.files.busy[f.id];
+    var failed = !!state.files.failed[f.id];
+    var tag = f.officeOnly ? '<span class="dpc-file-vis dpc-file-vis-lock">Office only (priced)</span>'
+      : busy ? '<span class="dpc-file-vis dpc-file-vis-busy">Saving...</span>'
+      : failed ? '<span class="dpc-file-vis dpc-file-vis-fail" role="alert">Not saved. Try again</span>'
+      : f.visible ? '<span class="dpc-file-vis dpc-file-vis-on">Visible to trades</span>'
+      : '<span class="dpc-file-vis dpc-file-vis-off">Hidden from trades</span>';
+    var ico = f.image && f.url
+      ? '<img class="dpc-file-thumb" src="' + esc(f.url) + '" alt="" loading="lazy">'
+      : '<span class="dpc-doc-ico" aria-hidden="true">' + esc(f.ext) + '</span>';
+    var body = ico + '<span class="dpc-grow"><strong>' + esc(f.name) + '</strong><small>' + esc(f.detail) + '</small>' +
+      (f.url ? '' : '<small>No file stored</small>') + tag + '</span>';
+    var h = '<div class="dpc-doc dpc-file" data-dpc-file="' + esc(f.id) + '">';
+    h += f.url
+      ? '<a class="dpc-file-open" href="' + esc(f.url) + '" target="_blank" rel="noopener">' + body + '</a>'
+      : '<div class="dpc-file-open dpc-doc-nopdf">' + body + '</div>';
+    if (!f.officeOnly) {
+      h += '<button type="button" class="dpc-file-sw" role="switch" data-dpc-file-vis="' + esc(f.id) + '" aria-checked="' + (f.visible ? 'true' : 'false') + '"' +
+        (busy ? ' aria-disabled="true"' : '') + ' aria-label="' + esc(f.name) + ': ' + (f.visible ? 'visible to trades' : 'hidden from trades') + '"></button>';
+    }
+    return h + '</div>';
+  }
+
+  // A press on a file's switch: the switch moves at once and the save runs
+  // (the job page's own toggle_document_visibility). A failed save puts the
+  // switch back and says so, so the screen never shows what the crew does not
+  // see. One save per file at a time.
+  function setFileVisible(docId) {
+    var d = state.detail;
+    if (!docId || state.files.busy[docId] || d.status !== 'ok' || !d.data || !Array.isArray(d.data.documents)) return;
+    var doc = null;
+    d.data.documents.forEach(function (x) { if (x && text(x.id) === docId) doc = x; });
+    if (!doc || fileOfficeOnly(doc)) return;
+    var jobId = d.jobId;
+    var was = doc.visible_to_trades === true;
+    var want = !was;
+    doc.visible_to_trades = want;
+    state.files.busy[docId] = true;
+    delete state.files.failed[docId];
+    paintSources();
+    refocus('[data-dpc-file-vis="' + docId + '"]');
+    Promise.resolve().then(function () {
+      return global.opsPost('toggle_document_visibility', { documentId: docId, visible_to_trades: want });
+    }).then(function (resp) {
+      if (!resp || resp.success !== true) throw new Error('Unexpected answer');
+    }).catch(function () {
+      doc.visible_to_trades = was;
+      state.files.failed[docId] = true;
+    }).then(function () {
+      delete state.files.busy[docId];
+      if (state.jobId !== jobId) return;
+      var a = global.document && global.document.activeElement;
+      var hadFocus = !!(a && a.getAttribute && a.getAttribute('data-dpc-file-vis') === docId);
+      paintSources();
+      if (hadFocus) refocus('[data-dpc-file-vis="' + docId + '"]');
+    });
+  }
 
   function sourceDocsHtml() {
     var d = state.detail;
@@ -6813,7 +6953,8 @@
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
-      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto]') : null;
+      '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto],' +
+      '[data-dpc-file-vis],[data-dpc-files-all]') : null;
     if (!t || t.disabled) return;
     if (onV2Click(t)) return;
     if (onPadClick(t)) return;
@@ -7010,6 +7151,14 @@
       if (panel) panel.innerHTML = panelHtml();
       ensureTabData();
       refocus('[data-dpc-msg="' + state.msg + '"]');
+    } else if (t.hasAttribute('data-dpc-file-vis')) {
+      setFileVisible(t.getAttribute('data-dpc-file-vis'));
+    } else if (t.hasAttribute('data-dpc-files-all')) {
+      if (state.jobId) state.files.all[state.jobId] = true;
+      paintSources();
+      // Keyboard focus goes to the first file the press uncovered.
+      var opened = root().querySelectorAll('[data-dpc-file] a.dpc-file-open');
+      if (opened[FILES_SHOWN]) opened[FILES_SHOWN].focus();
     } else if (t.hasAttribute('data-dpc-invoice')) {
       var xeroId = t.getAttribute('data-dpc-invoice');
       if (!xeroId) global.showToast('Could not load invoice PDF', 'error');

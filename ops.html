@@ -20855,6 +20855,33 @@ function swTradeTimeEntry(line) {
   var span = hm(st) + ' to ' + hm(fin) + (brk > 0 ? ', ' + brk + ' min break' : '');
   return { day: day, span: span, text: day + ', ' + span };
 }
+// <trade-bill-agent-label>
+// Owner, 11 Nov 2026: an agent (for example Grokbot) may help draft a trade
+// invoice, and the invoice says so. list_trade_invoices sends created_by_agent
+// and agent_label. Same words as agentInvoiceLine in
+// modules/trade-invoice-running-draft.js (guard:
+// scripts/test-trade-invoice-agent-label.js). A label only: the trade still
+// sent the invoice from their own login.
+function swTradeInvoiceAgentLine(inv) {
+  if (!inv || inv.created_by_agent !== true) return '';
+  var raw = String(inv.agent_label == null ? '' : inv.agent_label).replace(/[^A-Za-z0-9 _.-]/g, '').replace(/[\s_.-]+/g, ' ').trim().slice(0, 40);
+  var lower = raw.toLowerCase();
+  var name = '';
+  if (raw && lower !== 'agent' && lower !== 'assistant' && lower !== 'ai' && lower !== 'bot') {
+    name = (lower === 'grok' || lower === 'grokbot' || lower === 'grok bot')
+      ? 'Grokbot'
+      : raw.split(' ').map(function(word) { return word.charAt(0).toUpperCase() + word.slice(1); }).join(' ');
+  }
+  var who = String((inv.users && inv.users.name) || '').replace(/\s+/g, ' ').trim();
+  return 'Prepared with help from ' + (name || 'an assistant') + (who ? ', sent by ' + who : '') + '.';
+}
+function swTradeInvoiceAgentHtml(inv) {
+  var line = swTradeInvoiceAgentLine(inv);
+  if (!line) return '';
+  return '<div data-trade-bill-agent style="font-size:10px;color:var(--sw-text-sec);font-weight:400;text-transform:none;margin-top:2px">' + swTradeBillEsc(line) + '</div>';
+}
+// </trade-bill-agent-label>
+
 // The lines of one trade invoice that say when they were worked, as a fold
 // under the trade's name. Nothing at all when no line carries times.
 function swTradeInvoiceWhenHtml(inv) {
@@ -21078,7 +21105,7 @@ function renderTradeBillTable(invoices) {
       : swTradeBillEsc(inv.invoice_number || '—');
     var idArg = swTradeBillEsc(String(inv.id || '').replace(/[^A-Za-z0-9-]/g, ''));
     html += '<tr' + (isReview ? ' style="background:rgba(241,90,41,0.05)"' : '') + '>';
-    html += '<td>' + tradeName + swTradeInvoiceWhenHtml(inv) + '</td>';
+    html += '<td>' + tradeName + swTradeInvoiceAgentHtml(inv) + swTradeInvoiceWhenHtml(inv) + '</td>';
     html += '<td>' + we + badge + '</td>';
     html += '<td data-trade-bill-hours="' + hrs.source + '">' + hrs.hours.toFixed(1)
       + (hrs.perItem ? '<div data-trade-bill-per-item style="font-size:10px;color:var(--sw-text-sec);font-weight:400;margin-top:2px">Billed per item, not hours</div>' : '') + '</td>';

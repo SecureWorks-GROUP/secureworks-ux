@@ -1938,6 +1938,7 @@ const test = base.extend({
             status: 'draft',
             created_by_agent: !!runningDraftStore.created_by_agent,
             draft_origin: runningDraftStore.created_by_agent ? 'agent' : 'staff',
+            agent_label: runningDraftStore.created_by_agent ? 'grok' : null,
             xero: false,
             draft_builder: runningDraftStore.draft_builder,
             suggested: runningDraftSuggested,

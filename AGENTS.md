@@ -943,6 +943,14 @@ Search `modules/trade-invoice-running-draft.js`. Guards:
 `scripts/test-trade-invoice-running-draft.js`,
 `tests/e2e/trade-invoice-running-draft.spec.js`.
 
+An invoice an agent helped draft says so (owner 2026-11-11; search
+`// <invoice-agent-label>` in `trade.html`, `// <trade-bill-agent-label>` in
+`ops.html`). The words come from `agentDraftBanner` / `agentInvoiceLine` in
+`modules/trade-invoice-running-draft.js`, read from `created_by_agent` and
+`agent_label`: the draft banner, the sent invoice, its PDF and success screen,
+and the Trade Bills row. A label only; the trade still sends. Guard:
+`scripts/test-trade-invoice-agent-label.js`.
+
 A daily hours nudge uses that same flag (`// <daily-hours-nudge>`,
 `modules/trade-daily-hours-nudge.js`). Calendar and Pay show "Add today's
 hours" when a job today has no start and finish on the draft. One tap opens

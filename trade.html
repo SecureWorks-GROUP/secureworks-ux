@@ -21,8 +21,8 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
-    // Show the set-password panel before the body paints when a reset link lands here.
-    if (/type=recovery/.test(location.hash) || /type=recovery/.test(location.search) || /(?:#|&)error=/.test(location.hash)) {
+    // Show the set-password panel before the body paints when a reset or invite link lands here.
+    if (/type=(?:recovery|invite)/.test(location.hash) || /type=(?:recovery|invite)/.test(location.search) || /(?:#|&)error=/.test(location.hash)) {
       document.documentElement.classList.add('sw-recovery');
     }
   </script>
@@ -3625,10 +3625,10 @@
       <div id="forgotSent" class="login-sent" hidden>If that email has an account, we've sent a reset link.</div>
     </div>
     <div id="loginNewPassword" hidden>
-      <h2>Set a new password</h2>
+      <h2 id="newPasswordTitle">Set a new password</h2>
       <p class="login-lead" id="newPasswordLead">Checking your reset link...</p>
       <div id="newPasswordForm" hidden>
-        <label class="login-lead" for="newPassword">Choose a password for this trade account.</label>
+        <label class="login-lead" id="newPasswordLabel" for="newPassword">Choose a password for this trade account.</label>
         <input type="password" id="newPassword" placeholder="New password" autocomplete="new-password">
         <input type="password" id="confirmPassword" placeholder="Confirm password" autocomplete="new-password">
         <p class="login-hint">At least 8 characters.</p>
@@ -7121,7 +7121,14 @@
   // served as trade.html uses its own address so a local check comes back here.
   var TRADE_PASSWORD_MIN = 8;
   var TRADE_RESET_REDIRECT = 'https://secureworks-group.github.io/secureworks-ux/trade.html';
-  var _tradeHoldForRecovery = tradeUrlIsRecovery() || tradeUrlAuthError();
+  // <trade-invite-password>
+  // An invite link (type=invite) signs a new trade in with no password. Hold it
+  // on the same panel as a reset link so they choose one before the app opens;
+  // without this they are locked out when the first session ends. Supabase
+  // reports an invite as SIGNED_IN, not PASSWORD_RECOVERY, so the hold is taken
+  // from the address here and released by applyTradeLogin / initApp below.
+  var _tradeInviteLink = tradeUrlIsInvite();
+  var _tradeHoldForRecovery = tradeUrlIsRecovery() || _tradeInviteLink || tradeUrlAuthError();
   var _tradeRecoveryProfile = null;
   var _tradeRecoveryReady = false;
 
@@ -7129,6 +7136,11 @@
     var hash = window.location.hash || '';
     var search = window.location.search || '';
     return /type=recovery/.test(hash) || /type=recovery/.test(search);
+  }
+  function tradeUrlIsInvite() {
+    var hash = window.location.hash || '';
+    var search = window.location.search || '';
+    return /type=invite/.test(hash) || /type=invite/.test(search);
   }
   function tradeUrlAuthError() {
     return /(?:#|&)error=/.test(window.location.hash || '') || /(?:#|&)error_code=/.test(window.location.hash || '');
@@ -7174,23 +7186,28 @@
     var lead = document.getElementById('newPasswordLead');
     var form = document.getElementById('newPasswordForm');
     var expired = document.getElementById('newPasswordExpired');
+    var invite = _tradeInviteLink;
+    var title = document.getElementById('newPasswordTitle');
+    var label = document.getElementById('newPasswordLabel');
+    if (title) title.textContent = invite ? 'Welcome. Set your password' : 'Set a new password';
+    if (label) label.textContent = invite ? 'You will sign in with your email and this password.' : 'Choose a password for this trade account.';
     showLoginMessage('newPasswordError', '');
     if (mode === 'expired') {
       _tradeRecoveryReady = false;
-      if (lead) lead.textContent = 'This reset link has expired or is not valid.';
+      if (lead) lead.textContent = invite ? 'This invite link has expired or is not valid. Request a new link with the email the office invited.' : 'This reset link has expired or is not valid.';
       if (form) form.hidden = true;
       if (expired) expired.hidden = false;
       return;
     }
     if (mode === 'checking') {
       _tradeRecoveryReady = false;
-      if (lead) lead.textContent = 'Checking your reset link...';
+      if (lead) lead.textContent = invite ? 'Checking your invite link...' : 'Checking your reset link...';
       if (form) form.hidden = true;
       if (expired) expired.hidden = true;
       return;
     }
     _tradeRecoveryReady = true;
-    if (lead) lead.textContent = 'Choose a new password for your trade account.';
+    if (lead) lead.textContent = invite ? 'Your trade account is ready. Choose a password to finish setting it up.' : 'Choose a new password for your trade account.';
     if (form) form.hidden = false;
     if (expired) expired.hidden = true;
     var field = document.getElementById('newPassword');
@@ -7227,6 +7244,7 @@
   };
   window.showLoginForm = function() {
     _tradeHoldForRecovery = false;
+    _tradeInviteLink = false;
     if (cloud && cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
     hideLoginError();
     showLoginPanel('loginSignIn');
@@ -7289,6 +7307,7 @@
         return;
       }
       _tradeHoldForRecovery = false;
+      _tradeInviteLink = false;
       if (cloud.auth && cloud.auth.clearRecovery) cloud.auth.clearRecovery();
       stripAuthFromUrl();
       var profile = _tradeRecoveryProfile || (cloud.auth && cloud.auth.getUser && cloud.auth.getUser());
@@ -34870,6 +34889,7 @@
 
     cloud.on('auth:logout', function() {
       _tradeHoldForRecovery = false;
+      _tradeInviteLink = false;
       _tradeRecoveryReady = false;
       _tradeRecoveryProfile = null;
       resetJobListSession();
@@ -34886,6 +34906,9 @@
       if (tradeUrlAuthError() && !tradeUrlIsRecovery()) showSetPasswordScreen('expired');
       else showSetPasswordScreen('checking');
       if (cloud.auth.recoveryPending && cloud.auth.recoveryPending() && cloud.auth.getUser()) {
+        beginPasswordRecovery(cloud.auth.getUser());
+      } else if (_tradeInviteLink && cloud.auth.isLoggedIn() && cloud.auth.getUser()) {
+        // An invite arrives as an ordinary sign-in, which may land before the listeners above.
         beginPasswordRecovery(cloud.auth.getUser());
       }
       setTimeout(function() {

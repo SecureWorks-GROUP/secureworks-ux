@@ -46,6 +46,18 @@ async function installSupabaseAuthStub(page, {
                   user: recovery
                 };
                 listener('PASSWORD_RECOVERY', session);
+              } else if (hash.indexOf('type=invite') !== -1 && !session) {
+                // supabase-js reports an invite link as an ordinary SIGNED_IN, never PASSWORD_RECOVERY.
+                const invited = Object.values(USERS).map((record) => record.user).find((user) => user.id === 'e2e-installer')
+                  || Object.values(USERS)[0].user;
+                session = {
+                  access_token: 'e2e-invite-token',
+                  refresh_token: 'e2e-refresh-token',
+                  expires_in: 3600,
+                  token_type: 'bearer',
+                  user: invited
+                };
+                listener('SIGNED_IN', session);
               }
             }, 0);
             return { data: { subscription: { unsubscribe() {} } } };

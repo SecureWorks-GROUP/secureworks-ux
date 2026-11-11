@@ -47,7 +47,7 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
   await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
   await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
 
-  await card.getByRole('button', { name: '+ Add amount' }).click();
+  await card.getByRole('button', { name: '+ Take an amount off' }).click();
   await card.locator('[data-cardlumpdesc]').fill('Materials');
   await card.locator('[data-cardlumpamt]').fill('10');
   await card.locator('[data-cardlumpamt]').press('Tab');
@@ -337,7 +337,7 @@ test('job-centric WO allocations survive a Financial reload', async ({ appPage: 
 
   const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
   await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
-  await card.getByRole('button', { name: '+ Add amount' }).click();
+  await card.getByRole('button', { name: '+ Take an amount off' }).click();
   await card.locator('[data-cardlumpdesc]').fill('Materials');
   await card.locator('[data-cardlumpamt]').fill('10');
   await card.locator('[data-cardlumpamt]').press('Tab');
@@ -543,7 +543,7 @@ test.describe('Henry job-centric submit', () => {
     await card.locator('[data-cardwollname]').last().fill('Sonny');
     await card.locator('[data-cardwollamt]').last().fill('120');
     await card.locator('[data-cardwollamt]').last().press('Tab');
-    await card.getByRole('button', { name: '+ Add amount' }).click();
+    await card.getByRole('button', { name: '+ Take an amount off' }).click();
     await card.locator('[data-cardlumpdesc]').last().fill('Plinths supplied by office');
     await card.locator('[data-cardlumpamt]').last().fill('50');
     await card.locator('[data-cardlumpamt]').last().press('Tab');

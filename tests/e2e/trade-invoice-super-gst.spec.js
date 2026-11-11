@@ -132,12 +132,13 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
   await enterDayWorked(page);
   await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
-  await expect(card.getByRole('button', { name: '+ Add amount' })).toBeVisible();
+  await expect(card.getByRole('button', { name: '+ Take an amount off' })).toBeVisible();
   await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
   await expect(page.locator('#btnAddInvLump')).toBeVisible();
-  await expect(page.locator('#btnAddInvLump')).toHaveText('+ Add amount');
+  await expect(page.locator('#btnAddInvLump')).toHaveText('+ Take an amount off');
+  await expect(page.locator('#invLumpHelp')).toContainText('takes money off your invoice');
 
-  await card.getByRole('button', { name: '+ Add amount' }).click();
+  await card.getByRole('button', { name: '+ Take an amount off' }).click();
   await card.locator('[data-cardlumpdesc]').fill('Materials');
   await card.locator('[data-cardlumpamt]').fill('25');
   await card.locator('[data-cardlumpamt]').press('Tab');

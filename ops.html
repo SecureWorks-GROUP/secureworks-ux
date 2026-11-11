@@ -5492,6 +5492,13 @@ __swOpsStampAssets([
       <label class="form-label">New Rate ($/hr)</label>
       <input type="number" class="form-input" id="rateModalInput" min="0" step="0.50" placeholder="e.g. 45.00">
     </div>
+    <!-- <trade-super-on-top> office-only: this trade's own invoices paid in full, company pays 12% super on top -->
+    <div class="form-group" id="rateModalSuper" style="display:none;border-top:1px solid var(--sw-border);padding-top:12px;">
+      <label class="form-label">Super</label>
+      <div id="rateModalSuperState" style="font-size:13px;line-height:1.4;margin-bottom:8px;"></div>
+      <button type="button" class="btn btn-secondary" id="rateModalSuperBtn" onclick="toggleTradeSuperOnTop()"></button>
+    </div>
+    <!-- </trade-super-on-top> -->
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('rateModal')">Cancel</button>
       <button class="btn btn-primary" onclick="submitRateModal()">Save Rate</button>
@@ -21226,6 +21233,110 @@ function retryPushToXero(invoiceId) {
     loadTradeBills();
   });
 }
+
+// <trade-super-on-top>
+// Super on top (owner, 11 Nov 2026). Everyone is on the standard split: 12%
+// super, half withheld from pay. The office can mark one trade so their own
+// hourly and weekly invoices are paid in full and the company pays the whole
+// 12% on top. The server decides and prices it (ops-api
+// trade_invoice_super_basis.ts); this only shows the setting next to the rate
+// and switches it through set_trade_super_on_top_ops. list_trade_invoices
+// carries super_on_top on each rate row: true, false, or null when the
+// setting could not be read, in which case no control is shown.
+//
+// Kept apart from the rates panel code on purpose: it wraps
+// renderTradeRatesPanel and openRateModal instead of editing them, so it
+// merges cleanly beside <trade-first-rate>.
+var _tradeSuperOnTop = {};
+var _rateModalSuperArmed = false;
+
+function tradeSuperOnTopDay(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return '';
+  var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return Number(m[3]) + ' ' + months[Number(m[2]) - 1] + ' ' + m[1];
+}
+
+function noteTradeSuperOnTop(rates) {
+  _tradeSuperOnTop = {};
+  (rates || []).forEach(function(r) {
+    if (!r || !r.user_id || typeof r.super_on_top !== 'boolean') return;
+    _tradeSuperOnTop[String(r.user_id)] = { on: r.super_on_top, from: r.super_on_top_from || null };
+  });
+}
+
+// The rate chips are drawn in the order of `rates`; any other chips come after.
+function markTradeSuperOnTopChips(rates) {
+  var panel = document.getElementById('tradeRatesPanel');
+  var row = panel && panel.firstElementChild;
+  if (!row) return;
+  (rates || []).forEach(function(r, i) {
+    var chip = row.children[i];
+    if (!chip || !r || r.super_on_top !== true) return;
+    var tag = document.createElement('span');
+    tag.setAttribute('data-trade-super-on-top', '');
+    tag.style.cssText = 'margin-left:6px;font-size:11px;font-weight:700;color:var(--sw-orange)';
+    tag.textContent = '+ super on top';
+    chip.appendChild(tag);
+  });
+}
+
+function showRateModalSuper() {
+  var box = document.getElementById('rateModalSuper');
+  var state = _tradeSuperOnTop[String(_rateModalUserId || '')];
+  _rateModalSuperArmed = false;
+  if (!box) return;
+  if (!state) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.setAttribute('data-super-on-top', state.on ? 'on' : 'off');
+  document.getElementById('rateModalSuperState').textContent = state.on
+    ? 'Super on top' + (state.from ? ' from ' + tradeSuperOnTopDay(state.from) : '') + '. Their own invoices are paid in full and the company pays 12% super on top. Group work order shares keep the group\u2019s own pay basis.'
+    : 'Standard. Super is 12% of the invoice: half comes off their pay, the company pays the other half.';
+  document.getElementById('rateModalSuperBtn').textContent = state.on ? 'Turn off super on top' : 'Turn on super on top';
+}
+
+// Two taps: the first asks, the second saves. Saved invoices are not changed;
+// the next draft or invoice the trade raises uses the new setting.
+function toggleTradeSuperOnTop() {
+  var userId = _rateModalUserId;
+  var name = _rateModalName;
+  var state = _tradeSuperOnTop[String(userId || '')];
+  var btn = document.getElementById('rateModalSuperBtn');
+  if (!state || !btn) return;
+  var turnOn = !state.on;
+  if (!_rateModalSuperArmed) {
+    _rateModalSuperArmed = true;
+    btn.textContent = (turnOn ? 'Confirm: turn on for ' : 'Confirm: turn off for ') + name;
+    return;
+  }
+  _rateModalSuperArmed = false;
+  btn.disabled = true;
+  opsPost('set_trade_super_on_top_ops', { user_id: userId, on: turnOn }).then(function() {
+    btn.disabled = false;
+    closeModal('rateModal');
+    showToast('Super on top turned ' + (turnOn ? 'on' : 'off') + ' for ' + name, 'success');
+    loadTradeBills();
+  }).catch(function(e) {
+    btn.disabled = false;
+    showRateModalSuper();
+    showToast('Error: ' + (e && e.message ? e.message : 'not saved'), 'warning');
+  });
+}
+
+(function() {
+  var drawRates = renderTradeRatesPanel;
+  renderTradeRatesPanel = function(rates) {
+    noteTradeSuperOnTop(rates);
+    drawRates.apply(this, arguments);
+    markTradeSuperOnTopChips(rates);
+  };
+  var openRate = openRateModal;
+  openRateModal = function() {
+    openRate.apply(this, arguments);
+    showRateModalSuper();
+  };
+})();
+// </trade-super-on-top>
 
 function rejectTradeInvoice(invoiceId) {
   var note = prompt('Reason for rejecting (the trade will re-submit corrected hours):', '');

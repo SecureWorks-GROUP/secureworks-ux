@@ -35,7 +35,7 @@
   <script src="shared/group-work-order.js?v=fix4-20261106"></script>
   <script src="modules/trade-group-work-order.js?v=fix4-20261106"></script>
   <script src="modules/trade-group-invoice.js?v=fix4-20261106"></script>
-  <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
+  <script src="modules/trade-invoice-running-draft.js?v=agent-label-20261111"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
   <style>
@@ -22377,6 +22377,7 @@
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end || _hoursWeekEnd) + '</span></div>';
     html += _invoiceDetailStatusHtml(inv) + '</div>';
     html += _invoiceOfficeNoteHtml(inv);
+    html += _invoiceAgentHelpHtml(inv);
     if (_invoiceXeroPushPending(inv)) html += '<div class="wwi-warning">Invoice saved with exact totals. Xero sync is pending; do not submit it again.</div>';
     html += _weeklyInvoicePreviewHtml(inv);
     if (inv.notes) html += '<div class="wwi-panel"><div class="wwi-panel-title">Notes</div><div class="wwi-count">' + esc(inv.notes) + '</div></div>';
@@ -22465,6 +22466,7 @@
   var _invSuggested = [];
   var _invClaimed = [];
   var _invCreatedByAgent = false;
+  var _invAgentLabel = ''; // short name of the agent that drafted lines, from the server
   var _invRunningSavedHash = '';
   var _invRunningHydrating = false;
   var _invRunningLoadSeq = 0;
@@ -22516,6 +22518,7 @@
     _invSuggested = [];
     _invClaimed = [];
     _invCreatedByAgent = false;
+    _invAgentLabel = '';
     _invRunningSavedHash = '';
     _pmDraftIsPerMetre = false;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
@@ -22666,6 +22669,7 @@
     html += _invoiceDetailStatusHtml(inv);
     html += '</div>';
     html += _invoiceOfficeNoteHtml(inv);
+    html += _invoiceAgentHelpHtml(inv);
 
     // Labour lines
     var labourLines = lines.filter(function(l) { return !l.line_type || l.line_type === 'labour'; });
@@ -23471,6 +23475,41 @@
 
   // Why the office sent an invoice back or queried a line, in its own words.
   // ops-api sends only the office's text as `office_note`, never system notes.
+  // <invoice-agent-label>
+  // Owner, 11 Nov 2026: an agent may help draft a trade invoice and the invoice
+  // says so. Words come from modules/trade-invoice-running-draft.js. Only the
+  // trade can send; this is a label, not a permission.
+  function _invoiceAgentCore() {
+    var core = window.TradeInvoiceRunningDraft || {};
+    return {
+      agentDraftBanner: typeof core.agentDraftBanner === 'function'
+        ? core.agentDraftBanner
+        : function() { return 'An assistant drafted lines on this invoice. Only you can send it.'; },
+      agentInvoiceLine: typeof core.agentInvoiceLine === 'function'
+        ? core.agentInvoiceLine
+        : function(invoice) { return invoice && invoice.created_by_agent === true ? 'Prepared with help from an assistant.' : ''; }
+    };
+  }
+  function _invoiceAgentTradeName() {
+    var details = (typeof loadTradeDetails === 'function' ? loadTradeDetails() : null) || {};
+    return details.fullName || (_user ? _user.name : '') || '';
+  }
+  // The line for the invoice just sent from this screen. '' when no agent helped.
+  function _invoiceAgentLineForSubmit(result) {
+    var byAgent = (result && result.created_by_agent === true) || _invCreatedByAgent === true;
+    if (!byAgent) return '';
+    return _invoiceAgentCore().agentInvoiceLine(
+      { created_by_agent: true, agent_label: (result && result.agent_label) || _invAgentLabel },
+      _invoiceAgentTradeName()
+    );
+  }
+  function _invoiceAgentHelpHtml(inv) {
+    var line = _invoiceAgentCore().agentInvoiceLine(inv, _invoiceAgentTradeName());
+    if (!line) return '';
+    return '<div data-inv-agent-help style="margin:10px 0;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">' + esc(line) + '</div>';
+  }
+  // </invoice-agent-label>
+
   function _invoiceOfficeNoteHtml(inv, short) {
     var note = String((inv && inv.office_note) || '').trim();
     if (!note) return '';
@@ -24011,6 +24050,7 @@
     _invSuggested = [];
     _invClaimed = [];
     _invCreatedByAgent = false;
+    _invAgentLabel = '';
     _invRunningSavedHash = '';
     _invRunningHydrating = false;
     _invRunningLoadSeq++;
@@ -24250,7 +24290,8 @@
     if (!runningInvoiceDraftOn()) return '';
     var html = '';
     if (_invCreatedByAgent) {
-      html += '<div data-invoice-agent-banner style="margin-top:16px;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">An assistant drafted lines on this invoice. Only you can send it.</div>';
+      // Owner, 11 Nov 2026: the invoice names the agent that helped. [invoice-agent-label]
+      html += '<div data-invoice-agent-banner style="margin-top:16px;padding:8px 10px;border-radius:8px;background:rgba(13,148,136,0.12);font-size:12px;color:var(--sw-dark)">' + esc(_invoiceAgentCore().agentDraftBanner(_invAgentLabel)) + '</div>';
     }
     if (_invManualLock || (_invDismissedKeys && _invDismissedKeys.length)) {
       html += '<button type="button" id="invResyncBtn" data-invoice-resync onclick="resyncRunningInvoiceDraft()" style="margin-top:10px;background:none;border:0;padding:6px 0;font:inherit;font-size:13px;font-weight:600;color:var(--sw-orange-deep,#C7431B);cursor:pointer">Re-sync from this week\'s jobs</button>';
@@ -24295,6 +24336,7 @@
       _invClaimed = (res && res.claimed) || [];
       if (res && res.draft_id) _draftInvoiceId = res.draft_id;
       _invCreatedByAgent = !!(res && res.created_by_agent);
+      _invAgentLabel = _invCreatedByAgent ? String((res && res.agent_label) || '') : '';
       var merged = core.regenerate({
         cards: _serializeJobCardsDraft(_jobCards),
         dismissed: _invDismissedKeys,
@@ -24345,7 +24387,10 @@
     if (!opts.quiet) _paintRunningSaveState('Saving...');
     return api('save_running_invoice_draft', null, body).then(function(res) {
       if (res && res.draft_id) _draftInvoiceId = res.draft_id;
-      if (res && res.created_by_agent) _invCreatedByAgent = true;
+      if (res && res.created_by_agent) {
+        _invCreatedByAgent = true;
+        if (res.agent_label) _invAgentLabel = String(res.agent_label);
+      }
       _invRunningSavedHash = core.hashSnapshot(snap);
       _invRunningSaveWarned = false;
       _saveInvDraft();
@@ -26226,7 +26271,7 @@
     return '<div style="font-size:13px;color:var(--sw-text-sec)">' + text + '</div>';
   }
 
-  function _invoicePdfDataFromResponse(result, notes) {
+  function _invoicePdfDataFromResponse(result, notes, agentLine) {
     result = result || {};
     var money = _invoicePersistedMoney(result);
     var rows = _invoicePersistedPdfRows(result);
@@ -26235,6 +26280,7 @@
       invoiceNumber: result.invoice_number,
       rows: rows,
       notes: notes || '',
+      agentLine: agentLine || '',
       gst: money.gst_on,
       money: money
     };
@@ -27848,7 +27894,8 @@
           renderInvoiceBuilder();
           return;
         }
-        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
+        var agentSentLine = _invoiceAgentLineForSubmit(result);
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes, agentSentLine);
         _lastInvoicePdfData = pdfData;
         // The week is done the moment the server saved it. [invoice-week-choice]
         _moveToWeekAfter(postWeekEnd, result.invoice_number);
@@ -27858,6 +27905,7 @@
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + esc(result.invoice_number) + '</div>';
+        if (agentSentLine) successHtml += '<div data-invoice-agent-sent style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px">' + esc(agentSentLine) + '</div>';
         successHtml += _weekDoneHtml(postWeekEnd);
         if (xeroWarn) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
@@ -28402,7 +28450,8 @@
         }
 
         // Generate a PDF only from the successful response's persisted lines.
-        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
+        var agentSentLine = _invoiceAgentLineForSubmit(result);
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes, agentSentLine);
         _lastInvoicePdfData = pdfData;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
@@ -28414,6 +28463,7 @@
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + result.invoice_number + '</div>';
+        if (agentSentLine) successHtml += '<div data-invoice-agent-sent style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px">' + esc(agentSentLine) + '</div>';
         if (xeroWarn) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.xero_bill_number) {
@@ -28753,6 +28803,15 @@
       doc.setTextColor(60, 65, 70);
       doc.text(data.notes, margin, y, { maxWidth: cw });
       y += 10;
+    }
+
+    // ── Agent help (owner, 11 Nov 2026) ── [invoice-agent-label]
+    if (data.agentLine) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 110, 120);
+      doc.text(String(data.agentLine), margin, y, { maxWidth: cw });
+      y += 8;
     }
 
     // ── Payment details ──

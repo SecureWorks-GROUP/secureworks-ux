@@ -35,6 +35,8 @@ test('Save keeps the draft without sending, and it is still there after a fresh 
   await signIn(page, PERSONAS.installer);
   await openBuilder(page);
 
+  // Owner, 11 Nov 2026: the draft names the agent that helped.
+  await expect(page.locator('[data-invoice-agent-banner]')).toContainText('Drafted with help from Grokbot');
   await expect(page.locator('[data-invoice-agent-banner]')).toContainText('Only you can send it');
   await expect(page.locator('[data-invoice-save-note]')).toContainText('does not send it');
   await expect(page.locator('#invSaveBtn')).toHaveText('Save');

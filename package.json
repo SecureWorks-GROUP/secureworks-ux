@@ -14,6 +14,7 @@
     "test:trade-complete-invoice": "node scripts/test-trade-complete-invoice.js",
     "test:trade-time-entry": "node scripts/test-trade-time-entry.js",
     "test:trade-invoice-running-draft": "node scripts/test-trade-invoice-running-draft.js",
+    "test:trade-invoice-agent-label": "node scripts/test-trade-invoice-agent-label.js",
     "test:trade-daily-hours-nudge": "node scripts/test-trade-daily-hours-nudge.js",
     "test:makesafe-intake-sweep": "node scripts/test-makesafe-intake-sweep-explicit.js",
     "test:ops-job-detail-refresh": "node scripts/test-ops-job-detail-autorefresh.js",

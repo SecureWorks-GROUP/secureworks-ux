@@ -913,7 +913,8 @@ const test = base.extend({
       'trade-invoice-week-collision-legacy': ['generate_trade_invoice'],
       'trade-invoice-total-drift': [],
       'trade-invoice-stale-week': [],
-      'trade-invoice-multi-week': ['generate_trade_invoice'],
+      'trade-invoice-multi-week': ['generate_trade_invoice', 'self_allocate_for_invoice'],
+      'trade-invoice-saved-times': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
@@ -953,6 +954,18 @@ const test = base.extend({
           const events = [repairFamilyEvent, plainRepairEvent].filter((event) =>
             event.scheduled_date >= from && event.scheduled_date <= to);
           return { events, orgEvents: [] };
+        },
+        // A trade adds themselves to a job from the invoice (ops-api
+        // self_allocate_for_invoice): only ever the caller, one day.
+        self_allocate_for_invoice: async ({ request }) => {
+          const body = request.postDataJSON() || {};
+          const job = multiWeekJobs.find((entry) => entry.id === body.job_id);
+          if (!job) return { status: 404, body: { ok: false, code: 'self_allocate_job_not_found', error: 'We could not find that job in your company.' } };
+          return {
+            ok: true,
+            mode: 'created',
+            assignment: { id: 'self-' + body.job_id + '-' + body.work_date, job_id: body.job_id, scheduled_date: body.work_date, status: 'confirmed' }
+          };
         },
         search_all_jobs: ({ url }) => {
           if (feedScenario === 'trade-invoice-multi-week') {
@@ -1192,7 +1205,18 @@ const test = base.extend({
         crew_charges_on_my_jobs: { charges: [] },
         my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
         my_group_work_orders: { enabled: true, groups: [], group_job_ids: [] },
-        my_hours: feedScenario === 'trade-invoice-running-draft'
+        my_hours: feedScenario === 'trade-invoice-saved-times'
+          // Times the trade saved on the job card at clock off, as ops-api
+          // returns them (logged_time_entry, loggedTimeEntryForCard).
+          ? {
+            ...labourExplainerHours,
+            assignments: labourExplainerHours.assignments.map((a, i) => (i === 0 ? {
+              ...a,
+              hours_worked: 7.5,
+              logged_time_entry: { work_date: a.scheduled_date, start_time: '07:00:00', finish_time: '15:00:00', break_minutes: 30, hours: 7.5 }
+            } : a))
+          }
+          : feedScenario === 'trade-invoice-running-draft'
           ? { ...labourExplainerHours, running_invoice_draft: true }
           : deductionDraftScenario
           ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))

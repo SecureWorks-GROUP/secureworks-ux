@@ -112,6 +112,10 @@ test('own fresh 14h+ clock: "No" loads that job and opens its end-of-day report;
   await expect(page.locator('#eodOverlay')).toBeVisible();
 
   await page.evaluate((id) => window.timerAction('clock_off', id), ownRow.id);
+  // Clock off asks about a break and the times first (<clock-off-times>).
+  // Clocked on yesterday, so the start is left for the trade to give.
+  await expect(page.locator('[data-cot-start]')).toHaveValue('');
+  await page.locator('[data-cot-skip]').click();
   await expect.poll(() => requestLog.filter((r) => r.action === 'clock_event').length).toBe(1);
   await expect(page.locator('#toast')).toContainText('Not saved');
   await expect(page.locator('#toast')).not.toContainText('Saved locally');

@@ -3563,7 +3563,8 @@
     /* Allocation roster — multi-select (captain: multiple people per job) */
     .alloc-crew.sel{border-color:var(--jt-ms);background:var(--jt-ms-tint)}
     .alloc-crew .tick{float:right;color:var(--jt-ms-ink);font-weight:800;font-family:var(--sw-mono)}
-  </style>
+  .cot-break.sel{background:var(--sw-orange)!important;color:#fff!important;border-color:var(--sw-orange)!important}
+</style>
 </head>
 <body>
 
@@ -10703,7 +10704,9 @@
   // is the opposite kind of write: it is a manager acting ON that crew, gated
   // server-side by the same authority as allocating the job, and a manager is
   // in view-only mode on precisely the jobs where they need it.
-  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true };
+  // self_allocate_for_invoice only ever books the signed-in trade (ops-api),
+  // so a foreign job left open in the background must not block it.
+  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true, self_allocate_for_invoice: true };
 
   function blockedForeignJobWrite(action, params, postBody) {
     if (FOREIGN_JOB_WRITE_EXEMPT_ACTIONS[String(action || '')]) return false;
@@ -24304,10 +24307,11 @@
       _jobCards = _restoreJobCardsDraft(merged.cards);
       _invDismissedKeys = merged.dismissed;
       _invRunningHydrating = false;
-      if (merged.added.length) _invRunningSavedHash = '';
+      var filledSaved = _fillCardsFromSavedTimes();
+      if (merged.added.length || filledSaved) _invRunningSavedHash = '';
       else _invRunningSavedHash = core.hashSnapshot(_runningInvoiceSnapshot());
       renderInvoiceBuilder();
-      if (merged.added.length) _scheduleRunningInvoiceAutosave();
+      if (merged.added.length || filledSaved) _scheduleRunningInvoiceAutosave();
     }).catch(function() {
       if (seq !== _invRunningLoadSeq) return;
       _invRunningHydrating = false;
@@ -24364,6 +24368,7 @@
 
   function _paintRegeneratedDraft(merged) {
     _jobCards = _restoreJobCardsDraft(merged.cards);
+    _fillCardsFromSavedTimes();
     _invDismissedKeys = merged.dismissed;
     _invManualLock = true;
     renderInvoiceBuilder();
@@ -24917,6 +24922,9 @@
     return { min: c && c.assignment_id ? start : TradeTimeEntryCore.earliest(today), max: end && end < today ? end : today };
   }
   function _jobCardTimeHint(c) {
+    if (c.saved_times_offered && c.finish_time) {
+      return 'Times you saved on this job. Check them before you submit.';
+    }
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
       return TradeTimeEntryCore.hoursText(c.logged_hours) + ' on record for this job. Add the times you worked.';
     }
@@ -25631,7 +25639,44 @@
         _blank_job: isBlankJob
       }, prevFields)));
     });
+    _fillCardsFromSavedTimes();
   }
+
+  // <invoice-saved-times>
+  // A job card opens on the times the trade saved on that job card (clock
+  // off, or the job-view hours row), which my_hours returns per assignment as
+  // logged_time_entry only while they still describe the card's hours
+  // (ops-api loggedTimeEntryForCard). They are the trade's own statement; the
+  // card shows them for the trade to check before submit. Only a card with no
+  // date or times of its own is filled, and only once (saved_times_offered),
+  // so times the trade cleared or changed are never put back.
+  function _fillCardsFromSavedTimes() {
+    var list = (_hoursData && _hoursData.assignments) || [];
+    if (!list.length || !_jobCards || !_jobCards.length) return false;
+    var byId = {};
+    list.forEach(function(a) { if (a && a.id && a.logged_time_entry && typeof a.logged_time_entry === 'object') byId[a.id] = a.logged_time_entry; });
+    var today = clockPerthDay(new Date());
+    var changed = false;
+    _jobCards.forEach(function(c) {
+      if (!c || !c.assignment_id || c.saved_times_offered) return;
+      if (c.work_date || c.start_time || c.finish_time) return;
+      var e = byId[c.assignment_id];
+      if (!e || !e.work_date || !e.start_time || !e.finish_time) return;
+      var b = _jobCardDateBounds(c);
+      if (e.work_date > today || (b.min && e.work_date < b.min) || (b.max && e.work_date > b.max)) return;
+      var clash = _jobCards.some(function(o) { return o !== c && o.assignment_id === c.assignment_id && o.work_date === e.work_date; });
+      if (clash) return;
+      c.work_date = e.work_date;
+      c.start_time = TradeTimeEntryCore.normTime(e.start_time);
+      c.finish_time = TradeTimeEntryCore.normTime(e.finish_time);
+      c.break_minutes = Number(e.break_minutes) > 0 ? Number(e.break_minutes) : 0;
+      c.saved_times_offered = true;
+      _jobCardSyncHours(c);
+      changed = true;
+    });
+    return changed;
+  }
+  // </invoice-saved-times>
 
   // The office's reasons for the invoices whose entries were brought back.
   function _sentBackNoticeHtml() {
@@ -26509,6 +26554,74 @@
     _jcSearch.error = '';
     renderInvoiceBuilder();
   };
+
+  // <invoice-self-allocate>
+  // Marnin, 11 Nov 2026: being booked on a job is what lets a trade invoice
+  // it. Picking a job above works as before. When ops-api refuses the invoice
+  // because the trade is not booked on a job they put on it
+  // (extra_job_not_allowed, 403, with the job numbers), the app offers to add
+  // them to each of those jobs for the day they worked
+  // (self_allocate_for_invoice: only ever the signed-in trade, never a text)
+  // and then send again. Nothing is booked unless the trade says yes, and a
+  // trade the server already lets bill the job (office grant, a manager of
+  // that division) is never asked.
+  function _selfAllocatePairs(body, jobs) {
+    var wanted = {};
+    (jobs || []).forEach(function(ref) { if (ref) wanted[String(ref).toLowerCase()] = true; });
+    var seen = {};
+    var pairs = [];
+    (body && body.extra_items || []).forEach(function(item) {
+      if (!item || !item.job_id) return;
+      var hit = wanted[String(item.job_number || '').toLowerCase()] || wanted[String(item.job_id).toLowerCase()];
+      if (!hit) return;
+      var day = String(item.work_date || item.scheduled_date || item.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+      var key = item.job_id + '#' + day;
+      if (seen[key]) return;
+      seen[key] = true;
+      pairs.push({ job_id: item.job_id, job_number: item.job_number || '', work_date: day });
+    });
+    return pairs;
+  }
+  function _selfAllocateUnavailable(err) {
+    var status = err && Number(err.status);
+    var msg = String((err && err.message) || '');
+    return (status === 404 && !(err && err.body && err.body.code)) || /unknown action/i.test(msg);
+  }
+  function _offerSelfAllocateAndResend(refusal, body) {
+    var jobs = (refusal && Array.isArray(refusal.jobs)) ? refusal.jobs : [];
+    var pairs = _selfAllocatePairs(body, jobs);
+    if (!pairs.length) return false;
+    var names = [];
+    pairs.forEach(function(p) { if (p.job_number && names.indexOf(p.job_number) === -1) names.push(p.job_number); });
+    var label = names.length ? names.join(', ') : 'this job';
+    setTimeout(function() {
+      showConfirm(
+        'Add yourself to ' + label + '?',
+        'You are not booked on ' + label + ', so the invoice was not sent. Add yourself to ' + (names.length > 1 ? 'them' : 'it') + ' for the day' + (pairs.length > 1 ? 's' : '') + ' you worked, then send it. The office will see you added yourself.',
+        'Add me and send'
+      ).then(function(ok) {
+        if (!ok) return;
+        var chain = Promise.resolve();
+        pairs.forEach(function(p) {
+          chain = chain.then(function() { return api('self_allocate_for_invoice', null, { job_id: p.job_id, work_date: p.work_date }); });
+        });
+        return chain.then(function() {
+          _invalidateAssignmentLifecycleCaches();
+          toast('You are now on ' + label + '. Check and send your invoice.');
+          window.submitJobCentricInvoice();
+        }).catch(function(err) {
+          if (_selfAllocateUnavailable(err)) {
+            toast('Adding yourself to a job is not switched on yet. Ask the office to add you to ' + label + ', then send again.', true);
+            return;
+          }
+          toast('Not added: ' + friendlyError(err), true);
+        });
+      });
+    }, 0);
+    return true;
+  }
+  // </invoice-self-allocate>
 
   // Any line on this draft, including one built from a job or a work order.
   // The source key is kept so the next rebuild does not put that line back.
@@ -27916,6 +28029,12 @@
         if (err && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
           toast(_noteWeekAlreadyInvoiced(err.body, postWeekEnd), true);
           renderInvoiceBuilder();
+          return;
+        }
+        // <invoice-self-allocate> nothing was saved; offer to book the trade.
+        if (err && err.body && err.body.code === 'extra_job_not_allowed') {
+          renderInvoiceBuilder();
+          if (!_offerSelfAllocateAndResend(err.body, jobCentricBody)) toast(friendlyError(err), true);
           return;
         }
         return _handleFinancialWriteFailure('generate_trade_invoice', jobCentricBody, err, ctx).then(function(result) {
@@ -31193,35 +31312,10 @@
         break;
 
       case 'clock_off':
-        clockEvent('clock_off', assignmentId, {
-          break_minutes: _totalBreakMins,
-          progress_pct: window._quickProgress || undefined
-        }).then(function(result) {
-          captureGPS('clock_off');
-          var hours = result.net_hours ? (Math.round(result.net_hours * 100) / 100) + 'h' : '';
-          toast('Clocked off' + (hours ? ' \u2014 ' + hours + ' logged' : ''));
-          clearTimerState();
-          window._quickProgress = null;
-          // Update cached crew data so renderJobDetail shows "complete" not "clock on"
-          if (_currentJob && _currentJob.crew) {
-            for (var ci = 0; ci < _currentJob.crew.length; ci++) {
-              if (_currentJob.crew[ci].id === assignmentId) {
-                _currentJob.crew[ci].status = 'complete';
-                _currentJob.crew[ci].clocked_off_at = new Date().toISOString();
-                _currentJob.crew[ci].hours_worked = result.net_hours || null;
-                _currentJob.crew[ci].job_phase = 'complete';
-                break;
-              }
-            }
-          }
-          if (_currentJob) renderJobDetail(_currentJob);
-        }).catch(function(err) {
-          // Clock-off failed — DON'T clear timer state. A refusal was already
-          // shown by clockEvent; only a queued offline clock-off is "saved locally".
-          if (!(err && err.clock_refused) && !(err && err.code === 'view_only')) {
-            toast('Clock-off saved locally \u2014 will sync when online', false);
-          }
-          if (_currentJob) renderJobDetail(_currentJob);
+        // <clock-off-times> asks about a break and the times first.
+        _askClockOffTimes(assignmentId).then(function(choice) {
+          if (!choice) return;
+          _runClockOff(assignmentId, choice.entry);
         });
         break;
 
@@ -31229,6 +31323,204 @@
         console.warn('[trade] Unknown timer action:', action);
     }
   };
+
+  // <clock-off-times>
+  // Marnin, 11 Nov 2026: "if they use the clock in clock out feature it should
+  // ask if they had a break and how long or nah. Otherwise it saves that into
+  // the draft invoice." Clock off shows the start (when they clocked on), the
+  // finish (now) and a break question. The trade checks or changes them, and
+  // the confirmed times are saved on their job card with log_my_job_hours
+  // (source clock_off). The Weekly Invoice card then opens on those times for
+  // the trade to check (buildJobCards / _fillCardsFromSavedTimes). Nothing is
+  // invoiced or sent here.
+  function _clockPerthTime(value) {
+    var d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    var parts = new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Perth', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(d);
+    var byType = {};
+    parts.forEach(function(p) { byType[p.type] = p.value; });
+    return (byType.hour === '24' ? '00' : byType.hour) + ':' + byType.minute;
+  }
+  function _myClockRow(assignmentId) {
+    var crew = (_currentJob && _currentJob.crew) || [];
+    for (var i = 0; i < crew.length; i++) if (crew[i] && crew[i].id === assignmentId) return crew[i];
+    return null;
+  }
+  var _clockOffResolve = null;
+  var CLOCK_OFF_BREAKS = [0, 15, 30, 45, 60];
+  function _clockOffBreakLabel(m) { return m === 0 ? 'No break' : (m === 60 ? '1 hour' : m + ' min'); }
+  function _closeClockOffSheet(value) {
+    var el = document.getElementById('clockOffTimesOverlay');
+    if (el) el.remove();
+    var r = _clockOffResolve;
+    _clockOffResolve = null;
+    if (r) r(value);
+  }
+  function _readClockOffSheet() {
+    var start = (document.getElementById('cotStart') || {}).value || '';
+    var finish = (document.getElementById('cotFinish') || {}).value || '';
+    var sel = document.querySelector('#clockOffTimesOverlay [data-cot-break].sel');
+    var other = (document.getElementById('cotBreakOther') || {}).value;
+    var brk = null;
+    if (other !== undefined && String(other).trim() !== '') brk = TradeTimeEntryCore.breakOf ? TradeTimeEntryCore.breakOf(other) : Number(other);
+    else if (sel) brk = Number(sel.getAttribute('data-cot-break'));
+    return { start: start, finish: finish, brk: brk };
+  }
+  function _paintClockOffHours() {
+    var v = _readClockOffSheet();
+    var out = document.getElementById('cotHours');
+    var btn = document.getElementById('cotSave');
+    var h = v.brk == null ? null : TradeTimeEntryCore.hoursFor(v.start, v.finish, v.brk);
+    if (out) {
+      if (v.brk == null) out.textContent = 'Pick your break, or No break.';
+      else if (h == null) out.textContent = 'Finish must be after start, and longer than your break.';
+      else out.textContent = TradeTimeEntryCore.hoursText(h) + ' worked';
+    }
+    if (btn) btn.disabled = h == null;
+  }
+  window._cotPickBreak = function(el) {
+    document.querySelectorAll('#clockOffTimesOverlay [data-cot-break]').forEach(function(b) { b.classList.remove('sel'); });
+    el.classList.add('sel');
+    var other = document.getElementById('cotBreakOther');
+    if (other) other.value = '';
+    _paintClockOffHours();
+  };
+  window._cotOtherBreak = function() {
+    document.querySelectorAll('#clockOffTimesOverlay [data-cot-break]').forEach(function(b) { b.classList.remove('sel'); });
+    _paintClockOffHours();
+  };
+  window._cotChanged = function() { _paintClockOffHours(); };
+  window._cotSave = function() {
+    var v = _readClockOffSheet();
+    var h = v.brk == null ? null : TradeTimeEntryCore.hoursFor(v.start, v.finish, v.brk);
+    if (h == null) { _paintClockOffHours(); return; }
+    _closeClockOffSheet({ entry: {
+      work_date: clockPerthDay(new Date()),
+      start_time: TradeTimeEntryCore.normTime(v.start),
+      finish_time: TradeTimeEntryCore.normTime(v.finish),
+      break_minutes: v.brk,
+      hours: h
+    } });
+  };
+  window._cotSkip = function() { _closeClockOffSheet({ entry: null }); };
+  window._cotCancel = function() { window._quickProgress = null; _closeClockOffSheet(null); };
+
+  // Resolves { entry } to clock off (entry null = clock off without saving
+  // times), or null when the trade cancels.
+  function _askClockOffTimes(assignmentId) {
+    if (_clockOffResolve) _closeClockOffSheet(null);
+    var row = _myClockRow(assignmentId) || {};
+    var onAt = _clockedOnAt || row.clocked_on_at || row.arrived_at || null;
+    var now = new Date();
+    var today = clockPerthDay(now);
+    var sameDay = !!onAt && clockPerthDay(onAt) === today;
+    var start = sameDay ? _clockPerthTime(onAt) : '';
+    var finish = _clockPerthTime(now);
+    var tracked = Number(_totalBreakMins || row.break_minutes || 0);
+    return new Promise(function(resolve) {
+      _clockOffResolve = resolve;
+      var chip = 'padding:10px 12px;min-height:44px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;background:var(--sw-light);color:var(--sw-mid);font-family:var(--sw-font)';
+      var input = 'width:100%;min-height:44px;padding:9px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px;box-sizing:border-box;font-family:var(--sw-font)';
+      var h = '<div style="background:#fff;border-radius:12px;max-width:380px;width:100%;padding:20px;max-height:92vh;overflow:auto">';
+      h += '<div style="font-size:18px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Clocking off</div>';
+      if (!onAt || !sameDay) {
+        h += '<div data-cot-other-day style="font-size:13px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">' + (onAt ? 'You clocked on before today. ' : '') + 'Check the start time you worked today.</div>';
+      } else {
+        h += '<div style="font-size:13px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">Check your times. They go on this week’s invoice for you to check before you send it.</div>';
+      }
+      h += '<div style="display:flex;gap:10px;margin-bottom:12px">';
+      h += '<label style="flex:1;font-size:12px;font-weight:600;color:var(--sw-mid)">Start<input type="time" id="cotStart" data-cot-start value="' + esc(start) + '" oninput="_cotChanged()" style="' + input + ';margin-top:4px"></label>';
+      h += '<label style="flex:1;font-size:12px;font-weight:600;color:var(--sw-mid)">Finish<input type="time" id="cotFinish" data-cot-finish value="' + esc(finish) + '" oninput="_cotChanged()" style="' + input + ';margin-top:4px"></label>';
+      h += '</div>';
+      h += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">Did you have a break?</div>';
+      h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+      CLOCK_OFF_BREAKS.forEach(function(m) {
+        var sel = tracked > 0 ? (m === tracked) : false;
+        h += '<button type="button" class="cot-break' + (sel ? ' sel' : '') + '" data-cot-break="' + m + '" onclick="_cotPickBreak(this)" style="' + chip + '">' + _clockOffBreakLabel(m) + '</button>';
+      });
+      h += '</div>';
+      var otherVal = tracked > 0 && CLOCK_OFF_BREAKS.indexOf(tracked) === -1 ? String(tracked) : '';
+      h += '<label style="display:block;font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">Other (minutes)<input type="number" inputmode="numeric" min="0" step="1" id="cotBreakOther" data-cot-break-other value="' + esc(otherVal) + '" oninput="_cotOtherBreak()" style="' + input + ';margin-top:4px"></label>';
+      h += '<div id="cotHours" data-cot-hours style="font-size:13px;color:var(--sw-mid);margin-bottom:12px;min-height:18px"></div>';
+      h += '<div style="display:flex;flex-direction:column;gap:8px">';
+      h += '<button type="button" id="cotSave" data-cot-save onclick="_cotSave()" style="padding:14px;background:var(--sw-dark);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px">Clock off and save my times</button>';
+      h += '<button type="button" data-cot-skip onclick="_cotSkip()" style="padding:10px;background:none;border:1px solid var(--sw-border);border-radius:8px;color:var(--sw-mid);font-size:13px;cursor:pointer;min-height:44px">Clock off, I’ll add times on my invoice</button>';
+      h += '<button type="button" data-cot-cancel onclick="_cotCancel()" style="padding:8px;background:none;border:none;color:var(--sw-text-sec);font-size:13px;cursor:pointer">Cancel</button>';
+      h += '</div></div>';
+      var overlay = document.createElement('div');
+      overlay.id = 'clockOffTimesOverlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-label', 'Clocking off');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:520;display:flex;align-items:center;justify-content:center;padding:16px;';
+      overlay.innerHTML = h;
+      document.body.appendChild(overlay);
+      _paintClockOffHours();
+    });
+  }
+
+  function _saveClockOffTimes(assignmentId, entry) {
+    var jobId = (_currentJob && _currentJob.job && _currentJob.job.id) || _currentJobId || null;
+    if (!jobId) return Promise.resolve(false);
+    return api('log_my_job_hours', null, {
+      jobId: jobId,
+      assignmentId: assignmentId,
+      work_date: entry.work_date,
+      start_time: entry.start_time,
+      finish_time: entry.finish_time,
+      break_minutes: entry.break_minutes,
+      hours: entry.hours,
+      source: 'clock_off'
+    }).then(function() { return true; }).catch(function(err) {
+      console.warn('[trade] clock-off times not saved:', err);
+      return false;
+    });
+  }
+
+  function _runClockOff(assignmentId, entry) {
+    var extra = { progress_pct: window._quickProgress || undefined };
+    extra.break_minutes = entry ? entry.break_minutes : _totalBreakMins;
+    clockEvent('clock_off', assignmentId, extra).then(function(result) {
+      captureGPS('clock_off');
+      clearTimerState();
+      window._quickProgress = null;
+      var after = entry ? _saveClockOffTimes(assignmentId, entry) : Promise.resolve(null);
+      return after.then(function(saved) {
+        var hoursWorked = saved ? entry.hours : (result.net_hours || null);
+        if (saved) {
+          toast('Clocked off. ' + entry.start_time + ' to ' + entry.finish_time + (entry.break_minutes ? ', ' + entry.break_minutes + ' min break' : ', no break') + ' saved for your invoice.');
+        } else if (entry) {
+          toast('Clocked off, but your times were not saved. Add them on your invoice.', true);
+        } else {
+          var hours = result.net_hours ? (Math.round(result.net_hours * 100) / 100) + 'h' : '';
+          toast('Clocked off' + (hours ? ' — ' + hours + ' logged' : ''));
+        }
+        // Update cached crew data so renderJobDetail shows "complete" not "clock on"
+        if (_currentJob && _currentJob.crew) {
+          for (var ci = 0; ci < _currentJob.crew.length; ci++) {
+            if (_currentJob.crew[ci].id === assignmentId) {
+              _currentJob.crew[ci].status = 'complete';
+              _currentJob.crew[ci].clocked_off_at = new Date().toISOString();
+              _currentJob.crew[ci].hours_worked = hoursWorked;
+              _currentJob.crew[ci].job_phase = 'complete';
+              break;
+            }
+          }
+        }
+        if (saved) _invalidateAssignmentLifecycleCaches();
+        if (_currentJob) renderJobDetail(_currentJob);
+      });
+    }).catch(function(err) {
+      // Clock-off failed — DON'T clear timer state. A refusal was already
+      // shown by clockEvent; only a queued offline clock-off is "saved locally".
+      if (!(err && err.clock_refused) && !(err && err.code === 'view_only')) {
+        toast('Clock-off saved locally — will sync when online. Add your times on your invoice.', false);
+      }
+      if (_currentJob) renderJobDetail(_currentJob);
+    });
+  }
+  // </clock-off-times>
 
   // ── Resume job next day (multi-day) — re-clocks onto existing assignment ──
   window.resumeJobNextDay = function() {

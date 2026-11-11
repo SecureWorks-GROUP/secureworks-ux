@@ -994,7 +994,10 @@ row. ops-api recomputes the hours and refuses a time line without the fields
 own Extras row. The date worked cannot be after today (Perth), or more than a year
 before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
 onto a line: no default date or start, no device memory, no prefill from the
-schedule or clock on and off. A card, an Extras row and the job-view row open
+schedule or the clock alone. The one prefill is the trade's own saved times
+(`logged_time_entry` on `my_hours`: confirmed at clock off, which asks about a
+break, or saved on the job view), filled once into an empty card and shown for
+the trade to check (`// <clock-off-times>`, `// <invoice-saved-times>`). Otherwise a card, an Extras row and the job-view row open
 blank; a card shows hours on record only as a reminder. The job-view row
 records times against the job and never promises the week or the invoice.
 Lines that are not time carry none of the fields. Search
@@ -1008,6 +1011,20 @@ a spec that enters times on the fixture week's jobs needs
 Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.
+
+## Trade adds themselves to a job from the invoice (`trade.html`)
+
+Being on a job (allocated, or accepted with "I'm on it") is what lets a trade
+invoice it (Marnin, 11 Nov 2026). Picking a job in the invoice's "+ Add job"
+is unchanged; when ops-api refuses the invoice with `extra_job_not_allowed`
+(403, nothing saved), the app asks to add the trade to each refused job for
+the day worked (`self_allocate_for_invoice`, which books only the caller,
+never texts) and then opens the one-invoice confirm again. Never book the
+trade at pick time: the app cannot see an invoice-any-job grant, and those
+trades' searched-in cards move between days and weeks. Search
+`// <invoice-self-allocate>`; contract in `trade-app.md` → "Pay tab: adding
+yourself to a job you invoice". Guard:
+`tests/e2e/trade-invoice-self-allocate-clock-off.spec.js`.
 
 ## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
 

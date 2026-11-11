@@ -260,7 +260,8 @@ test('Dispatch panel Sources: quotes sent to the client, and this job\'s client 
   const { root, panel, of } = await boot(page);
   const groups = panel.locator('.dpc-h4');
   // Dispatch v2 has no purchase orders, so Sources lists none.
-  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices']);
+  // Documents (11 Nov 2026) sits under Invoices: job-a's work order is its one file.
+  await expect(groups).toHaveText(['Quotes sent to client', 'Invoices', 'Documents 1']);
   await expect(panel).not.toContainText(/purchase order/i);
 
   // Newest first; never the unsent quote or a work order.
@@ -329,22 +330,120 @@ test('Dispatch panel Sources: a name-matched invoice and a quote with no PDF', a
   await expect(page.locator('#viewDispatch a[href*="send-quote"], #viewDispatch a[href*="tok-e2e"]')).toHaveCount(0);
 
   await openJob(root, 'SWR-900503');
-  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.']);
+  await expect(panel.locator('.dpc-empty')).toHaveText(['No quote sent to the client yet.', 'No invoice on this job yet.', 'No files on this job yet.']);
 });
 
-test('Dispatch panel Sources: a failed job read is an error in both groups, never an empty one', async ({ page }) => {
+test('Dispatch panel Sources: a failed job read is an error in every group, never an empty one', async ({ page }) => {
   let down = false;
   const { root, panel, of } = await boot(page, {
     ops: { job_detail: (url) => (down ? { status: 500, body: { error: 'e2e failure' } } : DETAIL[url.searchParams.get('jobId')]) },
   });
   down = true;
   await openJob(root, 'SWP-900502');
-  await expect(panel.locator('[role="alert"]')).toHaveText(['Could not load documents. Retry', 'Could not load documents. Retry']);
+  await expect(panel.locator('[role="alert"]')).toHaveText(['Could not load documents. Retry', 'Could not load documents. Retry', 'Could not load documents. Retry']);
   await expect(panel).not.toContainText(/No quote|No invoice/);
   down = false;
   await panel.locator('[data-dpc-retry="detail"]').first().click();
   await expect(panel).toContainText('No invoice on this job yet.');
   expect(of('job_detail').map((c) => c.url.searchParams.get('jobId'))).toEqual(['job-a', 'job-b', 'job-b']);
+});
+
+// ── Sources: Documents (Shaun, 11 Nov 2026) ─────────────────────────────────
+
+const FILE = (over) => Object.assign({ type: 'general', visible_to_trades: false, version: 1 }, over);
+const FILES_A = () => [
+  FILE({ id: 'f-conf', type: 'material_order', file_name: 'CMI order confirmation.pdf', visible_to_trades: true, created_at: `${PERTH_YEAR}-11-10T03:00:00+00:00`, storage_url: 'https://docs.example.test/f-conf.pdf' }),
+  FILE({ id: 'f-photo', type: 'material_order', file_name: 'Metroll order photo 1.jpg', visible_to_trades: true, created_at: `${PERTH_YEAR}-11-10T02:00:00+00:00`, storage_url: 'https://docs.example.test/f-photo.jpg' }),
+  FILE({ id: 'f-plan', file_name: 'site plan.pdf', created_at: `${PERTH_YEAR}-11-06T02:00:00+00:00`, storage_url: 'https://docs.example.test/f-plan.pdf' }),
+  FILE({ id: 'f-named-wo', file_name: 'WO 1234.pdf', created_at: `${PERTH_YEAR}-10-02T02:00:00+00:00`, visible_to_trades: true, storage_url: 'https://docs.example.test/f-named-wo.pdf' }),
+  FILE({ id: 'f-fax', file_name: 'old fax.pdf', created_at: `${PERTH_YEAR}-10-01T02:00:00+00:00`, storage_url: null }),
+  // A client invoice stored as a document is listed under Invoices, never here.
+  FILE({ id: 'f-inv', type: 'invoice', file_name: 'INV-1002.pdf', created_at: `${PERTH_YEAR}-11-11T02:00:00+00:00`, storage_url: 'https://docs.example.test/inv.pdf' }),
+];
+const DETAIL_FILES = (files) => (url) => {
+  const id = url.searchParams.get('jobId');
+  if (id !== 'job-a') return DETAIL[id];
+  return Object.assign({}, DETAIL['job-a'], { documents: DETAIL['job-a'].documents.concat(files) });
+};
+
+test('Dispatch panel Sources Documents: every file newest first, quotes and invoices not repeated, work orders office only', async ({ page }) => {
+  const { panel } = await boot(page, { ops: { job_detail: DETAIL_FILES(FILES_A()) } });
+  await expect(panel.locator('.dpc-h4')).toHaveText(['Quotes sent to client', 'Invoices', 'Documents 6']);
+  const rows = panel.locator('[data-dpc-file]');
+  await expect(rows.locator('strong')).toHaveText(['CMI order confirmation', 'Metroll order photo 1', 'site plan', 'Work order', 'WO 1234', 'old fax']);
+  await expect(rows.locator('small').first()).toHaveText('Material order · 10/11');
+  await expect(rows.locator('.dpc-file-vis')).toHaveText(['Visible to trades', 'Visible to trades', 'Hidden from trades', 'Office only (priced)', 'Office only (priced)', 'Hidden from trades']);
+  // Work orders (by type, or a file named WO) have no switch: the trade app hides them anyway.
+  await expect(panel.locator('[data-dpc-file-vis]')).toHaveCount(4);
+  await expect(panel.locator('[data-dpc-file="wo"] [data-dpc-file-vis], [data-dpc-file="f-named-wo"] [data-dpc-file-vis]')).toHaveCount(0);
+  await expect(panel.locator('[data-dpc-file-vis="f-conf"]')).toHaveAttribute('aria-checked', 'true');
+  await expect(panel.locator('[data-dpc-file-vis="f-plan"]')).toHaveAttribute('aria-checked', 'false');
+  await expect(panel.locator('[data-dpc-file-vis="f-plan"]')).toHaveAttribute('role', 'switch');
+  // A file opens in a new tab; a photo shows a picture; a file with no stored copy is not a link.
+  const conf = panel.locator('[data-dpc-file="f-conf"] a.dpc-file-open');
+  await expect(conf).toHaveAttribute('href', 'https://docs.example.test/f-conf.pdf');
+  await expect(conf).toHaveAttribute('target', '_blank');
+  await expect(panel.locator('[data-dpc-file="f-conf"] .dpc-doc-ico')).toHaveText('PDF');
+  await expect(panel.locator('[data-dpc-file="f-photo"] img.dpc-file-thumb')).toHaveAttribute('src', 'https://docs.example.test/f-photo.jpg');
+  await expect(panel.locator('[data-dpc-file="f-fax"] a')).toHaveCount(0);
+  await expect(panel.locator('[data-dpc-file="f-fax"]')).toContainText('No file stored');
+  await expect(panel).not.toContainText('INV-1002.pdf');
+});
+
+test('Dispatch panel Sources Documents: the switch moves at once, saves once, and goes back when the save fails', async ({ page }) => {
+  let release;
+  let held = new Promise((resolve) => { release = resolve; });
+  let fail = false;
+  const { panel, of } = await boot(page, {
+    ops: {
+      job_detail: DETAIL_FILES(FILES_A()),
+      toggle_document_visibility: async () => {
+        await held;
+        return fail ? { status: 500, body: { error: 'e2e down' } } : { success: true };
+      },
+    },
+  });
+  const sw = panel.locator('[data-dpc-file-vis="f-plan"]');
+  const tag = panel.locator('[data-dpc-file="f-plan"] .dpc-file-vis');
+  await expect(tag).toHaveText('Hidden from trades');
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  await expect(tag).toHaveText('Saving...');
+  // A second press while it saves sends nothing more (the switch is marked busy, so the press is forced).
+  await sw.click({ force: true });
+  await expect.poll(() => of('toggle_document_visibility').length).toBe(1);
+  release();
+  await expect(tag).toHaveText('Visible to trades');
+  expect(of('toggle_document_visibility').map((c) => [c.method, c.body.documentId, c.body.visible_to_trades])).toEqual([['POST', 'f-plan', true]]);
+  await expect(sw).toBeFocused();
+
+  // A failed save puts the switch back and says so.
+  held = Promise.resolve();
+  fail = true;
+  await sw.click();
+  await expect(tag).toHaveText('Not saved. Try again');
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  expect(of('toggle_document_visibility').map((c) => c.body.visible_to_trades)).toEqual([true, false]);
+  // Trying again clears the message.
+  fail = false;
+  await sw.click();
+  await expect(tag).toHaveText('Hidden from trades');
+  await expect(sw).toHaveAttribute('aria-checked', 'false');
+  // The job was read once; the switch never re-reads it.
+  expect(of('job_detail').length).toBe(1);
+  expect(of('toggle_document_visibility').length).toBe(3);
+});
+
+test('Dispatch panel Sources Documents: more than 8 files shows 8 and Show all', async ({ page }) => {
+  const many = Array.from({ length: 11 }, (_, i) => FILE({ id: 'm' + i, file_name: `file ${i}.pdf`, created_at: `${PERTH_YEAR}-10-${String(20 - i).padStart(2, '0')}T02:00:00+00:00`, storage_url: `https://docs.example.test/m${i}.pdf` }));
+  const { panel } = await boot(page, { ops: { job_detail: DETAIL_FILES(many) } });
+  await expect(panel.locator('.dpc-h4').last()).toHaveText('Documents 12');
+  await expect(panel.locator('[data-dpc-file]')).toHaveCount(8);
+  await expect(panel.locator('[data-dpc-files-all]')).toHaveText('Show all 12');
+  await panel.locator('[data-dpc-files-all]').click();
+  await expect(panel.locator('[data-dpc-file]')).toHaveCount(12);
+  await expect(panel.locator('[data-dpc-files-all]')).toHaveCount(0);
+  await expect(panel.locator('[data-dpc-file] a.dpc-file-open').nth(8)).toBeFocused();
 });
 
 // ── Context story ────────────────────────────────────────────────────────────

@@ -8841,7 +8841,7 @@
       ? ' onclick="' + openAction + '" style="cursor:pointer"'
       : ' data-view-only="1" style="cursor:default"';
     var chip = globalJobSearchBadge(job, assignment, type);
-    var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair' };
+    var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair', granny_flat: 'Granny flat build' };
     var typeLabel = TYPE_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     var client = String(job.client_name || '').trim();
     var place = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim();
@@ -9513,7 +9513,7 @@
     function typeMeta(mapped, rawType) {
       var m = TYPE[mapped] || TYPE.other;
       if (mapped === 'other') {
-        var lbl = titleCase(rawType);
+        var lbl = rawType === 'granny_flat' ? 'Granny flat build' : titleCase(rawType);
         return { cls: 'nt', label: lbl || 'Job' };
       }
       return { cls: m.cls, label: m.label };
@@ -9833,7 +9833,7 @@
     }
 
     // ── Normaliser B: My Jobs / history / search (job + assignment) ──
-    var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair' };
+    var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair', granny_flat: 'Granny flat build' };
     function liveCrewNames(assignments) {
       var seen = {};
       return (assignments || []).filter(function (x) {
@@ -10169,6 +10169,7 @@
   // never independently misclassified by a second check somewhere else.
   function tradeJobVertical(job, assignment, ev) {
     if (isTradeRepairJob(job, assignment, ev)) return 'repair';
+    if (String((job && (job.type || job.job_type)) || (ev && ev.job_type) || '').toLowerCase() === 'granny_flat') return 'granny_flat';
     if (isTradeMakesafeJob(job, assignment)) return 'makesafe';
     return String((job && job.type) || (ev && ev.job_type) || 'patio').toLowerCase();
   }
@@ -10211,7 +10212,7 @@
   var OWN_WORK_BUCKETS = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'];
   // Verticals the calendar can open: make-safe (canonical feed), repair (raw
   // feed) and the trade-calendar.v1 types, which Mine serves for any trade.
-  var OWN_WORK_CALENDAR_TYPES = ['makesafe', 'fencing', 'patio', 'repair'];
+  var OWN_WORK_CALENDAR_TYPES = ['makesafe', 'fencing', 'patio', 'repair', 'granny_flat'];
   function ownAssignmentRows(data, userId) {
     var out = [];
     if (!data) return out;
@@ -10703,7 +10704,11 @@
   // is the opposite kind of write: it is a manager acting ON that crew, gated
   // server-side by the same authority as allocating the job, and a manager is
   // in view-only mode on precisely the jobs where they need it.
-  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true };
+  // A searched-in job is an extra_items line on the signed-in trade's OWN
+  // invoice. generate_trade_invoice binds its owner from auth, not the job's
+  // crew or a body user_id. A retained view-only detail must not block it;
+  // preview, invoice auth/confirmation and server guards still apply.
+  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true, generate_trade_invoice: true };
 
   function blockedForeignJobWrite(action, params, postBody) {
     if (FOREIGN_JOB_WRITE_EXEMPT_ACTIONS[String(action || '')]) return false;
@@ -18332,10 +18337,12 @@
     }
 
     // DA-3 · jobs.type (calendar_events.job_type = j.type — the uniform server
-    // classifier) → chip bucket. jobs_type_check (migration 2026-06-01):
+    // classifier) → chip bucket. Supported types (granny_flat after the
+    // companion backend taxonomy release):
     //   fencing, patio, combo, decking, renovation, insurance, roofing,
-    //   miscellaneous, general, makesafe.
-    // Chips are Make-safe / Fencing / Patio; every other value → neutral 'other'
+    //   miscellaneous, general, makesafe, repair, granny_flat.
+    // Granny flat build keeps its own filter bucket with neutral styling.
+    // Other values outside the named chips → neutral 'other'
     // (visible under the All lens only). Direct classifier pass-through — the fuzzy
     // isTradeMakesafeJob text-matcher is deliberately NOT used for chips.
     function mapType(jobType) {
@@ -18344,6 +18351,7 @@
       if (k === 'fencing') return 'fencing';
       if (k === 'patio') return 'patio';
       if (k === 'repair') return 'repair';
+      if (k === 'granny_flat') return 'granny_flat';
       return 'other';
     }
     function isMakesafe(jobType) {
@@ -18354,6 +18362,7 @@
       if (mappedType === 'fencing') return 'Fencing';
       if (mappedType === 'patio') return 'Patio';
       if (mappedType === 'repair') return 'Repair';
+      if (mappedType === 'granny_flat') return 'Granny flat build';
       return 'Job';
     }
     // Repair-family classifier for a calendar_events row. The family check
@@ -19168,7 +19177,7 @@
     var MOF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     var TYPE = {
       makesafe: { cls: 'ms', label: 'Make-safe' }, fencing: { cls: 'fc', label: 'Fencing' },
-      patio: { cls: 'pt', label: 'Patio' }, repair: { cls: 'rp', label: 'Repair' }, other: { cls: 'nt', label: 'Other' }
+      patio: { cls: 'pt', label: 'Patio' }, repair: { cls: 'rp', label: 'Repair' }, granny_flat: { cls: 'nt', label: 'Granny flat build' }, other: { cls: 'nt', label: 'Other' }
     };
     function TY(t) { return TYPE[t] || TYPE.other; }
     function typeLabel(t) { return TY(t).label; }
@@ -19565,12 +19574,12 @@
   function ncEveryoneAllowed(type) {
     if (!canUseEveryoneLens()) return false;
     if (_isAdmin) return true;
-    if (type === 'fencing' || type === 'patio') return managesTradeVertical(type);
+    if (type === 'fencing' || type === 'patio' || type === 'granny_flat') return managesTradeVertical(type);
     return true;
   }
   function ncDefaultCalendarScope(type) { return ncEveryoneAllowed(type) ? 'everyone' : 'mine'; }
   function ncScopeLabel() {
-    var names = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', repair: 'Repair' };
+    var names = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', repair: 'Repair', granny_flat: 'Granny flat build' };
     var whose = NC.scope === 'everyone' ? 'everyone’s' : 'your';
     return NC.type === 'all' ? whose + ' jobs in every trade' : whose + ' ' + (names[NC.type] || NC.type) + ' jobs';
   }
@@ -19908,6 +19917,7 @@
       if (_isAdmin || managesTradeVertical('all')) trades.push(['all', 'All', 'all']);
       trades.push(['makesafe', 'Make-safe', 'ms dot-ms']);
       if (_isAdmin || managesTradeVertical('patio') || own.indexOf('patio') !== -1) trades.push(['patio', 'Patio', 'pt dot-pt']);
+      if (_isAdmin || own.indexOf('granny_flat') !== -1) trades.push(['granny_flat', 'Granny flat build', 'nt']);
       trades.push(['repair', 'Repair', 'rp dot-rp']);
       if (managesTradeVertical('fencing') || own.indexOf('fencing') !== -1) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
@@ -20154,7 +20164,7 @@
           // Type badge. Repair-family rows (job_family/ses_family 'repair', see
           // <trade-repair-vertical>) badge as Repair even when the raw job_type
           // still says makesafe — same family-first rule as the new calendar.
-          var typeBadge = { patio: 'Patio', fencing: 'Fencing', decking: 'Decking', repair: 'Repair' };
+          var typeBadge = { patio: 'Patio', fencing: 'Fencing', decking: 'Decking', repair: 'Repair', granny_flat: 'Granny flat build' };
           var evVertical = isTradeRepairJob(null, null, ev) ? 'repair' : (ev.job_type || '').toLowerCase();
           var typeLabel = typeBadge[evVertical] || ev.job_type || '';
 
@@ -24782,7 +24792,7 @@
 
   function loadInvoiceJobOptions(q) {
     q = tradeJobSearchQuery(q);
-    api('search_all_jobs', q ? { q: q } : undefined).then(function(res) {
+    api('search_all_jobs', q ? { q: q, invoice_picker: 1 } : { invoice_picker: 1 }).then(function(res) {
       var dl = document.getElementById('invJobList');
       if (!dl) return;
       _knownJobNumbers = [];
@@ -24792,7 +24802,7 @@
         if (!j.job_number) return;
         _knownJobNumbers.push(j.job_number);
         _knownJobByNumber[j.job_number] = j;
-        var typeLabel = j.type ? String(j.type).replace(/_/g, ' ') : 'job';
+        var typeLabel = j.type === 'granny_flat' ? 'Granny flat build' : (j.type ? String(j.type).replace(/_/g, ' ') : 'job');
         h += '<option value="' + esc(j.job_number || '') + '">' + esc((j.job_number || '') + ' — ' + typeLabel + ' — ' + (j.client_name || '') + (j.site_suburb ? ' (' + j.site_suburb + ')' : '')) + '</option>';
       });
       dl.innerHTML = h;
@@ -26436,7 +26446,7 @@
 
   function _jcRunJobSearch(di, q) {
     var current = function() { return tradeJobSearchQuery(_jcSearch.q) === q; };
-    api('search_all_jobs', { q: q }).then(function(res) {
+    api('search_all_jobs', { q: q, invoice_picker: 1 }).then(function(res) {
       if (!current()) return; // stale response — user kept typing
       _jcSearch.error = '';
       _jcSearch.results = (res.jobs || []).slice(0, 10);
@@ -26466,7 +26476,7 @@
     }
     var h = '';
     _jcSearch.results.forEach(function(j, ri) {
-      var badge = j.type ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:rgba(241,90,41,0.1);color:var(--sw-orange);padding:1px 6px;border-radius:4px;margin-left:6px">' + esc(j.type) + '</span>' : '';
+      var badge = j.type ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:rgba(241,90,41,0.1);color:var(--sw-orange);padding:1px 6px;border-radius:4px;margin-left:6px">' + esc(j.type === 'granny_flat' ? 'Granny flat build' : j.type) + '</span>' : '';
       h += '<div class="jc-job-search-hit" onclick="jcSelectSearchJob(' + di + ',' + ri + ')" style="padding:9px 8px;border-bottom:1px solid var(--sw-border);cursor:pointer">';
       h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark)">' + esc(j.job_number || '') + badge + '</div>';
       h += '<div style="font-size:11px;color:var(--sw-text-sec)">' + esc(j.client_name || '') + (j.site_suburb ? ' — ' + esc(j.site_suburb) : '') + '</div>';

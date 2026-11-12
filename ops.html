@@ -28676,14 +28676,22 @@ function getNextStatuses(current, jobType) {
     return ft[current] || [];
   }
   if (jobType === 'patio') {
+    // <patio-ladder-order-materials>
     // Patio can wait on its deposit like fencing (Captain 2026-10-26), then
-    // carries on through approvals / processing as before.
+    // approvals, then Order Materials, as the stage-gate engine's patio graph
+    // says (modules/ops-stage-gate-engine.js PATIO_TRANSITIONS). Never Processing:
+    // it is a legacy umbrella status the Dispatch board does not list, so a patio
+    // moved there never reached Dispatch (patio walk step 8, 12 Nov 2026). A job
+    // already at Processing may still go to Order Materials (or start, as before).
     var pt = {
       'quoted': ['accepted', 'cancelled'],
-      'accepted': ['awaiting_deposit', 'approvals', 'processing'],
-      'awaiting_deposit': ['approvals', 'processing'],
-      'approvals': ['processing'],
-      'processing': ['in_progress'],
+      'accepted': ['awaiting_deposit', 'approvals', 'order_materials'],
+      'awaiting_deposit': ['approvals', 'order_materials'],
+      'approvals': ['order_materials'],
+      'order_materials': ['awaiting_supplier'],
+      'awaiting_supplier': ['order_confirmed'],
+      'order_confirmed': ['scheduled'],
+      'processing': ['order_materials', 'in_progress'],
       'scheduled': ['in_progress', 'cancelled'],
       'in_progress': ['complete', 'cancelled'],
       'complete': ['invoiced'],

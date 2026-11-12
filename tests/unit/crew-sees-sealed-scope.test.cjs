@@ -3,15 +3,18 @@
 // against the shipped code paths: the Trade App's Scope tab build spec (renderEnhancedScope and the
 // // <trade-sealed-crew-scope> block, cut out of trade.html as shipped), modules/sealed-crew-scope.js, and the
 // Ops scope card (modules/job-scope-record.js). The live screen proof is the walk's step 7.
+// Director's ruling, 12 Nov 2026, 8:08 pm: the crew page is the ACCEPTED, released revision's, as the trade view
+// (ops-api trade_job_detail crew_scope_of_works) sends it, never the latest saved scope; where the accepted binding
+// cannot be proved, one line says why and nothing is shown. The ROOT env var points the check at another copy
+// of the code (the before run against 36de77ad).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const vm = require('node:vm');
-const S = require('../../modules/sealed-crew-scope.js');
-const R = require('../../modules/job-scope-record.js');
-
-const ROOT = resolve(__dirname, '..', '..');
+const ROOT = process.env.ROOT ? resolve(process.env.ROOT) : resolve(__dirname, '..', '..');
+const S = require(resolve(ROOT, 'modules/sealed-crew-scope.js'));
+const R = require(resolve(ROOT, 'modules/job-scope-record.js'));
 const TRADE = readFileSync(resolve(ROOT, 'trade.html'), 'utf8');
 
 function cut(src, from, to) {
@@ -48,102 +51,141 @@ function tradeScope() {
   };
   vm.createContext(ctx);
   vm.runInContext(code + '\nthis.renderEnhancedScope = renderEnhancedScope; this.humanise = humanise;', ctx);
-  return { render: (job) => ctx.renderEnhancedScope({ job }, 'confirmed'), humanise: ctx.humanise, boxes, frames };
+  return { render: (job, extra) => ctx.renderEnhancedScope(Object.assign({ job }, extra || {}), 'confirmed'), humanise: ctx.humanise, boxes, frames };
 }
 const settle = () => new Promise((r) => setTimeout(r, 30));
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-// The crew scope of works page as the Scope Engine seals it (made-up job; shape as patio/scoper/src/docs.ts scopeDoc).
-const KEPT_PAGE = '<!doctype html><html><head><meta charset="utf-8"><title>Crew scope of works</title><style>@page{size:A4}</style></head><body>'
-  + '<h1>Crew scope of works</h1><p>Rev 1 &middot; sealed. Skillion on the fascia, insulated panel roof &middot; 2 posts</p>'
-  + '<h2>Key dimensions</h2><table><tr><th>Dimension</th><th class="num">Size</th><th class="num">How many</th></tr>'
-  + '<tr><td>Roof: width across the fall</td><td class="num">6,000 mm</td><td class="num">1</td></tr>'
-  + '<tr><td>Roof underside, low side (at the front)</td><td class="num">2,151 mm</td><td class="num">1</td></tr>'
-  + '<tr><td>Post height</td><td class="num">2,151 mm</td><td class="num">2</td></tr></table>'
-  + '<svg viewBox="0 0 800 600"><rect x="45" y="120" width="710" height="360"/></svg><p>Post &middot; 90 × 90 × 2.0 SHS ×2</p></body></html>';
-const FROZEN = 'frz-walk-0001';
+// A crew scope of works page as the Scope Engine seals it (made-up job; shape as patio/scoper/src/docs.ts scopeDoc).
+function patioPage(n, widthMm) {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Crew scope of works</title><style>@page{size:A4}</style></head><body>'
+    + '<h1>Crew scope of works</h1><p>Rev ' + n + ' &middot; sealed. Skillion on the fascia, insulated panel roof &middot; 2 posts</p>'
+    + '<h2>Key dimensions</h2><table><tr><th>Dimension</th><th class="num">Size</th><th class="num">How many</th></tr>'
+    + '<tr><td>Roof: width across the fall</td><td class="num">' + widthMm + ' mm</td><td class="num">1</td></tr>'
+    + '<tr><td>Roof underside, low side (at the front)</td><td class="num">2,151 mm</td><td class="num">1</td></tr>'
+    + '<tr><td>Post height</td><td class="num">2,151 mm</td><td class="num">2</td></tr></table>'
+    + '<svg viewBox="0 0 800 600"><rect x="45" y="120" width="710" height="360"/></svg><p>Post &middot; 90 × 90 × 2.0 SHS ×2</p></body></html>';
+}
+// Rev 1 was sent and accepted; Rev 2 was saved and sealed later, never sent or accepted (money14's case).
+const REV1_PAGE = patioPage(1, '6,000');
+const REV2_PAGE = patioPage(2, '9,000');
+const KEPT_PAGE = REV1_PAGE;
 
 // The page's stamp as the seal makes it: shared/hash.ts canonicalHash of the page, sha256 of it as a JSON string.
 // Cross-checked against scope-engine-v2's own canonicalHash on a sample page: b52f4547...61853d06 (see the vector test).
 async function stampOf(page) { return S.sha256Hex(JSON.stringify(page)); }
 
+// The job as saved: scope_json holds the LATEST saved revision's seal, correctly stamped (the 36de77ad reader trusted it).
 async function walkPatio(over) {
-  const o = Object.assign({ keepSeal: true, keepPage: true, page: KEPT_PAGE }, over || {});
+  const o = Object.assign({ n: 1, page: REV1_PAGE }, over || {});
+  const frozen = 'frz-walk-000' + o.n;
   const seal = {
-    frozen: { id: FROZEN, schemaVersion: 'frozen-revision/v1' },
+    frozen: { id: frozen, schemaVersion: 'frozen-revision/v1' },
     stamps: [
-      { frozenRevisionId: FROZEN, scopeRevisionId: 'rev-1', kind: 'installer-sow', scopeLineIds: [], contentHash: await stampOf(KEPT_PAGE) },
-      { frozenRevisionId: FROZEN, scopeRevisionId: 'rev-1', kind: 'customer-quote', scopeLineIds: [], contentHash: 'f'.repeat(64) },
+      { frozenRevisionId: frozen, scopeRevisionId: 'rev-' + o.n, kind: 'installer-sow', scopeLineIds: [], contentHash: await stampOf(o.page) },
+      { frozenRevisionId: frozen, scopeRevisionId: 'rev-' + o.n, kind: 'customer-quote', scopeLineIds: [], contentHash: 'f'.repeat(64) },
     ],
+    documents: { 'installer-sow': o.page },
     check: { ok: true, problems: [] },
   };
-  if (o.keepPage) seal.documents = { 'installer-sow': o.page };
   return {
     id: '5e0a0000-0000-4000-8000-000000000721', type: 'patio', status: 'awaiting_deposit',
-    scope_json: Object.assign({
+    scope_json: {
       tool: 'patio-scoper', version: '2.0', family: 'skillion', supported: true, lines: [],
-      revision: { n: 1, scopeRevisionId: 'rev-1', parentRevisionId: null, frozenId: FROZEN, catalogueRevisionId: 'cat-1', sealedAt: '2026-11-12T10:43:00.000Z', outputsAgree: true },
+      revision: { n: o.n, scopeRevisionId: 'rev-' + o.n, parentRevisionId: null, frozenId: frozen, catalogueRevisionId: 'cat-1', sealedAt: '2026-11-12T10:43:00.000Z', outputsAgree: true },
       // The tool's starting figures, as the walk's record kept them: 3 posts (postsAuto) and 2,600 mm at the front.
       draft: { site: { storeys: 'single', houseRoof: 'tile', fascia: 'timber', windClass: 'N2', sampleHeights: true },
         design: { shape: 'skillion', fixing: 'fascia', widthMm: 6000, projectionMm: 4000, frontHeightMm: 2600, pitchDeg: 3, posts: 3, postsAuto: true,
           products: { covering: 'panel:solarspan:75', post: 'shs:90x90x2.0:c450l0' }, colours: { frame: 'CB-SURFMIST', roof: 'CB-SURFMIST', trim: 'CB-SURFMIST' }, downpipes: 'both' } },
       earlier: [], savedAt: '2026-11-12T10:44:00.000Z',
-    }, o.keepSeal ? { sealed: { seal, build: {}, warnings: 0 } } : {}),
+      sealed: { seal, build: {}, warnings: 0 },
+    },
   };
 }
+
+// What the trade view (ops-api trade_job_detail) sends beside the job: the accepted, released revision's page.
+async function acceptedView(n, page, over) {
+  return { crew_scope_of_works: Object.assign({
+    status: 'accepted', page, content_hash: await stampOf(page), revision: { n, frozen_revision_id: 'frz-walk-000' + n },
+  }, over || {}) };
+}
+const NOT_PROVED = { crew_scope_of_works: { status: 'not_proved', reason: 'No accepted quote on this job is bound to a sealed revision.' } };
+
+async function shown(t) { await settle(); return t.frames.map((f) => f.srcdoc); }
 
 test('the stamp is the Scope Engine\'s: same sha256 as scope-engine-v2 shared/hash.ts canonicalHash', async () => {
   const sample = '<!doctype html><html><head><title>Crew scope</title></head><body><h1>Rev 1</h1><p>2 posts, 2,151 mm "check"</p>\n<svg viewBox="0 0 800 600"></svg></body></html>';
   assert.equal(await S.sha256Hex(S.stampedText(sample)), 'b52f45470dd395b7e91506b679b9ad710753869c102c8815c95d209f61853d06');
 });
 
-test('patio: the crew sees the sealed crew scope of works, the kept page byte for byte', async () => {
+test('patio: the crew sees the accepted revision\'s crew scope of works, the page the trade view sent, byte for byte', async () => {
   const t = tradeScope();
-  const job = await walkPatio();
-  const html = t.render(job);
+  const html = t.render(await walkPatio(), await acceptedView(1, REV1_PAGE));
   assert.match(html, /<h3>Crew scope of works, Rev 1<\/h3>/);
-  await settle();
-  assert.equal(t.frames.length, 1, 'one frame, the kept page');
-  const f = t.frames[0];
-  assert.equal(f.attrs.sandbox, 'allow-same-origin', 'the page runs no script');
+  const pages = await shown(t);
+  assert.equal(pages.length, 1, 'one frame, the kept page');
+  assert.equal(t.frames[0].attrs.sandbox, 'allow-same-origin', 'the page runs no script');
   // The frame holds the kept page unchanged; only the Scope Engine's own no-script policy is added to its head.
-  assert.equal(f.srcdoc, S.framePage(KEPT_PAGE));
-  assert.equal(f.srcdoc.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, ''), KEPT_PAGE);
+  assert.equal(pages[0], S.framePage(REV1_PAGE));
+  assert.equal(pages[0].replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, ''), REV1_PAGE);
   const box = Object.values(t.boxes)[0];
   assert.equal(box.attrs['data-sealed-crew-scope-status'], 'matches');
-  assert.equal(box.note.textContent, 'As sealed in the Scope Engine. The same page the office sees.');
+  assert.equal(box.note.textContent, 'The revision the customer accepted, as sealed in the Scope Engine. The same page the office sees.');
   // Never the old patio shape and never a figure worked out here: no 3 posts, no 2,600.
   assert.doesNotMatch(html, /Posts|2,?600|Post height:/);
 });
 
-test('patio: a page changed on its way to the phone is not shown, and says so', async () => {
+test('patio: Rev 1 accepted, Rev 2 saved later: Rev 1\'s page shows, Rev 2\'s never does', async () => {
   const t = tradeScope();
-  const altered = KEPT_PAGE.replace(/\b\d{3,}\b/g, ''); // as a money strip that takes out bare numbers would leave it
-  const job = await walkPatio({ page: altered });
-  const html = t.render(job);
-  await settle();
-  assert.equal(t.frames.length, 0);
-  const box = Object.values(t.boxes)[0];
-  assert.equal(box.attrs['data-sealed-crew-scope-status'], 'differs');
-  assert.match(box.note.textContent, /not the page that was sealed, so it is not shown\. Ask the office for it\./);
-  assert.doesNotMatch(html, /Posts|2,?600/);
+  // The latest save is a correctly stamped Rev 2 (9,000 mm); the customer accepted Rev 1 (6,000 mm).
+  const job = await walkPatio({ n: 2, page: REV2_PAGE });
+  const html = t.render(job, await acceptedView(1, REV1_PAGE));
+  const pages = await shown(t);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0], S.framePage(REV1_PAGE), 'the accepted Rev 1 page');
+  assert.match(html, /Crew scope of works, Rev 1/);
+  for (const seen of [html, ...pages]) {
+    assert.doesNotMatch(seen, /9,000|Rev 2/, 'the newer saved Rev 2 is never shown');
+  }
 });
 
-test('patio: no seal or no page says so plainly, never an empty or old-shape spec', async () => {
-  for (const [over, words] of [[{ keepSeal: false }, /saved without its seal/], [{ keepPage: false }, /not on this phone/]]) {
+test('patio: the accepted binding cannot be proved: one line says why, nothing else is shown', async () => {
+  const t = tradeScope();
+  const html = t.render(await walkPatio({ n: 2, page: REV2_PAGE }), NOT_PROVED);
+  const pages = await shown(t);
+  assert.equal(pages.length, 0, 'no page');
+  assert.equal(text(html), 'Crew scope of works No accepted quote on this job is bound to a sealed revision. So no crew scope of works is shown. Ask the office for it.');
+  assert.doesNotMatch(html, /9,000|6,000|Rev \d|Build spec|Posts|2,?600/);
+});
+
+test('patio: the trade view sent no crew scope of works (older office system): says so, never the saved scope', async () => {
+  const t = tradeScope();
+  const html = t.render(await walkPatio({ n: 2, page: REV2_PAGE }));
+  assert.equal((await shown(t)).length, 0);
+  assert.match(text(html), /has not come through to this phone, so nothing is shown/);
+  assert.doesNotMatch(html, /9,000|Rev \d|Build spec|Posts|2,?600/);
+});
+
+test('patio: a page changed on its way to the phone, or sent without a page or stamp, is not shown, and says so', async () => {
+  const altered = REV1_PAGE.replace(/\b\d{3,}\b/g, ''); // as a money strip that takes out bare numbers would leave it
+  const cases = [
+    [{ page: altered, content_hash: await stampOf(REV1_PAGE) }, /not the page that was sealed, so it is not shown/],
+    [{ page: '' }, /accepted crew scope of works is not on this phone/],
+    [{ content_hash: null }, /could not be checked against its seal/],
+  ];
+  for (const [over, words] of cases) {
     const t = tradeScope();
-    const html = t.render(await walkPatio(over));
-    await settle();
-    assert.equal(t.frames.length, 0);
-    assert.match(text(html), words);
-    assert.match(html, /Crew scope of works, Rev 1/);
+    const html = t.render(await walkPatio(), await acceptedView(1, REV1_PAGE, over));
+    assert.equal((await shown(t)).length, 0);
+    const box = Object.values(t.boxes)[0];
+    assert.match(box ? box.note.textContent : text(html), words);
     assert.doesNotMatch(html, /Build spec|Posts|2,?600/);
   }
 });
 
-test('patio: the 3D model is not offered for a Scope Engine patio (it would work the design out again)', () => {
+test('the 3D model is not offered where the crew scope of works decides the Scope tab (it reads the latest save)', () => {
   const block = cut(TRADE, '    // 3D model button (inside scope flow, not standalone)', '    // Office staff: open this job in the Scope Engine');
-  assert.match(block, /SealedCrewScope\.isEnginePatio\(scope3d\)\) return;/);
+  assert.match(block, /SealedCrewScope\.applies\(data\)\) return;/);
 });
 
 test('patio from the older patio page: its build spec is unchanged', () => {
@@ -155,22 +197,48 @@ test('patio from the older patio page: its build spec is unchanged', () => {
   assert.equal(t.frames.length, 0);
 });
 
-test('fence: what the crew sees equals the sealed revision\'s own summary', () => {
-  const t = tradeScope();
-  // A Scope Engine fence job as saved (fence/index.html: the job, its runs and gates, and each sealed revision's
-  // pack with its summary, _revisionSummary). The build spec reads the job; the pack is what was sealed.
-  const runs = [{ id: 'r1', name: 'Rear', length: 18.6, sheetHeight: 1800, panels: Array.from({ length: 8 }, (_, i) => ({ id: 'p' + i })) }];
+// A Scope Engine fence job as saved (fence/index.html: the job, its runs and gates, and each sealed revision's pack).
+function fenceJob(lengthM, packs) {
+  const runs = [{ id: 'r1', name: 'Rear', length: lengthM, sheetHeight: 1800, panels: Array.from({ length: 8 }, (_, i) => ({ id: 'p' + i })) }];
   const gates = [{ id: 'g1', type: 'pedestrian', width: 900, runIndex: 0, afterPanel: 3 }];
-  const summary = { runs: [{ id: 'r1', name: 'Rear', length: 18.6, panels: 8, plinths: 0 }], gates: [{ id: 'g1', type: 'pedestrian', width: 900, run: 0, after: 3 }], panels: 8, plinths: 0, colour: 'Monument', profile: 'Sameside' };
-  const job = { id: 'f-1', type: 'fencing', scope_json: { job: { runs, gates, profile: 'Sameside', colour: 'Monument', revisionPacks: [{ n: 1, code: '10B4Z4S', summary }] } } };
-  const seen = text(t.render(job));
-  const sealed = job.scope_json.job.revisionPacks[0].summary;
-  const metres = Math.round(sealed.runs.reduce((s, r) => s + r.length, 0) * 10) / 10;
-  assert.match(seen, new RegExp('^Build spec ' + String(metres).replace('.', '\\.') + 'm total length'));
-  assert.match(seen, new RegExp('Material ' + t.humanise('material', sealed.profile)));
-  assert.match(seen, new RegExp('Colour ' + sealed.colour));
-  assert.match(seen, new RegExp('Gates ' + sealed.gates.map((g) => g.type + ' ' + g.width + 'mm').join(', ')));
-  assert.equal(t.frames.length, 0, 'a fence keeps its own build spec');
+  const job = { runs, gates, profile: 'Sameside', colour: 'Monument' };
+  if (packs) job.revisionPacks = packs;
+  return { id: 'f-1', type: 'fencing', scope_json: { job } };
+}
+const fencePage = (n, m) => '<!doctype html><html><head><title>Scope of works</title></head><body><h1>Scope of works</h1><p>Rev ' + n + '. Rear run ' + m + ' m, Sameside, Monument, one pedestrian gate 900 mm.</p></body></html>';
+
+test('fence: Rev 1 accepted, Rev 2 saved later: Rev 1\'s crew scope of works shows, never the saved Rev 2 or its build spec', async () => {
+  const t = tradeScope();
+  const job = fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }, { n: 2, code: '10B4Z5T' }]);
+  const page = fencePage(1, '18.6');
+  const html = t.render(job, await acceptedView(1, page));
+  const pages = await shown(t);
+  assert.deepEqual(pages, [S.framePage(page)]);
+  assert.match(html, /Crew scope of works, Rev 1/);
+  assert.doesNotMatch(html + pages.join(''), /Build spec|24m|24\.0|Rev 2/);
+});
+
+test('fence: the accepted binding cannot be proved: one line says why, no build spec', async () => {
+  const t = tradeScope();
+  const html = t.render(fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }]), NOT_PROVED);
+  assert.equal((await shown(t)).length, 0);
+  assert.match(text(html), /^Crew scope of works No accepted quote on this job is bound to a sealed revision\. So no crew scope of works is shown\./);
+  assert.doesNotMatch(html, /Build spec|24m/);
+  // And with no field from an older office system, a sealed fence still shows nothing from the latest save.
+  const t2 = tradeScope();
+  const html2 = t2.render(fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }]));
+  assert.match(text(html2), /has not come through to this phone/);
+  assert.doesNotMatch(html2, /Build spec|24m/);
+});
+
+test('fence from the older fence designer (nothing sealed): its build spec is unchanged', () => {
+  const t = tradeScope();
+  const seen = text(t.render(fenceJob(18.6)));
+  assert.match(seen, /^Build spec 18\.6m total length/);
+  assert.match(seen, new RegExp('Material ' + t.humanise('material', 'Sameside')));
+  assert.match(seen, /Colour Monument/);
+  assert.match(seen, /Gates pedestrian 900mm/);
+  assert.equal(t.frames.length, 0);
 });
 
 test('Ops scope card: no posts or height from the draft, a link to the sealed scope of works instead', async () => {

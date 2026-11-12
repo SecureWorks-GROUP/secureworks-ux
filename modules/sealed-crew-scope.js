@@ -1,22 +1,28 @@
-// The sealed crew scope of works of a Scope Engine patio job, as its seal kept it.
+// The sealed crew scope of works of the ACCEPTED, released revision, as the trade view sends it.
 // ---------------------------------------------------------------------------------------
-// A patio sealed in the Scope Engine (scope-engine-v2) saves one record on the job (jobs.scope_json,
-// patio/scoper/src/jobsystem.ts ScopeRecord). From 3 Nov 2026 that record carries the newest revision's
-// seal (ScopeRecord.sealed, keptSeal), and from 13 Nov 2026 the seal keeps its pages as stamped
-// (patio/scoper/src/freeze.ts Seal.documents): the crew scope of works is documents['installer-sow'],
-// the page the Scope Engine's Documents shows the office as "Crew scope of works" (freeze.ts sealedPage).
-// Each page carries a stamp, seal.stamps[kind].contentHash: sha256 of the page as a JSON string
-// (shared/hash.ts canonicalHash; shared/identity/frozen.ts stampOutput).
+// Director's ruling, 12 Nov 2026: the backend's trade view (ops-api trade_job_detail) returns the sealed crew
+// scope of works of the accepted, released revision (the one the accepted quote document is bound to), never
+// the latest saved scope, with no money field. The Trade App shows that page only. Where the accepted binding
+// cannot be proved it says why and shows nothing.
 //
-// This module reads that page and checks it against its stamp. It never makes the page again and never
-// works out a size: the Trade App shows the page as kept, or says plainly why it cannot.
-// A job sold on a revision keeps that revision on top of the record (jobsystem.ts soldRefusal), so on a
-// sold job the record's revision is the accepted one.
-// Pure apart from hashing (crypto.subtle in the browser, node:crypto in tests). No DOM, no fetch.
+// The trade view field this module reads (paired secureworks-backend crew scope PR), beside `job`:
+//   crew_scope_of_works: {
+//     status: 'accepted'      the page below is the accepted, released revision's crew scope of works
+//           | 'not_proved',   the accepted binding could not be proved; `reason` says why
+//     page: string,           the kept page as the seal kept it (Scope Engine documents['installer-sow'])
+//     content_hash: string,   the seal's stamp for that page: sha256 hex of the page as a JSON string
+//                             (scope-engine-v2 shared/hash.ts canonicalHash)
+//     revision: { n, frozen_revision_id },
+//     reason: string          plain words, status 'not_proved' only
+//   }
+// The field is there for every job whose scope was sealed by the new tool (Scope Engine patio or fence) and
+// absent for older jobs. This module never reads the latest saved scope (`scope_json.sealed`, `revisionPacks`)
+// for the page: a correctly stamped newer save is not the accepted one. It never makes the page again and never
+// works out a size. Pure apart from hashing (crypto.subtle in the browser, node:crypto in tests). No DOM, no fetch.
 (function (root) {
   'use strict';
 
-  var KIND = 'installer-sow';
+  var FIELD = 'crew_scope_of_works';
   // The same policy the Scope Engine puts on a kept page (freeze.ts originalPage): kept pages are data, they run nothing.
   var POLICY = '<meta http-equiv="Content-Security-Policy" content="script-src \'none\'; object-src \'none\'; frame-src \'none\'; base-uri \'none\'; form-action \'none\'">';
 
@@ -34,31 +40,42 @@
     var s = parse(scopeJson);
     return !!s && s.tool === 'patio-scoper';
   }
-
-  // What the record holds of the sealed crew scope of works.
-  // problem: null when the page and its stamp are both there; otherwise
-  //   'no-seal'   the record kept no seal (saved before 3 Nov 2026), or its seal is not the record's own revision;
-  //   'no-page'   the seal kept no crew page (sealed before pages were kept), or it did not reach this device;
-  //   'no-stamp'  the page is there but its stamp is not, so it cannot be checked.
-  function read(scopeJson) {
+  // Whether a fence job's scope carries revisions sealed in the Scope Engine fence tool (fence/index.html keeps
+  // each sealed revision in job.revisionPacks). Only whether there are any is read, never what they say.
+  function isEngineFence(scopeJson) {
     var s = parse(scopeJson);
-    var out = { enginePatio: !!s && s.tool === 'patio-scoper', n: null, sealedAt: null, page: null, stamp: null, problem: null };
-    if (!out.enginePatio) return out;
-    var rev = obj(s.revision) || {};
+    var job = s && obj(s.job);
+    return !!job && Array.isArray(job.revisionPacks) && job.revisionPacks.length > 0;
+  }
+
+  // Whether the crew scope of works decides this job's Scope tab: the trade view sent the field, or the job's
+  // scope is from the new tool. Then the old build spec and the 3D model, which read the latest saved scope,
+  // are never shown.
+  function applies(data) {
+    var d = obj(data) || {};
+    if (FIELD in d && d[FIELD] != null) return true;
+    var job = obj(d.job) || {};
+    return isEnginePatio(job.scope_json) || isEngineFence(job.scope_json);
+  }
+
+  // What the trade view sent.
+  // problem: null when the accepted page and its stamp are both there; otherwise
+  //   'not-sent'   the trade view sent no crew scope of works for a new-tool job (an older office system);
+  //   'not-proved' the trade view could not prove which revision was accepted (`reason` says why);
+  //   'no-page'    it said accepted but sent no page;
+  //   'no-stamp'   the page is there but its stamp is not, so it cannot be checked.
+  function read(data) {
+    var d = obj(data) || {};
+    var f = obj(d[FIELD]);
+    var out = { n: null, frozenId: null, page: null, stamp: null, reason: null, problem: null };
+    if (!f) { out.problem = 'not-sent'; return out; }
+    var rev = obj(f.revision) || {};
     out.n = typeof rev.n === 'number' && isFinite(rev.n) ? rev.n : null;
-    out.sealedAt = str(rev.sealedAt) || null;
-    var kept = obj(s.sealed);
-    var seal = kept && obj(kept.seal);
-    var frozen = seal && obj(seal.frozen);
-    var frozenId = frozen ? str(frozen.id) : '';
-    if (!seal || !frozenId || (str(rev.frozenId) && str(rev.frozenId) !== frozenId)) { out.problem = 'no-seal'; return out; }
-    var docs = obj(seal.documents);
-    var page = docs && typeof docs[KIND] === 'string' && docs[KIND].length ? docs[KIND] : null;
-    if (!page) { out.problem = 'no-page'; return out; }
-    out.page = page;
-    var stamps = Array.isArray(seal.stamps) ? seal.stamps : [];
-    var stamp = stamps.filter(function (x) { return obj(x) && x.kind === KIND && str(x.frozenRevisionId) === frozenId; })[0];
-    out.stamp = stamp && /^[0-9a-f]{64}$/.test(str(stamp.contentHash)) ? str(stamp.contentHash) : null;
+    out.frozenId = str(rev.frozen_revision_id) || null;
+    if (f.status !== 'accepted') { out.problem = 'not-proved'; out.reason = str(f.reason) || null; return out; }
+    out.page = typeof f.page === 'string' && f.page.length ? f.page : null;
+    if (!out.page) { out.problem = 'no-page'; return out; }
+    out.stamp = /^[0-9a-f]{64}$/.test(str(f.content_hash)) ? str(f.content_hash) : null;
     if (!out.stamp) out.problem = 'no-stamp';
     return out;
   }
@@ -85,10 +102,9 @@
   }
 
   // 'matches' when the page is the one the seal stamped, 'differs' when it is not, 'unchecked' when this
-  // device cannot hash or the record carries no stamp. Only 'matches' is shown to the crew.
+  // device cannot hash or no stamp came. Only 'matches' is shown to the crew.
   function check(state, hasher) {
-    if (!state || !state.page) return Promise.resolve('unchecked');
-    if (!state.stamp) return Promise.resolve('unchecked');
+    if (!state || !state.page || !state.stamp || state.problem) return Promise.resolve('unchecked');
     return Promise.resolve((hasher || sha256Hex)(stampedText(state.page))).then(function (hex) {
       if (!hex) return 'unchecked';
       return hex === state.stamp ? 'matches' : 'differs';
@@ -104,20 +120,21 @@
 
   // The words for each state, so the Trade App and the check say the same thing.
   function heading(state) {
-    return 'Crew scope of works' + (state && state.n != null ? ', Rev ' + state.n : '');
+    return 'Crew scope of works' + (state && !state.problem && state.n != null ? ', Rev ' + state.n : '');
   }
   function words(state, status) {
-    if (!state || !state.enginePatio) return '';
-    if (state.problem === 'no-seal') return 'This job\'s scope was saved without its seal, so its crew scope of works is not on this job. Ask the office for it.';
-    if (state.problem === 'no-page') return 'The sealed crew scope of works is not on this phone. Ask the office for it.';
-    if (status === 'matches') return 'As sealed in the Scope Engine. The same page the office sees.';
+    if (!state) return '';
+    if (state.problem === 'not-sent') return 'The crew scope of works the customer accepted has not come through to this phone, so nothing is shown. Ask the office for it.';
+    if (state.problem === 'not-proved') return (state.reason ? state.reason.replace(/\s*\.?\s*$/, '. ') : 'Which revision the customer accepted could not be confirmed. ') + 'So no crew scope of works is shown. Ask the office for it.';
+    if (state.problem === 'no-page') return 'The accepted crew scope of works is not on this phone. Ask the office for it.';
+    if (status === 'matches') return 'The revision the customer accepted, as sealed in the Scope Engine. The same page the office sees.';
     if (status === 'differs') return 'The crew scope of works on this phone is not the page that was sealed, so it is not shown. Ask the office for it.';
     return 'The crew scope of works could not be checked against its seal on this phone, so it is not shown. Ask the office for it.';
   }
 
   var api = {
-    KIND: KIND, isEnginePatio: isEnginePatio, read: read, check: check, sha256Hex: sha256Hex,
-    stampedText: stampedText, framePage: framePage, heading: heading, words: words
+    FIELD: FIELD, isEnginePatio: isEnginePatio, isEngineFence: isEngineFence, applies: applies, read: read,
+    check: check, sha256Hex: sha256Hex, stampedText: stampedText, framePage: framePage, heading: heading, words: words
   };
   root.SealedCrewScope = api;
   if (typeof module === 'object' && module.exports) module.exports = api;

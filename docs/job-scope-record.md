@@ -33,5 +33,5 @@ The module only reads. It never writes a job, an order or a document.
 ## Tests
 
 - `modules/job-scope-record.test.cjs` (`npm run test:job-scope-record`): every shape, money rules, escaping.
-- `tests/unit/crew-sees-sealed-scope.test.cjs` (`npm run test:crew-sees-sealed-scope`): what the crew sees equals the sealed scope of works, patio and fence, and the card's posts and heights.
+- `tests/unit/crew-sees-sealed-scope.test.cjs` (`npm run test:crew-sees-sealed-scope`): what the crew sees equals the accepted revision's sealed scope of works (never a newer saved one), patio and fence, and the card's posts and heights.
 - `tests/e2e/ops-job-page-scope-engine.spec.js`: the real `ops.html` on a Scope Engine job (`tests/fixtures/scope-engine-patio.js`), tab by tab.

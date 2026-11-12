@@ -17,7 +17,9 @@
  *   - Emails to sort: the Unmatched supplier emails tray's own count.
  *
  * The six kinds, in the order the bar shows them:
- *   order   To order          a supplier box whose order is not sent yet
+ *   order   To order          a supplier box whose order is not sent yet, and
+ *                             every job at the Order Materials stage (repairs:
+ *                             Materials), boxes or not (Shaun's Go, 12 Nov 2026)
  *   pay     To pay            a pay-first box at Awaiting payment (payment.to_pay)
  *   replied Supplier replied  a box at Quote received to check, or a matched
  *                             reply with a date suggestion to Accept
@@ -153,6 +155,18 @@
         add('risk', name + ' date not confirmed, install in ' + daysWords(untilInstall));
       }
     });
+    // Every job at the ordering stage counts under To order, boxes or not
+    // (Shaun's Go, 12 Nov 2026): on 12 Nov eight patio jobs sat at Order
+    // Materials with no supplier box set up, so the box rule above never saw
+    // them. One with an unsent box already carries "Order <supplier>"; one
+    // with no box at all needs its order set up; one whose boxes are all sent
+    // is still at the stage and waits to be moved on.
+    var stageKey = text(b.stage_key);
+    var atOrderStage = stageKey === 'order_materials' || (stageKey === 'materials' && b.track === 'repairs');
+    if (atOrderStage && !out.some(function (r) { return r.kind === 'order'; })) {
+      var boxes = orders.filter(function (o) { return o.source === 'supplier_box'; });
+      add('order', boxes.length ? 'Still at Order materials' : 'Set up order');
+    }
     (Array.isArray(job.suggestions) ? job.suggestions : []).forEach(function (s) {
       if (isObj(s) && s.state === 'open') add('replied', 'Accept ' + (text(s.supplier_name) || 'supplier') + ' date');
     });

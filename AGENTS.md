@@ -350,6 +350,23 @@ make-safe board (it stays server-driven). Guard:
 `tests/e2e/ops-repairs-board.spec.js`; evidence in
 `docs/evidence/insurance-repairs-board-2026-08-13/`.
 
+## Ops Restoration board (`modules/ops-restoration-board.js`)
+
+A pipeline tab (`Restoration`, next to Repairs) for restoration work, which the
+server takes off the make-safe board (secureworks-backend
+`docs/restoration-board-v1.md`). Seven fixed light columns (New, Booked, Report
+due, Quote with builder, Works in progress, Invoiced, Closed) in the same
+`.kanban-col` chrome as Repairs, no dark Sales drawer. It reads ops-api
+`restoration_board` once per open and moves a card only through
+`restoration_set_stage` from the card's `moves` (a refused move is disabled with
+its `needs` words; Closed with `needs` asks for a `no_charge_reason`), then
+repaints from the card returned. It derives no stage; a failed read says so and
+never draws an empty board; a refusal shows the back end's words, never a code.
+Rules live in the pure `RestorationBoardCore` between `// <restoration-board-core>`
+sentinels; ops.html only routes the tab (`// <restoration-board>`, `loadJobs`,
+`renderJobs`, `searchJobs`). Office only (invoice amounts). Guard:
+`tests/e2e/ops-restoration-board.spec.js`.
+
 ## Restoration panel on a make-safe job (`modules/ops-restoration.js`)
 
 Restoration work is a make-safe board card whose family is Restoration, run one

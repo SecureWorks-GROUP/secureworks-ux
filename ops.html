@@ -5008,6 +5008,7 @@ __swOpsStampAssets([
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
         <button class="pipeline-tab" onclick="setPipelineTab('patio')" data-pipeline="patio">Patio</button>
         <button class="pipeline-tab" onclick="setPipelineTab('repairs')" data-pipeline="repairs">Repairs</button>
+        <button class="pipeline-tab" onclick="setPipelineTab('restoration')" data-pipeline="restoration">Restoration</button>
         <button class="pipeline-tab" onclick="setPipelineTab('decking')" data-pipeline="decking">Decking</button>
         <button class="pipeline-tab" onclick="setPipelineTab('makesafes')" data-pipeline="makesafes">Make Safes</button>
         <button class="pipeline-tab" onclick="setPipelineTab('misc')" data-pipeline="misc">Misc</button>
@@ -6476,6 +6477,10 @@ __swOpsStampAssets([
 <!-- Restoration plan, quote and builder's answer on a make-safe job page: read only (modules/ops-restoration.js). -->
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-restoration.js?v=1'}]);
+</script>
+<!-- Restoration board: the Restoration pipeline tab (modules/ops-restoration-board.js, // <restoration-board>). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-restoration-board.js?v=1'}]);
 </script>
 <!-- Paid close-out tags (live) and Get Review ladder (docs/job-closeout-screens.md): the ladder is off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
 <script>
@@ -13216,6 +13221,8 @@ async function loadJobs(opts) {
   opts = opts || {};
   if (opts.background && (makesafeReviewOverlayIsOpen() || jobDetailIsOpen())) return;
   updateJobsDate();
+  // Restoration has its own board read (restoration_board); see <restoration-board>.
+  if (_pipelineTab === 'restoration') return loadRestorationBoard(opts);
   try {
     var data;
     if (_pipelineTab === 'makesafes') {
@@ -13364,6 +13371,12 @@ async function loadMakesafeBoardPackChips() {
 }
 
 function searchJobs(q) {
+  // Restoration board: client-side filter over the board already read.
+  if (_pipelineTab === 'restoration') {
+    _jobSearch = q || '';
+    if (_pipelineData) renderJobs(_pipelineData);
+    return;
+  }
   // Make-safe kanban: instant client-side filter, no server round-trip
   if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
     _makesafeBoardSearch = (q || '').toLowerCase().trim();
@@ -13515,6 +13528,11 @@ function renderJobs(data) {
   if (container) {
     container.style.overflow = '';
     container.classList.toggle('jobs-body-makesafes', _pipelineTab === 'makesafes' && _jobView === 'kanban');
+  }
+  // The Restoration board is one kanban in both views; it never paints another tab's payload.
+  if (_pipelineTab === 'restoration') {
+    if (data && data._restoration && window.RestorationBoard) RestorationBoard.render(data._restoration);
+    return;
   }
   if (_jobView === 'kanban') {
     if (_pipelineTab === 'fencing') {
@@ -14005,6 +14023,24 @@ function renderRepairKanban(container, columns) {
   container.innerHTML = html;
   setupKanbanHorizontalScroll();
 }
+
+// <restoration-board>
+// Restoration board (secureworks-backend docs/restoration-board-v1.md): its own
+// seven-column board, read from ops-api restoration_board and moved only through
+// restoration_set_stage. The rules and the painting live in
+// modules/ops-restoration-board.js (RestorationBoardCore / RestorationBoard);
+// this block only routes the Jobs tab to it. Same light .kanban-col chrome as
+// Repairs, no dark Sales drawer. Restoration jobs leave the make-safe board on
+// the server; nothing here filters the make-safe board.
+function loadRestorationBoard(opts) {
+  var container = document.getElementById('jobsBody');
+  if (!window.RestorationBoard) {
+    if (container) container.innerHTML = '<div style="padding:20px;color:#9A3412;">The Restoration board did not load. Refresh the page to try again.</div>';
+    return Promise.resolve();
+  }
+  return RestorationBoard.load(opts);
+}
+// </restoration-board>
 
 function renderMakesafeKanban(container, columns) {
   var STAGE_LABELS = {

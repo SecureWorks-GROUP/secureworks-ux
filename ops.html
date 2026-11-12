@@ -18858,9 +18858,9 @@ async function kanbanDrop(e) {
     var kc0 = document.querySelector('#jobsBody .kanban-container');
     _kanbanSavedScroll = kc0 ? kc0.scrollLeft : 0;
     if (_pipelineData) renderJobs(_pipelineData);
-    showToast('Council decision required before moving this patio job.', 'warning', [
-      { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-      { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+    showToast('Does this patio job need council approval?', 'warning', [
+      { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+      { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
     ]);
     return;
   }
@@ -24214,9 +24214,9 @@ function confirmStepChange(jobId, targetStatus, targetIdx, currentIdx) {
     var kc1 = document.querySelector('#jobsBody .kanban-container');
     _kanbanSavedScroll = kc1 ? kc1.scrollLeft : 0;
     if (_pipelineData) renderJobs(_pipelineData);
-    showToast('Council decision required before moving this patio job.', 'warning', [
-      { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-      { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+    showToast('Does this patio job need council approval?', 'warning', [
+      { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+      { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
     ]);
     return;
   }
@@ -28795,9 +28795,9 @@ async function changeJobStatus(jobId, status) {
       var kc2 = document.querySelector('#jobsBody .kanban-container');
       _kanbanSavedScroll = kc2 ? kc2.scrollLeft : 0;
       if (_pipelineData) renderJobs(_pipelineData);
-      showToast('Council decision required before moving this patio job.', 'warning', [
-        { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-        { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+      showToast('Does this patio job need council approval?', 'warning', [
+        { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+        { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
       ]);
       return;
     }

@@ -4493,6 +4493,7 @@
       if (b.open) out.push({ m: b.open, box: b });
       b.sent.forEach(function (m) { out.push({ m: m, box: b }); });
     });
+    (e.d.unboxed || []).forEach(function (u) { out.push(u); });
     return out;
   }
 
@@ -4567,6 +4568,8 @@
     h += '<p class="dpc-mail-msg">' + esc(facts.join(', ') + '.') + '</p>';
     if (m.test) h += '<p class="dpc-mail-msg">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';
     h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre>';
+    // Its box was taken off with the X: nothing to go to in Materials.
+    if (it.box.removed) return h + '<p class="dpc-mail-msg">' + esc(it.box.name) + ' was taken off this job in Materials. This sent email is kept.</p>';
     return h + '<div class="dpc-actions"><button type="button" data-dpc-mail-goto="' + sid + '" data-dpc-mail-id="' + esc(m.id) + '">' + (m.sent ? 'Show in Materials' : 'Edit and send in Materials') + '</button></div>';
   }
 
@@ -4986,7 +4989,14 @@
         lines: resp.draft_list.lines.filter(function (l) { return isObj(l) && l.id; }).map(v2LineFrom).sort(v2ByPos),
         photos: resp.draft_list.photos.filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom)
       },
-      boxes: resp.suppliers.filter(function (s) { return isObj(s) && s.supplier_id; }).map(v2BoxFrom).sort(v2ByPos)
+      boxes: resp.suppliers.filter(function (s) { return isObj(s) && s.supplier_id; }).map(v2BoxFrom).sort(v2ByPos),
+      // Sent order emails whose box was taken off with the X: still listed in
+      // Emails. Empty from an older server.
+      unboxed: (Array.isArray(resp.unboxed_sent_emails) ? resp.unboxed_sent_emails : []).map(function (u) {
+        var m = isObj(u) ? v2EmailFrom(u.email) : null;
+        if (!m) return null;
+        return { m: m, box: { supplier_id: u.supplier_id ? String(u.supplier_id) : '', name: text(u.supplier_name) || 'Supplier', removed: true } };
+      }).filter(Boolean)
     };
   }
 
@@ -4998,7 +5008,9 @@
       // and typedAt[id] is the line's stamp when the typing began.
       local: [], typed: {}, typedAt: {}, again: {}, more: {},
       mailTyped: {}, mailAt: {}, mailAgain: {},
-      dates: {}, fulfil: {}, busy: {}, msg: {}, notice: '', ask: null
+      dates: {}, fulfil: {}, busy: {}, msg: {}, notice: '', ask: null,
+      // The box whose X asks "Remove ...?" now, or null.
+      rmAsk: null
     };
   }
 
@@ -5079,6 +5091,7 @@
     e.local.forEach(function (l) { keep[l.id] = true; });
     var old = e.d;
     e.d = d;
+    if (e.rmAsk && !d.boxes.some(function (b) { return b.supplier_id === e.rmAsk; })) e.rmAsk = null;
     Object.keys(e.typed).forEach(function (id) {
       if (keep[id]) return;
       var now = v2Line(e, id);
@@ -5422,21 +5435,73 @@
     });
   }
 
+  // The X on a box: first ask, under the box's header, what goes with it.
+  function v2RemoveAsk(jobId, sid) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || !v2Box(e, sid) || e.busy['box:' + sid]) return;
+    e.rmAsk = sid;
+    delete e.msg['box:' + sid];
+    paintV2();
+    refocus('[data-dpc-v2="remove-sup-yes"][data-dpc-v2-sid="' + v2KeyAttr(sid) + '"]');
+  }
+
+  function v2RemoveCancel(jobId, sid) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    e.rmAsk = null;
+    paintV2();
+    refocus('[data-dpc-v2="remove-sup"][data-dpc-v2-sid="' + v2KeyAttr(sid) + '"]');
+  }
+
+  // The question: the supplier, what the box holds that goes with it, and
+  // that nothing is sent to the supplier.
+  function v2RemoveAskHtml(e, b) {
+    var sid = b.supplier_id;
+    var busy = !!e.busy['box:' + sid];
+    var lines = b.lines.length + e.local.filter(function (l) { return l.supplier_id === sid; }).length;
+    var parts = [];
+    if (lines) parts.push(v2Count(lines, 'line', 'lines'));
+    if (b.photos.length) parts.push(v2Count(b.photos.length, 'photo', 'photos'));
+    if (b.open && !b.open.sent) parts.push('the held order email');
+    var ask = 'Remove ' + b.name + (parts.length ? ' and its ' + v2JoinAnd(parts) : '') + '? Nothing is sent to ' + b.name + '.';
+    if (b.sent.length) ask += ' The order already sent stays in this job\'s Emails.';
+    var h = '<div class="dpc-tape-confirm dpc-v2-rmask" role="group" aria-label="Confirm taking ' + esc(b.name) + ' off this job"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
+    h += '<button type="button" class="dpc-primary" data-dpc-v2="remove-sup-yes" data-dpc-v2-sid="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Removing...' : 'Remove') + '</button>';
+    return h + '<button type="button" data-dpc-v2="remove-sup-no" data-dpc-v2-sid="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>Cancel</button></div>';
+  }
+
+  function v2JoinAnd(parts) {
+    if (parts.length < 2) return parts.join('');
+    return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+  }
+
   function v2RemoveSupplier(jobId, sid) {
     var e = v2Entry(jobId);
     var key = 'box:' + sid;
     if (!e || e.status !== 'ok' || e.busy[key]) return;
+    var b = v2Box(e, sid);
+    var name = b ? b.name : 'The supplier';
     e.busy[key] = 'remove';
     delete e.msg[key];
     paintV2();
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_remove_supplier', { job_id: jobId, supplier_id: sid }); }).then(v2Ok).then(function () {
       delete e.busy[key];
-      e.d.boxes = e.d.boxes.filter(function (b) { return b.supplier_id !== sid; });
+      e.rmAsk = null;
+      // Its lines not saved yet go with it.
+      e.local = e.local.filter(function (l) { return l.supplier_id !== sid; });
+      // Its sent emails stay in Emails until the re-read says the same.
+      if (b) b.sent.forEach(function (m) { e.d.unboxed.push({ m: m, box: { supplier_id: sid, name: name, removed: true } }); });
+      e.d.boxes = e.d.boxes.filter(function (x) { return x.supplier_id !== sid; });
+      e.notice = name + ' was taken off this job. Nothing was sent to them.';
       paintV2If(jobId);
       readV2(jobId, true);
     }, function (err) {
       delete e.busy[key];
-      v2Fail(jobId, key, err, 'Not taken off.');
+      e.rmAsk = null;
+      var w = v2Words(err, 'Not taken off.') || { text: 'Not taken off.' };
+      if (w.changed) { e.msg[key] = { bad: true, text: w.text }; v2Changed409(jobId, w.text); return; }
+      e.msg[key] = { bad: true, text: w.text + ' Press the cross to try again.' };
+      paintV2If(jobId);
     });
   }
 
@@ -6408,9 +6473,11 @@
       h += '<label class="dpc-v2-main"><input type="checkbox" data-dpc-v2-main="' + esc(sid) + '"' + (b.is_main ? ' checked' : '') + (e.busy.main ? ' disabled' : '') + '> Main supplier' +
         (b.is_main && !d.mainTicked ? ' <small>(default)</small>' : '') + '</label>';
     }
-    var empty = !b.lines.length && !b.photos.length && !b.open && !b.sent.length && !e.local.some(function (l) { return l.supplier_id === sid; });
-    if (empty) h += '<button type="button" class="dpc-x" data-dpc-v2="remove-sup" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Take ' + esc(b.name) + ' off this job"' + (e.busy[key] ? ' disabled' : '') + '>&times;</button>';
+    // The X is on every box (Shaun, 12 Nov 2026): it asks first, then takes
+    // the supplier off the job with its lines and held email.
+    h += '<button type="button" class="dpc-x" data-dpc-v2="remove-sup" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Take ' + esc(b.name) + ' off this job"' + (e.busy[key] || e.rmAsk === sid ? ' disabled' : '') + '>&times;</button>';
     h += '</div>';
+    if (e.rmAsk === sid) h += v2RemoveAskHtml(e, b);
     if (b.blocked) {
       h += '<div class="dpc-v2-blocked" role="note"><strong>Send blocked.</strong> ' + esc(b.blocked.message || 'This supplier has no approved order email. Ask Shaun to add one before sending.') +
         ' You can still split lines to it.</div>';
@@ -6732,7 +6799,9 @@
       if (e.busy['line:' + id] === 'delete' || (e.msg['line:' + id] && /taken off/i.test(e.msg['line:' + id].text))) v2DeleteLine(jobId, id); else v2SaveLine(jobId, id);
     }
     else if (verb === 'more') { e.more[id] = true; paintV2(); refocus('[data-dpc-v2-cell="profile"][data-dpc-v2-id="' + id + '"]'); }
-    else if (verb === 'remove-sup') v2RemoveSupplier(jobId, sid);
+    else if (verb === 'remove-sup') v2RemoveAsk(jobId, sid);
+    else if (verb === 'remove-sup-yes') v2RemoveSupplier(jobId, sid);
+    else if (verb === 'remove-sup-no') v2RemoveCancel(jobId, sid);
     else if (verb === 'photo-add') {
       var input = region('v2mat') && region('v2mat').querySelector('[data-dpc-v2-file="' + v2KeyAttr(sid) + '"]');
       if (input) input.click();

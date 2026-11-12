@@ -47,7 +47,8 @@
 <body>
   <header>SecureWorks · Add job photos</header>
 
-  <main id="jpSignIn" style="display:none">
+  <main>
+  <section id="jpSignIn" style="display:none">
     <div class="jp-card">
       <form id="jpSignInForm">
         <label for="jpEmail">Email</label>
@@ -59,9 +60,9 @@
       </form>
     </div>
     <div class="jp-foot">Your Trade app sign-in.</div>
-  </main>
+  </section>
 
-  <main id="jpMain" style="display:none">
+  <section id="jpMain" style="display:none">
     <div class="jp-card">
       <div class="jp-job" id="jpJob"></div>
       <div class="jp-count" id="jpCount"></div>
@@ -77,6 +78,7 @@
       <div class="jp-grid" id="jpGrid"></div>
     </div>
     <div class="jp-foot">Photos go on this visit of the job. This page sends nothing to anyone.</div>
+  </section>
   </main>
 
   <script src="modules/job-photos.js?v=1"></script>

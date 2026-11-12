@@ -657,6 +657,35 @@ test.describe('Dispatch v2 supplier replies', () => {
     expect(of('dispatch_v2_replies_assign').map((c) => [c.body.email_id, c.body.job_id, c.body.order_id || null])).toEqual([['tu-1', 'job-p1', 'ord-9'], ['tu-2', 'job-r1', null]]);
     expect(of('dispatch_v2_replies_hide').map((c) => c.body.email_id)).toEqual(['tu-3']);
   });
+
+  test('Clear all asks first; Keep sends nothing; Clear all sends the listed emails in one press', async ({ page }) => {
+    let emails = [
+      EMAIL({ id: 'tc-1', state: 'unmatched', rung: null, job_id: null, job_number: null, supplier_name: 'Stratco', subject: 'Your order' }),
+      EMAIL({ id: 'tc-2', state: 'needs_confirmation', job_number: 'SWF-910001', supplier_name: 'Metroll', subject: 'Re: order' }),
+    ];
+    const { root, of } = await boot(page, {
+      dispatch_v2_replies_unmatched: () => ({ ok: true, include_other: false, emails, counts: { needs_confirmation: emails.filter((m) => m.state === 'needs_confirmation').length, unmatched_order_desk: emails.filter((m) => m.state === 'unmatched').length, unmatched_other: 0 } }),
+      dispatch_v2_replies_clear: (url, body) => { emails = emails.filter((m) => !body.email_ids.includes(m.id)); return { ok: true, cleared: body.email_ids.length, skipped: 0 }; },
+    });
+    const btn = root.locator('[data-dpc-tray-toggle]');
+    await expect(btn).toHaveText('Unmatched supplier emails 2');
+    await btn.click();
+    const tray = root.locator('[data-dpc-region="tray"]');
+    await expect(tray.locator('[data-dpc-tray-item]')).toHaveCount(2);
+    await tray.locator('[data-dpc-tray-clear]').click();
+    await expect(tray).toContainText('Clear all 2 emails from this list? Best guesses are turned down. They stay in admin@ and nothing is sent.');
+    await tray.locator('[data-dpc-tray-clear-no]').click();
+    await expect(tray.locator('[data-dpc-tray-clear-go]')).toHaveCount(0);
+    await expect(tray.locator('[data-dpc-tray-item]')).toHaveCount(2);
+    expect(of('dispatch_v2_replies_clear')).toEqual([]);
+    await tray.locator('[data-dpc-tray-clear]').click();
+    await tray.locator('[data-dpc-tray-clear-go]').click();
+    await expect(tray).toContainText('Cleared 2 emails from this list.');
+    await expect(tray).toContainText('Nothing to sort. Every supplier email is on a job.');
+    await expect(tray.locator('[data-dpc-tray-clear]')).toHaveCount(0);
+    await expect(btn).toHaveText('Unmatched supplier emails 0');
+    expect(of('dispatch_v2_replies_clear').map((c) => c.body.email_ids)).toEqual([['tc-1', 'tc-2']]);
+  });
 });
 
 // ── Slice 4 (screen): the old PO board and the SMS ask ────────────────────────

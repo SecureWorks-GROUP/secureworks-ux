@@ -115,6 +115,18 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   (dimensions/colours; on fencing jobs also the scoping tool's "Scoper's
   notes" — contract in `AGENTS.md` → "Fencing scoping-tool notes") → work
   order lines → job videos → Materials & Receipts.
+  A patio sealed in the Scope Engine (`patio-scoper`, or any job the trade
+  view sends it for) has no old build spec: that slot shows the **crew scope of works of the revision
+  the customer accepted**, exactly as ops-api `trade_job_detail` sends it in
+  `crew_scope_of_works` (`status: 'accepted'`, `page`, `content_hash`,
+  `revision`), in a frame that runs no script, only after the page matches its
+  stamp. Never the latest saved scope: a newer saved revision is not the
+  accepted one. When the trade view says `not_proved` (with its `reason`), or
+  sends nothing, one line says why and nothing else is shown. No size is worked
+  out and no 3D model is offered for it (`// <trade-sealed-crew-scope>`,
+  `modules/sealed-crew-scope.js`; check `npm run test:crew-sees-sealed-scope`).
+  A fence job, sealed or not, keeps today's build spec and 3D: the trade view
+  sends null for every fence until it can send an accepted fence page.
   The crew line under the tabs is gone; the roster panel above the tabs is the
   crew. Guard: `tests/e2e/trade-job-scope-clarity.spec.js`.
 - **Request Variation**: Scope tab, confirmed or in-progress assignment. Contract

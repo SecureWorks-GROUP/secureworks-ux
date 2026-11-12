@@ -15,6 +15,8 @@
 
 `kind`, `tool`, `trade`, `revision` (engine only: `n`, `sealedAt`, `savedAt`, `frozenId`, `catalogue`, `outputsAgree`, `earlier[]`, `options[]`), `inputs[]` (`group`, `label`, `value`, in words), `notes[]`, `lines[]` (engine material lines), `documents[]` (the five Scope Engine documents of the sealed revision), `toolUrl`, and `money`.
 
+An engine record shows no post count and no height. The draft's `design.posts` is the tool's starting count (the Scope Engine replaces it from the beam span tables while `postsAuto` is set) and `design.frontHeightMm` is replaced by the house heights for a fascia or riser fix, and the record keeps no sealed figure for either. So the card names neither, and its "Posts and heights" fact links the sealed crew scope of works in the Scope Engine (`href` on that input), which prints them as sealed.
+
 `money` holds each figure as a number or `null`. `null` means not known and is shown as "Not known yet" or "Not priced yet", never `$0`. A total cost with a part missing is `costIsPartial` and reads "so far". `estimatedMargin(rec)` is the ex GST margin of the sealed costs, or null when the sale or the cost is not known.
 
 ## Where the job page uses it
@@ -31,4 +33,5 @@ The module only reads. It never writes a job, an order or a document.
 ## Tests
 
 - `modules/job-scope-record.test.cjs` (`npm run test:job-scope-record`): every shape, money rules, escaping.
+- `tests/unit/crew-sees-sealed-scope.test.cjs` (`npm run test:crew-sees-sealed-scope`): what the crew sees equals the accepted revision's sealed scope of works (never a newer saved one) for a patio, a fence keeping today's build spec and 3D, and the card's posts and heights.
 - `tests/e2e/ops-job-page-scope-engine.spec.js`: the real `ops.html` on a Scope Engine job (`tests/fixtures/scope-engine-patio.js`), tab by tab.

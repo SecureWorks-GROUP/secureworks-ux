@@ -15,8 +15,8 @@
 //     revision: { n, frozen_revision_id },
 //     reason: string          plain words, status 'not_proved' only
 //   }
-// The field is there for every job whose scope was sealed by the new tool (Scope Engine patio or fence) and
-// absent for older jobs. This module never reads the latest saved scope (`scope_json.sealed`, `revisionPacks`)
+// The field is there for every job whose scope was sealed by the new patio tool and null for every other job,
+// fence included (secureworks-backend trade_crew_scope_of_works.ts). This module never reads the latest saved scope (`scope_json.sealed`, `revisionPacks`)
 // for the page: a correctly stamped newer save is not the accepted one. It never makes the page again and never
 // works out a size. Pure apart from hashing (crypto.subtle in the browser, node:crypto in tests). No DOM, no fetch.
 (function (root) {
@@ -49,13 +49,14 @@
   }
 
   // Whether the crew scope of works decides this job's Scope tab: the trade view sent the field, or the job's
-  // scope is from the new tool. Then the old build spec and the 3D model, which read the latest saved scope,
-  // are never shown.
+  // scope is from the new patio tool. Then the old build spec and the 3D model, which read the latest saved scope,
+  // are never shown. A fence job stays on today's Scope tab (build spec and 3D) until the trade view sends an
+  // accepted fence page: today it sends null for every fence (director's ruling, 12 Nov 2026, 9:16 pm).
   function applies(data) {
     var d = obj(data) || {};
     if (FIELD in d && d[FIELD] != null) return true;
     var job = obj(d.job) || {};
-    return isEnginePatio(job.scope_json) || isEngineFence(job.scope_json);
+    return isEnginePatio(job.scope_json);
   }
 
   // What the trade view sent.

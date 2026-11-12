@@ -1,5 +1,5 @@
 // node --test tests/unit/crew-sees-sealed-scope.test.cjs
-// "What the crew sees equals the sealed scope of works" (director's ruling 4, 12 Nov 2026), patio and fence,
+// "What the crew sees equals the sealed scope of works" (director's ruling 4, 12 Nov 2026), patio; fence keeps today's view,
 // against the shipped code paths: the Trade App's Scope tab build spec (renderEnhancedScope and the
 // // <trade-sealed-crew-scope> block, cut out of trade.html as shipped), modules/sealed-crew-scope.js, and the
 // Ops scope card (modules/job-scope-record.js). The live screen proof is the walk's step 7.
@@ -207,28 +207,45 @@ function fenceJob(lengthM, packs) {
 }
 const fencePage = (n, m) => '<!doctype html><html><head><title>Scope of works</title></head><body><h1>Scope of works</h1><p>Rev ' + n + '. Rear run ' + m + ' m, Sameside, Monument, one pedestrian gate 900 mm.</p></body></html>';
 
-test('fence: Rev 1 accepted, Rev 2 saved later: Rev 1\'s crew scope of works shows, never the saved Rev 2 or its build spec', async () => {
+// Today's View 3D Model entry, cut out of trade.html as shipped (renderScopeTab's 3D block).
+function trade3dEntry(data) {
+  const block = cut(TRADE, '    // 3D model button (inside scope flow, not standalone)', '    // Office staff: open this job in the Scope Engine');
+  const ctx = { window: { SealedCrewScope: S }, job: data.job, data, h: '' };
+  vm.createContext(ctx);
+  vm.runInContext(block, ctx);
+  return ctx.h;
+}
+
+// Director's ruling, 12 Nov 2026, 9:16 pm: the trade view sends null for every fence job (secureworks-backend
+// trade_crew_scope_of_works.ts), so a fence stays on today's Scope tab: its build spec and its 3D entry.
+test('fence: a new-tool fence with sealed revisions and a null crew scope of works keeps today\'s build spec and 3D', () => {
+  const job = fenceJob(24.5, [{ n: 1, code: '10B4Z4S' }, { n: 2, code: '10B4Z5T' }]);
+  const view = { crew_scope_of_works: null };
+  assert.equal(S.applies(Object.assign({ job }, view)), false, 'the crew scope route is for a new-tool patio only');
   const t = tradeScope();
-  const job = fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }, { n: 2, code: '10B4Z5T' }]);
-  const page = fencePage(1, '18.6');
-  const html = t.render(job, await acceptedView(1, page));
-  const pages = await shown(t);
-  assert.deepEqual(pages, [S.framePage(page)]);
-  assert.match(html, /Crew scope of works, Rev 1/);
-  assert.doesNotMatch(html + pages.join(''), /Build spec|24m|24\.0|Rev 2/);
+  const html = t.render(job, view);
+  const seen = text(html);
+  // Byte for byte the build spec today's Trade App draws for this job (the same job with no sealed revisions).
+  const today = tradeScope().render(fenceJob(24.5), view);
+  assert.equal(html, today);
+  assert.match(seen, /^Build spec 24\.5m total length/);
+  assert.match(seen, /Colour Monument/);
+  assert.match(seen, /Gates pedestrian 900mm/);
+  assert.doesNotMatch(seen, /has not come through|Crew scope of works/);
+  assert.equal(t.frames.length, 0);
+  // Today's View 3D Model entry is still offered.
+  assert.match(trade3dEntry(Object.assign({ job }, view)), /View 3D Model/);
+  assert.equal(trade3dEntry(Object.assign({ job }, view)), trade3dEntry({ job: fenceJob(24.5), crew_scope_of_works: null }));
+  // And with no field at all (the trade view left it out), the same.
+  assert.equal(tradeScope().render(job), today);
+  assert.match(trade3dEntry({ job }), /View 3D Model/);
 });
 
-test('fence: the accepted binding cannot be proved: one line says why, no build spec', async () => {
-  const t = tradeScope();
-  const html = t.render(fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }]), NOT_PROVED);
-  assert.equal((await shown(t)).length, 0);
-  assert.match(text(html), /^Crew scope of works No accepted quote on this job is bound to a sealed revision\. So no crew scope of works is shown\./);
-  assert.doesNotMatch(html, /Build spec|24m/);
-  // And with no field from an older office system, a sealed fence still shows nothing from the latest save.
-  const t2 = tradeScope();
-  const html2 = t2.render(fenceJob(24.0, [{ n: 1, code: '10B4Z4S' }]));
-  assert.match(text(html2), /has not come through to this phone/);
-  assert.doesNotMatch(html2, /Build spec|24m/);
+test('patio: a new-tool patio still hides the 3D entry (it reads the latest save)', async () => {
+  const job = await walkPatio();
+  job.scope_json.length = 6; // so the old 3D rule would offer it, and only the crew scope route holds it back
+  assert.equal(trade3dEntry(Object.assign({ job }, await acceptedView(1, REV1_PAGE))), '');
+  assert.equal(trade3dEntry({ job, crew_scope_of_works: null }), '');
 });
 
 test('fence from the older fence designer (nothing sealed): its build spec is unchanged', () => {

@@ -12688,13 +12688,14 @@
   }
 
   // <trade-sealed-crew-scope>
-  // A job whose scope was sealed in the Scope Engine (patio or fence) shows the
+  // A patio whose scope was sealed in the Scope Engine shows the
   // crew scope of works of the revision the customer ACCEPTED, exactly as the
   // trade view sends it (trade_job_detail crew_scope_of_works,
   // modules/sealed-crew-scope.js), after its stamp is checked. Never the latest
   // saved scope, never the old build spec, never a size worked out here. When
   // the accepted revision cannot be proved, one plain line says why and nothing
-  // else is shown.
+  // else is shown. A fence job keeps today's build spec and 3D until the trade
+  // view sends an accepted fence page (it sends null for every fence today).
   var _sealedCrewScopeSeq = 0;
   function renderSealedCrewScope(data) {
     var S = window.SealedCrewScope;

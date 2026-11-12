@@ -34,7 +34,7 @@
   <script src="shared/job-work-order.js?v=4"></script>
   <script src="shared/group-work-order.js?v=fix4-20261106"></script>
   <script src="modules/trade-group-work-order.js?v=fix4-20261106"></script>
-  <script src="modules/trade-group-invoice.js?v=fix4-20261106"></script>
+  <script src="modules/trade-group-invoice.js?v=job-mode-20261111"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
 
@@ -754,6 +754,11 @@
     .jct-fixed { min-height: 44px; display: flex; align-items: center; font-size: 15px; font-weight: 700; color: var(--sw-dark); }
     .jct-err { margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--sw-red); }
     .jct-hint { margin-top: 4px; font-size: 11px; color: var(--sw-text-sec); }
+    /* How a job on the invoice is paid [invoice-job-mode]: one plain line, the other choices as small links. */
+    .jc-mode { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; }
+    .jc-mode-label { display: inline-block; font-size: 12px; font-weight: 800; color: var(--sw-dark); background: var(--sw-light); border: 1px solid var(--sw-border); border-radius: 999px; padding: 3px 10px; }
+    .jc-mode-hint { flex-basis: 100%; font-size: 12px; color: var(--sw-text-sec); line-height: 1.4; }
+    .jc-mode-switch { background: none; border: 0; padding: 6px 0; min-height: 32px; font: inherit; font-size: 12px; font-weight: 700; color: var(--sw-orange); text-decoration: underline; cursor: pointer; }
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
     .inv-totals-row { display: flex; justify-content: space-between; font-size: 13px; line-height: 1.8; }
     .inv-totals-row.grand { font-size: 16px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.15); margin-top: 4px; padding-top: 6px; }
@@ -774,6 +779,13 @@
     .inv-gst-switch[aria-checked="true"] { background: rgba(241,90,41,0.18); border-color: rgba(241,90,41,0.7); }
     .inv-gst-switch[aria-checked="true"] .inv-gst-track { background: var(--sw-orange); }
     .inv-gst-switch[aria-checked="true"] .inv-gst-thumb { transform: translateX(14px); }
+    /* The same GST switch on the light Work Order Invoice panel. */
+    .wwi-panel .inv-gst-control { border-top: 0; margin-top: 0; padding-top: 0; }
+    .wwi-panel .inv-gst-copy strong { color: var(--sw-dark); }
+    .wwi-panel .inv-gst-copy span { color: var(--sw-text-sec); }
+    .wwi-panel .inv-gst-switch { color: var(--sw-dark); border-color: var(--sw-border); background: var(--sw-light); }
+    .wwi-panel .inv-gst-track { background: var(--sw-border); }
+    .wwi-panel .inv-gst-switch[aria-checked="true"] { background: rgba(241,90,41,0.12); border-color: rgba(241,90,41,0.7); }
     .inv-history-item { background: var(--sw-card); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--sw-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .inv-history-item:active { background: var(--sw-light); }
     .inv-status { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
@@ -8025,6 +8037,8 @@
   function resetInvoiceSession() {
     _invoiceAuthGen++;
     _hoursData = null;
+    _invModeInFlight = {};
+    _invModeFailed = {};
     _runningInvoiceDraftServer = null;
     _dailyHoursWeekSubmitted = false;
     _dailyHoursDecision = null;
@@ -14185,7 +14199,7 @@
           ch += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">View only -- another crew is allocated</div>';
         } else if (isPerMetreUser() && match.can_add_to_weekly_invoice) {
           authorizeWorkOrders([match]);
-          ch += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(match.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(match)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Add to Weekly Invoice</button>';
+          ch += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(match.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(match)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Open in Work Order Invoice</button>';
         } else if (match.can_invoice && match.can_invoice_direct !== false) {
           authorizeWorkOrders([match]);
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
@@ -21644,7 +21658,9 @@
       workOrders: workOrders || [], selected: {}, charges: {}, labour: {},
       crew: {}, crewLoading: {}, finalDeductions: [], notes: '',
       draftId: null, preview: null, dirty: true, busy: false, saveUnresolved: false,
-      revision: 0, requestSeq: 0, weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd
+      revision: 0, requestSeq: 0, weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd,
+      // The trade's GST choice, from the same profile the Weekly Invoice reads.
+      gstOn: _invoiceGstDefault(_hoursData || _user)
     };
     state.workOrders.forEach(function(workOrder) {
       state.selected[String(workOrder.id)] = true;
@@ -21862,6 +21878,7 @@
       return { description: line.description || '', unit_rate: Math.abs(Number(line.unit_rate || line.line_total_ex || 0)) };
     });
     _weeklyWoInvoice.notes = invoice.notes || '';
+    if (typeof invoice.gst_on === 'boolean') _weeklyWoInvoice.gstOn = invoice.gst_on;
     _weeklyWoInvoice.draftId = _weeklyInvoiceIdentity(invoice);
     _weeklyWoInvoice.preview = invoice;
     _weeklyWoInvoice.dirty = false;
@@ -22049,6 +22066,15 @@
     renderWeeklyWorkOrderInvoice();
   };
 
+  // GST on this invoice: the trade's profile choice, changed here like the
+  // Weekly Invoice's switch. SecureWorks works out the amounts on Save.
+  window.weeklyWoGstChanged = function(next) {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.gstOn = next === true;
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
   window.updateWeeklyInvoiceNotes = function(value) {
     if (!_weeklyWoInvoice) return;
     _weeklyWoInvoice.notes = String(value || '');
@@ -22084,7 +22110,7 @@
     });
     var payload = {
       week_start: state.weekStart,
-      gst_on: false,
+      gst_on: state.gstOn === true,
       work_order_blocks: blocks,
       final_deductions: finalDeductions,
       notes: state.notes
@@ -22194,6 +22220,11 @@
       html += '<button class="wwi-remove" aria-label="Remove final deduction" onclick="removeWeeklyFinalDeduction(' + index + ')">&times;</button></div>';
     });
     html += '<button class="inv-add-btn" onclick="addWeeklyFinalDeduction()">+ Add final deduction</button></section>';
+    html += '<section class="wwi-panel" data-weekly-invoice-gst><div class="inv-gst-control">';
+    html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered. Save &amp; calculate again after you change it.</span></div>';
+    html += '<button type="button" class="inv-gst-switch" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (state.gstOn ? 'true' : 'false') + '" onclick="weeklyWoGstChanged(!' + (state.gstOn ? 'true' : 'false') + ')">';
+    html += '<span class="inv-gst-track" aria-hidden="true"><span class="inv-gst-thumb"></span></span><span data-invoice-gst-state>' + (state.gstOn ? 'On' : 'Off') + '</span></button>';
+    html += '</div></section>';
     html += '<section class="wwi-panel"><label class="wwi-panel-title" for="weeklyInvoiceNotes">Notes</label><textarea class="wwi-notes" id="weeklyInvoiceNotes" rows="3" placeholder="Optional note for finance" onchange="updateWeeklyInvoiceNotes(this.value)">' + esc(state.notes || '') + '</textarea></section>';
     html += '<div data-weekly-invoice-result>' + _weeklyInvoicePreviewHtml(state.preview) + '</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy || (state.saveUnresolved && !state.draftId) ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : (state.saveUnresolved && !state.draftId ? 'Confirming...' : 'Save & calculate')) + '</button>';
@@ -23788,26 +23819,27 @@
       html += '</div>';
     });
     html += '</div>';
-    html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Add amount</button>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">Same option as hours — description and amount. No job needed.</div>';
+    html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Take an amount off</button>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">Takes an amount off this invoice, for example money you owe the company. Say what it is. No job needed.</div>';
     html += '</div>';
     return html;
   }
 
   function _cardAddAmountBtnHtml(idx) {
     return '<button type="button" onclick="addWoLumpLine(' + idx + ')" '
-      + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
+      + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer;min-height:32px">+ Take an amount off</button>';
   }
 
   function _renderCardLumpLinesHtml(c, opts) {
     opts = opts || {};
     var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
     var html = '<div data-cardlumps="' + c._idx + '" style="margin-top:8px">';
+    if (lumpLines.length) html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:4px">Taken off this job</div>';
     for (var lpi = 0; lpi < lumpLines.length; lpi++) {
       var lp = lumpLines[lpi];
       var lpAmt = Math.round(Number(lp.amount || 0) * 100) / 100;
       html += '<div data-wolump="' + c._idx + '_' + lpi + '" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;background:rgba(0,0,0,0.02);border-radius:8px;padding:6px 8px">';
-      html += '<input type="text" data-cardlumpdesc="' + c._idx + '_' + lpi + '" value="' + esc(lp.description || '') + '" placeholder="What this amount is" '
+      html += '<input type="text" data-cardlumpdesc="' + c._idx + '_' + lpi + '" value="' + esc(lp.description || '') + '" placeholder="What you are taking off" '
         + 'onchange="setWoLumpDescription(' + c._idx + ',' + lpi + ',this.value)" '
         + 'style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-family:var(--sw-font)">';
       html += '<input type="number" data-cardlumpamt="' + c._idx + '_' + lpi + '" min="0" step="0.01" inputmode="decimal" value="' + (lp.amount != null ? lp.amount : '') + '" placeholder="$" '
@@ -24892,9 +24924,57 @@
   // changed per job.
   // ════════════════════════════════════════════════════════════════════════════
 
-  function _defaultJobCardWoMode() {
-    return false;
-  }
+  // <invoice-job-mode>
+  // Marnin, 11 Nov 2026: the job decides how it is billed, not the trade.
+  // ops-api sends each job's invoice_mode ('hourly' | 'work_order' |
+  // 'group_work_order') and can_claim_commission on the my_hours assignment
+  // rows, and from trade_invoice_job_modes for a job the trade searched in.
+  // A card starts in that mode. A work-order card keeps a small "Bill by
+  // hours instead" (fencing helpers bill hours on fencing jobs), and
+  // Commission is offered only where can_claim_commission is true. With no
+  // mode (an older ops-api, invoice_mode_unavailable, or a failed read) the
+  // card keeps the Hours / Work Order / Commission toggle it always had: this
+  // is the only copy of the rule in the app, and it is ops-api's answer.
+  var InvoiceJobModeCore = (function() {
+    var MODES = { hourly: true, work_order: true, group_work_order: true };
+    function norm(mode) {
+      var m = String(mode == null ? '' : mode).trim().toLowerCase();
+      return MODES[m] ? m : null;
+    }
+    // One server row (my_hours assignment or trade_invoice_job_modes job).
+    function read(row, unavailable) {
+      if (!row || unavailable === true) return { mode: null, commission: null };
+      var c = row.can_claim_commission;
+      return { mode: norm(row.invoice_mode), commission: c === true ? true : (c === false ? false : null) };
+    }
+    function known(card) { return !!(card && norm(card.invoice_mode)); }
+    function current(card) { return card && card.commission_mode ? 'commission' : (card && card.wo_mode ? 'work_order' : 'hours'); }
+    // The links a card with a server mode offers to change how it is billed.
+    // locks.hours / locks.work_order: that choice is not open on this card now.
+    function switches(card, locks) {
+      locks = locks || {};
+      var mode = norm(card && card.invoice_mode);
+      if (!mode || mode === 'group_work_order') return [];
+      var now = current(card), out = [];
+      if (now !== 'work_order' && mode === 'work_order' && !locks.work_order) out.push({ to: 'work_order', label: 'Bill as a work order instead' });
+      if (now !== 'hours' && !locks.hours) out.push({ to: 'hours', label: 'Bill by hours instead' });
+      if (now !== 'commission' && card.can_claim_commission === true) out.push({ to: 'commission', label: 'Claim commission instead' });
+      return out;
+    }
+    var LABEL = { hours: 'Paid by the hour', work_order: 'Paid as a work order', commission: 'Commission' };
+    var HINT = {
+      hours: 'Fill in the date you worked and your start and finish times.',
+      work_order: 'Fill in the work-order amount. Take off anything you paid other trades.',
+      commission: 'Fill in your commission for this job.'
+    };
+    return {
+      norm: norm, read: read, known: known, current: current, switches: switches,
+      label: function(mode) { return LABEL[mode] || LABEL.hours; },
+      hint: function(mode) { return HINT[mode] || HINT.hours; }
+    };
+  })();
+  window.InvoiceJobModeCore = InvoiceJobModeCore;
+  // </invoice-job-mode>
 
   // ── When the time was worked [trade-time-entry] ─────────────────────────
   // One rule everywhere a trade gives a time: the date worked cannot be
@@ -24950,7 +25030,7 @@
       description: '',
       included: true,
       _blank_job: false,
-      wo_mode: _defaultJobCardWoMode(),
+      wo_mode: false,
       // Every trade may invoice a job as a Work Order (WO allocated less the
       // work-order amounts paid to other trades, labour and other deductions),
       // whether or not ops issued a work_orders row. A server work order still
@@ -25638,8 +25718,116 @@
         included: !isBlankJob,
         _blank_job: isBlankJob
       }, prevFields)));
+      // The job decides how it is billed: the card starts in ops-api's mode.
+      if (data.invoice_mode_unavailable === true || Object.prototype.hasOwnProperty.call(a, 'invoice_mode')) {
+        _applyInvoiceJobMode(_jobCards[_jobCards.length - 1], a, data.invoice_mode_unavailable === true);
+      }
     });
     _fillCardsFromSavedTimes();
+  }
+
+  // [invoice-job-mode] Put a server row's mode on a card. The mode is the
+  // card's starting mode once (invoice_mode_applied); after that a switch the
+  // trade made (mode_picked) or hours they typed stand, also in a saved draft.
+  function _applyInvoiceJobMode(c, row, unavailable) {
+    if (!c) return;
+    var r = InvoiceJobModeCore.read(row, unavailable);
+    c.invoice_mode = r.mode;
+    c.can_claim_commission = r.commission;
+    c.invoice_mode_checked = true;
+    if (!r.mode) return;
+    if (r.commission !== true && c.commission_mode) c.commission_mode = false;
+    if (c.mode_picked || c.invoice_mode_applied === r.mode) return;
+    c.invoice_mode_applied = r.mode;
+    if (r.mode === 'group_work_order') return;
+    if (r.mode === 'work_order') {
+      if (_jobCardKeepHoursMode(c) || _jobCardWorkOrderBlocked(c)) return;
+      c.wo_mode = true;
+    } else if (!c.work_order_id) {
+      c.wo_mode = false;
+    }
+    c.commission_mode = false;
+  }
+  // Assigned cards take their mode from this week's my_hours rows.
+  function _syncInvoiceJobModes() {
+    var data = _hoursData || {};
+    var byId = {};
+    (data.assignments || []).forEach(function(a) { if (a && a.id) byId[a.id] = a; });
+    var unavailable = data.invoice_mode_unavailable === true;
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.assignment_id || !byId[c.assignment_id]) return;
+      var a = byId[c.assignment_id];
+      if (!unavailable && !Object.prototype.hasOwnProperty.call(a, 'invoice_mode')) return;
+      _applyInvoiceJobMode(c, a, unavailable);
+    });
+    _noteInvoiceGroupRoutes(data);
+    _requestInvoiceJobModes();
+  }
+  // Jobs the server says are paid through a group work order are routed to
+  // the group module like the group_route_jobs my_hours already names.
+  function _invoiceModeGroupRoutes(data) {
+    var out = [], seen = {};
+    function add(jobId, fields) {
+      if (jobId == null || seen[String(jobId)]) return;
+      seen[String(jobId)] = true;
+      out.push(Object.assign({ job_id: jobId, route: 'group' }, fields));
+    }
+    if (data && data.invoice_mode_unavailable !== true) {
+      (data.assignments || []).forEach(function(a) {
+        if (!a || InvoiceJobModeCore.norm(a.invoice_mode) !== 'group_work_order') return;
+        var job = a.jobs || {};
+        add(a.job_id || job.id, { job_number: job.job_number || '', client_name: job.client_name || '', site_suburb: job.site_suburb || '', booked_dates: a.scheduled_date ? [a.scheduled_date] : [] });
+      });
+    }
+    (_jobCards || []).forEach(function(c) {
+      if (!c || c.assignment_id || InvoiceJobModeCore.norm(c.invoice_mode) !== 'group_work_order') return;
+      add(c.job_id, { job_number: c.job_number || '', client_name: c.client_name || '', site_suburb: c.site_suburb || '', booked_dates: [] });
+    });
+    return out;
+  }
+  // A job the trade searched in: ask ops-api how it is paid. A failed read, or
+  // an ops-api without the action, leaves the card as it was (the toggle).
+  var _invModeInFlight = {}, _invModeFailed = {};
+  function _invoiceModeChecking(c) {
+    return !!(c && !c.assignment_id && c.job_id && !c.invoice_mode_checked && _invModeInFlight[String(c.job_id)]);
+  }
+  function _requestInvoiceJobModes() {
+    var ids = [];
+    (_jobCards || []).forEach(function(c) {
+      if (!c || c.assignment_id || !c.job_id || c.invoice_mode_checked) return;
+      var id = String(c.job_id);
+      if (_invModeInFlight[id] || _invModeFailed[id] || ids.indexOf(id) !== -1) return;
+      ids.push(id);
+    });
+    ids = ids.slice(0, 50);
+    if (!ids.length) return;
+    ids.forEach(function(id) { _invModeInFlight[id] = true; });
+    var ctx = _invoiceApiContext();
+    function repaint() {
+      if (!_invoiceBuilderOpen || !_jobCentricActive) return;
+      var active = document.activeElement;
+      _syncJobCardsFromDOM(true);
+      _noteInvoiceGroupRoutes(_hoursData);
+      renderInvoiceBuilder();
+      var again = _invoiceFieldAfterRepaint(active);
+      if (again && again.focus) again.focus();
+    }
+    api('trade_invoice_job_modes', { job_ids: ids.join(',') }).then(function(res) {
+      ids.forEach(function(id) { delete _invModeInFlight[id]; });
+      if (!_invoiceApiCurrent(ctx)) return;
+      if (!res || !Array.isArray(res.jobs)) throw new Error('No job modes');
+      var byJob = {};
+      res.jobs.forEach(function(r) { if (r && r.job_id != null) byJob[String(r.job_id)] = r; });
+      (_jobCards || []).forEach(function(c) {
+        if (!c || c.assignment_id || !c.job_id || c.invoice_mode_checked) return;
+        if (ids.indexOf(String(c.job_id)) === -1) return;
+        _applyInvoiceJobMode(c, byJob[String(c.job_id)] || null, false);
+      });
+      repaint();
+    }).catch(function() {
+      ids.forEach(function(id) { delete _invModeInFlight[id]; _invModeFailed[id] = true; });
+      if (_invoiceApiCurrent(ctx)) repaint();
+    });
   }
 
   // <invoice-saved-times>
@@ -25757,7 +25945,6 @@
     if (!c || !c.included || c.wo_mode || c.commission_mode) return;
     var errEl = document.querySelector('[data-cardtimeerr="' + idx + '"]');
     if (!errEl) return;
-    if (!TradeTimeEntryCore.touched(c) && _woLumpSum(c) > 0) return;
     var chk = _timeCheck(c);
     errEl.textContent = chk.ok ? '' : chk.error;
     errEl.hidden = chk.ok;
@@ -25922,30 +26109,38 @@
   function invoiceRoutesSettled() { return !window.GroupWorkOrderInvoice || (GroupWorkOrderInvoice.routesSettled ? GroupWorkOrderInvoice.routesSettled() : GroupWorkOrderInvoice.routesReady()); }
   // my_hours names the jobs this week that are paid through a group, so they
   // are never shown as hours cards, even before or without the group read.
+  // [invoice-job-mode] plus the jobs ops-api says are paid through a group.
   function _noteInvoiceGroupRoutes(data) {
-    if (window.GroupWorkOrderInvoice && GroupWorkOrderInvoice.setRouteJobs) GroupWorkOrderInvoice.setRouteJobs((data && data.group_route_jobs) || []);
+    if (window.GroupWorkOrderInvoice && GroupWorkOrderInvoice.setRouteJobs) GroupWorkOrderInvoice.setRouteJobs(((data && data.group_route_jobs) || []).concat(_invoiceModeGroupRoutes(data)));
   }
   function refreshInvoiceGroups() {
     if (!_invoiceBuilderOpen) return;
     _syncJobCardsFromDOM(); _syncRowsFromDOM(); _syncInvLumpLinesFromDOM();
     renderInvoiceBuilder();
   }
-  // A group job's card: its work-order choice is the group, paid from the pool,
-  // so Hours and Commission are off. It links to the group's one panel in the
-  // Group work orders section; the hours form lives only there.
+  // A group job's card is paid from the group's pool, so it has no Hours or
+  // Commission choice: it says so, and links to the group's one panel in the
+  // Group work orders section, where the hours form lives.
   function _groupJobCardHtml(c) {
-    var seg = 'font-size:11px;font-weight:600;padding:5px 11px;border:none;outline:none;';
-    var off = 'background:var(--sw-card);color:var(--sw-text-sec);opacity:0.45;cursor:not-allowed;';
-    var toggle = '<div data-group-mode style="display:flex;margin-top:10px;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;width:fit-content">'
-      + '<button type="button" disabled aria-disabled="true" title="Paid from the group pool" style="' + seg + off + '">Hours</button>'
-      + '<button type="button" aria-pressed="true" style="' + seg + 'border-left:1px solid var(--sw-border);background:var(--sw-dark);color:#fff;cursor:default">Group work order</button>'
-      + '<button type="button" disabled aria-disabled="true" title="Paid from the group pool" style="' + seg + 'border-left:1px solid var(--sw-border);' + off + '">Commission</button>'
-      + '</div>';
+    var toggle = '<div class="jc-mode" data-group-mode data-card-mode="group_work_order"><span class="jc-mode-label">Paid through the group work order</span></div>';
     return '<div class="jc-card" data-card="' + c._idx + '" data-group-job-card="' + esc(c.job_id) + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:12px;margin-bottom:8px;background:var(--sw-card)">'
       + GroupWorkOrderInvoice.jobCardHtml(c, toggle)
       + GroupWorkOrderInvoice.savedEntriesHtml(_jobCards.filter(function(entry) { return String(entry.job_id) === String(c.job_id); })) + '</div>';
   }
+  // [invoice-job-mode] What a card with a server mode says: how it is paid,
+  // what to fill in, and links to the other choices open to it.
+  function _jobCardModeHtml(c, cardMode, locks) {
+    var i = c._idx;
+    var h = '<div class="jc-mode" data-card-mode="' + esc(cardMode) + '" data-card-job-mode="' + esc(c.invoice_mode || '') + '">';
+    h += '<span class="jc-mode-label" data-card-mode-label="' + i + '">' + esc(InvoiceJobModeCore.label(cardMode)) + '</span>';
+    InvoiceJobModeCore.switches(c, locks).forEach(function(sw) {
+      h += '<button type="button" class="jc-mode-switch" data-card-mode-switch="' + esc(sw.to) + '" onclick="setJobCardMode(' + i + ',\'' + sw.to + '\')">' + esc(sw.label) + '</button>';
+    });
+    h += '<span class="jc-mode-hint">' + esc(InvoiceJobModeCore.hint(cardMode)) + '</span>';
+    return h + '</div>';
+  }
   function renderJobCardsHtml() {
+    _syncInvoiceJobModes();
     if (!invoiceRoutesSettled()) {
       return '<p data-invoice-routes-pending role="status">Checking which jobs are paid through a group. Your entries are kept.</p>';
     }
@@ -25977,7 +26172,13 @@
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
     } else {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">For each job, give the date you worked and your start and finish time. Hours are worked out for you. ' + (_assignedRateEditable() ? 'The rate box opens on your usual rate, and you can change it for a job.' : 'Your rate is set by the office and shown for reference.') + '</div>';
+      // [invoice-job-mode] Once ops-api says how each job is paid, the card says it.
+      var modesKnown = _jobCards.some(function(c) { return InvoiceJobModeCore.known(c); });
+      html += '<div data-invoice-cards-intro style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">'
+        + (modesKnown
+          ? 'Each job says how it is paid. Fill in what it asks for. For hours, give the date you worked and your start and finish times: hours are worked out for you. '
+          : 'For each job, give the date you worked and your start and finish time. Hours are worked out for you. ')
+        + (_assignedRateEditable() ? 'The rate box opens on your usual rate, and you can change it for a job.' : 'Your rate is set by the office and shown for reference.') + '</div>';
     }
 
     // Group cards by scheduled_date
@@ -26036,7 +26237,7 @@
         var lineAmt = (c.included && c.hours != null && rowRate > 0) ? Math.round(c.hours * rowRate * 100) / 100 : 0;
         html += '<div class="jc-card" data-card="' + c._idx + '" style="border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--sw-card);' + (c.included ? '' : 'opacity:0.5') + '">';
         html += '<div style="display:flex;align-items:flex-start;gap:10px">';
-        html += '<input type="checkbox" ' + (c.included ? 'checked' : '') + ' onchange="toggleJobCard(' + c._idx + ',this.checked)" style="margin-top:3px;width:18px;height:18px">';
+        html += '<input type="checkbox" ' + (c.included ? 'checked' : '') + ' aria-label="Put ' + esc(c.job_number || 'this job') + ' on this invoice" onchange="toggleJobCard(' + c._idx + ',this.checked)" style="margin-top:3px;width:22px;height:22px;flex:0 0 auto">';
         html += '<div style="flex:1;min-width:0">';
         var badge = c.job_type ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:rgba(241,90,41,0.1);color:var(--sw-orange);padding:1px 6px;border-radius:4px;margin-left:6px">' + esc(c.job_type) + '</span>' : '';
         // FIX4: blank-job cards show a clear warning label instead of silent 'Job'.
@@ -26044,29 +26245,39 @@
         if (c.wo_number) jobLabel += ' · ' + esc(c.wo_number);
         html += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + jobLabel + badge + '</div>';
         if (c._blank_job) {
-          html += '<div style="font-size:12px;font-weight:600;color:var(--sw-orange);margin-top:2px">Contact the office — this job has no number or client name.</div>';
+          html += '<div style="font-size:12px;font-weight:600;color:var(--sw-orange);margin-top:2px">Contact the office. This job has no number or client name.</div>';
         } else {
-          html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(c.client_name || '') + (c.site_suburb ? ' — ' + esc(c.site_suburb) : '') + '</div>';
+          html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(c.client_name || '') + (c.client_name && c.site_suburb ? ', ' : '') + esc(c.site_suburb || '') + '</div>';
           // FIX5: show insurer/builder reference when present (makesafe jobs).
           if (c.external_ref) html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:1px">Ref: ' + esc(c.external_ref) + '</div>';
         }
-        // Card mode segmented control: hours | work-order | commission [Q15, Q16]
-        var cardMode = c.commission_mode ? 'commission' : (c.wo_mode ? 'work_order' : 'hours');
-        html += '<div style="display:flex;gap:0;margin-top:8px;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;width:fit-content">';
-        var modeStyles = 'font-size:11px;font-weight:600;padding:5px 11px;cursor:pointer;border:none;outline:none;transition:background 0.15s,color 0.15s;';
-        var modeActive = 'background:var(--sw-dark);color:#fff;';
-        var modeInactive = 'background:var(--sw-card);color:var(--sw-text-sec);';
+        // Which day: the day the office booked it, or the day the trade added it to.
+        html += '<div data-card-day="' + c._idx + '" style="font-size:11px;font-weight:600;color:var(--sw-mid);margin-top:2px">' + (c.assignment_id ? 'Booked for ' : '') + esc(label) + '</div>';
+        // How this job is billed [invoice-job-mode]. With the job's mode from
+        // ops-api the card says it, with a small link for the other choices
+        // open to it. Without one, the Hours / Work Order / Commission toggle.
+        var cardMode = InvoiceJobModeCore.current(c);
         var hoursLocked = _jobCardWorkOrderBlocked(c);
-        html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
-          + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
-          + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
         var jobWoOn = tradeJobWoRetiresTypedBox(c);
         var woLocked = jobWoOn || (!c.work_order_id && !!c.requires_work_order_id);
-        html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="' + (jobWoOn ? 'This job has a work order: bill the hours you worked' : 'No work order on this job yet') + '" ' : '')
-          + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
-          + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
-        html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'commission' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'commission\')">Commission</button>';
-        html += '</div>';
+        if (_invoiceModeChecking(c)) {
+          html += '<div class="jc-mode" data-card-mode-checking="' + c._idx + '"><span class="jc-mode-hint">Checking how this job is paid.</span></div>';
+        } else if (InvoiceJobModeCore.known(c)) {
+          html += _jobCardModeHtml(c, cardMode, { hours: hoursLocked, work_order: woLocked });
+        } else {
+          html += '<div style="display:flex;gap:0;margin-top:8px;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;width:fit-content">';
+          var modeStyles = 'font-size:11px;font-weight:600;padding:5px 11px;cursor:pointer;border:none;outline:none;transition:background 0.15s,color 0.15s;';
+          var modeActive = 'background:var(--sw-dark);color:#fff;';
+          var modeInactive = 'background:var(--sw-card);color:var(--sw-text-sec);';
+          html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
+            + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
+            + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
+          html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="' + (jobWoOn ? 'This job has a work order: bill the hours you worked' : 'No work order on this job yet') + '" ' : '')
+            + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
+            + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
+          html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'commission' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'commission\')">Commission</button>';
+          html += '</div>';
+        }
         html += invoiceJobWorkOrderNoteHtml(c);
         if (_jobCardWorkOrderBlocked(c)) {
           html += '<div data-wo-block="' + c._idx + '" style="margin-top:8px;padding:8px 10px;border:1px solid var(--sw-orange);border-radius:8px;background:rgba(241,90,41,0.08)">';
@@ -26096,7 +26307,7 @@
           var labourLines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
           // WO allocated input
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
-          html += '<label style="font-size:12px;color:var(--sw-text-sec)">WO allocated $</label>';
+          html += '<label style="font-size:12px;color:var(--sw-text-sec)">Work-order amount $</label>';
           html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardwoalloc="' + c._idx + '" '
             + 'value="' + (c.wo_allocated != null ? c.wo_allocated : '') + '" placeholder="0.00" '
             + 'onchange="setJobCardWoAllocated(' + c._idx + ',this.value)" '
@@ -26149,9 +26360,9 @@
           html += '<span style="font-size:12px;color:var(--sw-text-sec)">Net payable</span>';
           html += '<span data-cardamt="' + c._idx + '" style="font-size:20px;font-weight:800;color:' + ((c.included && net < 0) ? 'var(--sw-red)' : 'var(--sw-dark)') + '">$' + (c.included ? net : 0).toFixed(2) + '</span>';
           html += '</div>';
-          html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
+          html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">What you take off is more than the work-order amount. Net cannot be below $0.</div>';
           html += _renderWoTravelHtml(c);
-          html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
+          html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + '. This is written on the invoice line.'
             + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
           html += _jobCardTimeHtml(c, rowRate);
@@ -26163,13 +26374,13 @@
         if (window.GroupWorkOrderInvoice) html += GroupWorkOrderInvoice.routeHtml(c) + GroupWorkOrderInvoice.discoveryHtml(c);
         // Description: auto-filled for commission; optional annotation for WO; required for hours.
         var commAutoDesc = cardMode === 'commission' ? ('Commission — ' + esc(c.job_number || '') + ' — ' + esc(c.client_name || '')) : '';
-        var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional — breakdown auto-added)' : 'Description of work');
+        var descPlaceholder = cardMode === 'commission' ? 'Auto-filled: Commission — job — client' : (cardMode === 'work_order' ? 'Description (optional, the breakdown is added for you)' : 'Description of work');
         var descVal = cardMode === 'commission' ? commAutoDesc : esc(c.description || '');
         // An hours card's description sits with its other boxes (above).
         if (cardMode !== 'hours') html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
         if (!_invRunningHydrating) {
           html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">'
-            + (c.manually_added ? 'Added by you — the office will verify. ' : '')
+            + (c.manually_added ? 'You added this job. The office will check it. ' : '')
             + '<button type="button" data-cardremove="' + c._idx + '" onclick="removeDraftJobCard(' + c._idx + ')" style="background:none;border:0;padding:0;font:inherit;font-size:10px;font-weight:600;color:var(--sw-red);cursor:pointer">Remove</button></div>';
         }
         // [M4 U2] Over-allowance make-safe variation prompt (hours mode only). Capture, never blocks.
@@ -26661,10 +26872,25 @@
       toast(c.wo_block_reason || 'This work order is not available for a job invoice.', true);
       return;
     }
+    // [invoice-job-mode] With the job's mode from ops-api, only the choices
+    // the card offers are open.
+    if (InvoiceJobModeCore.known(c)) {
+      if (mode === 'commission' && c.can_claim_commission !== true) {
+        toast('Commission is not open on this job.', true);
+        return;
+      }
+      if (mode === 'work_order' && c.invoice_mode !== 'work_order' && !c.work_order_id) {
+        toast('This job is paid by the hour.', true);
+        return;
+      }
+    }
     _syncJobCardsFromDOM();
     c.wo_mode = (mode === 'work_order');
     c.commission_mode = (mode === 'commission');
     c.hours_mode_locked = (mode === 'hours');
+    // The trade's own choice: a later read of the job's mode does not undo it.
+    c.mode_picked = true;
+    _markDraftEdited(c);
     renderInvoiceBuilder();
   };
   window.ackJobCardWorkOrderAsHours = function(idx) {
@@ -26684,10 +26910,6 @@
     _syncJobCardsFromDOM();
     c.included = false;
     renderInvoiceBuilder();
-  };
-  // Legacy toggle preserved for any code still referencing it.
-  window.toggleJobCardWoMode = function(idx, on) {
-    window.setJobCardMode(idx, on ? 'work_order' : 'hours');
   };
   // ── Commission amount setter [Q16] ────────────────────────────────────
   window.setJobCardCommission = function(idx, val) {
@@ -27357,8 +27579,8 @@
     }
     // Description is required for manually-added (searched) hourly rows so ops know
     // what was done, but optional for auto-assigned cards (job/client already identifies
-    // the work). Hours and rate are required unless the card has complete lump-sum
-    // amounts — those are a peer option to hours for every job-centric trade.
+    // the work). Hours and rate are always required on an hours card: an amount on it
+    // is only ever taken off (Marnin, 11 Nov 2026).
     var hourLumpBad = [];
     included.forEach(function(c) {
       if (_jobCardEmitsWorkOrder(c) || c.commission_mode) return;
@@ -27381,19 +27603,16 @@
     // Hours are worked out from those and never typed. [trade-time-entry]
     function _timeCardLabel(c) { return c.job_number || c.site_suburb || c.client_name || 'Job'; }
     function _isTimeCard(c) { return !_jobCardEmitsWorkOrder(c) && !c.commission_mode; }
-    function _completeLumps(c) {
-      return _woCleanLumpLines(c).filter(function(lp) { return lp.description && lp.amount > 0; });
-    }
     var timeBad = [];
     var timeSeen = {};
     included.forEach(function(c) {
       if (!_isTimeCard(c)) return;
       var touched = TradeTimeEntryCore.touched(c);
-      // An amount-only card bills no time, so it owes no times.
-      if (!touched && _completeLumps(c).length > 0) return;
+      // Marnin, 11 Nov 2026: an amount on an hours card is taken off; it is
+      // never a line on its own. A card with only an amount owes its times.
       var lbl = _timeCardLabel(c);
       if (!touched) {
-        timeBad.push({ idx: c._idx, msg: lbl + ': add the date, start time and finish time you worked, or add an amount.' });
+        timeBad.push({ idx: c._idx, msg: lbl + ': add the date, start time and finish time you worked.' });
         return;
       }
       var chk = TradeTimeEntryCore.check(c, opts.today);
@@ -27442,7 +27661,6 @@
         if (c.manually_added && !c.description) return true;
         return false;
       }
-      if (_completeLumps(c).length > 0) return false;
       return true;
     });
     if (missing.length > 0) {
@@ -27451,9 +27669,9 @@
         var _noRate = !(Number(c.rate) > 0);
         var _noDesc = c.manually_added && !c.description;
         if (!c.manually_added && _noRate && !_assignedRateEditable()) return RATE_NOT_SET_MSG;
-        if (_noDesc && _noRate) return _lbl + ': add a description and your rate, or add an amount.';
+        if (_noDesc && _noRate) return _lbl + ': add a description and your rate.';
         if (_noDesc) return _lbl + ': add a description of works done.';
-        return _lbl + ': enter your rate, or add an amount.';
+        return _lbl + ': enter your rate.';
       });
       var _shown = _msgs.slice(0, 3);
       if (_msgs.length > 3) _shown.push('...and ' + (_msgs.length - 3) + ' more');
@@ -30851,7 +31069,7 @@
       } else if (wo.already_invoiced) {
         html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);border-radius:8px;padding:10px;font-size:13px;font-weight:600;margin-top:10px">&#10003; Invoiced</div>';
       } else if (isPerMetreUser() && wo.can_add_to_weekly_invoice) {
-        html += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(wo.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(wo)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Add to Weekly Invoice</button>';
+        html += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(wo.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(wo)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px;min-height:44px">Open in Work Order Invoice</button>';
       } else if (wo.can_invoice && wo.can_invoice_direct !== false) {
         html += '<button id="woBtn' + wo.id + '" onclick="invoiceWorkOrder(\'' + wo.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Invoice This Work Order</button>';
       } else if (wo.direct_invoice_block_reason) {

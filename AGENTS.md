@@ -934,9 +934,9 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
-A running draft for that same week is off unless `my_hours.running_invoice_draft`
-is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
-one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+A running draft for that same week shows when `my_hours.running_invoice_draft`
+is true; ops-api sends true unless `users.trade_details.runningInvoiceDraft`
+is false. `?invdraft=1` shows Save on one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
 and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
 GST, super and the weekly deduction are still worked out only on submit.
 Search `modules/trade-invoice-running-draft.js`. Guards:
@@ -1025,6 +1025,20 @@ trades' searched-in cards move between days and weeks. Search
 `// <invoice-self-allocate>`; contract in `trade-app.md` → "Pay tab: adding
 yourself to a job you invoice". Guard:
 `tests/e2e/trade-invoice-self-allocate-clock-off.spec.js`.
+
+## Trade invoice: the job decides how it is billed (`trade.html`)
+
+Marnin, 11 Nov 2026. A Weekly Invoice card starts in ops-api's `invoice_mode`
+for the job (`my_hours` rows; `trade_invoice_job_modes` for a searched-in job):
+hourly shows no work-order or commission choice, a work order keeps a small
+"Bill by hours instead", a group work order goes to the group, and Commission
+shows only where `can_claim_commission` is true. Never restate the rule in the
+app; with no mode (older ops-api, `invoice_mode_unavailable`, a failed read)
+the old Hours / Work Order / Commission toggle stays exactly as it was. A
+trade's own switch (`mode_picked`) is never undone. "+ Take an amount off" only
+deducts: an hours card still owes its times. Search `// <invoice-job-mode>`;
+contract in `trade-app.md` → "Pay tab: the job decides how it is billed".
+Guard: `tests/e2e/trade-invoice-job-mode.spec.js`.
 
 ## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
 

@@ -366,6 +366,11 @@ action"; any other failed read says so in words. Every rule is in the pure
 quote, that it was sent, or the builder's answer is done from the terminal
 tools today, not this screen. Guards: `npm run test:ops-restoration` (in
 `test:e2e`) and `tests/e2e/ops-restoration-panel.spec.js`.
+The board card shows the same phase as a chip (`// <makesafe-restoration-phase>`)
+from the price-free `restoration` block on the canonical `makesafe_board` row
+(a sent quote reads "Quote sent · waiting on builder approval"); it never
+re-derives the phase or moves the card. Guard:
+`tests/e2e/ops-makesafe-restoration-phase.spec.js`.
 
 ## Add job photos page (`job-photos.html`)
 

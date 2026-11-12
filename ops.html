@@ -1886,6 +1886,16 @@
       padding: 2px 7px; border-radius: 10px; white-space: nowrap;
       color: #7A4A12; background: #FEF3E7; border: 1px solid #F5C889;
     }
+    /* Restoration phase: where the quote is at (see <makesafe-restoration-phase>). */
+    .ms-card-v2 .ms-resto {
+      display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+      font-size: 9px; font-weight: 800; padding: 3px 7px; border-radius: 6px;
+      color: #1E4E5C; background: #EAF3F6; border: 1px solid #C9DEE5;
+    }
+    .ms-card-v2 .ms-resto .ms-resto-ref { font-weight: 600; opacity: 0.8; }
+    .ms-card-v2 .ms-resto.wait { color: #7A4A12; background: #FEF3E7; border-color: #F5C889; }
+    .ms-card-v2 .ms-resto.done { color: #14532D; background: #ECFDF3; border-color: #BBE5C8; }
+    .ms-card-v2 .ms-resto.stop { color: #991B1B; background: #FEF2F2; border-color: #FECACA; }
     .kanban-col-header .ms-col-note {
       display: block; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
       text-transform: none; color: #7A4A12; margin-top: 2px;
@@ -15743,6 +15753,11 @@ function mapCanonicalMakesafeRow(row, enrich, opts) {
   j.ses_family = row.ses_family || null;
   j.ses_family_label = row.ses_family_label || null;
   j.ses_recipe_state = row.ses_recipe_state || null;
+  // Restoration cards only: where the quote is at (price-free, from the
+  // server's one restoration reader). See <makesafe-restoration-phase>.
+  j.restoration = (row.restoration && typeof row.restoration === 'object')
+    ? row.restoration
+    : null;
 
   // The card's canonical stage is also the ONLY stage the job detail may show
   // for it. Remember it by job id so opening the card cannot re-derive a
@@ -16688,6 +16703,60 @@ function makesafeCardHasReviewAffordance(j, status, packCompleteness) {
 // numbers (refined dual-ref block), intake/client, a muted age/KPI pill, a red
 // past-SLA banner when breached, the 2A crew chip, the doc-icon row, and
 // Allocate/Reassign. All behaviour (drag, click-in, allocate/reassign) kept.
+// <makesafe-restoration-phase>
+// A restoration card (family Restoration) carries `restoration` on the
+// canonical makesafe_board row: mode, phase, phase_label and next_step, worked
+// out on the server by the same rules as the restoration_plan read. The card
+// only words it: the phase is never re-derived here, and the column still
+// comes from canonical_stage alone. Price-free: nothing here shows money.
+var MAKESAFE_RESTORATION_CHIP = {
+  awaiting_approval: { label: 'Quote sent \u00b7 waiting on builder approval', tone: 'wait' },
+  quote_drafted: { label: 'Quote drafted \u00b7 not sent yet', tone: '' },
+  approved_works: { label: 'Quote approved \u00b7 do the works', tone: 'done' },
+  declined: { label: 'Quote declined', tone: 'stop' }
+};
+function makesafeRestorationChip(restoration) {
+  if (!restoration || typeof restoration !== 'object') return null;
+  var nextStep = String(restoration.next_step || '').trim();
+  if (restoration.readable === false) {
+    return {
+      label: 'Restoration plan needs a look',
+      title: nextStep || 'The stored restoration plan could not be read.',
+      tone: 'stop',
+      detail: ''
+    };
+  }
+  var phase = String(restoration.phase || '').trim();
+  if (!phase) return null;
+  var known = MAKESAFE_RESTORATION_CHIP[phase] || {};
+  var label = known.label || String(restoration.phase_label || '').trim();
+  if (!label) return null;
+  var detail = '';
+  var quoteNumber = String(restoration.quote_number || '').trim();
+  if (quoteNumber && phase !== 'assess' && phase !== 'attend_and_charge') {
+    detail = quoteNumber;
+    if (phase === 'awaiting_approval' && restoration.quote_sent_at) {
+      var sentAt = new Date(restoration.quote_sent_at);
+      if (!isNaN(sentAt.getTime())) {
+        detail += ' sent ' + sentAt.toLocaleDateString('en-AU', {
+          timeZone: 'Australia/Perth', day: 'numeric', month: 'short'
+        });
+      }
+    }
+  }
+  return { label: label, title: nextStep, tone: known.tone || '', detail: detail };
+}
+function renderMakesafeRestorationChip(j) {
+  var chip = makesafeRestorationChip(j && j.restoration);
+  if (!chip) return '';
+  return '<div class="ms-resto' + (chip.tone ? ' ' + chip.tone : '') + '"'
+    + ' data-restoration-phase="' + escapeAttr(String((j.restoration && j.restoration.phase) || 'unreadable')) + '"'
+    + (chip.title ? ' title="' + escapeAttr(chip.title) + '"' : '') + '>'
+    + '<span class="ms-resto-lbl">' + escapeHtml(chip.label) + '</span>'
+    + (chip.detail ? '<span class="ms-resto-ref">' + escapeHtml(chip.detail) + '</span>' : '')
+    + '</div>';
+}
+
 function renderMakesafeCard(j, status) {
   var builder = getMakesafeBuilder(j);
   var suburb = j.site_suburb || j.suburb || '';
@@ -16822,6 +16891,8 @@ function renderMakesafeCard(j, status) {
   var tradeStage = makesafeTradeStageLabel(j, status);
   if (tradeStage) html += '<span><b>Trade</b> ' + escapeHtml(tradeStage) + '</span>';
   html += '</div>';
+  // Restoration: where the quote is at. See <makesafe-restoration-phase>.
+  if (status !== 'cancelled') html += renderMakesafeRestorationChip(j);
 
   // loud red past-SLA banner on breach
   if (sla.breached) {

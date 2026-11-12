@@ -168,7 +168,7 @@ test.describe('the rate box once ops-api honours a typed rate', () => {
     await expect(card.locator('[data-cardratenote]')).toBeHidden();
 
     await page.locator('#invSubmitBtn').click();
-    await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: enter your rate, or add an amount.');
+    await expect(page.locator('#toast')).toContainText('FENCE-HENRY-001: enter your rate.');
     await expect(page.locator('#toast')).not.toContainText('contact them to have it set');
     expect(invoicePosts(feedRequests)).toEqual([]);
   });

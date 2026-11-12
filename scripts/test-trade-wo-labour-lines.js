@@ -239,10 +239,11 @@ function hoursCard(overrides) {
     finish_time: '',
     wo_lump_lines: [{ description: 'Site allowance', amount: 50, line_kind: 'lump_sum' }],
   })])
-  assert(!built.error, 'lumps-only hours card builds without hours: ' + built.error)
-  assert.strictEqual(built.manualAssignments.length, 0)
-  assert.strictEqual(built.cardExtraItems.length, 0, 'lump-only hours card does not ride extra_items')
-  assert.strictEqual(built.subtotal, 0, 'job-centric extras stay hours/WO/commission only')
+  // Marnin, 11 Nov 2026: an amount on an hours card is only taken off. A
+  // card with an amount and no times owes its times.
+  assert(built.error, 'an amount-only hours card is refused')
+  assert(built.error.indexOf('add the date, start time and finish time you worked') !== -1, 'asks for the times: ' + built.error)
+  assert(built.error.indexOf('or add an amount') === -1, 'no longer offers an amount instead of times: ' + built.error)
 }
 
 {

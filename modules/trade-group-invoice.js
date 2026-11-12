@@ -454,7 +454,11 @@
           + (route.discovery && route.discovery.state === 'setup_required' ? '' : discoveryHtml(card)) + links({ job_id: card.job_id });
       }
       return head({ job_number: card.job_number, client_name: card.client_name, site_suburb: card.site_suburb, job_id: card.job_id }) + (toggle || '')
-        + '<div class="gw-locked" style="margin-top:12px">Paid from the group work order.</div>' + links({ job_id: card.job_id });
+        + '<div class="gw-locked" data-group-mode-job style="margin-top:12px">Paid from the group work order.'
+        // The job's mode from ops-api says group, and no group is listed for
+        // this trade yet: the job page is where they join or start it.
+        + (card.invoice_mode === 'group_work_order' ? ' Open the job to join or start its group, then add your hours there.' : '')
+        + '</div>' + links({ job_id: card.job_id });
     }
     return list.map(function(g, i) {
       var id = esc(g.group_id);

@@ -951,9 +951,9 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
-A running draft for that same week is off unless `my_hours.running_invoice_draft`
-is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
-one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+A running draft for that same week shows when `my_hours.running_invoice_draft`
+is true; ops-api sends true unless `users.trade_details.runningInvoiceDraft`
+is false. `?invdraft=1` shows Save on one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
 and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
 GST, super and the weekly deduction are still worked out only on submit.
 Search `modules/trade-invoice-running-draft.js`. Guards:
@@ -1011,7 +1011,10 @@ row. ops-api recomputes the hours and refuses a time line without the fields
 own Extras row. The date worked cannot be after today (Perth), or more than a year
 before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
 onto a line: no default date or start, no device memory, no prefill from the
-schedule or clock on and off. A card, an Extras row and the job-view row open
+schedule or the clock alone. The one prefill is the trade's own saved times
+(`logged_time_entry` on `my_hours`: confirmed at clock off, which asks about a
+break, or saved on the job view), filled once into an empty card and shown for
+the trade to check (`// <clock-off-times>`, `// <invoice-saved-times>`). Otherwise a card, an Extras row and the job-view row open
 blank; a card shows hours on record only as a reminder. The job-view row
 records times against the job and never promises the week or the invoice.
 Lines that are not time carry none of the fields. Search
@@ -1025,6 +1028,40 @@ a spec that enters times on the fixture week's jobs needs
 Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.
+
+## Trade adds themselves to a job from the invoice (`trade.html`)
+
+Being on a job (allocated, or accepted with "I'm on it") is what lets a trade
+invoice it (Marnin, 11 Nov 2026). Picking a job in the invoice's "+ Add job"
+is unchanged; when ops-api refuses the invoice with `extra_job_not_allowed`
+(403, nothing saved), the app asks to add the trade to each refused job for
+the day worked (`self_allocate_for_invoice`, which books only the caller,
+never texts) and then opens the one-invoice confirm again. Never book the
+trade at pick time: the app cannot see an invoice-any-job grant, and those
+trades' searched-in cards move between days and weeks. Search
+`// <invoice-self-allocate>`; contract in `trade-app.md` → "Pay tab: adding
+yourself to a job you invoice". Guard:
+`tests/e2e/trade-invoice-self-allocate-clock-off.spec.js`.
+
+## Trade invoice: the job decides how it is billed (`trade.html`)
+
+Marnin, 11 Nov 2026. A Weekly Invoice card starts in ops-api's `invoice_mode`
+for the job (`my_hours` rows; `trade_invoice_job_modes` for a searched-in job):
+hourly shows no work-order or commission choice, a work order keeps a small
+"Bill by hours instead", a group work order goes to the group, and Commission
+shows only where `can_claim_commission` is true. Never restate the rule in the
+app; with no mode (older ops-api, `invoice_mode_unavailable`, a failed read)
+the old Hours / Work Order / Commission toggle stays exactly as it was. A
+trade's own switch (`mode_picked`) is never undone. "+ Take an amount off" only
+deducts: an hours card still owes its times. A work-order job whose row
+carries `work_order_agreed_ex` (Marnin, 12 Nov 2026: an approved job work
+order) bills that amount read only, re-pinned from the server before every
+paint and submit and never kept from a saved draft; only without that field
+does an approved job work order still force hours (`tradeJobWoRetiresTypedBox`).
+ops-api's `work_order_amount_not_agreed` refusal is shown in words, never
+queued. The estimate takes no super on commission. Search `// <invoice-job-mode>`;
+contract in `trade-app.md` → "Pay tab: the job decides how it is billed".
+Guard: `tests/e2e/trade-invoice-job-mode.spec.js`.
 
 ## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
 

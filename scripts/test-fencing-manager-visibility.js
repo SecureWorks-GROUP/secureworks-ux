@@ -370,8 +370,8 @@ assert(!html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFi
   !/hours === 1 && chargeNames/.test(html) &&
   !/wo_lump_lines: lumpLinesOut/.test(html),
   'invoice-level and hours-card lumps stay on final_deductions; WO deducts reshape to hours×rate fanout lines');
-assert(html.includes('or add an amount'),
-  'hours-card validation treats an amount as a peer to hours');
+assert(!html.includes('or add an amount') && html.includes('+ Take an amount off'),
+  'an amount on an hours card is only taken off, never a peer to hours (Marnin, 11 Nov 2026)');
 assert(html.includes('addWoLumpLine'),
   'job-centric cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),

@@ -357,7 +357,7 @@ async function checkPayableRoutes() {
     window: {TradeInvoiceRunningDraft: Core, GroupWorkOrderInvoice: group}, GroupWorkOrderInvoice: group,
     _jobCards: stored, _invRows: [], _invLumpLines: [], _invDismissedKeys: ['kept'], _invManualLock: true,
     _invNotes: '', _invGst: false, _hoursWeekStart: '2026-10-26', _hoursWeekEnd: '2026-11-01',
-    _serializeInvLumpLinesDraft: x => x, _defaultJobCardWoMode: () => false,
+    _serializeInvLumpLinesDraft: x => x,
     esc: value => String(value == null ? '' : value).replace(/</g, '&lt;'),
     _hoursData: {rate: 99}, _tradeRate: 99, _assignedRateEditable: () => false,
     document: {querySelector: () => { throw Error('Group sync must not read ordinary inputs'); }, getElementById: () => null}

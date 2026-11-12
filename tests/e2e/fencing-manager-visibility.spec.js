@@ -434,7 +434,7 @@ test.describe('Fencing manager visibility', () => {
     await expect(page.locator('[data-work-order-card]')).toHaveCount(1);
     await expect(page.locator('#hoursContent')).toContainText('WO-FENCE-001');
     await expect(page.locator('#hoursContent')).toContainText('Total: $110.00');
-    await expect(page.getByRole('button', { name: 'Add to Weekly Invoice' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open in Work Order Invoice' })).toBeVisible();
     await expect(page.locator('#hoursContent')).not.toContainText('WO-PATIO-002');
     await expect(page.locator('#hoursContent')).not.toContainText('WO-OTHER-TENANT');
 

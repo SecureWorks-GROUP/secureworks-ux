@@ -795,6 +795,7 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-draft { border-color: #C9D6DD; }
 .dpc-v2-draft .dpc-suphead { background: #FBF8F5; }
 .dpc-v2-isblocked { border-color: #E9C98A; }
+.dpc-v2-rmask { margin: 10px 12px 0; }
 .dpc-v2-blocked { margin: 10px 12px 0; padding: 9px 12px; border-radius: 8px; background: #FDF3E1; color: #7A4D00; font-size: 13px; }
 .dpc-v2-main { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--steel-2); cursor: pointer; white-space: nowrap; }
 .dpc-v2-main small { font-weight: 400; color: var(--mute); }

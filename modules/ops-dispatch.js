@@ -1077,7 +1077,7 @@
     arrival: {},
     // v2 slice 8: each job's supplier replies read and its presses, and the
     // Unmatched supplier emails tray.
-    rep: { jobs: {}, tray: { open: false, status: 'idle', data: null, other: false, busy: {}, msg: null, pick: {}, hideAsk: null } },
+    rep: { jobs: {}, tray: { open: false, status: 'idle', data: null, other: false, busy: {}, msg: null, pick: {}, hideAsk: null, clearAsk: false, clearing: false } },
     // Needs you now (Tweak 3): the chip pressed (null = show all), the last
     // worked out summary (modules/dispatch-needs-you.js) and its fingerprint.
     needs: { kind: null, now: null, sig: '' },
@@ -1561,9 +1561,10 @@
   // ── v2 slice 8: supplier replies and suggested delivery dates ──
   // Two reads, each writing nothing: dispatch_v2_replies once per job open
   // (and once after each press on it), and dispatch_v2_replies_unmatched once
-  // each time the tab is shown (and after each tray press). Six presses, each
+  // each time the tab is shown (and after each tray press). Seven presses, each
   // sent once on a person's press, never on their own: confirm_guess,
-  // reject_guess, assign, hide, suggestion_accept and suggestion_dismiss.
+  // reject_guess, assign, hide, clear (Clear all), suggestion_accept and
+  // suggestion_dismiss.
   // Accept saves the supplier's delivery date on the supplier box and moves no
   // stage: when its answer offers a stage move, the rail's own confirm line
   // asks first, and only Move sends update_job_status.
@@ -2000,6 +2001,35 @@
       var w = repWords(err);
       t.msg = { ok: false, text: w ? w.text : REP_NOT_DONE[kind] };
       if (w && w.changed) loadTray(); else paintTray();
+    });
+  }
+
+  // Clear all (Shaun, 12 Nov 2026): every email listed in the tray, in one
+  // press, after the tray's own ask. It names only the emails on screen, so
+  // one that came in since the list was read stays. Best guesses are turned
+  // down, then every email is hidden; each stays in admin@.
+  function trayClearAll() {
+    var t = state.rep.tray;
+    var ids = t.data ? t.data.emails.map(function (m) { return m.id; }) : [];
+    if (!ids.length || t.clearing || Object.keys(t.busy).length) return;
+    t.clearing = true;
+    t.msg = null;
+    paintTray();
+    Promise.resolve().then(function () { return global.opsPost('dispatch_v2_replies_clear', { email_ids: ids }); }).then(function (resp) {
+      if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
+      var n = Number(resp.cleared) || 0;
+      var skipped = Number(resp.skipped) || 0;
+      t.clearing = false;
+      t.clearAsk = false;
+      t.hideAsk = null;
+      t.msg = { ok: true, text: 'Cleared ' + n + (n === 1 ? ' email' : ' emails') + ' from this list.' +
+        (skipped ? ' ' + skipped + (skipped === 1 ? ' was' : ' were') + ' already sorted.' : '') };
+      loadTray();
+    }, function (err) {
+      t.clearing = false;
+      var w = repWords(err);
+      t.msg = { ok: false, text: w ? w.text : 'Could not clear the list. Nothing was changed by this press. Try again.' };
+      loadTray();
     });
   }
 
@@ -4493,6 +4523,7 @@
       if (b.open) out.push({ m: b.open, box: b });
       b.sent.forEach(function (m) { out.push({ m: m, box: b }); });
     });
+    (e.d.unboxed || []).forEach(function (u) { out.push(u); });
     return out;
   }
 
@@ -4567,6 +4598,8 @@
     h += '<p class="dpc-mail-msg">' + esc(facts.join(', ') + '.') + '</p>';
     if (m.test) h += '<p class="dpc-mail-msg">Test copy sent to ' + esc(text(m.test.sent_to) || V2_FROM) + ', ' + esc(stampText(m.test.sent_at)) + (text(m.test.sent_by_email) ? ' by ' + esc(m.test.sent_by_email) : '') + '.</p>';
     h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre>';
+    // Its box was taken off with the X: nothing to go to in Materials.
+    if (it.box.removed) return h + '<p class="dpc-mail-msg">' + esc(it.box.name) + ' was taken off this job in Materials. This sent email is kept.</p>';
     return h + '<div class="dpc-actions"><button type="button" data-dpc-mail-goto="' + sid + '" data-dpc-mail-id="' + esc(m.id) + '">' + (m.sent ? 'Show in Materials' : 'Edit and send in Materials') + '</button></div>';
   }
 
@@ -4767,8 +4800,17 @@
     var t = state.rep.tray;
     if (!t.open) return '<div data-dpc-region="tray" hidden></div>';
     var h = '<div class="dpc-panel dpc-tray" data-dpc-region="tray" id="dpc-tray" role="region" aria-label="Unmatched supplier emails"><div class="dpc-row"><h3 class="dpc-grow">Unmatched supplier emails</h3>';
+    var listed = t.status === 'ok' && t.data ? t.data.emails.length : 0;
+    var anyBusy = t.clearing || Object.keys(t.busy).length > 0;
+    if (listed && !t.clearAsk) h += '<button type="button" class="dpc-textbtn" data-dpc-tray-clear' + (anyBusy ? ' disabled' : '') + '>Clear all</button>';
     h += '<label class="dpc-tray-other"><input type="checkbox" data-dpc-tray-other' + (t.other ? ' checked' : '') + '> Also show accounts and other supplier mail</label></div>';
     h += '<p class="dpc-empty dpc-empty-tight">Supplier emails that could not be matched to a job, and best guesses to check. Pick the job, and it moves to that job\'s Emails.</p>';
+    if (listed && t.clearAsk) {
+      h += '<div class="dpc-rep-ask" role="group" aria-label="Clear all"><span class="dpc-grow">Clear all ' + listed + (listed === 1 ? ' email' : ' emails') +
+        ' from this list? Best guesses are turned down. They stay in admin@ and nothing is sent.</span>' +
+        '<button type="button" class="dpc-primary" data-dpc-tray-clear-go' + (anyBusy ? ' disabled' : '') + '>' + (t.clearing ? 'Clearing...' : 'Clear all') + '</button>' +
+        '<button type="button" data-dpc-tray-clear-no' + (t.clearing ? ' disabled' : '') + '>Keep</button></div>';
+    }
     if (t.msg) h += repMsgHtml(t.msg);
     if (t.status === 'error') return h + failLine('Could not load the unmatched supplier emails.', 'tray', true) + '</div>';
     if (!t.data) return h + '<p class="dpc-empty">Reading supplier emails...</p></div>';
@@ -4777,7 +4819,7 @@
     return h + '</div>';
   }
 
-  var TRAY_FOCUS_KEYS = ['data-dpc-tray-confirm', 'data-dpc-tray-reject', 'data-dpc-tray-assign', 'data-dpc-tray-job', 'data-dpc-tray-put', 'data-dpc-tray-hide', 'data-dpc-tray-hide-go', 'data-dpc-tray-other'];
+  var TRAY_FOCUS_KEYS = ['data-dpc-tray-clear', 'data-dpc-tray-clear-go', 'data-dpc-tray-clear-no', 'data-dpc-tray-confirm', 'data-dpc-tray-reject', 'data-dpc-tray-assign', 'data-dpc-tray-job', 'data-dpc-tray-put', 'data-dpc-tray-hide', 'data-dpc-tray-hide-go', 'data-dpc-tray-other'];
   function paintTray() {
     needsWorkOut();
     paintNeeds();
@@ -4986,7 +5028,14 @@
         lines: resp.draft_list.lines.filter(function (l) { return isObj(l) && l.id; }).map(v2LineFrom).sort(v2ByPos),
         photos: resp.draft_list.photos.filter(function (p) { return isObj(p) && p.id; }).map(v2PhotoFrom)
       },
-      boxes: resp.suppliers.filter(function (s) { return isObj(s) && s.supplier_id; }).map(v2BoxFrom).sort(v2ByPos)
+      boxes: resp.suppliers.filter(function (s) { return isObj(s) && s.supplier_id; }).map(v2BoxFrom).sort(v2ByPos),
+      // Sent order emails whose box was taken off with the X: still listed in
+      // Emails. Empty from an older server.
+      unboxed: (Array.isArray(resp.unboxed_sent_emails) ? resp.unboxed_sent_emails : []).map(function (u) {
+        var m = isObj(u) ? v2EmailFrom(u.email) : null;
+        if (!m) return null;
+        return { m: m, box: { supplier_id: u.supplier_id ? String(u.supplier_id) : '', name: text(u.supplier_name) || 'Supplier', removed: true } };
+      }).filter(Boolean)
     };
   }
 
@@ -4998,7 +5047,9 @@
       // and typedAt[id] is the line's stamp when the typing began.
       local: [], typed: {}, typedAt: {}, again: {}, more: {},
       mailTyped: {}, mailAt: {}, mailAgain: {},
-      dates: {}, fulfil: {}, busy: {}, msg: {}, notice: '', ask: null
+      dates: {}, fulfil: {}, busy: {}, msg: {}, notice: '', ask: null,
+      // The box whose X asks "Remove ...?" now, or null.
+      rmAsk: null
     };
   }
 
@@ -5079,6 +5130,7 @@
     e.local.forEach(function (l) { keep[l.id] = true; });
     var old = e.d;
     e.d = d;
+    if (e.rmAsk && !d.boxes.some(function (b) { return b.supplier_id === e.rmAsk; })) e.rmAsk = null;
     Object.keys(e.typed).forEach(function (id) {
       if (keep[id]) return;
       var now = v2Line(e, id);
@@ -5422,21 +5474,73 @@
     });
   }
 
+  // The X on a box: first ask, under the box's header, what goes with it.
+  function v2RemoveAsk(jobId, sid) {
+    var e = v2Entry(jobId);
+    if (!e || e.status !== 'ok' || !v2Box(e, sid) || e.busy['box:' + sid]) return;
+    e.rmAsk = sid;
+    delete e.msg['box:' + sid];
+    paintV2();
+    refocus('[data-dpc-v2="remove-sup-yes"][data-dpc-v2-sid="' + v2KeyAttr(sid) + '"]');
+  }
+
+  function v2RemoveCancel(jobId, sid) {
+    var e = v2Entry(jobId);
+    if (!e) return;
+    e.rmAsk = null;
+    paintV2();
+    refocus('[data-dpc-v2="remove-sup"][data-dpc-v2-sid="' + v2KeyAttr(sid) + '"]');
+  }
+
+  // The question: the supplier, what the box holds that goes with it, and
+  // that nothing is sent to the supplier.
+  function v2RemoveAskHtml(e, b) {
+    var sid = b.supplier_id;
+    var busy = !!e.busy['box:' + sid];
+    var lines = b.lines.length + e.local.filter(function (l) { return l.supplier_id === sid; }).length;
+    var parts = [];
+    if (lines) parts.push(v2Count(lines, 'line', 'lines'));
+    if (b.photos.length) parts.push(v2Count(b.photos.length, 'photo', 'photos'));
+    if (b.open && !b.open.sent) parts.push('the held order email');
+    var ask = 'Remove ' + b.name + (parts.length ? ' and its ' + v2JoinAnd(parts) : '') + '? Nothing is sent to ' + b.name + '.';
+    if (b.sent.length) ask += ' The order already sent stays in this job\'s Emails.';
+    var h = '<div class="dpc-tape-confirm dpc-v2-rmask" role="group" aria-label="Confirm taking ' + esc(b.name) + ' off this job"><span class="dpc-empty dpc-empty-tight dpc-grow">' + esc(ask) + '</span>';
+    h += '<button type="button" class="dpc-primary" data-dpc-v2="remove-sup-yes" data-dpc-v2-sid="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Removing...' : 'Remove') + '</button>';
+    return h + '<button type="button" data-dpc-v2="remove-sup-no" data-dpc-v2-sid="' + esc(sid) + '"' + (busy ? ' disabled' : '') + '>Cancel</button></div>';
+  }
+
+  function v2JoinAnd(parts) {
+    if (parts.length < 2) return parts.join('');
+    return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+  }
+
   function v2RemoveSupplier(jobId, sid) {
     var e = v2Entry(jobId);
     var key = 'box:' + sid;
     if (!e || e.status !== 'ok' || e.busy[key]) return;
+    var b = v2Box(e, sid);
+    var name = b ? b.name : 'The supplier';
     e.busy[key] = 'remove';
     delete e.msg[key];
     paintV2();
     Promise.resolve().then(function () { return global.opsPost('dispatch_v2_remove_supplier', { job_id: jobId, supplier_id: sid }); }).then(v2Ok).then(function () {
       delete e.busy[key];
-      e.d.boxes = e.d.boxes.filter(function (b) { return b.supplier_id !== sid; });
+      e.rmAsk = null;
+      // Its lines not saved yet go with it.
+      e.local = e.local.filter(function (l) { return l.supplier_id !== sid; });
+      // Its sent emails stay in Emails until the re-read says the same.
+      if (b) b.sent.forEach(function (m) { e.d.unboxed.push({ m: m, box: { supplier_id: sid, name: name, removed: true } }); });
+      e.d.boxes = e.d.boxes.filter(function (x) { return x.supplier_id !== sid; });
+      e.notice = name + ' was taken off this job. Nothing was sent to them.';
       paintV2If(jobId);
       readV2(jobId, true);
     }, function (err) {
       delete e.busy[key];
-      v2Fail(jobId, key, err, 'Not taken off.');
+      e.rmAsk = null;
+      var w = v2Words(err, 'Not taken off.') || { text: 'Not taken off.' };
+      if (w.changed) { e.msg[key] = { bad: true, text: w.text }; v2Changed409(jobId, w.text); return; }
+      e.msg[key] = { bad: true, text: w.text + ' Press the cross to try again.' };
+      paintV2If(jobId);
     });
   }
 
@@ -6408,9 +6512,11 @@
       h += '<label class="dpc-v2-main"><input type="checkbox" data-dpc-v2-main="' + esc(sid) + '"' + (b.is_main ? ' checked' : '') + (e.busy.main ? ' disabled' : '') + '> Main supplier' +
         (b.is_main && !d.mainTicked ? ' <small>(default)</small>' : '') + '</label>';
     }
-    var empty = !b.lines.length && !b.photos.length && !b.open && !b.sent.length && !e.local.some(function (l) { return l.supplier_id === sid; });
-    if (empty) h += '<button type="button" class="dpc-x" data-dpc-v2="remove-sup" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Take ' + esc(b.name) + ' off this job"' + (e.busy[key] ? ' disabled' : '') + '>&times;</button>';
+    // The X is on every box (Shaun, 12 Nov 2026): it asks first, then takes
+    // the supplier off the job with its lines and held email.
+    h += '<button type="button" class="dpc-x" data-dpc-v2="remove-sup" data-dpc-v2-sid="' + esc(sid) + '" aria-label="Take ' + esc(b.name) + ' off this job"' + (e.busy[key] || e.rmAsk === sid ? ' disabled' : '') + '>&times;</button>';
     h += '</div>';
+    if (e.rmAsk === sid) h += v2RemoveAskHtml(e, b);
     if (b.blocked) {
       h += '<div class="dpc-v2-blocked" role="note"><strong>Send blocked.</strong> ' + esc(b.blocked.message || 'This supplier has no approved order email. Ask Shaun to add one before sending.') +
         ' You can still split lines to it.</div>';
@@ -6732,7 +6838,9 @@
       if (e.busy['line:' + id] === 'delete' || (e.msg['line:' + id] && /taken off/i.test(e.msg['line:' + id].text))) v2DeleteLine(jobId, id); else v2SaveLine(jobId, id);
     }
     else if (verb === 'more') { e.more[id] = true; paintV2(); refocus('[data-dpc-v2-cell="profile"][data-dpc-v2-id="' + id + '"]'); }
-    else if (verb === 'remove-sup') v2RemoveSupplier(jobId, sid);
+    else if (verb === 'remove-sup') v2RemoveAsk(jobId, sid);
+    else if (verb === 'remove-sup-yes') v2RemoveSupplier(jobId, sid);
+    else if (verb === 'remove-sup-no') v2RemoveCancel(jobId, sid);
     else if (verb === 'photo-add') {
       var input = region('v2mat') && region('v2mat').querySelector('[data-dpc-v2-file="' + v2KeyAttr(sid) + '"]');
       if (input) input.click();
@@ -6952,7 +7060,7 @@
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
-      '[data-dpc-tray-toggle],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
+      '[data-dpc-tray-toggle],[data-dpc-tray-clear],[data-dpc-tray-clear-go],[data-dpc-tray-clear-no],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto],' +
       '[data-dpc-file-vis],[data-dpc-files-all]') : null;
     if (!t || t.disabled) return;
@@ -7096,6 +7204,17 @@
       tray.open = !tray.open;
       if (tray.open && (tray.status === 'idle' || tray.status === 'error')) loadTray(); else paintTray();
       if (tray.open) { var panel = region('tray'); if (panel) panel.scrollIntoView({ block: 'nearest' }); }
+    } else if (t.hasAttribute('data-dpc-tray-clear')) {
+      tray.clearAsk = true;
+      tray.msg = null;
+      paintTray();
+      refocus('[data-dpc-tray-clear-go]');
+    } else if (t.hasAttribute('data-dpc-tray-clear-go')) {
+      trayClearAll();
+    } else if (t.hasAttribute('data-dpc-tray-clear-no')) {
+      tray.clearAsk = false;
+      paintTray();
+      refocus('[data-dpc-tray-clear]');
     } else if ((id = t.getAttribute('data-dpc-tray-confirm'))) {
       trayPress('confirm', id);
     } else if ((id = t.getAttribute('data-dpc-tray-reject'))) {

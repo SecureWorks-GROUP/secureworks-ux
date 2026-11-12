@@ -1036,7 +1036,13 @@ shows only where `can_claim_commission` is true. Never restate the rule in the
 app; with no mode (older ops-api, `invoice_mode_unavailable`, a failed read)
 the old Hours / Work Order / Commission toggle stays exactly as it was. A
 trade's own switch (`mode_picked`) is never undone. "+ Take an amount off" only
-deducts: an hours card still owes its times. Search `// <invoice-job-mode>`;
+deducts: an hours card still owes its times. A work-order job whose row
+carries `work_order_agreed_ex` (Marnin, 12 Nov 2026: an approved job work
+order) bills that amount read only, re-pinned from the server before every
+paint and submit and never kept from a saved draft; only without that field
+does an approved job work order still force hours (`tradeJobWoRetiresTypedBox`).
+ops-api's `work_order_amount_not_agreed` refusal is shown in words, never
+queued. The estimate takes no super on commission. Search `// <invoice-job-mode>`;
 contract in `trade-app.md` → "Pay tab: the job decides how it is billed".
 Guard: `tests/e2e/trade-invoice-job-mode.spec.js`.
 

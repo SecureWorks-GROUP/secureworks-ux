@@ -14349,9 +14349,13 @@
   // Invoice: on a job with an approved work order the blank typed
   // "WO allocated $" box is retired and the card bills the hours worked. A
   // card carrying a server-issued crew work order (work_order_id) and a
-  // per-metre trade's cards keep their Work Order mode.
+  // per-metre trade's cards keep their Work Order mode. A card whose job
+  // ops-api says bills as a work order at its agreed amount
+  // (work_order_agreed_ex, Marnin 12 Nov 2026) is never retired: it bills
+  // that amount. Without the field (an older ops-api) the rule stands.
   function tradeJobWoRetiresTypedBox(c) {
     return !!(c && c.job_id && !c.work_order_id && tradeJobWoOn() && !isPerMetreUser()
+      && InvoiceJobModeCore.agreed(c) == null
       && tradeJobWoApproved(c.job_id));
   }
 
@@ -22861,7 +22865,10 @@
       var backendCompany = pickNum(source, ['company_contribution']);
       // Full-carve-out signature: only meaningful when it differs from the
       // half split (a zero fund makes the two contracts identical).
-      var fullCarve = oldNet != null && halfCash != null && !sameMoney(oldNet, halfCash);
+      // A zero fund with money earned is an invoice of commission only (no
+      // super on commission): never the old full carve-out.
+      var fullCarve = oldNet != null && halfCash != null && !sameMoney(oldNet, halfCash)
+        && !(fund != null && sameMoney(fund, 0));
       var legacy = fullCarve && (
         (backendCash != null && sameMoney(backendCash, oldNet)) ||
         (backendWorker != null && fund != null && sameMoney(backendWorker, fund))
@@ -23351,15 +23358,20 @@
   // Builder-only estimate. The browser never sends these calculated figures;
   // generate/submit requests send line inputs + gst_on and the backend persists
   // the authoritative gross/super/net amounts used by summaries and PDFs.
-  function _invoicePreviewMoney(gross) {
+  // Commission lines carry no super (ops-api, 12 Nov 2026): the estimate's
+  // super is worked out on the rest of what was earned.
+  function _invoicePreviewMoney(gross, commission) {
     gross = Math.round((Number(gross) || 0) * 100) / 100;
+    commission = Math.round((Number(commission) || 0) * 100) / 100;
+    if (!(commission > 0)) commission = 0;
     var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);
     // Per-metre job-centric invoices use the same super split as hourly
     // trades when the hours payload omitted the rate. Preview only — submit
     // still never sends super_rate; the backend persists the authority.
     if (rate == null && isPerMetreUser()) rate = 0.12;
     if (rate == null) return null;
-    var split = MyMoneyCore.resolveSuperSplit({ gross_earned: gross, super_rate: rate });
+    var superBase = Math.max(0, Math.round((gross - commission) * 100) / 100);
+    var split = MyMoneyCore.resolveSuperSplit({ gross_earned: superBase, super_rate: rate });
     var preview = {
       complete: true,
       estimated: true,
@@ -23368,9 +23380,12 @@
       super_amount: split.super_amount,
       worker_withhold: split.worker_withhold,
       company_contribution: split.company_contribution,
-      amount_payable: split.amount_payable,
+      amount_payable: commission > 0 && split.worker_withhold != null
+        ? Math.round((gross - split.worker_withhold) * 100) / 100
+        : split.amount_payable,
       gst_on: _invGst
     };
+    if (commission > 0) preview.commission_no_super = commission;
     var weekDeduction = _invoiceDeductionWeek();
     if (weekDeduction) preview.deduction_week = weekDeduction;
     return preview;
@@ -23565,7 +23580,7 @@
   }
 
   function _invoicePreviewSummaryHtml(gross, opts) {
-    var money = _invoicePreviewMoney(gross);
+    var money = _invoicePreviewMoney(gross, _currentInvoiceCommission());
     return money
       ? _invoiceMoneySummaryHtml(money, opts)
       : _invoiceMoneyUnavailableHtml(Object.assign({}, opts || {}, { preview: true }));
@@ -23648,6 +23663,7 @@
       html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(MyMoneyCore.deductionLabel(weekDeduction)) + ' comes off what you are paid for this week, after super and GST. It is applied when you submit. SecureWorks confirms the amount you are paid then.</div>';
     }
     html += '<div class="inv-money-note">Your job amounts are not changed. Only half the super comes out of what you earned; the company covers the other half. The full ' + _invoiceRateLabel(money.super_rate) + ' still goes into your super fund each week.</div>';
+    if (money.commission_no_super > 0) html += '<div class="inv-money-note" data-invoice-commission-no-super>No super is taken on commission (' + _invoiceMoney(money.commission_no_super) + ').</div>';
     if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
     html += '</div>';
     return html;
@@ -23663,6 +23679,18 @@
       return Math.round(perMetreGross * 100) / 100;
     }
     return _jobCentricActive ? _grandInvTotal() : _calcInvTotals().subtotal;
+  }
+
+  // Commission on the job cards being invoiced: no super is worked out on it.
+  function _currentInvoiceCommission() {
+    if (!_jobCentricActive || document.querySelectorAll('[id^="pmMetres_"]').length > 0) return 0;
+    var sum = 0;
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.included || !c.commission_mode || invoiceGroupJob(c)) return;
+      var ca = Number(c.commission_amount);
+      if (ca > 0) sum += ca;
+    });
+    return Math.round(sum * 100) / 100;
   }
 
   function _updateInvoiceMoneySummary(gross) {
@@ -23892,6 +23920,16 @@
     return (cards || []).map(function(raw) {
       var fields = Object.assign({}, raw || {});
       delete fields._idx;
+      // [invoice-job-mode] An agreed work-order amount is the server's, read
+      // fresh: a saved draft never keeps it or a figure typed on the card.
+      // A job the trade searched in asks ops-api again.
+      if (fields.work_order_agreed_ex != null || fields.agreed_applied != null
+          || String(fields.invoice_mode || '').trim().toLowerCase() === 'work_order') {
+        if (fields.work_order_agreed_ex != null || fields.agreed_applied != null) fields.wo_allocated = null;
+        if (!fields.assignment_id) fields.invoice_mode_checked = false;
+      }
+      delete fields.work_order_agreed_ex;
+      delete fields.job_work_order_id;
       var card = _newJobCard(fields);
       // New ordinary cards derive billable hours from times. A restored group
       // entry is a recovery record, including older hours without times.
@@ -24941,12 +24979,31 @@
       var m = String(mode == null ? '' : mode).trim().toLowerCase();
       return MODES[m] ? m : null;
     }
+    // The agreed amount of the job's approved work order (Marnin, 12 Nov
+    // 2026): ops-api sends work_order_agreed_ex (ex GST) only on a
+    // work-order job that has one. Anything else is no agreed amount.
+    function agreedOf(row) {
+      if (!row || norm(row.invoice_mode) !== 'work_order') return null;
+      var raw = row.work_order_agreed_ex;
+      if (raw == null || raw === '') return null;
+      var n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+    }
     // One server row (my_hours assignment or trade_invoice_job_modes job).
     function read(row, unavailable) {
-      if (!row || unavailable === true) return { mode: null, commission: null };
+      if (!row || unavailable === true) return { mode: null, commission: null, agreed: null, jobWorkOrderId: null };
       var c = row.can_claim_commission;
-      return { mode: norm(row.invoice_mode), commission: c === true ? true : (c === false ? false : null) };
+      var agreed = agreedOf(row);
+      return {
+        mode: norm(row.invoice_mode),
+        commission: c === true ? true : (c === false ? false : null),
+        agreed: agreed,
+        jobWorkOrderId: agreed != null && row.job_work_order_id != null && String(row.job_work_order_id) ? String(row.job_work_order_id) : null
+      };
     }
+    // The agreed amount a card bills at, or null (no agreed amount: the
+    // trade types the work-order amount as before).
+    function agreed(card) { return agreedOf(card); }
     function known(card) { return !!(card && norm(card.invoice_mode)); }
     function current(card) { return card && card.commission_mode ? 'commission' : (card && card.wo_mode ? 'work_order' : 'hours'); }
     // The links a card with a server mode offers to change how it is billed.
@@ -24965,10 +25022,11 @@
     var HINT = {
       hours: 'Fill in the date you worked and your start and finish times.',
       work_order: 'Fill in the work-order amount. Take off anything you paid other trades.',
+      work_order_agreed: 'The work-order amount is agreed with the office. Take off anything you paid other trades.',
       commission: 'Fill in your commission for this job.'
     };
     return {
-      norm: norm, read: read, known: known, current: current, switches: switches,
+      norm: norm, read: read, known: known, current: current, switches: switches, agreed: agreed,
       label: function(mode) { return LABEL[mode] || LABEL.hours; },
       hint: function(mode) { return HINT[mode] || HINT.hours; }
     };
@@ -25735,8 +25793,24 @@
     c.invoice_mode = r.mode;
     c.can_claim_commission = r.commission;
     c.invoice_mode_checked = true;
+    // The agreed work-order amount comes only from the server, every read.
+    c.work_order_agreed_ex = r.agreed;
+    c.job_work_order_id = r.jobWorkOrderId;
     if (!r.mode) return;
     if (r.commission !== true && c.commission_mode) c.commission_mode = false;
+    if (r.agreed != null) {
+      c.wo_allocated = r.agreed;
+      // A job with an agreed work order opens as that work order, once per
+      // amount, unless the trade chose hours or typed their own hours.
+      if (!c.mode_picked && !c.hours_user_edited && c.agreed_applied !== r.agreed && !_jobCardWorkOrderBlocked(c)) {
+        c.agreed_applied = r.agreed;
+        c.invoice_mode_applied = r.mode;
+        c.wo_mode = true;
+        c.commission_mode = false;
+        c.hours_mode_locked = false;
+        return;
+      }
+    }
     if (c.mode_picked || c.invoice_mode_applied === r.mode) return;
     c.invoice_mode_applied = r.mode;
     if (r.mode === 'group_work_order') return;
@@ -25747,6 +25821,39 @@
       c.wo_mode = false;
     }
     c.commission_mode = false;
+  }
+  // ops-api refuses a work-order line whose amount is not the job's agreed
+  // work order (code work_order_amount_not_agreed, nothing saved).
+  function _isWorkOrderAmountNotAgreed(err) {
+    return !!(err && (err.code === 'work_order_amount_not_agreed'
+      || (err.body && err.body.code === 'work_order_amount_not_agreed')));
+  }
+  function _workOrderAmountNotAgreedMessage(err) {
+    var body = (err && err.body) || {};
+    var msg = String(body.userMessage || body.error || body.message || (err && err.message) || '').trim();
+    if (!msg || msg === 'work_order_amount_not_agreed' || /^(conflict|unprocessable|request failed)/i.test(msg)) {
+      msg = 'A job on this invoice has an agreed work order, and the amount on its card is not the agreed amount.';
+    }
+    return msg + ' Nothing was sent. The agreed amounts have been read again: check the card and press Submit again.';
+  }
+  // Read the agreed amounts again: assigned cards from my_hours, searched-in
+  // jobs from trade_invoice_job_modes.
+  function _rereadAgreedWorkOrders() {
+    (_jobCards || []).forEach(function(c) {
+      if (!c || c.assignment_id || !c.job_id) return;
+      if (InvoiceJobModeCore.norm(c.invoice_mode) !== 'work_order' && !c.wo_mode) return;
+      c.invoice_mode_checked = false;
+      delete _invModeFailed[String(c.job_id)];
+    });
+    _refreshHoursDataForOpenInvoice();
+  }
+  // A card on a job with an agreed work order bills that amount: put it back
+  // on the card before every paint and every submit.
+  function _pinAgreedWorkOrders(cards) {
+    (cards || []).forEach(function(c) {
+      var agreed = InvoiceJobModeCore.agreed(c);
+      if (agreed != null) c.wo_allocated = agreed;
+    });
   }
   // Assigned cards take their mode from this week's my_hours rows.
   function _syncInvoiceJobModes() {
@@ -26136,11 +26243,13 @@
     InvoiceJobModeCore.switches(c, locks).forEach(function(sw) {
       h += '<button type="button" class="jc-mode-switch" data-card-mode-switch="' + esc(sw.to) + '" onclick="setJobCardMode(' + i + ',\'' + sw.to + '\')">' + esc(sw.label) + '</button>';
     });
-    h += '<span class="jc-mode-hint">' + esc(InvoiceJobModeCore.hint(cardMode)) + '</span>';
+    var hintKey = (cardMode === 'work_order' && InvoiceJobModeCore.agreed(c) != null) ? 'work_order_agreed' : cardMode;
+    h += '<span class="jc-mode-hint">' + esc(InvoiceJobModeCore.hint(hintKey)) + '</span>';
     return h + '</div>';
   }
   function renderJobCardsHtml() {
     _syncInvoiceJobModes();
+    _pinAgreedWorkOrders(_jobCards);
     if (!invoiceRoutesSettled()) {
       return '<p data-invoice-routes-pending role="status">Checking which jobs are paid through a group. Your entries are kept.</p>';
     }
@@ -26305,13 +26414,19 @@
         } else if (cardMode === 'work_order') {
           var net = _woNet(c);
           var labourLines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
-          // WO allocated input
+          // WO allocated input. A job with an agreed work order shows the
+          // agreed amount, read only: the trade cannot bill another total.
+          var agreedWo = InvoiceJobModeCore.agreed(c);
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
-          html += '<label style="font-size:12px;color:var(--sw-text-sec)">Work-order amount $</label>';
-          html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardwoalloc="' + c._idx + '" '
-            + 'value="' + (c.wo_allocated != null ? c.wo_allocated : '') + '" placeholder="0.00" '
-            + 'onchange="setJobCardWoAllocated(' + c._idx + ',this.value)" '
-            + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+          if (agreedWo != null) {
+            html += '<span data-card-wo-agreed="' + c._idx + '" style="font-size:13px;color:var(--sw-dark)">Agreed work order <b>$' + agreedWo.toFixed(2) + '</b> <span style="font-size:11px;color:var(--sw-text-sec)">ex GST, set by the office</span></span>';
+          } else {
+            html += '<label style="font-size:12px;color:var(--sw-text-sec)">Work-order amount $</label>';
+            html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardwoalloc="' + c._idx + '" '
+              + 'value="' + (c.wo_allocated != null ? c.wo_allocated : '') + '" placeholder="0.00" '
+              + 'onchange="setJobCardWoAllocated(' + c._idx + ',this.value)" '
+              + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+          }
           html += '</div>';
           // Paid-to-other-trades: WO pass-throughs + hourly labour lines [Q17]
           html += '<div style="margin-top:8px">';
@@ -26566,7 +26681,9 @@
         }
       } else if (c.wo_mode) {
         var allocEl = document.querySelector('[data-cardwoalloc="' + idx + '"]');
-        if (allocEl) {
+        if (InvoiceJobModeCore.agreed(c) != null) {
+          c.wo_allocated = InvoiceJobModeCore.agreed(c);
+        } else if (allocEl) {
           var n = parseFloat(allocEl.value);
           c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
         }
@@ -26856,6 +26973,7 @@
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
   window.setJobCardMode = function(idx, mode) {
     var c = _jobCards[idx]; if (!c) return;
+    var agreedWo = InvoiceJobModeCore.agreed(c);
     if (mode === 'work_order' && tradeJobWoRetiresTypedBox(c)) {
       toast('This job has a work order. Bill the hours you worked; the office checks them against it.', true);
       return;
@@ -26888,6 +27006,7 @@
     c.wo_mode = (mode === 'work_order');
     c.commission_mode = (mode === 'commission');
     c.hours_mode_locked = (mode === 'hours');
+    if (agreedWo != null) c.wo_allocated = agreedWo;
     // The trade's own choice: a later read of the job's mode does not undo it.
     c.mode_picked = true;
     _markDraftEdited(c);
@@ -26921,6 +27040,8 @@
   // ── Work-order invoicing mode (Q15 ADD 2) ──────────────────────────────
   window.setJobCardWoAllocated = function(idx, val) {
     var c = _jobCards[idx]; if (!c) return;
+    // An agreed work order bills its agreed amount, never a typed one.
+    if (InvoiceJobModeCore.agreed(c) != null) { c.wo_allocated = InvoiceJobModeCore.agreed(c); _refreshJobCardLine(idx); return; }
     var n = parseFloat(val);
     c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
     _refreshJobCardLine(idx);
@@ -28012,6 +28133,7 @@
     var timeBounds = { weekStart: postWeekStart, weekEnd: postWeekEnd, today: clockPerthDay(new Date()) };
     // <trade-job-work-order> a job with an approved work order never submits a typed WO total
     retireTypedWorkOrderOnJobWorkOrders(_jobCards);
+    _pinAgreedWorkOrders(_jobCards);
     var built = _buildJobCentricPayload(_jobCards, timeBounds);
     if (built.error) {
       toast(built.error, true);
@@ -28246,6 +28368,15 @@
         // not route to Invoice history as if it had been. Say so, keep the form.
         if (err && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
           toast(_noteWeekAlreadyInvoiced(err.body, postWeekEnd), true);
+          renderInvoiceBuilder();
+          return;
+        }
+        // [invoice-job-mode] A work-order line that is not the job's agreed
+        // amount (a stale draft): nothing was saved. Say so, read the agreed
+        // amounts again, keep the form. Never queued.
+        if (_isWorkOrderAmountNotAgreed(err)) {
+          toast(_workOrderAmountNotAgreedMessage(err), true);
+          _rereadAgreedWorkOrders();
           renderInvoiceBuilder();
           return;
         }

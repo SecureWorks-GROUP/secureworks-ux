@@ -37,6 +37,8 @@
   <script src="modules/trade-group-invoice.js?v=job-mode-20261111"></script>
   <script src="modules/trade-invoice-running-draft.js?v=draft-line-edit-20261102"></script>
   <script src="modules/trade-daily-hours-nudge.js?v=20261024"></script>
+  <!-- The sealed crew scope of works of a Scope Engine patio, as its seal kept it (Scope tab). -->
+  <script src="modules/sealed-crew-scope.js?v=20261112"></script>
 
   <style>
     /* ══════════════════════════════════════════════════
@@ -12685,10 +12687,52 @@
     return h;
   }
 
+  // <trade-sealed-crew-scope>
+  // A patio sealed in the Scope Engine carries no old patio shape (config.length,
+  // projection, posts), so the build spec below would print nothing. Its crew
+  // scope of works is the page the seal kept (modules/sealed-crew-scope.js): it
+  // is shown exactly as kept, after its stamp is checked, and never made again
+  // or worked out here. Anything else says why it is not shown.
+  var _sealedCrewScopeSeq = 0;
+  function renderSealedCrewScope(job) {
+    var S = window.SealedCrewScope;
+    var state = S.read(job.scope_json);
+    var id = 'sealedCrewScope' + (++_sealedCrewScopeSeq);
+    var h = '<div class="detail-section" data-build-spec data-sealed-crew-scope id="' + id + '">';
+    h += '<h3>' + esc(S.heading(state)) + '</h3>';
+    h += '<div data-sealed-crew-scope-note role="status" style="font-size:13px;color:var(--sw-text-sec);margin-bottom:8px">'
+      + esc(state.problem === 'no-seal' || state.problem === 'no-page' ? S.words(state) : 'Checking it against its seal...') + '</div>';
+    h += '</div>';
+    if (state.problem === 'no-seal' || state.problem === 'no-page') return h;
+    S.check(state).then(function (status) {
+      var box = document.getElementById(id);
+      if (!box) return;
+      var note = box.querySelector('[data-sealed-crew-scope-note]');
+      if (note) note.textContent = S.words(state, status);
+      box.setAttribute('data-sealed-crew-scope-status', status);
+      if (status !== 'matches') return;
+      // The kept page runs nothing: no scripts in the frame (sandbox) and the Scope Engine's own policy in its head.
+      // Same origin only so the frame can be sized to the page.
+      var frame = document.createElement('iframe');
+      frame.setAttribute('sandbox', 'allow-same-origin');
+      frame.setAttribute('title', S.heading(state));
+      frame.setAttribute('data-sealed-crew-scope-frame', '');
+      frame.style.cssText = 'display:block;width:100%;height:70vh;border:1px solid var(--sw-border);border-radius:8px;background:#fff';
+      frame.addEventListener('load', function () {
+        try { frame.style.height = (frame.contentDocument.documentElement.scrollHeight + 16) + 'px'; } catch (e) { /* keeps 70vh */ }
+      });
+      frame.srcdoc = S.framePage(state.page);
+      box.appendChild(frame);
+    });
+    return h;
+  }
+  // </trade-sealed-crew-scope>
+
   function renderEnhancedScope(data, phase) {
     if (phase === 'travelling' || phase === 'end_of_day' || isJobDone(phase)) return '';
     var job = data.job;
     if (!job.scope_json) return '';
+    if (window.SealedCrewScope && window.SealedCrewScope.isEnginePatio(job.scope_json)) return renderSealedCrewScope(job);
     var config = job.scope_json.config || job.scope_json;
     var type = (job.type || 'patio').toLowerCase();
     var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
@@ -14438,6 +14482,9 @@
     (function() {
       var scope3d = job.scope_json;
       if (!scope3d) return;
+      // The viewer builds its model from the old patio shape. A Scope Engine patio has none, and the viewer
+      // would have to work the design out again, so it is not offered; the sealed crew scope of works is.
+      if (window.SealedCrewScope && window.SealedCrewScope.isEnginePatio(scope3d)) return;
       var cfg3d = scope3d.config || scope3d;
       var jobType3d = (job.type || 'patio').toLowerCase();
       var has3dData = jobType3d === 'fencing'

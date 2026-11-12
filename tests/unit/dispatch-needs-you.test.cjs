@@ -47,6 +47,28 @@ test('To order: a supplier box whose order is not sent yet', () => {
   assert.deepEqual(reasons(job('j', [order('PO', { source: 'dispatch_order', order_sent: false, material_stage: 'order_materials' })])), []);
 });
 
+test('To order: every job at Order Materials counts, boxes or not', () => {
+  const at = (orders, board) => job('j', orders, { board: { stage_key: 'order_materials', track: 'pipeline', ...board } });
+  // No supplier box set up yet (the 8 patio jobs on 12 Nov 2026).
+  assert.deepEqual(reasons(at([])), ['order: Set up order']);
+  // An unsent box already says which supplier: no second tag.
+  assert.deepEqual(reasons(at([order('Metroll', { order_sent: false, sent_at: null, material_stage: 'order_materials' })])), ['order: Order Metroll']);
+  // Every box sent, the job still at the stage.
+  assert.deepEqual(reasons(at([order('Metroll', { material_stage: 'order_confirmed' })])), ['order: Still at Order materials']);
+  // A purchase order alone is not a box: the order is still to set up.
+  assert.deepEqual(reasons(at([order('PO', { source: 'dispatch_order', order_sent: true, material_stage: 'order_confirmed' })])), ['order: Set up order']);
+  // Repairs: their Materials stage is the ordering stage.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'materials', track: 'repairs' } })), ['order: Set up order']);
+  // Later stages with nothing unsent: not to order.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'awaiting_supplier', track: 'pipeline' } })), []);
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'scheduled', track: 'repairs' } })), []);
+  // Archived: never.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'order_materials', view: 'archive' } })), []);
+  // The chip counts each job once.
+  const s = N.summarise([at([]), job('k', [], { board: { stage_key: 'order_materials' } })], ctx(), 0);
+  assert.equal(s.counts.order, 2);
+});
+
 test('To pay: payment.to_pay, and the same rule for a server without it', () => {
   assert.deepEqual(reasons(job('j', [order('CMI', { material_stage: 'awaiting_payment', payment: { state: 'unpaid', to_pay: true } })])), ['pay: Pay CMI']);
   assert.deepEqual(reasons(job('j', [order('CMI', { material_stage: 'awaiting_payment', payment: { state: 'unpaid', to_pay: false } })])), []);

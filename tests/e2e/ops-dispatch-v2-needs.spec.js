@@ -15,13 +15,16 @@ const QUIET = 'job-quiet';
 // The payment fixture's job, plus a quiet job with no supplier orders that
 // needs nothing. The quiet job is the newer one, so it is listed (and
 // opened) first; Needs you now then lifts the other above it. Each job's
-// replies read answers for that job only.
-function twoJobs(fake, { emails = 0 } = {}) {
+// replies read answers for that job only. Both jobs sit at Scheduled by
+// default (quietStatus, mainStatus), so they share a section and the quiet
+// one stays first: at the ordering stage every job counts under To order
+// (12 Nov 2026), and the quiet job would need its order set up.
+function twoJobs(fake, { emails = 0, quietStatus = 'scheduled', mainStatus = 'scheduled' } = {}) {
   const pipeline = fake.api.pipeline;
   const quietRow = () => {
     const r = fake.row();
     return Object.assign({}, r, {
-      id: QUIET, job_number: 'SWR-930002', client_name: 'Jane Quiet', updated_at: '2026-11-01T00:00:00Z',
+      id: QUIET, job_number: 'SWR-930002', client_name: 'Jane Quiet', updated_at: '2026-11-01T00:00:00Z', status: quietStatus,
       board: Object.assign({}, r.board, {
         title: 'SWR-930002 · Jane Quiet',
         arrival: { today: PERTH_TODAY, install_day: null, orders: [], counts: { orders: 0, sent: 0, confirmed: 0, late: 0 }, all_confirmed_in_time: false, waiting_on_us: [] },
@@ -32,7 +35,7 @@ function twoJobs(fake, { emails = 0 } = {}) {
   return {
     pipeline: (url, body) => {
       const out = pipeline(url, body);
-      const main = Object.assign({}, out.columns.accepted[0], { updated_at: '2026-10-01T00:00:00Z' });
+      const main = Object.assign({}, out.columns.accepted[0], { updated_at: '2026-10-01T00:00:00Z', status: mainStatus });
       return Object.assign({}, out, { columns: { accepted: [quietRow(), main] }, total: 2 });
     },
     dispatch_v2_replies: (url) => (url.searchParams.get('job_id') === JOB_ID ? fake.replies() : V2_EMPTY_READS.dispatch_v2_replies(url)),
@@ -66,6 +69,18 @@ test.describe('Dispatch v2: Needs you now', () => {
       await card(root, 'SWR-930001').scrollIntoViewIfNeeded();
       await root.locator('[data-dpc-region="queue"]').screenshot({ path: process.env.DPC_SHOT + '-needs-list.png' });
     }
+  });
+
+  test('a job at the ordering stage with no supplier box counts under To order (12 Nov 2026)', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const { root } = await boot(page, fake, { api: twoJobs(fake, { quietStatus: fake.work === 'repair' ? 'materials' : 'order_materials' }) });
+    await expect(card(root, 'SWR-930002').locator('.dpc-need-order')).toHaveText('Set up order');
+    // The payment job's boxes are all sent and it sits at Scheduled: only
+    // the quiet job is to order, and the chip keeps only it.
+    await expect(chip(root, 'To order')).toHaveText('To order 1');
+    await chip(root, 'To order').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(1);
+    await expect(card(root, 'SWR-930002')).toBeVisible();
   });
 
   test('a chip keeps only its jobs; pressed again, every job shows', async ({ page }) => {

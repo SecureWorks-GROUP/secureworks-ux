@@ -367,6 +367,23 @@ quote, that it was sent, or the builder's answer is done from the terminal
 tools today, not this screen. Guards: `npm run test:ops-restoration` (in
 `test:e2e`) and `tests/e2e/ops-restoration-panel.spec.js`.
 
+## Add job photos page (`job-photos.html`)
+
+One job's photo upload from a link (`job-photos.html?jobId=<job uuid>`), for a
+trade who is filing a make-safe or restoration report through an AI and not
+the Trade app (secureworks-jarvis `sw_submit_makesafe_report`, which hands out
+this link). It is the Trade app's own upload and nothing else: the same
+sign-in (the shared Supabase session; its own small sign-in form when there is
+none), the same three calls (`get_upload_url`, the storage PUT,
+`confirm_upload` with phase `completion`) and the same picture size (longest
+side 1600, `compressImage` in `trade.html`; change the two together). It reads
+`trade_job_detail` once to name the job and count the photos on this visit,
+accepts only a job UUID, files no report and sends nothing; ops-api's own
+access check decides who may add photos. Rules live in the pure
+`JobPhotosCore` between `// <job-photos-core>` sentinels
+(`modules/job-photos.js`). Guards: `npm run test:job-photos` (in `test:e2e`)
+and `tests/e2e/job-photos-page.spec.js`.
+
 ## Ops make-safe board (`ops.html`)
 
 The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1.2`,

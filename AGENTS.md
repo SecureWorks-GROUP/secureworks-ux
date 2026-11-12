@@ -350,6 +350,23 @@ make-safe board (it stays server-driven). Guard:
 `tests/e2e/ops-repairs-board.spec.js`; evidence in
 `docs/evidence/insurance-repairs-board-2026-08-13/`.
 
+## Restoration panel on a make-safe job (`modules/ops-restoration.js`)
+
+Restoration work is a make-safe board card whose family is Restoration, run one
+of two ways: do and charge, or assess and quote (secureworks-backend
+`docs/restoration-workflow-v1.md`). `renderMakesafeOpsDetail` leaves a
+`[data-restoration-plan]` host and `RestorationOps.paint(data)` fills it from
+ONE ops-api `restoration_plan` read per job open: the mode, the phase, the next
+step, the builder's authority limit beside the invoice proposal, the current
+quote with who sent or decided it, and a link to the quote PDF. It is read
+only (it never posts), office only (the quote is priced), paints nothing for a
+job that is not restoration, and nothing while the back end answers "Unknown
+action"; any other failed read says so in words. Every rule is in the pure
+`RestorationOpsCore` between `// <ops-restoration-core>` sentinels. Recording a
+quote, that it was sent, or the builder's answer is done from the terminal
+tools today, not this screen. Guards: `npm run test:ops-restoration` (in
+`test:e2e`) and `tests/e2e/ops-restoration-panel.spec.js`.
+
 ## Ops make-safe board (`ops.html`)
 
 The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1.2`,

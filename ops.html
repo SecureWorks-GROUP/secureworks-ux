@@ -6463,6 +6463,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
 </script>
+<!-- Restoration plan, quote and builder's answer on a make-safe job page: read only (modules/ops-restoration.js). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-restoration.js?v=1'}]);
+</script>
 <!-- Paid close-out tags (live) and Get Review ladder (docs/job-closeout-screens.md): the ladder is off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-job-closeout.js?v=1'}]);
@@ -25112,6 +25116,8 @@ function renderMakesafeOpsDetail(data) {
   html += '</div>';
   html += '</div>';
 
+  // Restoration plan, quote and the builder's answer (modules/ops-restoration.js). Empty unless the job's family is Restoration.
+  html += '<div data-restoration-plan></div>';
   html += '<div data-job-wo-overview></div>';
   html += '<div data-office-group-wo></div>';
 
@@ -25323,6 +25329,7 @@ function renderOverviewView(data) {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
     if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
     if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
+    if (window.RestorationOps) RestorationOps.paint(data);
     return;
   }
   // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below

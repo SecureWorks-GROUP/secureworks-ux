@@ -69,6 +69,41 @@ test.describe('Trade password reset', () => {
     expect(page.url()).not.toContain('access_token');
   });
 
+  test('an invite link makes a new trade set a password before the app opens', async ({ appPage: page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    // Supabase signs an invited trade straight in (SIGNED_IN). Without the hold they never choose a password.
+    await page.goto('/trade.html?e2e=invite#access_token=e2e&type=invite');
+    await expect(page.getByRole('heading', { name: 'Welcome. Set your password' })).toBeVisible();
+    await expect(page.locator('#newPasswordLead')).toHaveText('Your trade account is ready. Choose a password to finish setting it up.');
+    await expect(page.locator('#newPassword')).toBeVisible();
+    await expect(page.locator('#bottomNav')).toBeHidden();
+    await expect(page.locator('#loginSignIn')).toBeHidden();
+    await page.screenshot({ path: `${SHOTS}/trade-invite-set-password.png` });
+
+    await page.locator('#newPassword').fill('short');
+    await page.locator('#confirmPassword').fill('short');
+    await page.locator('#btnSetPassword').click();
+    await expect(page.locator('#newPasswordError')).toHaveText('Use at least 8 characters.');
+    await expect(page.locator('#bottomNav')).toBeHidden();
+
+    await page.locator('#newPassword').fill('first-password');
+    await page.locator('#confirmPassword').fill('first-password');
+    await page.locator('#btnSetPassword').click();
+    await expect(page.locator('#bottomNav')).toBeVisible();
+    await expect(page.locator('#viewLogin')).toBeHidden();
+    await expect(page.locator('#headerUser')).toHaveText('E2E Installer');
+    await expect.poll(() => page.evaluate(() => window.__swPasswordUpdates)).toEqual(['first-password'.length]);
+    expect(page.url()).not.toContain('type=invite');
+    expect(page.url()).not.toContain('access_token');
+  });
+
+  test('a recovery link keeps the reset wording', async ({ appPage: page }) => {
+    await page.goto('/trade.html?e2e=recovery-wording#access_token=e2e&type=recovery');
+    await expect(page.getByRole('heading', { name: 'Set a new password' })).toBeVisible();
+    await expect(page.locator('#newPasswordLead')).toHaveText('Choose a new password for your trade account.');
+    await expect(page.locator('#newPasswordLabel')).toHaveText('Choose a password for this trade account.');
+  });
+
   test('an expired reset link offers a new one', async ({ appPage: page }) => {
     await page.goto('/trade.html?e2e=expired#error=access_denied&error_code=otp_expired&error_description=expired');
     await expect(page.locator('#newPasswordLead')).toHaveText('This reset link has expired or is not valid.');

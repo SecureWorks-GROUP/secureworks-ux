@@ -23438,12 +23438,16 @@
     var netPay = source.net_pay;
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
     // An invoice that carries a deduction is paid the server's trade_payable
-    // and is read in the shape ops-api sends, which names the GST figure
-    // `gst`. An invoice with none is read exactly as it was before deductions
-    // existed. [trade-recurring-deduction]
+    // and keeps its own rows below the invoice total.
+    // [trade-recurring-deduction]
     var deduction = MyMoneyCore.deductionOf(source);
     var gstAmount = source.gst_amount;
-    if (gstAmount == null && deduction) gstAmount = source.gst;
+    // ops-api names the GST figure `gst` on every money answer
+    // (tradeInvoiceMoneyResponse), with or without a deduction. Reading it
+    // only beside a deduction left every GST-registered trade's submit
+    // confirmation at "totals are unavailable". A true/false `gst` is a GST
+    // choice, never an amount.                          <invoice-gst-figure>
+    if (gstAmount == null && typeof source.gst !== 'boolean') gstAmount = source.gst;
     var split = MyMoneyCore.resolveSuperSplit({
       gross_earned: gross,
       super_rate: superRate,
@@ -23458,7 +23462,17 @@
     // not the old full-super net). Legacy `total` can be a gross/line
     // subtotal, so it is never money authority here.
     var cash = split.amount_payable;
-    var total = gstOn === false ? cash : source.total_inc;
+    // With GST on and no deduction, the invoice total is the bill the trade
+    // is paid: the server's trade_payable (what you get paid plus GST). Its
+    // total_inc is earned plus GST, which is more than the bill, so it is the
+    // total only for an older answer with no trade_payable, or beside a
+    // deduction, whose rows carry trade_payable themselves. Nothing here adds
+    // the two up: no trade_payable and no total_inc still reads unavailable.
+    //                                                    <invoice-gst-figure>
+    var gstTotal = !deduction && _invoiceHasPersistedNumber(source.trade_payable)
+      ? source.trade_payable
+      : source.total_inc;
+    var total = gstOn === false ? cash : gstTotal;
     var hasCoreMoney = _invoiceHasPersistedNumber(gross)
       && _invoiceHasPersistedNumber(superRate)
       && Number(superRate) > 0
@@ -23466,7 +23480,7 @@
       && _invoiceHasPersistedNumber(cash)
       && gstOn != null;
     var hasGstMoney = gstOn !== true
-      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(source.total_inc));
+      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(gstTotal));
     // Without the server's trade_payable there is no honest amount to show
     // for a deduction, so the money reads unavailable rather than the figure
     // before it.
@@ -28508,8 +28522,11 @@
     html += '</div>';
     html += '</div>';
 
-    if (!details.abn) {
-      html += '<div style="font-size:11px;color:var(--sw-yellow);margin-top:6px">&#9888; ABN not set — <a href="#" onclick="event.preventDefault();showView(\'profile\')" style="color:var(--sw-yellow);text-decoration:underline">update in Profile</a></div>';
+    // Still a warning, not a block: the server takes an invoice with no ABN.
+    // Shown only when neither the account nor this phone holds one.  <trade-details-save>
+    var accountAbn = _user && (_user.abn || (_user.trade_details || {}).abn);
+    if (!details.abn && !accountAbn) {
+      html += '<div data-invoice-abn-warning style="font-size:11px;color:var(--sw-yellow);margin-top:6px">&#9888; No ABN entered. This invoice goes to the office without one, which can hold up your pay. <a href="#" onclick="event.preventDefault();showView(\'profile\')" style="color:var(--sw-yellow);text-decoration:underline">Add it in Profile</a></div>';
     }
     html += '</div>';
 
@@ -33793,6 +33810,12 @@
   // TRADE DETAILS — localStorage + API sync
   // ══════════════════════════════════════════════════
 
+  // <trade-details-save> The two lines a trade reads when My Details is not
+  // on the account. A failed save is never worded as a save, and a missing
+  // ABN stays a warning (the server does not refuse an invoice for it).
+  var TRADE_DETAILS_NOT_SAVED_TEXT = 'Not saved. Your details did not reach your account. Check your connection and tap Save Details again.';
+  var TRADE_ABN_MISSING_TEXT = 'No ABN yet. Your invoices go to the office without one, which can hold up your pay. Add it and save.';
+
   function loadTradeDetails() {
     try {
       var raw = localStorage.getItem('sw_trade_details');
@@ -33822,25 +33845,37 @@
       gstRegistered: (function () { var t = document.getElementById('tdGst'); return t ? t.getAttribute('data-value') === 'yes' : _invoiceGstDefault(_user); })(),
     };
 
-    // Save to localStorage immediately
+    // Keep what they typed on this phone so a failed save loses nothing.
+    // This copy only refills the form and the invoice preview on this phone.
+    // The office reads the account, so this copy is never reported as saved.
+    //                                                   <trade-details-save>
     try { localStorage.setItem('sw_trade_details', JSON.stringify(details)); } catch (e) {}
 
     var status = document.getElementById('tdSaveStatus');
+    if (status) { status.textContent = 'Saving…'; status.style.color = 'var(--sw-text-sec)'; }
 
     // Sync to backend
     api('update_trade_profile', null, details).then(function(res) {
-      if (res && res.profile && _user) {
+      // Saved means the server said so. Any other answer is not a save.
+      if (!res || res.success !== true) {
+        throw new Error((res && (res.userMessage || res.error)) || 'The save was not confirmed');
+      }
+      if (res.profile && _user) {
         _user.trade_details = res.profile.trade_details || _user.trade_details;
         if (res.profile.abn !== undefined) _user.abn = res.profile.abn;
       } else if (_user) {
         _user.trade_details = Object.assign({}, _user.trade_details || {}, { gstRegistered: details.gstRegistered === true });
       }
-      if (status) { status.textContent = 'Saved to your account'; status.style.color = 'var(--sw-green)'; }
+      var savedAbn = res.profile && res.profile.abn !== undefined ? res.profile.abn : details.abn;
+      if (status) {
+        status.textContent = String(savedAbn || '').trim() ? 'Saved to your account' : 'Saved to your account. ' + TRADE_ABN_MISSING_TEXT;
+        status.style.color = String(savedAbn || '').trim() ? 'var(--sw-green)' : 'var(--sw-yellow)';
+      }
       toast('Details saved');
     }).catch(function(err) {
-      console.warn('[trade] Profile sync failed:', err);
-      if (status) { status.textContent = 'Saved locally — will retry on next save'; status.style.color = 'var(--sw-yellow)'; }
-      toast('Saved locally');
+      console.warn('[trade] Profile save failed:', err);
+      if (status) { status.textContent = TRADE_DETAILS_NOT_SAVED_TEXT; status.style.color = 'var(--sw-red)'; }
+      toast('Not saved. Try again.', true);
     });
   };
 

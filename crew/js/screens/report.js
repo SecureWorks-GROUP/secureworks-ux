@@ -304,6 +304,7 @@ function ReportForm({ jobId, job, data, ms, user, visit, report, tail }) {
       local.del(key);
       const off = res && res.board_sync && res.board_sync.allocation_override ? (res.board_sync.allocation_override.cancelled || []).length : 0;
       if (res && res.report) mutateQuery('job:' + jobId, (d) => ({ ...d, serviceReport: res.report }));
+      const page = document.querySelector('main.page'); if (page) page.scrollTop = 0;
       invalidate('job:' + jobId); invalidate('myjobs'); invalidate('hours');
       buzz([14, 60, 14, 60, 30]);
       toast(off ? `Report sent. ${off === 1 ? 'The other person' : 'The others'} booked on this visit ${off === 1 ? 'has' : 'have'} been taken off it.` : 'Report sent to the office.', { kind: 'ok', ms: 5000 });
@@ -352,10 +353,10 @@ function ReportForm({ jobId, job, data, ms, user, visit, report, tail }) {
         </div>
         ${f.mats.length ? html`<div class="stack tight">
           ${f.mats.map((m, i) => (MATERIALS.includes(m.name) ? html`<div class="matrow" key=${m.name}><b>${m.name}</b>
-            <${Counter} label=${'How many ' + m.name} value=${m.qty} min=${1} max=${999} blank="How many" onChange=${(v) => setMat(i, { qty: v })} />
+            <${Counter} label=${'How many ' + m.name} value=${m.qty} min=${1} max=${999} blank="How many?" onChange=${(v) => setMat(i, { qty: v })} />
             <${IconButton} name="close" label=${'Remove ' + m.name} size=${18} onClick=${() => patch({ mats: f.mats.filter((_, idx) => idx !== i) })} /></div>` : null))}
           ${customMats.map((m) => html`<div class="matrow" key=${'c' + m.i}><input class="input" value=${m.name} placeholder="What was it?" aria-label="Material" onInput=${(e) => setMat(m.i, { name: e.currentTarget.value })} />
-            <${Counter} label="How many" value=${m.qty} min=${1} max=${999} blank="How many" onChange=${(v) => setMat(m.i, { qty: v })} />
+            <${Counter} label="How many" value=${m.qty} min=${1} max=${999} blank="How many?" onChange=${(v) => setMat(m.i, { qty: v })} />
             <${IconButton} name="close" label="Remove this material" size=${18} onClick=${() => patch({ mats: f.mats.filter((_, idx) => idx !== m.i) })} /></div>`)}
         </div>` : null}
       </section>

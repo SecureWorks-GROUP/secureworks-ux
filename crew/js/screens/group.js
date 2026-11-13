@@ -42,7 +42,8 @@ export function Group({ jobId }) {
   const off = (share && share.enabled === false) || (listQ.data && listQ.data.enabled === false) || isOff(shareQ.error);
 
   const refresh = (fresh) => {
-    if (fresh && typeof fresh === 'object' && (fresh.awaiting || fresh.discovery || fresh.group_id)) primeQuery('group:' + jobId, { ...(share || {}), ...fresh });
+    // Hours and lock-in answer with the whole of my share, so it can be shown at once. Anything else is read again.
+    if (fresh && typeof fresh === 'object' && fresh.awaiting) primeQuery('group:' + jobId, { enabled: true, participant: true, ...fresh });
     else shareQ.refetch();
     invalidate('groups'); invalidate('hours');
   };

@@ -212,7 +212,7 @@ export function Receipt({ jobId, poId }) {
 
       ${problem && !sending ? html`<div class=${cx('note-banner', offline ? '' : 'bad')}><${Icon} name=${offline ? 'cloudoff' : 'alert'} size=${18} /><span><span class="t-strong">${offline ? 'No signal, so it has not sent.' : 'That did not send.'}</span> ${offline ? (photo ? 'Your photo is still here. Try again when you are back in range.' : 'Try again when you are back in range.') : friendly(problem)}</span></div>
         <${Button} block icon="refresh" onClick=${() => send(photo, reason)}>Try again<//>
-        ${photo ? html`<${Button} kind="quiet" block onClick=${() => take(true)}>Take the photo again<//>` : null}` : null}
+        ${photo && !unsure.current ? html`<${Button} kind="quiet" block onClick=${() => take(true)}>Take the photo again<//>` : null}` : null}
       ${!online && !problem && !sending ? html`<p class="t-small t-mute">You have no signal right now. You can take the photo, and send it when you are back in range.</p>` : null}
     </div>
 

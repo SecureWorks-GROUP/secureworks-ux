@@ -30,7 +30,11 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
     Money never queues.
   - `router.js` hash routes, `go(path)`, `back(fallback)`.
 - `js/ui/kit.js` Page, Button, Sheet, Slide, toast, ask, PhotoGrid and the rest.
-  `js/ui/icons.js` the icon set.
+  `js/ui/icons.js` the icon set. `js/ui/logo.js` the SecureWorks Group logo.
+  `js/ui/paybits.js` pieces the pay screens share (done screen, server money
+  rows, signature pad, stars).
+- `js/lib/roster.js` shared reads for the manager screens (everyone's
+  bookings, people, days off), keeping only the fields those screens draw.
 - `js/screens/` one file per screen. `main.js` maps routes to screens.
 - `js/demo/` the in-browser demo server. Each screen group adds its answers in
   its own `extra-*.js` through `registerDemo`.

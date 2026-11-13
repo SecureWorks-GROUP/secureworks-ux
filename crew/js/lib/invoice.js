@@ -28,9 +28,10 @@ export function invoiceState(inv) {
 }
 /** The amount this invoice pays the trade, straight from the server (null when it sent none). */
 export function invoicePays(inv) {
+  // `payable` (my_money rows) is already after the office's changes in Xero.
   if (inv.payable_after_xero != null) return Number(inv.payable_after_xero);
-  if (inv.trade_payable != null) return Number(inv.trade_payable);
   if (inv.payable != null) return Number(inv.payable);
+  if (inv.trade_payable != null) return Number(inv.trade_payable);
   return null;
 }
 

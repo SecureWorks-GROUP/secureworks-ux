@@ -7,6 +7,7 @@ import { todayISO, mondayOf, addDays, fmtWeek, fmtMoney, fmtHours, fmtDate, dowO
 import { invoiceForWeek, sentBackForWeek, invoiceState, invoicePays, buildLines, estimate, isLiveInvoice } from '../lib/invoice.js';
 import { Icon } from '../ui/icons.js';
 import { Chip, SkelRows, Skel, Empty, LoadError, Button } from '../ui/kit.js';
+import { useCharges, needsCheck } from './charges.js';
 
 export function useInvoices() { return useQuery('invoices', () => api('my_trade_invoices'), { persist: true, ttl: 60000 }); }
 export function useHours(monday) {
@@ -22,6 +23,8 @@ export function Pay() {
   const invoices = useInvoices();
   const hours = useHours(monday);
   const lastHours = useHours(lastMonday);
+  const charges = useCharges();
+  const toCheck = ((charges.data && charges.data.charges) || []).filter(needsCheck).length;
   const groups = useQuery('groups', () => api('my_group_work_orders', null, null, { keepSession: true }), { ttl: 120000 });
   const list = (invoices.data && invoices.data.invoices) || [];
   const thisInv = invoiceForWeek(list, monday);
@@ -60,6 +63,7 @@ export function Pay() {
       <button type="button" class="action" onClick=${() => go('/pay/receipt')}><${Icon} name="receipt" size=${22} />Add receipt</button>
       <button type="button" class="action" onClick=${() => go('/pay/money')}><${Icon} name="wallet" size=${22} />My money</button>
       ${user.perMetre ? html`<button type="button" class="action" onClick=${() => go('/pay/work-orders')}><${Icon} name="tools" size=${22} />Work orders</button>` : null}
+      ${toCheck ? html`<button type="button" class="action" onClick=${() => go('/pay/charges')}><${Icon} name="users" size=${22} />Check crew (${toCheck})</button>` : null}
     </div>
 
     ${groupList.length ? html`<section class="section"><span class="t-label">Paid as a crew</span><div class="list ruled">
@@ -94,7 +98,7 @@ export function InvoiceRow({ inv }) {
   const pays = invoicePays(inv);
   const week = (inv.week_start || '').slice(0, 10);
   return html`<button type="button" class="row" onClick=${() => go('/pay/invoice/' + inv.id)}>
-    <span class="main" style="grid-column:1"><b>${week ? fmtWeek(week) : inv.invoice_source === 'work_order' ? 'Work order' : 'Invoice'}</b>
+    <span class="main" style="grid-column:1"><b>${week ? fmtWeek(week) : inv.invoice_source === 'work_order' ? 'Work order' : 'One-off invoice'}</b>
       <span>${inv.invoice_number || ''}${inv.paid_at ? ' · paid ' + fmtDate(inv.paid_at.slice(0, 10)) : ''}</span></span>
     <span style="text-align:right;display:grid;gap:4px;justify-items:end"><span class="t-num" style="font-size:20px">${pays == null ? '' : fmtMoney(pays, { cents: true })}</span><${Chip} kind=${kind}>${words}<//></span>
     <span class="trail"><${Icon} name="right" size=${18} /></span>

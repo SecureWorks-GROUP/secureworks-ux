@@ -270,7 +270,7 @@ registerDemo((db, h) => {
       const people = [...new Set([me.id, ...db.assignments.filter((a) => a.job_id === j.id && a.status !== 'cancelled').map((a) => a.user_id)])];
       const g = { group_id: db.id('g'), ...jobRef(j), pay_basis: 'all_in_12_v2', client_signed: false, _pot: 1900, _people: people, _frozen: false, _submitted: null, _signoff: null, entries: [] };
       db.groups.push(g);
-      return { ok: true, group_id: g.group_id, job_id: j.id, status: 'open', client_signed: false, ...shareOf(g) };
+      return { ok: true, group_id: g.group_id, job_id: j.id, status: 'open', client_signed: false };
     },
     join_group_work_order(p, b) {
       groupOff();
@@ -278,7 +278,7 @@ registerDemo((db, h) => {
       if (g._frozen) fail(409, { ok: false, code: 'group_split_frozen', error: 'The shares are already locked in for this job. Call the office.' });
       if (!onJob(g.job_id)) fail(403, { ok: false, code: 'group_work_order_not_assigned', error: 'You need to be booked on this job to join its crew work order.' });
       if (!inCrew(g)) g._people.push(me.id);
-      return { ok: true, status: 'open', ...shareOf(g) };
+      return { ok: true, group_id: g.group_id, job_id: g.job_id, status: 'open', client_signed: g.client_signed };
     },
     submit_group_work_order_hours(p, b) {
       const g = mustBeIn(b);

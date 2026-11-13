@@ -83,11 +83,14 @@ textarea.input.short { min-height: 64px; }
 .form section > h2 small { display: block; font-size: 14px; font-weight: 440; font-stretch: 100%; color: var(--ink-2); margin-top: 3px; }
 .savestate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-3); padding-right: 12px; white-space: nowrap; }
 .savestate.bad { color: var(--bad); }
-.matrow { display: grid; grid-template-columns: minmax(0, 1fr) 148px 40px; gap: 8px; align-items: center; }
+.matrow { display: grid; grid-template-columns: minmax(0, 1fr) 168px 36px; gap: 6px; align-items: center; }
 .matrow b { font-weight: 620; font-size: 16.5px; }
 .matrow .input { min-height: var(--tap); }
 .matrow .counter { grid-template-columns: 46px 1fr 46px; }
-.matrow .iconbtn { width: 40px; height: 40px; color: var(--ink-3); }
+.matrow .counter b span { white-space: nowrap; font-size: 13px !important; }
+.form .pick:disabled { opacity: 0.4; }
+.form .pick svg { vertical-align: -1px; }
+.matrow .iconbtn { width: 36px; height: 40px; color: var(--ink-3); }
 .need { display: block; width: 100%; text-align: center; font-size: 14px; font-weight: 650; color: var(--hi); padding: 2px 0; }
 .sumlist { display: grid; gap: 14px; }
 .sumlist > div > .t-label { display: block; margin-bottom: 2px; }

@@ -66,16 +66,16 @@ export function Group({ jobId }) {
     }
   };
 
-  const head = html`<header class="block ghead"><span class="t-label">Paid as a crew</span><h1 class="t-display">${title}</h1>${sub ? html`<p class="t-small t-num" style="font-weight:600">${sub}</p>` : null}</header>`;
+  const head = html`<header class="block ghead"><span class="t-label">Crew work order</span><h1 class="t-display">${title}</h1>${sub ? html`<p class="t-small t-num" style="font-weight:600">${sub}</p>` : null}</header>`;
 
   if (result) return html`<${ShareSent} result=${result} title=${title} onDone=${() => { setResult(null); shareQ.refetch(); }} />`;
 
   if (off) {
-    return html`<${Page} title=${title} onBack=${() => back('/pay')}>${head}
+    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
       <${Empty} title="Crew work orders are not switched on" action=${html`<${Button} kind="line" small onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's invoice<//>`}>Bill your hours for this job on your weekly invoice, the same as any other job.<//><//>`;
   }
   if (!share) {
-    return html`<${Page} title=${title} onBack=${() => back('/pay')}>${head}
+    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
       ${shareQ.loading ? html`<div class="block" style="display:grid;gap:14px;margin-top:22px"><${Skel} h=${120} r=${22} /><${Skel} w="70%" h=${22} /><${Skel} w="86%" h=${22} /><${Skel} w="60%" h=${22} /></div>`
         : html`<${LoadError} error=${shareQ.error} onRetry=${shareQ.refetch} what="the crew work order" />`}<//>`;
   }
@@ -87,15 +87,15 @@ export function Group({ jobId }) {
   if (!member) {
     const canCreate = disc.state === 'create';
     const canJoin = disc.state === 'join' || g.awaiting === 'needs_join' || (Boolean(g.group_id) && !disc.state);
-    return html`<${Page} title=${title} onBack=${() => back('/pay')}>${head}
+    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
       <section class="block gnext">
-        <span class="t-label">Next</span>
+        ${canCreate || canJoin ? html`<span class="t-label">Next</span>` : null}
         <b class="t-title">${canCreate ? 'Start the crew work order' : canJoin ? 'Join the crew work order' : 'Nothing for you to do here'}</b>
         <p>${disc.message || (canCreate ? 'This job is paid as a crew, not by the hour. Start the crew work order so everyone can add their hours.' : canJoin ? 'The crew work order for this job is open. Join it to add your hours and get your share.' : 'You are not part of the crew work order for this job. If you worked on it, ask the office to book you on.')}</p>
       </section>
-      <div class="block gexplain">
+      ${canCreate || canJoin ? html`<div class="block gexplain">
         <p><span class="t-strong">How it works.</span> The job pays the crew one agreed amount. Everyone adds the days they worked, the customer signs the job off, and the amount is shared by hours. Then each person invoices their own share.</p>
-      </div>
+      </div>` : html`<div class="block" style="margin-top:14px"><${Button} kind="line" small onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's invoice<//></div>`}
       ${canCreate || canJoin ? html`<div class="dock">
         ${canCreate ? html`<${Button} block busy=${busy === 'create'} onClick=${() => write('create', 'create_group_work_order', { job_id: jobId }, { done: 'Crew work order started. Add your hours.' })}>Start the crew work order<//>`
           : html`<${Button} block busy=${busy === 'join'} onClick=${() => write('join', 'join_group_work_order', g.group_id ? { group_id: g.group_id } : { job_id: jobId }, { done: 'You are in. Add your hours.' })}>Join the crew work order<//>`}
@@ -130,7 +130,7 @@ export function Group({ jobId }) {
     const res = await write('day:' + d.work_date, 'delete_group_work_order_hours', { ...idBody, work_date: d.work_date }, { done: 'Day removed.' });
     if (res) dropDay(d.work_date);
   };
-  const sign = () => openOverlay((close) => html`<${SignSheet} idBody=${idBody} job=${job} title=${title} onClose=${close} onDone=${() => { toast('Signed. Thank the customer for us.', { kind: 'ok' }); refresh(); }} />`);
+  const sign = () => openOverlay((close) => html`<${SignSheet} idBody=${idBody} job=${job} title=${title} onClose=${close} onDone=${(res) => { if (res) toast(res.happy === false ? 'Saved. The office will follow up what needs fixing.' : 'Signed. Thank the customer for us.', { kind: 'ok' }); refresh(); listQ.refetch(); }} />`);
   const lock = async () => {
     if (!(await ask({ title: 'Lock in the shares?', body: 'This splits the job between the crew by the hours entered. Nobody can change their hours after this, so check the hours are right first.', yes: 'Lock in the shares' }))) return;
     await write('lock', 'freeze_group_work_order', idBody, { expect: (r) => r.awaiting === 'frozen', done: 'Shares are locked in.' });
@@ -159,25 +159,27 @@ export function Group({ jobId }) {
     local.del(unsureKey); setUnsure(null);
   };
 
-  const next = nextWords({ awaiting, signed, submitted, release, blocked, myHours });
+  const paidDiffers = num(g.my_cash_pay) != null && num(g.my_share) != null && Math.abs(g.my_cash_pay - g.my_share) > 0.005;
+  const notHappy = !signed && (g.client_not_happy === true || (signoff && signoff.happy === false));
+  const next = nextWords({ awaiting, signed, submitted, release, blocked, myHours, notHappy });
   const serverSays = g.next_step || (disc.state !== 'member' ? disc.message : '') || '';
   const primary = blocked || submitted ? null
     : step === 0 && (awaiting === 'needs_hours' || !myHours) ? html`<${Button} block icon="plus" onClick=${addDay}>Add a day you worked<//>`
-    : step === 1 ? html`<${Button} block icon="pen" onClick=${sign}>Get the customer to sign<//>`
+    : step === 1 ? html`<${Button} block icon="pen" onClick=${sign}>${notHappy ? 'All fixed? Get the customer to sign' : 'Get the customer to sign'}<//>`
     : step === 2 && awaiting === 'ready' ? html`<${Button} block icon="lock" busy=${busy === 'lock'} onClick=${lock}>Lock in the shares<//>`
     : step === 3 && num(g.my_share) > 0 ? html`<${Button} block busy=${busy === 'invoice'} onClick=${invoice}>Invoice my share · ${cash(g.my_share)}<//>` : null;
 
-  return html`<${Page} title=${title} onBack=${() => back('/pay')}>${head}
+  return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
     <section class=${cx('block gnext', (step === 3 || submitted) && !blocked && 'night')}>
       <span class="t-label">${submitted ? 'Where it is up to' : 'Next'}</span>
       <b class="t-title">${next[0]}</b>
       <p>${serverSays || next[1]}</p>
       ${frozen && num(g.my_share) != null ? html`<div class="gshare">
         <div><span class="t-label">Your share</span><span class="money xl">${cash(g.my_share)}</span></div>
-        ${num(g.my_cash_pay) != null || num(g.my_super) != null ? html`<div class="pair">
-          ${num(g.my_cash_pay) != null ? html`<div><span class="t-label">Paid to you</span><span class="money md">${cash(g.my_cash_pay)}</span></div>` : null}
+        ${paidDiffers ? html`<div class="pair">
+          <div><span class="t-label">Paid to you</span><span class="money md">${cash(g.my_cash_pay)}</span></div>
           ${num(g.my_super) != null ? html`<div><span class="t-label">Into your super</span><span class="money md">${cash(g.my_super)}</span></div>` : null}
-        </div>` : null}
+        </div>` : num(g.my_super) ? html`<p>Plus ${cash(g.my_super)} into your super.</p>` : null}
       </div>` : null}
     </section>
 
@@ -208,7 +210,7 @@ export function Group({ jobId }) {
       <li class=${stepClass(1, step, signed)}>
         <span class="gdot">${signed ? html`<${Icon} name="check" size=${16} stroke=${3} />` : '2'}</span>
         <div><b class="gt">Customer signs off</b>
-          <span class="how">${signed ? `Signed${signoff && signoff.name ? ' by ' + signoff.name : ''}${signoff && signoff.at ? ', ' + fmtDay(tsToDate(signoff.at)) : ''}.` : hoursDone ? 'Hand them your phone, or the office can send them a link.' : 'Once everyone has their hours in.'}</span>
+          <span class="how">${signed ? `Signed${signoff && signoff.name ? ' by ' + signoff.name : ''}${signoff && signoff.at ? ', ' + fmtDay(tsToDate(signoff.at)) : ''}.` : notHappy ? `${signoff && signoff.name ? signoff.name : 'The customer'} listed things to fix${signoff && signoff.at ? ' on ' + fmtDay(tsToDate(signoff.at)) : ''}. They sign again once those are done.` : hoursDone ? 'Hand them your phone, or the office can send them a link.' : 'Once everyone has their hours in.'}</span>
           ${signed && signoff && signoff.happy === false ? html`<span class="how" style="color:var(--bad)">They listed things to fix. The office will be in touch about them.</span>` : null}
           ${signed && !frozen ? html`<span class="how">If anyone changes their hours now, the customer has to sign again.</span>` : null}
         </div>
@@ -236,7 +238,7 @@ export function Group({ jobId }) {
 
 function stepClass(i, step, done) { return cx('gstep', done ? 'done' : i === step ? 'now' : 'later'); }
 
-function nextWords({ awaiting, signed, submitted, release, blocked, myHours }) {
+function nextWords({ awaiting, signed, submitted, release, blocked, myHours, notHappy }) {
   if (blocked) return ['Waiting on the office', 'Your share may already be in. The office needs to check before anything else happens.'];
   if (submitted) {
     if (release.released === true || submitted.status === 'paid') return ['Sent for payment', 'Your share went for payment with the whole crew.'];
@@ -249,8 +251,9 @@ function nextWords({ awaiting, signed, submitted, release, blocked, myHours }) {
   if (awaiting === 'awaiting_others') return ['Waiting on the rest of the crew', myHours ? 'Your hours are in. The others still need to add theirs. Give them a nudge.' : 'The others still need to add their hours.'];
   if (awaiting === 'awaiting_rate' || awaiting === 'awaiting_office') return ['Waiting on the office', 'The office has to finish setting up pay for someone in the crew. Nothing for you to do.'];
   if (awaiting === 'awaiting_crew_approval') return ['Waiting on the crew', 'The crew still has to confirm the hours.'];
+  if (notHappy && awaiting !== 'ready' && awaiting !== 'frozen') return ['Fix what the customer listed', 'The customer was not happy to sign the job off yet. Fix what they listed, then get them to sign again.'];
   if (awaiting === 'awaiting_signoff' || (!signed && awaiting !== 'ready' && awaiting !== 'frozen')) return ['Get the customer to sign', 'All the hours are in. The customer signs the job off on your phone, then the shares can be locked in.'];
-  if (awaiting === 'ready') return ['Lock in the shares', 'Hours are in and the customer has signed. Lock it in to see what each person gets.'];
+  if (awaiting === 'ready') return ['Lock in the shares', 'Hours are in and the customer has signed. Lock it in to set your share.'];
   if (awaiting === 'frozen') return ['Invoice your share', 'The shares are set. Send yours and you are done.'];
   return ['Crew work order', 'Open each step below to see where it is up to.'];
 }

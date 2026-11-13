@@ -185,7 +185,7 @@ function Flow({ jobId, job, data, user }) {
   // ---- send ----
   const items = useMemo(() => [
     ...s.photos.map((p) => ({ id: p.key, kind: 'photo', label: p.label, phase: 'completion', mediaLabel: p.label })),
-    ...(needNbr && !s.waive ? s.nbrs.filter((n) => n.key).map((n) => ({ id: n.key, kind: 'photo', label: `Sign-off from ${n.label.replace(/^The /, 'the ')}`, phase: 'neighbour_signoff', mediaLabel: 'Neighbour sign-off: ' + n.label })) : []),
+    ...(needNbr && !s.waive ? s.nbrs.filter((n) => n.key).map((n) => ({ id: n.key, kind: 'photo', label: `Sign-off from ${n.label.replace(/^The /, 'the ')}`, phase: 'neighbour_signoff', mediaLabel: 'Neighbour sign-off: ' + n.label.replace(/^The neighbour$/, 'Neighbour') })) : []),
     ...(needNbr && s.waive ? [{ id: 'waiver', kind: 'waiver', label: 'Why there is no neighbour sign-off' }] : []),
     ...(!s.absent && s.sig ? [{ id: s.sig.key, kind: 'photo', label: 'Customer signature', phase: 'signature', mediaLabel: 'Client signature - ' + s.name.trim(), png: true }] : []),
     { id: 'complete', kind: 'complete', label: 'Mark the job finished' }
@@ -267,7 +267,7 @@ function Flow({ jobId, job, data, user }) {
   const nextPrompt = prompts.find((p) => !s.photos.some((x) => x.label === p));
   const place = jobTitle(job);
 
-  return html`<${Page} title=${'Finish ' + jobTitle(job)} onBack=${prev}>
+  return html`<${Page} class="steppage" title=${'Finish ' + jobTitle(job)} onBack=${prev}>
     <${StepBar} index=${index} total=${steps.length} />
 
     ${step === 'clock' ? html`<${ClockStep} place=${place} clock=${clock} onDone=${({ hours }) => { toast(hours ? `Clocked off. ${fmtHours(hours)} saved for your invoice.` : 'Clocked off.', { kind: 'ok' }); goStep('photos'); }} />` : null}

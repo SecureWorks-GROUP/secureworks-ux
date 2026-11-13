@@ -14,23 +14,34 @@ const WORKED = ['complete', 'completed', 'submitted', 'verified', 'invoiced'];
 const TIMES = [['', 'No set time'], ['06:30', '6:30am'], ['07:00', '7am'], ['07:30', '7:30am'], ['other', 'Other']];
 
 /** Open the booking sheet for a job. `vertical` is the job type, as the job page worked it out. */
-export function openAllocate(job, vertical) {
+export function openAllocate(job, vertical, preset) {
   if (!job || !job.id) return;
-  openOverlay((close) => html`<${AllocateSheet} job=${job} vertical=${vertical} onClose=${close} />`);
+  openOverlay((close) => html`<${AllocateSheet} job=${job} vertical=${vertical} preset=${preset || null} onClose=${close} />`);
+}
+
+/** The server's own words for a "no", with its two shop-talk refusals put plainly. */
+function words(err) {
+  const msg = friendly(err);
+  const closed = /cannot allocate an? ([a-z_]+) job/i.exec(msg || '');
+  if (closed) return `This job is ${closed[1].replace(/_/g, ' ')}, so nobody can be booked on it.`;
+  if (err && err.status === 403 && /not authori[sz]ed/i.test(msg || '')) return 'You can only book crew on the job types you manage. Ask the office to do this one.';
+  if (err && err.body && err.body.code === 'assignment_user_date_conflict') return 'They already have a booking on this job that day that the office needs to tidy up.';
+  return msg;
 }
 
 function refresh(jobId) { invalidate('job:' + jobId); invalidate('myjobs'); invalidate('team'); invalidate('board'); }
 
-function AllocateSheet({ job, onClose }) {
+function AllocateSheet({ job, preset, onClose }) {
   const user = useStore((s) => s.user);
   const today = todayISO();
+  const startDays = ((preset && preset.days) || []).filter((d) => d >= today && d <= addDays(today, 13));
   const q = useJob(job.id);
   const users = useUsers(true);
   const away = useAvailability(today, addDays(today, 13));
   const [mode, setMode] = useState('book');
-  const [people, setPeople] = useState([]);
-  const [days, setDays] = useState([]);
-  const [page, setPage] = useState(0);
+  const [people, setPeople] = useState(() => ((preset && preset.people) || []).filter(Boolean));
+  const [days, setDays] = useState(startDays);
+  const [page, setPage] = useState(startDays.length && startDays[0] > addDays(today, 6) ? 1 : 0);
   const [time, setTime] = useState('');
   const [other, setOther] = useState('');
   const [note, setNote] = useState('');
@@ -38,6 +49,7 @@ function AllocateSheet({ job, onClose }) {
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [failed, setFailed] = useState([]);
+  const [someOk, setSomeOk] = useState(false);
 
   const data = q.data;
   const crew = useMemo(() => ((data && data.crew) || []).filter((c) => String(c.status || '').toLowerCase() !== 'cancelled' && c.role !== 'observer'), [data]);
@@ -72,6 +84,7 @@ function AllocateSheet({ job, onClose }) {
     for (const u of bookable(users.data && users.data.users, user.id)) map.set(u.id, { id: u.id, name: u.name });
     for (const p of onJob) if (p.id && !map.has(p.id)) map.set(p.id, { id: p.id, name: p.name });
     if (!map.has(user.id)) map.set(user.id, { id: user.id, name: user.name });
+    for (const p of (preset && preset.names) || []) if (p.id && !map.has(p.id)) map.set(p.id, { id: p.id, name: p.name });
     return [...map.values()].sort((a, b) => Number(b.id === user.id) - Number(a.id === user.id) || Number(onJobById.has(b.id)) - Number(onJobById.has(a.id)) || a.name.localeCompare(b.name));
   }, [users.data, onJob, user.id]);
   const awayBy = useMemo(() => awayIndex(away.data), [away.data]);
@@ -87,7 +100,8 @@ function AllocateSheet({ job, onClose }) {
   const awayDays = (id, list) => { const m = awayBy.get(id); return m ? list.filter((d) => m.has(d)).map((d) => m.get(d)) : []; };
 
   const submit = async (shut) => {
-    const clashes = people.flatMap((id) => awayDays(id, days).map((r) => `${nameOf(id)} ${r.status === 'leave' ? 'is on leave' : 'cannot work'} ${fmtDay(r.date)}`));
+    const clashes = people.map((id) => ({ id, rows: awayDays(id, days) })).filter((c) => c.rows.length)
+      .map((c) => `${nameOf(c.id)} ${c.id === user.id ? 'are' : 'is'} ${c.rows.every((r) => r.status === 'leave') ? 'on leave' : 'marked as not working'} ${daysWords(c.rows.map((r) => r.date), 3)}`);
     if (clashes.length && !(await ask({ title: 'Book them anyway?', body: clashes.slice(0, 4).join('. ') + (clashes.length > 4 ? `, and ${clashes.length - 4} more.` : '.'), yes: 'Book anyway', no: 'Go back' }))) return;
     setBusy(true); setFailed([]);
     const jobs = people.flatMap((id) => days.map((d) => ({ id, d })));
@@ -104,7 +118,7 @@ function AllocateSheet({ job, onClose }) {
         if (!ok) throw new ApiError((res && (res.error || res.message)) || 'That booking was not saved.', { status: 409, body: res });
         if (res.deduped || res.mode === 'idempotent') already += 1; else made += 1;
       } catch (err) {
-        bad.push({ id, d, message: friendly(err) });
+        bad.push({ id, d, message: words(err) });
         if (err.offline) { stopped = true; break; }
       }
     }
@@ -118,7 +132,9 @@ function AllocateSheet({ job, onClose }) {
       shut();
       return;
     }
-    setFailed(bad);
+    setFailed(bad); setSomeOk(made + already > 0);
+    setPeople([...new Set(bad.map((f) => f.id))]);
+    setTimeout(() => { const el = document.querySelector('.sheet .bookfail'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 60);
     toast(stopped ? 'No signal. Some bookings were not sent.' : made || already ? `Booked ${made + already} of ${jobs.length}. See what was not booked.` : 'Not booked. See why below.', { kind: 'bad', ms: 5000 });
   };
 
@@ -129,7 +145,7 @@ function AllocateSheet({ job, onClose }) {
       await api('delete_assignment', null, { assignmentId: r.id });
       toast(`Done. ${p.id === user.id ? 'You are' : firstName(p.name) + ' is'} off ${fmtDay(r.date)}.`, { kind: 'ok' });
       refresh(job.id);
-    } catch (err) { toast(friendly(err), { kind: 'bad', ms: 7000 }); }
+    } catch (err) { toast(words(err), { kind: 'bad', ms: 7000 }); }
     setStep('');
   };
   const setLead = async (p, clear) => {
@@ -139,7 +155,7 @@ function AllocateSheet({ job, onClose }) {
       const res = await api('set_job_lead', null, clear ? { jobId: job.id, clear: true } : { jobId: job.id, assignmentId: row.id });
       toast(res && res.lead ? `${p.id === user.id ? 'You are' : firstName(p.name) + ' is'} the lead on this job.` : 'No lead on this job now.', { kind: 'ok' });
       refresh(job.id);
-    } catch (err) { toast(friendly(err), { kind: 'bad', ms: 6000 }); }
+    } catch (err) { toast(words(err), { kind: 'bad', ms: 6000 }); }
     setStep('');
   };
 
@@ -182,7 +198,7 @@ function AllocateSheet({ job, onClose }) {
                   ${on ? html`<span class="t-small" style="display:block">On this job ${daysWords(on.rows.map((r) => r.date).filter(Boolean), 2)}</span>` : null}
                   ${offDays.length ? html`<span class=${cx('t-small', days.length ? 't-bad' : 't-mute')} style="display:block;font-weight:${days.length ? 620 : 440}">${awayWord(offDays[0].status)} ${daysWords(offDays.map((r) => r.date), 2)}</span>` : null}
                 </span>
-                <span class=${cx('tick', picked && 'on')}><${Icon} name="check" size=${16} stroke=${3} /></span>
+                <span class=${cx('picktick', picked && 'on')}><${Icon} name="check" size=${16} stroke=${3} /></span>
               </button>`;
             })}
             ${term && !shownRoster.length ? html`<p class="t-small t-mute" style="padding:10px 0">Nobody by that name.</p>` : null}
@@ -210,7 +226,8 @@ function AllocateSheet({ job, onClose }) {
 
         <div class="note-banner plain"><${Icon} name="message" size=${18} /><span>${textsOthers || !people.length ? 'Each person gets a text for every day you book them. ' : ''}Booking yourself sends no text. The customer is not texted.</span></div>
 
-        ${failed.length ? html`<div class="note-banner bad" role="alert"><${Icon} name="alert" size=${18} /><span><b class="t-strong">Not booked</b>
+        ${failed.length ? html`<div class="note-banner bad bookfail" role="alert"><${Icon} name="alert" size=${18} /><span><b class="t-strong">Not booked</b>
+          <span style="display:block;margin-top:2px">${someOk ? 'The rest went through. These are still picked, so you can try again.' : 'Nothing was booked.'}</span>
           ${failed.slice(0, 5).map((f) => html`<span style="display:block;margin-top:4px">${nameOf(f.id)}, ${fmtDay(f.d)}: ${f.message}</span>`)}
           ${failed.length > 5 ? html`<span style="display:block;margin-top:4px">And ${failed.length - 5} more.</span>` : null}</span></div>` : null}
       </div>`}

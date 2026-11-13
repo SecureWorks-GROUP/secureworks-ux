@@ -1,1 +1,115 @@
-/* SecureWorks Crew: styles for the pay screens. Tokens and shared components are in app.css. */
+/* SecureWorks Crew: styles for the pay screens only (invoice, my money,
+   receipts, crew work order, work orders, crew lines). Tokens are in app.css. */
+
+/* ---------- shared ---------- */
+.textlink { color: var(--ink); font-weight: 650; font-size: 14.5px; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; min-height: 32px; text-align: left; }
+.textlink:active { color: var(--hi); }
+.line.still:active { background: none; }
+.linechip { display: block; margin-top: 8px; }
+.sumrow > span:first-child { min-width: 0; }
+.sumrow .plainval { font-weight: 600; white-space: normal; text-align: right; font-variant-numeric: normal; }
+.row .lead.quiet { width: 26px; display: grid; place-items: center; color: var(--ink-3); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pair > div { display: grid; gap: 6px; align-content: start; }
+
+/* the end of a flow */
+.donescreen { display: grid; align-content: start; gap: 22px; padding-top: calc(var(--safe-t) + 56px); padding-bottom: 32px; }
+.donelead { margin-top: 10px; color: var(--ink-2); max-width: 36ch; }
+.done-mark.wait { background: var(--warn-soft); color: var(--warn); }
+.done-mark.wait svg path { stroke-dasharray: none; stroke-dashoffset: 0; animation: none; }
+
+/* ---------- one invoice, one work order ---------- */
+.invhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.invhead > div { min-width: 0; }
+.invhead .chip { margin-top: 4px; flex: none; }
+.invtitle { font-size: 30px; margin-top: 2px; }
+.paytop { display: grid; gap: 10px; margin-top: 22px; }
+.paytop p { color: var(--ink-2); max-width: 36ch; }
+
+/* ---------- my money ---------- */
+.period { display: grid; gap: 8px; margin-top: 20px; padding: 20px; border-radius: var(--r-l); }
+.period.night { background: var(--night); color: var(--night-ink); }
+.period.night .t-label { color: var(--night-ink-2); }
+.period .sub { color: var(--night-ink-2); font-size: 14.5px; }
+.period .pair { margin-top: 10px; padding-top: 16px; box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.14); }
+.months { display: grid; }
+.mrow { display: grid; grid-template-columns: minmax(64px, 1fr) repeat(3, minmax(0, 1.05fr)); gap: 8px; align-items: baseline; padding: 12px 0; font-variant-numeric: tabular-nums; font-size: 15.5px; }
+.mrow + .mrow { box-shadow: inset 0 1px 0 var(--line); }
+.mrow > * { text-align: right; white-space: nowrap; }
+.mrow > :first-child { text-align: left; }
+.mrow b { font-stretch: 84%; font-weight: 700; font-size: 17px; }
+.mrow.head { padding: 4px 0 6px; font-stretch: 108%; font-weight: 640; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.mrow .due { font-weight: 700; }
+.mrow span:not(.due):last-child { color: var(--ink-3); }
+.uncounted > .row { padding-bottom: 40px; }
+.uncounted > .row .main b, .uncounted > .row .t-num { color: var(--ink-3); }
+.uncounted-tag { position: absolute; left: var(--gut); bottom: 13px; font-size: 13px; font-weight: 600; color: var(--ink-3); pointer-events: none; }
+
+/* ---------- receipts ---------- */
+.bigadd.shoot { min-height: 232px; gap: 6px; padding: 20px; text-align: center; color: var(--ink); background: var(--paper-2); box-shadow: none; font-stretch: 86%; font-weight: 720; font-size: 22px; line-height: 1.1; transition: transform 160ms var(--ease), background 140ms; }
+.bigadd.shoot:active { transform: scale(0.985); background: var(--paper-3); }
+.bigadd.shoot .t-small { font-stretch: 100%; font-weight: 440; max-width: 26ch; }
+.shootmark { width: 76px; height: 76px; border-radius: 50%; background: var(--hi); color: var(--hi-ink); display: grid; place-items: center; margin-bottom: 8px; }
+.shot { position: relative; border-radius: var(--r-m); overflow: hidden; background: var(--paper-3); display: grid; }
+.shot.busy img { opacity: 0.45; }
+.shotstate { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; font-weight: 680; font-size: 17px; }
+.shotstate .spin { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin 700ms linear infinite; }
+.shotrow { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 8px 12px 8px 8px; border-radius: var(--r-m); background: var(--paper-2); }
+.shotrow:active { background: var(--paper-3); }
+.shotrow img { width: 54px; height: 54px; object-fit: cover; border-radius: 9px; background: var(--paper-3); }
+.pick.ghost { display: inline-flex; align-items: center; gap: 7px; background: none; box-shadow: inset 0 0 0 1.5px var(--line-2); color: var(--ink-2); }
+
+/* ---------- crew work order ---------- */
+.ghead { display: grid; gap: 6px; }
+.gnext { display: grid; gap: 8px; margin-top: 20px; padding: 18px 20px 20px; border-radius: var(--r-l); background: var(--paper-2); }
+.gnext p { color: var(--ink-2); }
+.gnext.night { background: var(--night); color: var(--night-ink); }
+.gnext.night .t-label, .gnext.night p { color: var(--night-ink-2); }
+.gshare { display: grid; gap: 14px; margin-top: 10px; padding-top: 16px; box-shadow: inset 0 1px 0 var(--line-2); }
+.gnext.night .gshare { box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.14); }
+.gshare > div:first-child { display: grid; gap: 6px; }
+.gexplain { margin-top: 16px; color: var(--ink-2); font-size: 15.5px; }
+.gsteps { list-style: none; margin: 26px 0 0; padding: 0 var(--gut); display: grid; }
+.gstep { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; padding-bottom: 24px; position: relative; }
+.gstep::before { content: ''; position: absolute; left: 14px; top: 34px; bottom: 4px; width: 2px; border-radius: 2px; background: var(--line); }
+.gstep.done::before { background: var(--ok); opacity: 0.5; }
+.gstep:last-child { padding-bottom: 4px; }
+.gstep:last-child::before { display: none; }
+.gdot { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-variant-numeric: tabular-nums; font-stretch: 86%; font-weight: 740; font-size: 14px; color: var(--ink-3); box-shadow: inset 0 0 0 2px var(--line-2); }
+.gstep.done .gdot { background: var(--ok); color: white; box-shadow: none; }
+.gstep.now .gdot { background: var(--ink); color: var(--paper); box-shadow: none; }
+.gstep .gt { display: block; font-stretch: 84%; font-weight: 700; font-size: 19px; line-height: 30px; }
+.gstep.later .gt { color: var(--ink-3); }
+.gstep .how { display: block; color: var(--ink-2); font-size: 14.5px; }
+.gstep .how + .how { margin-top: 4px; }
+.gdays { display: grid; margin-top: 10px; border-radius: var(--r-m); background: var(--paper-2); padding: 2px 4px 2px 14px; }
+.gday { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 58px; }
+.gday + .gday { box-shadow: inset 0 1px 0 var(--line); }
+.gday b { display: block; font-stretch: 86%; font-weight: 700; font-size: 16.5px; }
+.gday span span { display: block; font-size: 13.5px; color: var(--ink-2); }
+.gday .iconbtn { color: var(--ink-3); }
+.gday .iconbtn:disabled { opacity: 0.4; }
+.gcrew { display: grid; margin-top: 12px; }
+.gcrewrow { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 15px; }
+.gcrewrow + .gcrewrow { box-shadow: inset 0 1px 0 var(--line); }
+.gcrewrow span:last-child { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+.gcrewrow span.t-mute:last-child { font-weight: 440; }
+
+/* customer sign-off: always dark ink on white, in either theme */
+.sigwrap { position: relative; }
+.sigwrap .sigpad { background: #fff; height: 180px; }
+.sigclear { position: absolute; right: 8px; top: 8px; height: 34px; padding: 0 12px; border-radius: 34px; background: oklch(25% 0.028 232 / 0.08); color: oklch(30% 0.03 232); font-weight: 650; font-size: 13.5px; }
+.starrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; }
+.starrow .stars { gap: 0; }
+.starrow .stars button { width: 40px; height: 46px; }
+
+/* ---------- work orders ---------- */
+.linkbanner { width: calc(100% - 2 * var(--gut)); margin-top: 16px; text-align: left; align-items: center; }
+.linkbanner > span { flex: 1; min-width: 0; }
+.linkbanner:active { transform: scale(0.99); }
+
+/* pages whose main button sits at the bottom even when the page is short */
+.page.paycol { display: flex; flex-direction: column; }
+.page.paycol > * { flex: none; }
+.page.paycol > .dock { margin-top: auto; padding-top: 28px; }
+.shot .receipt-shot { height: min(300px, 40vh); max-height: none; object-fit: contain; border-radius: 0; }

@@ -29,7 +29,9 @@ export function Money() {
   const month = d.month || {};
   const fy = d.fytd || {};
   const months = d.months || [];
-  const rows = d.invoices || [];
+  // A row's `payable` is already after the weekly deduction and any office change, so it is the figure to show.
+  const rows = (d.invoices || []).map((r) => ({ ...r, payable_after_xero: null, trade_payable: r.payable != null ? r.payable : r.trade_payable, paid: r.status === 'paid' || r.paid === true || String(r.xero_bill_status || '').toUpperCase() === 'PAID',
+    bill_status_label: r.bill_status_label || (['VOIDED', 'DELETED'].includes(String(r.xero_bill_status || '').toUpperCase()) ? 'Cancelled' : undefined) }));
   const left = rows.filter((r) => r.counts === false).length;
 
   return html`<${Page} title="My money" onBack=${() => back('/pay')}>

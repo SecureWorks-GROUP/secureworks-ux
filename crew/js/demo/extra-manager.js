@@ -33,20 +33,30 @@ registerDemo((db, h) => {
 
   // ---- the rest of the crew's week, so the team view has something to show ----
   const row = (jid, uid, date, start, extra = {}) => db.assignments.push({ id: db.id('a'), job_id: jid, user_id: uid, scheduled_date: date, start_time: start, status: 'confirmed', role: 'lead_installer', assignment_type: 'install', is_lead: false, clocked_on_at: null, clocked_off_at: null, started_at: null, completed_at: null, hours_worked: null, break_minutes: 0, job_phase: 'assigned', notes: '', ...extra });
+  // Two more people, so a day has somebody free as well as somebody busy.
+  db.others.push({ id: 'u-mia', name: 'Mia Chen', role: 'crew', phone: '0400 121 343' }, { id: 'u-dan', name: 'Dan Kowalski', role: 'crew', phone: '0400 565 787' });
+  const minsAgo = (n) => new Date(db.now().getTime() - n * 60000).toISOString();
   row('j-karr', 'u-jo', addDays(today, 1), '08:00');
-  row('j-bays', 'u-israel', today, '07:00', { is_lead: true });
-  row('j-bays', 'u-jo', today, '07:00');
   row('j-bays', 'u-israel', addDays(today, 1), '07:00', { is_lead: true });
   row('j-wemb', 'u-tendo', addDays(today, 2), '07:00');
-  row('j-joon', 'u-israel', addDays(today, 5), '07:00');
+  row('j-joon', 'u-israel', addDays(today, 5), '07:00', { status: 'scheduled' });
+  row('j-scar', 'u-mia', addDays(today, 3), '08:00', { status: 'scheduled' });
   if (db.persona === 'office') {
     row('j-joon', 'u-tendo', today, '07:00', { is_lead: true });
     row('j-joon', 'u-tendo', addDays(today, 1), '07:00', { is_lead: true });
     row('j-morl', 'u-jo', addDays(today, -1), '13:00', { status: 'complete', clocked_on_at: db.at(addDays(today, -1), '13:05'), clocked_off_at: db.at(addDays(today, -1), '15:40'), hours_worked: 2.58 });
   }
+  // Today, as the clock and the "on my way" button would leave it:
+  // Tendo is on site, Israel is driving, Dan has finished, Mia is free and Jo is off.
+  const tendoToday = db.assignments.find((a) => a.job_id === 'j-joon' && a.user_id === 'u-tendo' && a.scheduled_date === today);
+  if (tendoToday) Object.assign(tendoToday, { status: 'in_progress', job_phase: 'working', clocked_on_at: minsAgo(134), started_at: minsAgo(134), arrived_at: minsAgo(136) });
+  row('j-bays', 'u-israel', today, '07:00', { is_lead: true, job_phase: 'travelling', travel_started_at: minsAgo(12) });
+  row('j-sper', 'u-dan', today, '06:00', { status: 'complete', job_phase: 'complete', clocked_on_at: minsAgo(330), started_at: minsAgo(330), clocked_off_at: minsAgo(105), completed_at: minsAgo(105), break_minutes: 15, hours_worked: 3.5 });
+  row('j-hill', 'u-dan', addDays(today, 4), '09:00', { status: 'scheduled' });
 
   // ---- days off ----
   const off = (uid, date, status, note) => db.availability.push({ id: db.id('av'), user_id: uid, date, status, note: note || null, created_at: db.now().toISOString() });
+  off('u-jo', today, 'unavailable', 'Sick');
   off('u-jo', addDays(today, 2), 'unavailable', 'Dentist');
   off('u-israel', addDays(today, 8), 'leave', 'Family trip');
   off('u-israel', addDays(today, 9), 'leave', 'Family trip');

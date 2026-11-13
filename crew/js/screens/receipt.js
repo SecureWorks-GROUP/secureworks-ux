@@ -149,7 +149,7 @@ export function Receipt({ jobId, poId }) {
   if (step === 'done') {
     const sameRoute = expense.hadJob === Boolean(job.id);
     const checker = sameRoute ? who(expense.routed_to) : 'The office';
-    return html`<${DoneScreen} title="Receipt sent" lead=${`${checker} checks it${chosen ? ` against ${jobTitle(chosen)}` : ''}. You do not need to keep the paper copy for us.`}>
+    return html`<${DoneScreen} title="Receipt sent" lead=${`${checker} checks it${chosen ? ` against ${jobTitle(chosen)}` : ''}. Nothing more for you to do.`}>
       <section class="inset"><div class="sumrows">
         <div class="sumrow"><span>${f.vendor.trim()}</span><span>${cash(total)}</span></div>
         <div class="sumrow"><span>${PAID_WORDS[f.paid]}</span><span class="plainval">${chosen ? jobTitle(chosen) : 'No job'}</span></div>
@@ -165,7 +165,7 @@ export function Receipt({ jobId, poId }) {
     const read = expense.extraction && (expense.extraction.vendor_name || num(expense.extraction.total_amount) != null);
     const today = todayISO(); const yesterday = addDays(today, -1);
     const dateMode = f.date === today ? 'today' : f.date === yesterday ? 'yesterday' : f.date || f.otherDate ? 'other' : null;
-    return html`<${Page} title="Check the receipt" onBack=${() => back('/pay')}>
+    return html`<${Page} title="Check the receipt" class="paycol" onBack=${() => back('/pay')}>
       <header class="block"><h1 class="t-title" style="font-size:30px">Check the receipt</h1>
         <p class="t-small" style="margin-top:6px">${!photo ? 'No photo, so fill in what you paid.' : read ? 'This is what we read off your photo. Fix anything that is wrong.' : 'We could not read the photo. Fill in what you can see on it.'}</p></header>
       <div class="form" style="margin-top:18px">
@@ -176,7 +176,7 @@ export function Receipt({ jobId, poId }) {
           <${Field} label="Total paid"><input class="input big" type="number" inputmode="decimal" min="0" step="0.01" placeholder="$" value=${f.total} onInput=${(e) => set('total', e.currentTarget.value)} /><//>
           <${Field} label="GST in that"><input class="input big" type="number" inputmode="decimal" min="0" step="0.01" placeholder="$" value=${f.gst} onInput=${(e) => set('gst', e.currentTarget.value)} /><//>
         </div>
-        <${Field} label="Date on the receipt">
+        <${Field} label=${photo ? 'Date on the receipt' : 'Date you paid'}>
           <${Picks} value=${dateMode} options=${[['today', 'Today'], ['yesterday', 'Yesterday'], ['other', dateMode === 'other' && f.date ? fmtDay(f.date) : 'Another day']]} onChange=${(v) => setF((p) => ({ ...p, otherDate: v === 'other', date: v === 'today' ? today : v === 'yesterday' ? yesterday : p.date === today || p.date === yesterday ? '' : p.date }))} />
           ${dateMode === 'other' ? html`<input class="input" type="date" max=${today} value=${f.date} aria-label="Date on the receipt" onInput=${(e) => set('date', e.currentTarget.value > today ? '' : e.currentTarget.value)} />` : null}
         <//>
@@ -256,7 +256,7 @@ export function Receipts() {
   const q = useQuery('expenses', () => api('list_expenses', { limit: 100 }), { persist: true, ttl: 60000 });
   const rows = mine(q.data && q.data.expenses, user).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const open = (e) => openOverlay((close) => html`<${ReceiptSheet} expense=${e} onClose=${close} />`);
-  return html`<${Page} title="Receipts" onBack=${() => back('/pay')}>
+  return html`<${Page} title="Receipts" class="paycol" onBack=${() => back('/pay')}>
     <header class="block"><h1 class="t-display">Receipts</h1><p class="t-small" style="margin-top:8px">The ones you have sent, newest first.</p></header>
     ${q.loading ? html`<${SkelRows} n=${4} />` : q.error && !q.data ? html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="your receipts" />`
       : !rows.length ? html`<${Empty} title="No receipts yet">When you buy something for work, take a photo of the receipt here and the office takes it from there.<//>`

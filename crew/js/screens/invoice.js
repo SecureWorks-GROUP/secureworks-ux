@@ -58,6 +58,8 @@ export function Invoice({ invoiceId }) {
     : checking ? `The office is checking ${checking === 1 ? 'a line' : checking + ' lines'} on it. You are paid once they approve.`
     : 'With the office. You are paid once they approve it.';
 
+  const payLabel = paid ? 'You were paid' : draft ? 'This draft adds up to' : sentBack || voided ? 'It added up to' : 'You get paid';
+
   const byDay = [];
   for (const l of [...lines].sort((a, b) => lineDay(a).localeCompare(lineDay(b)))) {
     const d = lineDay(l);
@@ -85,7 +87,7 @@ export function Invoice({ invoiceId }) {
     </header>
 
     <section class="block paytop">
-      <span class="t-label">${paid ? 'You were paid' : draft ? 'This draft adds up to' : 'You get paid'}</span>
+      <span class="t-label">${payLabel}</span>
       ${figures ? html`<span class="money xl">${cash(pays)}</span>` : html`<span class="t-title">Figures not available</span>`}
       <p>${figures ? where : 'The office system did not send the figures for this one. Ask the office for them. ' + where}</p>
     </section>
@@ -95,7 +97,7 @@ export function Invoice({ invoiceId }) {
       : inv.office_note ? html`<div class="block note-banner plain" style="margin-top:16px"><${Icon} name="message" size=${18} /><span><span class="t-strong">From the office</span><span style="display:block;margin-top:2px">${inv.office_note}</span></span></div>` : null}
 
     ${figures ? html`<section class="block inset" style="margin-top:18px">
-      <${PayRows} m=${inv} hours=${hours || null} totalLabel=${paid ? 'You were paid' : 'You get paid'} />
+      <${PayRows} m=${inv} hours=${hours || null} totalLabel=${payLabel} />
       ${superNote(inv) ? html`<p class="t-small t-mute" style="margin-top:10px">${superNote(inv)}</p>` : null}
       ${adjusted ? html`<p class="t-small" style="margin-top:8px">The office changed this bill after you sent it. Ask them about any change you do not expect.</p>` : null}
       ${xeroGap ? html`<p class="t-small" style="margin-top:8px">The bookkeeper's bill for this invoice is ${cash(inv.xero_pays)}, not ${cash(pays)}. Ask the office which is right.</p>` : null}
@@ -132,13 +134,14 @@ function LineItem({ line: l }) {
   const kind = labour ? '' : LINE_KIND[String(l.line_type).toLowerCase()] || 'Other';
   const when = labour ? whenWords(l) : '';
   const desc = l.description && !/^labour$/i.test(l.description.trim()) && l.description.trim() !== kind ? l.description.trim() : '';
+  const sameStart = Boolean(kind && desc && desc.toLowerCase().startsWith(kind.toLowerCase()));
   const review = reviewOf(l);
   const leadAsked = String(l.acknowledgment_status || '').toLowerCase() === 'queried';
   const rate = num(l.hourly_rate != null ? l.hourly_rate : l.unit_rate);
   const small = labour && num(l.total_hours) ? `${fmtHours(l.total_hours)}${rate ? ' at ' + fmtMoney(rate) : ''}` : !labour && num(l.quantity) > 1 ? `${l.quantity} ${l.unit || ''}`.trim() : '';
   return html`<div class="line still">
     <span><b>${l.site_suburb || l.client_name || l.job_number || kind || 'Line'}</b>
-      ${when || kind ? html`<span class="how">${[kind, when].filter(Boolean).join(' · ')}</span>` : null}
+      ${when || (kind && !sameStart) ? html`<span class="how">${[sameStart ? '' : kind, when].filter(Boolean).join(' · ')}</span>` : null}
       ${desc ? html`<span class="how">${desc}</span>` : null}
       ${l.job_number ? html`<span class="how t-num" style="font-size:13px;color:var(--ink-3)">${[l.job_number, l.external_ref].filter(Boolean).join(' · ')}</span>` : null}
       ${review === 'checking' ? html`<span class="linechip"><${Chip} kind="warn">Office is checking this line<//></span>` : null}

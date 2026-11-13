@@ -30,7 +30,7 @@ export function Board({ vertical }) {
     <//><//>`;
   }
   return html`<${Page} title="Job board">
-    <header class="page-pad" style="padding-top:2px"><h1 class="t-display">Job board</h1></header>
+    <header class="page-pad" style="padding-top:2px">${boards.length === 1 ? html`<span class="t-label">${VERTICAL_LABEL[current] || 'Jobs'}</span>` : null}<h1 class="t-display" style=${boards.length === 1 ? 'margin-top:4px' : ''}>Job board</h1></header>
     <div class="page-pad stack tight" style="margin-top:14px">
       ${boards.length > 1 ? html`<${Seg} value=${current} options=${boards.map((v) => [v, VERTICAL_LABEL[v] || 'Jobs'])} onChange=${(v) => go('/board/' + v, { replace: true })} />` : null}
       <div class="search">

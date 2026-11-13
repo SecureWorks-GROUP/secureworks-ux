@@ -112,7 +112,7 @@ export function Details() {
       <${Group} title="You" why="So the office knows who you are and how to reach you." />
       <${Field} label="Full name" error=${show('fullName')}><input class="input" type="text" autocomplete="name" autocapitalize="words" value=${form.fullName} onInput=${(e) => set('fullName')(e.currentTarget.value)} /><//>
       <${Field} label="Mobile" error=${show('phone')}><input class="input" type="tel" inputmode="tel" autocomplete="tel" value=${form.phone} onInput=${(e) => set('phone')(e.currentTarget.value)} placeholder="04xx xxx xxx" /><//>
-      <${Field} label="Email" error=${show('email')}><input class="input" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck=${false} value=${form.email} onInput=${(e) => set('email')(e.currentTarget.value)} /><//>
+      <${Field} label="Email" error=${show('email')} hint="Where the office emails you. Your login email stays the same."><input class="input" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck=${false} value=${form.email} onInput=${(e) => set('email')(e.currentTarget.value)} /><//>
 
       <${Group} title="Your business" why="So your invoices are valid and the tax is right." />
       <${Field} label="ABN" error=${show('abn')} hint=${abnOdd ? null : '11 numbers. Spaces are added for you.'}>
@@ -138,9 +138,9 @@ export function Details() {
       </div>
     </form>
 
-    <div class="dock">
-      <${Button} block busy=${busy} disabled=${!dirty} onClick=${save}>${dirty ? 'Save details' : 'Saved'}<//>
-    </div>
+    ${dirty ? html`<div class="dock savedock">
+      <${Button} block busy=${busy} onClick=${save}>Save details<//>
+    </div>` : null}
   <//>`;
 }
 

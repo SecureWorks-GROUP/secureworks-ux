@@ -21096,6 +21096,11 @@ async function loadTradeBills() {
     if (!data || !Array.isArray(data.invoices)) throw new Error('Trade bills did not come back.');
     renderTradeBillTable(data.invoices);
     renderTradeRatesPanel(data.rates || []);
+    // <trade-first-rate> the crew list is a second read; if it is slow or fails
+    // the panel keeps the people who already have a rate.
+    await loadCrewList();
+    if (seq !== _tradeBillsLoadSeq) return;
+    renderTradeRatesPanel(data.rates || [], tradesWithNoRate(data.rates || [], _crewList));
   } catch (e) {
     if (seq !== _tradeBillsLoadSeq) return;
     console.error('loadTradeBills error:', e);
@@ -21349,20 +21354,48 @@ function rejectTradeInvoice(invoiceId) {
   });
 }
 
-function renderTradeRatesPanel(rates) {
+// <trade-first-rate>
+// Hours are billed from trade_rates only, and list_trade_invoices returns only
+// the people who already have a rate there. A new trade had no chip, so the
+// office had no screen to give them a first rate and their hours invoice was
+// refused. Crew from list_users with no current rate are listed too, marked
+// "No rate set", and saved through the same set_trade_rate_ops door as a change.
+var TRADE_RATE_ROLES = { crew: true, lead_installer: true, installer: true };
+function tradesWithNoRate(rates, crew) {
+  var have = {};
+  (rates || []).forEach(function(r) { if (r && r.user_id) have[String(r.user_id)] = true; });
+  return (crew || []).filter(function(u) {
+    return !!(u && u.id && TRADE_RATE_ROLES[String(u.role || '')] === true && !have[String(u.id)]);
+  });
+}
+
+function tradeRateChipArgs(userId, name) {
+  return "'" + swTradeBillEsc(String(userId || '').replace(/[^A-Za-z0-9-]/g, '')) + "','"
+    + swTradeBillEsc(String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'")) + "'";
+}
+
+function renderTradeRatesPanel(rates, noRate) {
   var panel = document.getElementById('tradeRatesPanel');
-  if (!rates.length) {
+  rates = rates || [];
+  noRate = noRate || [];
+  if (!rates.length && !noRate.length) {
     panel.innerHTML = '';
     return;
   }
+  var chip = 'background:var(--sw-card);padding:8px 12px;border-radius:8px;box-shadow:var(--sw-shadow);font-size:13px;cursor:pointer';
   var html = '<div style="display:flex;gap:8px;flex-wrap:wrap">';
   rates.forEach(function(r) {
     var name = r.users?.name || 'Unknown';
-    var nameArg = swTradeBillEsc(String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
-    var userArg = swTradeBillEsc(String(r.user_id || '').replace(/[^A-Za-z0-9-]/g, ''));
-    html += '<div style="background:var(--sw-card);padding:8px 12px;border-radius:8px;box-shadow:var(--sw-shadow);font-size:13px;cursor:pointer" onclick="openRateModal(\'' + userArg + '\',\'' + nameArg + '\',' + (Number(r.hourly_rate) || 0) + ')">';
+    html += '<div data-trade-rate style="' + chip + '" onclick="openRateModal(' + tradeRateChipArgs(r.user_id, name) + ',' + (Number(r.hourly_rate) || 0) + ')">';
     html += '<span style="font-weight:600">' + swTradeBillEsc(name) + '</span>';
     html += ' <span style="color:var(--sw-green);font-weight:700">$' + Number(r.hourly_rate).toFixed(2) + '/hr</span>';
+    html += '</div>';
+  });
+  noRate.forEach(function(u) {
+    var name = u.name || 'Unknown';
+    html += '<div data-trade-no-rate style="' + chip + ';border:1px dashed var(--sw-orange)" onclick="openRateModal(' + tradeRateChipArgs(u.id, name) + ',null)">';
+    html += '<span style="font-weight:600">' + swTradeBillEsc(name) + '</span>';
+    html += ' <span style="color:var(--sw-orange);font-weight:700">No rate set</span>';
     html += '</div>';
   });
   html += '</div>';
@@ -21371,13 +21404,17 @@ function renderTradeRatesPanel(rates) {
 
 var _rateModalUserId = null;
 var _rateModalName = '';
+var _rateModalFirst = false;
 
+// currentRate null (or not above zero) is a trade with no rate yet.
 function openRateModal(userId, name, currentRate) {
+  var has = Number(currentRate) > 0;
   _rateModalUserId = userId;
   _rateModalName = name;
+  _rateModalFirst = !has;
   document.getElementById('rateModalTitle').textContent = 'Set Rate — ' + name;
-  document.getElementById('rateModalCurrent').textContent = '$' + Number(currentRate).toFixed(2) + '/hr';
-  document.getElementById('rateModalInput').value = currentRate;
+  document.getElementById('rateModalCurrent').textContent = has ? '$' + Number(currentRate).toFixed(2) + '/hr' : 'No rate set';
+  document.getElementById('rateModalInput').value = has ? currentRate : '';
   document.getElementById('rateModal').classList.add('active');
   document.getElementById('rateModalInput').focus();
 }
@@ -21385,14 +21422,16 @@ function openRateModal(userId, name, currentRate) {
 function submitRateModal() {
   var val = parseFloat(document.getElementById('rateModalInput').value);
   if (!val || val <= 0) return;
+  var first = _rateModalFirst;
   opsPost('set_trade_rate_ops', { user_id: _rateModalUserId, hourly_rate: val }).then(function() {
     closeModal('rateModal');
-    showToast('Rate updated for ' + _rateModalName + ' to $' + val.toFixed(2) + '/hr', 'success');
+    showToast((first ? 'Rate set for ' : 'Rate updated for ') + _rateModalName + (first ? ' at $' : ' to $') + val.toFixed(2) + '/hr', 'success');
     loadTradeBills();
   }).catch(function(e) {
     showToast('Error: ' + e.message, 'warning');
   });
 }
+// </trade-first-rate>
 
 // ════════════════════════════════════════════════════════════
 // PURCHASE ORDER BOARD (Dispatch tab; was the Materials tab, see <ops-tab-set>)

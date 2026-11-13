@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Marks the SecureWorks Crew sources as ES modules for tooling. Nothing is installed or built from here."
+}

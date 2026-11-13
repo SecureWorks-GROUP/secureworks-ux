@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SecureWorks Crew</title>
+  <meta name="description" content="SecureWorks Crew: your jobs, your hours, your pay.">
+  <meta name="theme-color" content="#f7f5f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14202a" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="SW Crew">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preload" href="fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/more.css">
+  <link rel="stylesheet" href="css/pay.css">
+  <link rel="stylesheet" href="css/reports.css">
+  <link rel="stylesheet" href="css/manager.css">
+  <script>
+    // Same Supabase project and public key as the current Trade App.
+    window.CREW_CONFIG = {
+      supabaseUrl: 'https://kevgrhcjxspbxgovpmfl.supabase.co',
+      supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc',
+      resetRedirect: 'https://secureworks-group.github.io/secureworks-ux/trade.html',
+      oldAppUrl: '../trade.html',
+      version: '1.0.0'
+    };
+    try { var t = localStorage.getItem('crew:theme'); if (t) document.documentElement.dataset.theme = JSON.parse(t); } catch (e) {}
+  </script>
+  <style>
+    .boot { height: 100%; display: grid; place-items: center; background: #1b2a33; color: #f4f1ec; font: 700 18px/1 system-ui, sans-serif; letter-spacing: .02em; }
+    .boot i { display: inline-block; width: 10px; height: 28px; background: #f15a29; border-radius: 2px; margin-right: 12px; vertical-align: -7px; animation: bootpulse 1.2s ease-in-out infinite; }
+    @keyframes bootpulse { 50% { opacity: .35; } }
+  </style>
+</head>
+<body>
+  <div id="app"><div class="boot"><span><i></i>SecureWorks Crew</span></div></div>
+  <noscript>SecureWorks Crew needs JavaScript switched on.</noscript>
+  <script src="vendor/supabase.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

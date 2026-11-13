@@ -153,6 +153,8 @@ function fakePayment(opts = {}) {
       material_stage_reply: st.source === 'reply' ? bx.reply : null,
       held_by_payment: payment(bx).holds_stage && ['awaiting_payment'].includes(st.key),
       skips_ready: skipsReady(bx), payment: payment(bx), date_mode: bx.dateMode,
+      // Its order email saved as a draft and not sent (Order drafted, 13 Nov 2026).
+      order_drafted: bx.drafted === true,
     });
   };
 

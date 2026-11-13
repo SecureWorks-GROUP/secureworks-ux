@@ -6043,6 +6043,8 @@
       }
       paintV2If(jobId);
       readV2(jobId, true);
+      // The list read again: Needs you now moves the box to Order drafted.
+      if (!resp.unchanged) loadBase();
     }, function (err) {
       delete e.busy[key];
       v2Fail(jobId, key, err, 'The email was not made.');
@@ -6190,6 +6192,8 @@
       e.msg['make:' + box.supplier_id] = { text: 'Email discarded. Nothing was sent.' };
       paintV2If(jobId);
       readV2(jobId, true);
+      // The list read again: the box is no longer Order drafted.
+      loadBase();
     }, function (err) {
       delete e.busy[key];
       v2Fail(jobId, key, err, 'Not discarded.');
@@ -6268,6 +6272,9 @@
       if (fresh && fresh.status === 'draft') box.open = fresh;
       paintV2If(jobId);
       readV2(jobId, true);
+      // The list read again: Needs you now drops the sent order (Order
+      // drafted, To order). A test copy changes nothing there.
+      if (!test) loadBase();
     }, function (err) {
       md.busy = false;
       var code = err && err.code;

@@ -23411,6 +23411,14 @@
     if (rate == null) return null;
     var superBase = Math.max(0, Math.round((gross - commission) * 100) / 100);
     var split = MyMoneyCore.resolveSuperSplit({ gross_earned: superBase, super_rate: rate });
+    // <super-on-top> ops-api my_hours sends super_basis super_on_top_v1 for a
+    // trade the company pays super on top for (owner, 13 Nov 2026): nothing is
+    // withheld, the trade is paid the whole amount and super goes to the fund.
+    var superOnTop = !!(_hoursData && _hoursData.super_basis === 'super_on_top_v1');
+    if (superOnTop) {
+      var onTopSuper = Math.round(superBase * rate * 100) / 100;
+      split = { super_amount: onTopSuper, worker_withhold: 0, company_contribution: onTopSuper, amount_payable: gross };
+    }
     var preview = {
       complete: true,
       estimated: true,
@@ -23419,7 +23427,7 @@
       super_amount: split.super_amount,
       worker_withhold: split.worker_withhold,
       company_contribution: split.company_contribution,
-      amount_payable: commission > 0 && split.worker_withhold != null
+      amount_payable: superOnTop ? gross : commission > 0 && split.worker_withhold != null
         ? Math.round((gross - split.worker_withhold) * 100) / 100
         : split.amount_payable,
       gst_on: _invGst

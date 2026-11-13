@@ -51,6 +51,9 @@ export function jobStatusLabel(status) { return JOB_STATUS[String(status || '').
 export function jobIsClosed(status) { return ['complete', 'completed', 'invoiced', 'final_payment', 'get_review', 'paid', 'closed', 'archived', 'cancelled', 'lost'].includes(String(status || '').toLowerCase()); }
 
 const DONE = ['complete', 'completed', 'submitted', 'verified', 'disputed'];
+/** Still being quoted or sold: not a job the crew can be on yet. */
+export function jobNotOpenYet(status) { return ['lead', 'new', 'draft', 'quoted'].includes(String(status || '').toLowerCase()); }
+
 /** booked | live (clocked on now) | done */
 export function bookingState(b) {
   if (b.clockOn && !b.clockOff && !DONE.includes(b.status)) return 'live';

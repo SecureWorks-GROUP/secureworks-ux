@@ -8,7 +8,7 @@ import { useJob, jobStub, bookMyself, unbookMyself, noteBody, optimisticNote, us
 import { go, back } from '../lib/router.js';
 import { todayISO, addDays, fmtDay, fmtDow, fmtDom, fmtDate, fmtTime, fmtTs, fmtHours, fmtRelDay, tsToDate } from '../lib/dates.js';
 import {
-  verticalOf, isReportJob, jobTitle, jobAddress, mapsUrl, jobStatusLabel, jobIsClosed, tradeNotes, noteText, noteAuthor, splitMedia, PHASES, noPrices
+  verticalOf, isReportJob, jobTitle, jobAddress, mapsUrl, jobStatusLabel, jobIsClosed, jobNotOpenYet, tradeNotes, noteText, noteAuthor, splitMedia, PHASES, noPrices
 } from '../lib/model.js';
 import { queueWrite, outboxItems, onOutbox } from '../lib/outbox.js';
 import { uploadPhoto, pickPhotos } from '../lib/upload.js';
@@ -41,7 +41,8 @@ export function Job({ jobId, tab: tabParam }) {
     return bookings.filter((b) => b.jobId === jobId && b.mine).map((b) => ({ id: b.id, date: b.date, status: b.status, clockOn: b.clockOn, clockOff: b.clockOff, hours: b.hours, start: b.start }));
   }, [data, bookings, jobId, user.id]);
   const onJob = myRows.length > 0;
-  const closed = job ? jobIsClosed(job.status) : false;
+  const notOpen = job ? jobNotOpenYet(job.status) : false;
+  const closed = job ? jobIsClosed(job.status) || notOpen : false;
   const { photos, videos } = useMemo(() => splitMedia(data && data.media), [data]);
   const notes = useMemo(() => tradeNotes(data && data.notes), [data]);
   const pendingNotes = usePendingNotes(jobId);
@@ -56,7 +57,7 @@ export function Job({ jobId, tab: tabParam }) {
   return html`<${Page} title=${jobTitle(job)} right=${html`<button type="button" class="iconbtn" aria-label="Refresh" onClick=${() => { q.refetch(); buzz(6); }}><${Icon} name="refresh" size=${20} class=${q.refreshing ? 'spin-slow' : ''} /></button>`}>
     <header class="jobhero">
       <div class="ref"><${Tag} vertical=${vertical} />${job.job_number ? html`<span class="t-small t-num t-mute">${job.job_number}</span>` : null}
-        ${closed ? html`<${Chip}>${jobStatusLabel(job.status)}<//>` : null}
+        ${closed && jobStatusLabel(job.status) ? html`<${Chip}>${jobStatusLabel(job.status)}<//>` : null}
         ${onJob ? html`<${Chip} kind="ok" icon="check">You are on it<//>` : null}</div>
       <h1 class="t-display">${jobTitle(job)}</h1>
       ${jobAddress(job) ? html`<a class="addr" href=${mapsUrl(job)} target="_blank" rel="noopener"><${Icon} name="pin" size=${18} /><span>${jobAddress(job)}</span></a>` : null}
@@ -71,7 +72,7 @@ export function Job({ jobId, tab: tabParam }) {
       <button type="button" class="action" onClick=${() => (viewOnly ? toast('Add yourself to this job first.') : openProblem(job))}><${Icon} name="alert" size=${22} />Problem</button>
     </div>
 
-    ${viewOnly ? html`<div class="block note-banner plain" style="margin-top:14px"><${Icon} name="info" size=${18} /><span>You are looking at this job. Add yourself to clock on, add photos and notes, and see the customer's number.</span></div>` : null}
+    ${viewOnly && !closed ? html`<div class="block note-banner plain" style="margin-top:14px"><${Icon} name="info" size=${18} /><span>You are looking at this job. Add yourself to clock on, add photos and notes, and see the customer's number.</span></div>` : null}
     ${isReportJob(vertical) && !viewOnly ? html`<${ReportCard} jobId=${jobId} data=${data} vertical=${vertical} />` : null}
     ${q.error && data ? html`<div class="block note-banner" style="margin-top:14px">Showing the last saved copy. ${q.error.offline ? 'No signal.' : ''}</div>` : null}
 
@@ -80,7 +81,9 @@ export function Job({ jobId, tab: tabParam }) {
     </div>
 
     <div key=${tab} class="rise" style="padding-top:18px;min-height:46vh">
-      ${q.locked ? html`<${Empty} title="Add yourself to open this job">The scope, photos and notes open up once you are on the job.<//>`
+      ${q.locked ? (notOpen ? html`<${Empty} title="Not a live job yet">This one is still being quoted. It opens up for the crew once the customer says yes.<//>`
+          : closed ? html`<${Empty} title="This job is closed">Ask the office if you need something from it.<//>`
+          : html`<${Empty} title="Add yourself to open this job">The scope, photos and notes open up once you are on the job.<//>`)
         : !data ? html`<div class="page-pad" style="display:grid;gap:12px"><${Skel} h=${90} r=${14} /><${Skel} w="80%" /><${Skel} w="60%" /></div>`
         : tab === 'scope' ? html`<${ScopeTab} data=${data} job=${job} vertical=${vertical} videos=${videos} user=${user} viewOnly=${viewOnly} onJob=${onJob} />`
         : tab === 'photos' ? html`<${PhotosTab} jobId=${jobId} photos=${photos} viewOnly=${viewOnly} live=${Boolean(clock && clock.jobId === jobId)} started=${myRows.some((r) => r.clockOn)} />`

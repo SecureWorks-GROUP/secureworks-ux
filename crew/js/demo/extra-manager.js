@@ -211,7 +211,7 @@ registerDemo((db, h) => {
         if (!target) h.fail(409, { error: 'That person is not an active crew member on this job' });
       }
       db.assignments.forEach((a) => { if (a.job_id === jobId) a.is_lead = false; });
-      if (target) rows.forEach((a) => { if (a.user_id === target.user_id) a.is_lead = true; });
+      if (target) target.is_lead = true;
       return { success: true, job_id: jobId, lead: target ? { assignment_id: target.id, user_id: target.user_id, name: h.person(target.user_id).name } : null };
     }
   };

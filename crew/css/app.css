@@ -292,6 +292,7 @@ textarea.input { min-height: 96px; resize: none; line-height: 1.4; }
 .field .hint { font-size: 13.5px; color: var(--ink-2); text-transform: none; letter-spacing: 0; font-weight: 440; font-stretch: 100%; }
 .field .err { color: var(--bad); font-size: 13.5px; font-weight: 560; text-transform: none; letter-spacing: 0; font-stretch: 100%; }
 .search { position: relative; }
+.search input::-webkit-search-cancel-button { display: none; }
 .search svg { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
 .search .input { padding-left: 46px; padding-right: 44px; border-radius: 28px; }
 .search .clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }

@@ -1,6 +1,6 @@
 // SecureWorks Crew: app shell. Signs in, picks the screen, draws the tabs.
 import { html, render, useEffect, useState, cx } from './lib/h.js';
-import { getState, setState, useStore, local } from './lib/store.js';
+import { getState, setState, useStore, local, invalidate } from './lib/store.js';
 import { initAuth, decorate } from './lib/auth.js';
 import { setDemoHandler } from './lib/api.js';
 import { useRoute, go, ROOTS } from './lib/router.js';
@@ -101,6 +101,13 @@ function App() {
   const demo = useStore((s) => s.demo);
   const route = useRoute();
   useEffect(() => { if (user) { restoreClock(); setTimeout(flushOutbox, 3000); } }, [user && user.id]);
+  // Coming back to the app after a while: quietly check for changes.
+  useEffect(() => {
+    let away = 0;
+    const fn = () => { if (document.hidden) { away = Date.now(); return; } if (away && Date.now() - away > 30000) { invalidate('myjobs'); invalidate('hours'); invalidate('job:'); invalidate('invoices'); } };
+    document.addEventListener('visibilitychange', fn);
+    return () => document.removeEventListener('visibilitychange', fn);
+  }, []);
   if (!ready) return html`<div class="boot"><span><i />SecureWorks Crew</span></div>`;
   if (!user) return html`<${Login} /><${Toasts} />`;
   const focus = FOCUS.some((f) => route.parts.includes(f));
@@ -122,11 +129,13 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); wind
 
 async function boot() {
   const params = new URLSearchParams(location.search);
-  if (params.has('demo')) {
+  const forced = window.CREW_CONFIG.forceDemo;
+  if (params.has('demo') || forced) {
     const demo = await import('./demo/server.js');
     await Promise.all([import('./demo/extra-pay.js'), import('./demo/extra-reports.js'), import('./demo/extra-manager.js')]);
     if (params.get('now')) setNow(new Date(params.get('now')));
-    const persona = params.get('demo') || 'crew';
+    const persona = params.get('demo') || local.get('demoPersona', '') || (forced === true ? 'crew' : forced) || 'crew';
+    local.set('demoPersona', persona);
     setDemoHandler(demo.createDemoServer(persona));
     setState({ demo: true, ready: true, user: params.has('signedout') ? null : decorate(demo.demoProfile(persona)) });
     window.__crewDemoSignIn = () => setState({ user: decorate(demo.demoProfile(persona)) });

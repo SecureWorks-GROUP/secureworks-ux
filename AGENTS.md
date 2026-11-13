@@ -1353,6 +1353,24 @@ Gotchas:
   in the first place. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
   `tests/e2e/ops-schedule-lane-overlap.spec.js`.
 
+## SecureWorks Crew: the new trades' app (`crew/`)
+
+A from-scratch trades' app that runs beside `trade.html` (Marnin, 13 Nov 2026):
+same sign-in, same ops-api actions, so a trade can use either on the same day.
+`trade.html` stays the live app until the owner moves the crews over; do not
+retire or redirect it from here. Conventions, file map and the rules that must
+hold: `crew/README.md`. No build step (plain ES modules, vendored Preact). It
+has its own storage keys (`crew:`), its own outbox and its own service worker
+scoped to `crew/`; it never reads or writes the old app's queues. Never put
+`trade` in a path or file name under `crew/`: `sw-trade.js` caches any path
+that contains it. The server owns every money figure; anything computed in the
+app is labelled an estimate, and an invoice is never sent twice. `?demo` runs
+it on made-up data with no network (`crew/js/demo/`), and that is what
+`tests/e2e/crew-*.spec.js` drive. Three behaviours depend on ops-api switches
+that ship off (secureworks-backend `docs/trade-open-access-v1.md`): opening a
+job you are not on, booking yourself ahead, and typing your rate; with a switch
+off the app falls back in words, never with an error.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

@@ -176,3 +176,75 @@ test('a draft with no allowance has no Approve until one is saved', async ({ pag
   await expect(queue.locator('[data-office-wo-fill-msg]')).toHaveText('Set the labour allowance. Use 0 when there is none.');
   expect(await page.evaluate(() => window.__posts.length)).toBe(0);
 });
+
+// The queue holds every job type's drafts in one list. The type buttons show
+// one type at a time, so a repair is not lost among make-safes.
+const MIXED = [
+  { ...ROW, id: 'wo-f1', wo_number: 'WO-F1', job_number: 'SWF-1', job_type: 'fencing' },
+  { ...ROW, id: 'wo-m1', wo_number: 'WO-M1', job_number: 'SWMS-1', job_type: 'makesafe', agreed_labour_ex: null, needs_allowance: true },
+  { ...ROW, id: 'wo-r1', wo_number: 'WO-R1', job_number: 'SWR-1', job_type: 'repair', agreed_labour_ex: null, needs_allowance: true },
+  { ...ROW, id: 'wo-m2', wo_number: 'WO-M2', job_number: 'SWMS-2', job_type: 'makesafe', agreed_labour_ex: null, needs_allowance: true },
+  { ...ROW, id: 'wo-x1', wo_number: 'WO-X1', job_number: 'SWM-1', job_type: 'miscellaneous', agreed_labour_ex: null, needs_allowance: true },
+];
+
+test('a queue of one job type draws no type buttons', async ({ page }) => {
+  await boot(page, `if (action === 'list_office_job_work_orders') return { enabled: true, work_orders: ${JSON.stringify([ROW, { ...ROW, id: 'wo-fill-2', wo_number: 'WO-101' }])} }; return {};`);
+  await page.evaluate(() => OfficeWoFill.paint());
+  await expect(page.locator('[data-office-wo-fill]')).toHaveCount(2);
+  await expect(page.locator('[data-office-wo-types]')).toHaveCount(0);
+});
+
+test('type buttons count each job type and show one type at a time', async ({ page }) => {
+  await boot(page, `if (action === 'list_office_job_work_orders') return { enabled: true, work_orders: ${JSON.stringify(MIXED)} }; return {};`);
+  await page.evaluate(() => { try { localStorage.removeItem('sw_owf_type'); } catch (e) {} return OfficeWoFill.paint(); });
+  await showWorkOrders(page);
+  const queue = page.locator('[data-office-wo-fill-queue]');
+  const types = queue.locator('[data-office-wo-type]');
+  await expect(types).toHaveText(['All (5)', 'Fencing (1)', 'Repair (1)', 'Make-safe (2)', 'Other (1)']);
+  await expect(queue.locator('[data-office-wo-type="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(queue.locator('[data-office-wo-fill]')).toHaveCount(5);
+
+  await queue.locator('[data-office-wo-type="repair"]').click();
+  await expect(queue.locator('[data-office-wo-fill]')).toHaveCount(1);
+  await expect(queue.locator('[data-office-wo-fill]')).toContainText('SWR-1');
+  await expect(queue.locator('[data-office-wo-type="repair"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(queue.locator('[data-office-wo-type="all"]')).toHaveAttribute('aria-pressed', 'false');
+  // The counts still describe the whole queue, not the type on screen.
+  await expect(types).toHaveText(['All (5)', 'Fencing (1)', 'Repair (1)', 'Make-safe (2)', 'Other (1)']);
+  // Choosing a type reads nothing again and writes nothing.
+  expect(await page.evaluate(() => window.__posts.length)).toBe(0);
+
+  // A save from the filtered list posts that row, and the choice survives the re-read.
+  await queue.locator('[data-office-wo-allowance]').fill('450');
+  await queue.locator('[data-office-wo-fill-save]').click();
+  await expect.poll(() => page.evaluate(() => window.__posts.length)).toBe(1);
+  const fill = await page.evaluate(() => window.__posts[0]);
+  expect(fill.action).toBe('fill_job_work_order_allowance');
+  expect(fill.body.work_order_id).toBe('wo-r1');
+  expect(fill.body.agreed_labour_ex).toBe(450);
+  await expect(queue.locator('[data-office-wo-type="repair"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-office-wo-fill]')).toHaveCount(1);
+  expect(await page.evaluate(() => localStorage.getItem('sw_owf_type'))).toBe('repair');
+});
+
+test('a chosen type with no drafts left falls back to every type', async ({ page }) => {
+  await boot(page, 'return {};');
+  await page.evaluate((rows) => {
+    window.__rows = rows;
+    window.opsFetch = async function () { return { enabled: true, work_orders: window.__rows }; };
+    try { localStorage.setItem('sw_owf_type', 'repair'); } catch (e) {}
+    return OfficeWoFill.paint();
+  }, MIXED);
+  await showWorkOrders(page);
+  await page.locator('[data-office-wo-type="repair"]').click();
+  await expect(page.locator('[data-office-wo-fill]')).toHaveCount(1);
+
+  // The last repair draft is approved elsewhere; the next read has none.
+  await page.evaluate(() => {
+    window.__rows = window.__rows.filter((r) => r.job_type !== 'repair');
+    return OfficeWoFill.paint();
+  });
+  await expect(page.locator('[data-office-wo-type]')).toHaveText(['All (4)', 'Fencing (1)', 'Make-safe (2)', 'Other (1)']);
+  await expect(page.locator('[data-office-wo-type="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-office-wo-fill]')).toHaveCount(4);
+});

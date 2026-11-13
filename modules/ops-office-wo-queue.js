@@ -64,14 +64,64 @@ var OfficeWoFillCore = (function () {
     return { amount: Math.round(amount * 100) / 100 };
   }
 
-  function queueHtml(rows) {
-    var list = Array.isArray(rows) ? rows : [];
+  // The queue holds every job type's drafts in one list (fencing, patio,
+  // repair, make-safe and the rest), oldest first. The type buttons let the
+  // office see one type at a time, so a repair is not lost among make-safes.
+  // They are drawn only when the list holds more than one type.
+  var TYPE_ORDER = ['fencing', 'patio', 'repair', 'makesafe', 'other'];
+  var TYPE_WORDS = { fencing: 'Fencing', patio: 'Patio', repair: 'Repair', makesafe: 'Make-safe', other: 'Other' };
+
+  function typeKey(row) {
+    var t = String((row && row.job_type) || '').trim().toLowerCase();
+    if (t === 'fencing' || t === 'patio' || t === 'repair') return t;
+    if (t === 'makesafe' || t === 'makesafes' || t === 'make-safe' || t === 'make safe') return 'makesafe';
+    return 'other';
+  }
+
+  function typeCounts(rows) {
+    var counts = {};
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (!row) return;
+      var k = typeKey(row);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return TYPE_ORDER.filter(function (k) { return counts[k] > 0; }).map(function (k) {
+      return { key: k, label: TYPE_WORDS[k], count: counts[k] };
+    });
+  }
+
+  // The type on screen: the one asked for while it still has a draft,
+  // otherwise every type. A type whose last draft was just approved never
+  // leaves an empty list behind.
+  function activeType(rows, wanted) {
+    var w = String(wanted || '').toLowerCase();
+    var has = typeCounts(rows).some(function (c) { return c.key === w; });
+    return has ? w : 'all';
+  }
+
+  function typeButtonsHtml(rows, active) {
+    var counts = typeCounts(rows);
+    if (counts.length < 2) return '';
+    var total = counts.reduce(function (n, c) { return n + c.count; }, 0);
+    var h = '<div class="owf-types" data-office-wo-types role="group" aria-label="Show one job type">';
+    [{ key: 'all', label: 'All', count: total }].concat(counts).forEach(function (c) {
+      h += '<button type="button" class="owf-type" data-office-wo-type="' + esc(c.key) + '" aria-pressed="' +
+        (c.key === active ? 'true' : 'false') + '">' + esc(c.label) + ' (' + c.count + ')</button>';
+    });
+    return h + '</div>';
+  }
+
+  function queueHtml(rows, wantedType) {
+    var all = Array.isArray(rows) ? rows : [];
+    var active = activeType(all, wantedType);
+    var list = active === 'all' ? all : all.filter(function (row) { return row && typeKey(row) === active; });
     var h = '<section class="owf" data-office-wo-fill-queue aria-label="Work orders to fill">';
     h += '<div class="owf-title">Work orders to fill</div>';
-    if (!list.length) {
+    if (!all.length) {
       h += '<div class="owf-empty" data-office-wo-fill-empty>No draft job work orders to fill.</div></section>';
       return h;
     }
+    h += typeButtonsHtml(all, active);
     list.forEach(function (row) {
       if (!row) return;
       var needs = row.needs_allowance === true || row.agreed_labour_ex == null;
@@ -104,6 +154,9 @@ var OfficeWoFillCore = (function () {
     fillBody: fillBody,
     approveBody: approveBody,
     parseAllowance: parseAllowance,
+    typeKey: typeKey,
+    typeCounts: typeCounts,
+    activeType: activeType,
     queueHtml: queueHtml
   };
 })();
@@ -114,6 +167,19 @@ var OfficeWoFillCore = (function () {
   var C = OfficeWoFillCore;
   var bound = false;
   var switchOn = false;
+  var lastRows = [];
+  var TYPE_KEY = 'sw_owf_type';
+  var typeWanted = 'all';
+  // The chosen type is a per-browser convenience only. Storage can be
+  // unavailable or throw, so every read and write is guarded.
+  try { typeWanted = String(window.localStorage.getItem(TYPE_KEY) || 'all'); } catch (e) { typeWanted = 'all'; }
+
+  function chooseType(key) {
+    typeWanted = String(key || 'all');
+    try { window.localStorage.setItem(TYPE_KEY, typeWanted); } catch (e) { /* not remembered */ }
+    var el = host();
+    if (el && switchOn) el.innerHTML = C.queueHtml(lastRows, typeWanted);
+  }
 
   function noteSwitch(res) {
     if (res && (res.enabled === true || (res.enabled !== false && Array.isArray(res.work_orders)))) {
@@ -148,6 +214,8 @@ var OfficeWoFillCore = (function () {
   }
 
   async function onClick(ev) {
+    var typeBtn = ev.target.closest('[data-office-wo-type]');
+    if (typeBtn) { chooseType(typeBtn.getAttribute('data-office-wo-type')); return; }
     var save = ev.target.closest('[data-office-wo-fill-save]');
     var approve = ev.target.closest('[data-office-wo-fill-approve]');
     if (!save && !approve) return;
@@ -184,7 +252,11 @@ var OfficeWoFillCore = (function () {
         '.owf-title{font-size:13px;font-weight:700;margin-bottom:8px}.owf-row{padding:10px 0;border-top:1px solid var(--sw-border,#e5e7eb)}' +
         '.owf-who,.owf-fig,.owf-msg{font-size:12px;color:var(--sw-text-sec,#4b5563);margin-top:4px}' +
         '.owf-allow{display:block;font-size:12px;margin-top:8px}.owf-allow input{display:block;margin-top:4px;padding:6px 8px;width:140px}' +
-        '.owf-actions{display:flex;gap:8px;margin-top:8px}';
+        '.owf-actions{display:flex;gap:8px;margin-top:8px}' +
+        '.owf-types{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}' +
+        '.owf-type{font:inherit;font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--sw-border,#e5e7eb);background:var(--sw-card,#fff);color:var(--sw-text,#1a2332);cursor:pointer}' +
+        '.owf-type[aria-pressed="true"]{background:var(--sw-dark,#293c46);border-color:var(--sw-dark,#293c46);color:#fff;font-weight:700}' +
+        '.owf-type:focus-visible{outline:2px solid var(--sw-orange,#f15a29);outline-offset:2px}';
       document.head.appendChild(style);
     }
   }
@@ -199,7 +271,8 @@ var OfficeWoFillCore = (function () {
       if (!el) return;
       if (C.isOff(res)) { switchOn = false; el.innerHTML = ''; return; }
       noteSwitch(res);
-      el.innerHTML = C.queueHtml(res && res.work_orders);
+      lastRows = (res && Array.isArray(res.work_orders)) ? res.work_orders : [];
+      el.innerHTML = C.queueHtml(lastRows, typeWanted);
     } catch (e) {
       clear();
       if (C.isOff(null, e)) { switchOn = false; return; }

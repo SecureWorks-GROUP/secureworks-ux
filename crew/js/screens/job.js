@@ -415,7 +415,10 @@ function FilesTab({ jobId, data, user, viewOnly }) {
       ${docs.map((d) => html`<a class="filerow" href=${docUrl(d)} target="_blank" rel="noopener"><span class="ico"><${Icon} name="file" size=${20} /></span>
         <span style="min-width:0"><b class="clip">${d.label || d.file_name || d.name || d.filename || DOC_LABEL[d.type] || 'Document'}</b><span>${DOC_LABEL[d.type] || 'Document'}</span></span><${Icon} name="external" size=${18} class="t-mute" /></a>`)}</section>` : null}
     ${!pos.length && !docs.length ? html`<${Empty} title="No files on this job">Plans, approvals and material orders show here when the office adds them.<//>` : null}
-    ${viewOnly ? null : html`<${Button} kind="soft" block icon="receipt" onClick=${() => go('/pay/receipt?job=' + jobId)}>Bought something for this job? Add the receipt<//>`}
+    ${viewOnly ? null : html`<div class="stack tight">
+      <${Button} kind="soft" block icon="receipt" onClick=${() => go('/pay/receipt?job=' + jobId)}>Bought something for this job? Add the receipt<//>
+      ${isReportJob(verticalOf(data.job, data)) ? null : html`<${Button} kind="soft" block icon="pen" onClick=${() => go(`/job/${jobId}/service`)}>Service report for the customer<//>`}
+    </div>`}
   </div>`;
 }
 

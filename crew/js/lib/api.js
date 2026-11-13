@@ -30,7 +30,7 @@ export class ApiError extends Error {
   }
 }
 // ops-api throws plain errors for these, so they arrive as HTTP 500.
-const REFUSAL_500 = /not assigned to this job|not your assignment|assignment not found|makesafe job required|jobid required|jobid and text required|invalid status/i;
+const REFUSAL_500 = /not assigned to this job|not your assignment|assignment not found|makesafe job required|jobid required|jobid and text required|invalid status|report already (submitted|approved)|cannot complete a job with status/i;
 
 /** Words a trade can act on, for any failure. */
 export function friendly(err) {

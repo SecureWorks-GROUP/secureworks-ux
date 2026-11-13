@@ -237,10 +237,10 @@ function RoofDone({ jobId, fresh, draft, values, steps, jobData, refetchJob, pho
       <section class="stack tight">
         <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="t-head">Photos on this job</h2><span class="t-num t-mute">${photos.length}</span></div>
         <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" max=${8} />
-        <${Button} kind="line" block icon="refresh" busy=${busy} onClick=${rebuild}>Rebuild the report with these ${photos.length || ''} photos<//>
+        <${Button} kind="line" block icon="refresh" busy=${busy} onClick=${rebuild}>Rebuild with ${photos.length === 1 ? 'this photo' : `these ${photos.length || ''} photos`}<//>
         <p class="t-small t-mute">Added photos after sending? Rebuild puts them into the PDF. The words stay as you sent them.</p>
       </section>
-      <${HoursCard} jobId=${jobId} crew=${jobData && jobData.crew} userId=${user.id} title="Your hours for this report" />
+      <${HoursCard} office=${user.office} jobId=${jobId} crew=${jobData && jobData.crew} userId=${user.id} title="Your hours for this report" />
       <section class="sumlist">
         ${steps.map((s) => { const rows = s.fields.filter((f) => f.type !== 'photos').map((f) => [f, shown(f, values[f.key])]).filter(([, v]) => v); return rows.length ? html`<div key=${s.key}><h2 class="t-head" style="margin-bottom:8px">${s.title}</h2>
           <div class="stack tight">${rows.map(([f, v]) => html`<div><span class="t-label">${f.label}</span><p class="prose">${v}</p></div>`)}</div></div>` : null; })}

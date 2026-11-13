@@ -89,7 +89,7 @@ export function Report({ jobId }) {
   const reportFamily = REPORT_FAMILY[family] ? family : REPORT_FAMILY[String(ms.report_type || '').toLowerCase()] ? String(ms.report_type).toLowerCase() : '';
   const handoff = ms.completion_handoff || (reportFamily ? 'builder_portal' : 'physical');
   const manager = user.office || user.managed.includes('makesafe');
-  const title = vertical === 'restoration' ? 'Restoration report' : handoff === 'physical' ? 'Make safe report' : REPORT_FAMILY[reportFamily] || 'Roof report';
+  const title = !isReportJob(vertical) ? 'Report' : vertical === 'restoration' ? 'Restoration report' : handoff === 'physical' ? 'Make safe report' : REPORT_FAMILY[reportFamily] || 'Roof report';
   const visit = Number(ms.cycle_number) || (Number(ms.reattend_count) || 0) + 1;
   const report = data.serviceReport || null;
   const status = report ? String(report.status || '').toLowerCase() : '';
@@ -120,7 +120,7 @@ export function Report({ jobId }) {
     ${visit > 1 && ms.last_reattend_reason && !sent ? html`<div class="block note-banner plain" style="margin-top:14px"><${Icon} name="refresh" size=${18} /><span>You went back: ${noPrices(ms.last_reattend_reason, user.seesMoney)}. This report is for this visit only.</span></div>` : null}
     ${q.error ? html`<div class="block note-banner" style="margin-top:14px">Showing the last saved copy. ${q.error.offline ? 'No signal.' : ''}</div>` : null}
     ${handoff === 'physical'
-      ? (sent ? html`<${Submitted} ...${common} report=${report} />` : html`<${ReportForm} key=${ms.attendance_cycle_id || visit} ...${common} report=${report} tail=${managerBox} />`)
+      ? (sent ? html`<${Submitted} ...${common} report=${report} />` : html`<${ReportForm} key=${visit} ...${common} report=${report} tail=${managerBox} />`)
       : html`<${BuilderReport} ...${common} handoff=${handoff} family=${reportFamily} />`}
     ${writing ? null : managerBox}
   `);
@@ -219,7 +219,7 @@ function visitPhotos(data, cycleId) {
 
 function ReportForm({ jobId, job, data, ms, user, visit, report, tail }) {
   const cycleId = ms.attendance_cycle_id || '';
-  const key = `msr:${jobId}:${cycleId || visit}`;
+  const key = `msr:${jobId}:v${visit}`;
   const crewRows = (data.crew || []).filter((c) => String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer');
   const init = useMemo(() => {
     const saved = local.get(key);
@@ -403,7 +403,7 @@ function Submitted({ jobId, job, data, ms, user, visit, report }) {
     try {
       const res = await api('unlock_makesafe_report', null, { job_id: jobId });
       if (!res || res.ok !== true) throw new ApiError((res && (res.error || res.message)) || 'The report could not be opened.', { status: 409, body: res });
-      local.del(`msr:${jobId}:${ms.attendance_cycle_id || visit}`);
+      local.del(`msr:${jobId}:v${visit}`);
       mutateQuery('job:' + jobId, (d) => ({ ...d, serviceReport: { ...d.serviceReport, status: 'draft', submitted_at: null } }));
       invalidate('job:' + jobId); invalidate('myjobs');
       toast(res.already ? 'The report is already open to change.' : 'The report is open. Change it, then send it again.', { ms: 4500 });
@@ -431,7 +431,7 @@ function Submitted({ jobId, job, data, ms, user, visit, report }) {
       <${Button} kind="soft" block icon="refresh" onClick=${() => openReattend(jobId, job, visit)}>Went back again? Start a new visit<//>
     </div>
 
-    <${HoursCard} jobId=${jobId} crew=${data.crew} userId=${user.id} seed=${f.start && f.finish ? { date: f.date, start: f.start, finish: f.finish, breakMin: f.breakMin, from: 'Times from your report' } : null} />
+    <${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} seed=${f.start && f.finish ? { date: f.date, start: f.start, finish: f.finish, breakMin: f.breakMin, from: 'Times from your report' } : null} />
 
     ${verticalOf(job, data) === 'makesafe' ? html`<${RoofRow} jobId=${jobId} status=${ms.roof_report_draft_status} offer />` : null}
 
@@ -473,21 +473,21 @@ function RoofRow({ jobId, status, offer }) {
 }
 
 // --------------------------------------- reports done on the builder's site -
-function portalIsDone(ms, jobId) {
+function portalIsDone(ms, jobId, visit) {
   const cycle = Number(ms.cycle_number == null ? 1 : ms.cycle_number);
   if (ms.portal_verified_at && Number(ms.portal_verified_cycle) === cycle) return 'recorded';
   const id = ms.attendance_cycle_id;
   if (id && (ms.portal_captures || []).some((c) => c && String(c.attendance_cycle_id) === String(id) && c.capture_result === 'done' && c.status === 'verified' && (c.screenshot_object_key || c.attested_producer))) return 'recorded';
   const mark = local.get('builder-report-done:' + jobId);
-  return mark && String(mark.visit) === String(id || cycle) ? (mark.told ? 'told' : 'recorded') : '';
+  return mark && Number(mark.visit) === visit ? (mark.told ? 'told' : 'recorded') : '';
 }
-function BuilderReport({ jobId, job, data, ms, user, handoff, family }) {
+function BuilderReport({ jobId, job, data, ms, user, visit, handoff, family }) {
   const [busy, setBusy] = useState(false);
   const [, bump] = useState(0);
   const links = useMemo(() => portalLinks(ms, job.metadata, user.seesMoney), [data]);
   const roofStatus = String(ms.roof_report_draft_status || '').toLowerCase();
   const ours = handoff === 'own_template';
-  const done = portalIsDone(ms, jobId);
+  const done = portalIsDone(ms, jobId, visit);
   const what = family === 'assessment_report_quote' ? 'report' : 'roof report';
 
   const tellOffice = async (text, okWords) => {
@@ -502,8 +502,7 @@ function BuilderReport({ jobId, job, data, ms, user, handoff, family }) {
   const markDone = async () => {
     if (!(await ask({ title: `Is the ${what} done on the builder's website?`, body: 'Only say yes once you have filled it in and sent it there. The office takes it from here.', yes: 'Yes, it is done' }))) return;
     setBusy(true);
-    const visitKey = ms.attendance_cycle_id || Number(ms.cycle_number == null ? 1 : ms.cycle_number);
-    const remember = (told) => { local.set('builder-report-done:' + jobId, { visit: visitKey, told, at: Date.now() }); invalidate('job:' + jobId); invalidate('myjobs'); bump((n) => n + 1); buzz([12, 40, 20]); };
+    const remember = (told) => { local.set('builder-report-done:' + jobId, { visit, told, at: Date.now() }); invalidate('job:' + jobId); invalidate('myjobs'); bump((n) => n + 1); buzz([12, 40, 20]); };
     try {
       let res = null; let viaOffice = false;
       if (!user.office && family === 'roof_report') {
@@ -537,14 +536,14 @@ function BuilderReport({ jobId, job, data, ms, user, handoff, family }) {
       ${roofStatus === 'submitted' ? html`<div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">Roof report sent.</span> The office has it.</span></div>`
         : html`<p style="color:var(--ink-2)">This ${what} is written here in the app, on SecureWorks letterhead. It takes about ten minutes on site.</p>`}
       <${RoofRow} jobId=${jobId} status=${roofStatus} />
-      ${roofStatus === 'submitted' ? html`<${HoursCard} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />` : null}
+      ${roofStatus === 'submitted' ? html`<${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />` : null}
       ${links.main ? html`<section><h2 class="t-head" style="margin-bottom:4px">From the builder</h2><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></section>` : null}
     </div>`;
   }
   if (done) {
     return html`<div class="block stack loose rise" style="margin-top:18px">
       <div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">${done === 'told' ? 'The office has been told it is done.' : 'Marked as done.'}</span> Nothing more to do on the ${what}.</span></div>
-      <${HoursCard} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />
+      <${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />
       ${links.main ? html`<section><h2 class="t-head" style="margin-bottom:4px">From the builder</h2><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></section>` : null}
     </div>`;
   }

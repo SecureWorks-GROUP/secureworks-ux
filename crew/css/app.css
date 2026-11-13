@@ -411,7 +411,7 @@ textarea.input { min-height: 96px; resize: none; line-height: 1.4; }
 .week button[aria-pressed='true'] .dow { color: color-mix(in oklab, var(--paper) 70%, transparent); }
 .week button.today:not([aria-pressed='true']) .dom { color: var(--hi); }
 .weeknav { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 var(--gut); margin-top: 14px; }
-.weeknav .t-label { display: inline-flex; align-items: center; gap: 4px; padding: 8px 0; }
+.weeknav .t-label { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 10px 0 0; }
 
 .booking { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 16px var(--gut); width: 100%; text-align: left; position: relative; }
 .booking:active { background: var(--paper-2); }
@@ -446,8 +446,8 @@ textarea.input { min-height: 96px; resize: none; line-height: 1.4; }
 /* job */
 .jobhero { padding: 2px var(--gut) 0; display: grid; gap: 8px; }
 .jobhero .ref { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.jobhero .addr { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 16px; text-align: left; }
-.jobhero .addr svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.jobhero .addr { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 16px; text-align: left; min-height: 44px; margin: -8px 0; }
+.jobhero .addr svg { flex: none; color: var(--ink-3); }
 .tabs { position: sticky; top: 46px; z-index: 4; display: flex; gap: 4px; padding: 8px 14px; margin-top: 18px; overflow-x: auto; scrollbar-width: none; background: color-mix(in oklab, var(--paper) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 1px 0 var(--line); }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button { flex: none; height: 38px; padding: 0 14px; border-radius: 38px; font-stretch: 94%; font-weight: 650; font-size: 15px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; transition: background 160ms, color 160ms; }

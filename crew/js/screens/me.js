@@ -53,7 +53,7 @@ export function Me() {
     </section>
 
     ${getState().demo ? html`<section class="section"><span class="t-label">Demo: look at it as</span>
-      <div class="block" style="margin-top:8px"><${Picks} value=${local.get('demoPersona', 'crew')} options=${[['crew', 'A crew member'], ['lead', 'A fencing lead'], ['office', 'The office']]} onChange=${(p) => { local.set('demoPersona', p); const u = new URL(location.href); if (u.searchParams.has('demo')) u.searchParams.set('demo', p); u.hash = '#/today'; location.href = u.toString(); location.reload(); }} /></div></section>` : null}
+      <div class="block" style="margin-top:8px"><${Picks} value=${local.get('demoPersona', 'crew')} options=${[['crew', 'A crew member'], ['lead', 'A fencing lead'], ['office', 'The office'], ['new', 'Someone new']]} onChange=${(p) => { local.set('demoPersona', p); const u = new URL(location.href); if (u.searchParams.has('demo')) u.searchParams.set('demo', p); u.hash = '#/today'; location.href = u.toString(); location.reload(); }} /></div></section>` : null}
 
     <div class="block" style="margin-top:28px;display:grid;gap:10px">
       <${Button} kind="line" block icon="signout" onClick=${async () => {

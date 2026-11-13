@@ -3,6 +3,7 @@
 const NOW = '2026-11-13T09:00:00+08:00'; // a Friday, so the demo week has past days in it
 
 function crewUrl(hash = '#/today', persona = 'crew') {
+  // The hash may carry its own query (#/job/x?tab=notes); that is fine after the page query.
   return `/crew/?demo=${persona}&now=${encodeURIComponent(NOW)}${hash}`;
 }
 

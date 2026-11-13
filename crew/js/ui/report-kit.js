@@ -34,7 +34,7 @@ export function plain(err) {
   let msg = friendly(err);
   for (const [re, fn] of SWAPS) { const m = re.exec(msg); if (m) { msg = fn(...m); break; } }
   return String(msg)
-    .replace(/\s*[–—]\s*/g, ', ')
+    .replace(/\s*[\u2013\u2014]\s*/g, ', ')
     .replace(/attendance cycles?/gi, 'visit')
     .replace(/sub-?status/gi, 'status')
     .replace(/builder portal|portal/gi, "builder's website")
@@ -285,7 +285,7 @@ export function TimesBlock({ value, onChange, outLabel = 'Hours' }) {
  * start, finish and break; hours are worked out, never typed.
  * `seed` = { date, start, finish, breakMin, from } offers times already on record.
  */
-export function HoursCard({ jobId, crew, userId, title = 'Your hours for this job', seed }) {
+export function HoursCard({ jobId, crew, userId, title = 'Your hours for this job', seed, office }) {
   const mine = (crew || []).filter((c) => c.user_id === userId && String(c.status).toLowerCase() !== 'cancelled');
   const saved = mine.filter((c) => c.hours_worked != null && Number(c.hours_worked) > 0).sort((a, b) => String(b.scheduled_date).localeCompare(String(a.scheduled_date)));
   const clocked = mine.filter((c) => c.clocked_on_at && c.clocked_off_at).sort((a, b) => String(b.clocked_on_at).localeCompare(String(a.clocked_on_at)))[0];
@@ -313,6 +313,7 @@ export function HoursCard({ jobId, crew, userId, title = 'Your hours for this jo
     setBusy(false);
   };
 
+  if (office && !mine.length) return null; // office staff looking at a job they did not work
   const last = done || (saved[0] ? { hours: Number(saved[0].hours_worked), date: String(saved[0].scheduled_date || '').slice(0, 10) } : null);
   if (last && !open) {
     return html`<section class="inset hourscard">

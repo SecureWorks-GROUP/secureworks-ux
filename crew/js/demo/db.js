@@ -9,6 +9,8 @@ export const PEOPLE = {
     trade_details: { fullName: 'Sam Tane', abn: '51 824 753 556', bsb: '066-000', accountNo: '1234 5678', accountName: 'S Tane', gstRegistered: false, phone: '0400 111 222' } },
   lead: { id: 'u-henry', email: 'henry@example.test', name: 'Henry Fence', role: 'lead_installer', trade_tier: 3, managed_verticals: ['fencing'], invoice_type: 'per_metre', org_id: ORG,
     trade_details: { fullName: 'Henry Fence', abn: '11 222 333 444', bsb: '016-000', accountNo: '9988 7766', accountName: 'H Fence', gstRegistered: true } },
+  // First week on the job: nothing booked, no invoices, details not filled in.
+  new: { id: 'u-riley', email: 'riley@example.test', name: 'Riley Hart', role: 'crew', trade_tier: 1, managed_verticals: [], invoice_type: 'hourly', org_id: ORG, trade_details: {} },
   office: { id: 'u-office', email: 'office@example.test', name: 'Alex Office', role: 'ops_manager', trade_tier: 3, managed_verticals: ['makesafe'], invoice_type: 'hourly', org_id: ORG, trade_details: {} }
 };
 const OTHERS = [
@@ -53,7 +55,8 @@ export function createDb(persona) {
   const dMon = mon; const dTue = addDays(mon, 1);
   const yesterday = addDays(today, -1);
 
-  if (persona !== 'office') {
+  const working = persona !== 'office' && persona !== 'new';
+  if (working) {
     asg('j-joon', me.id, today, '07:00', { is_lead: true });
     asg('j-joon', 'u-tendo', today, '07:00');
     asg('j-joon', me.id, addDays(today, 1), '07:00', { is_lead: true });
@@ -116,7 +119,7 @@ export function createDb(persona) {
   };
 
   const mondayLast = addDays(mon, -7);
-  const invoices = persona === 'office' ? [] : [
+  const invoices = !working ? [] : [
     { id: 'inv-last', user_id: me.id, week_start: mondayLast, week_end: addDays(mondayLast, 6), invoice_number: 'SW-INV-ST-0417', status: 'pushed_to_xero', invoice_source: 'hourly', gst_on: false, gross_earned: 1760, super_rate: 0.12, super_amount: 211.2, worker_withhold: 105.6, net_pay: 1654.4, gst: 0, total_inc: 1760, trade_payable: 1654.4, xero_bill_id: 'xb-1', submitted_at: at(addDays(mon, -1), '17:02'), created_at: at(addDays(mon, -1), '17:02'), paid_at: null,
       lines: [0, 1, 2, 3].map((n) => ({ id: 'l' + n, line_date: addDays(mondayLast, n), work_date: addDays(mondayLast, n), start_time: '07:00', finish_time: '15:30', break_minutes: 30, job_number: n < 2 ? 'SWF-26168' : 'SWD-26088', client_name: n < 2 ? 'Priya Nair' : 'Marcus Lim', description: 'Labour', line_type: 'labour', total_hours: 8, hourly_rate: 55, line_total_ex: 440 })) },
     { id: 'inv-prev', user_id: me.id, week_start: addDays(mondayLast, -7), week_end: addDays(mondayLast, -1), invoice_number: 'SW-INV-ST-0409', status: 'paid', invoice_source: 'hourly', gst_on: false, gross_earned: 2145, super_rate: 0.12, super_amount: 257.4, worker_withhold: 128.7, net_pay: 2016.3, gst: 0, total_inc: 2145, trade_payable: 2016.3, xero_bill_id: 'xb-0', submitted_at: at(addDays(mondayLast, -1), '16:40'), created_at: at(addDays(mondayLast, -1), '16:40'), paid_at: at(addDays(mondayLast, 4), '09:00'), amount_paid: 2016.3,
@@ -124,7 +127,7 @@ export function createDb(persona) {
   ];
   const expenses = [];
   const availability = [];
-  const groups = persona === 'office' ? [] : [{ group_id: 'g-dunc', job_id: 'j-dunc', job_number: 'SWP-26339', client_name: 'Graham Rees', site_suburb: 'Duncraig', job_type: 'patio', pay_basis: 'all_in_12_v2', awaiting: 'needs_hours', pot_total: null, my_share: null, client_signed: false, crew_hours: [{ name: 'Israel Vaka', me: false, hours: 7.5, approved: true }, { name: me.name, me: true, hours: 0, approved: false }], crew_status: [], discovery: { state: 'member' }, entries: [] }];
+  const groups = !working ? [] : [{ group_id: 'g-dunc', job_id: 'j-dunc', job_number: 'SWP-26339', client_name: 'Graham Rees', site_suburb: 'Duncraig', job_type: 'patio', pay_basis: 'all_in_12_v2', awaiting: 'needs_hours', pot_total: null, my_share: null, client_signed: false, crew_hours: [{ name: 'Israel Vaka', me: false, hours: 7.5, approved: true }, { name: me.name, me: true, hours: 0, approved: false }], crew_status: [], discovery: { state: 'member' }, entries: [] }];
 
   return { me, persona, org: ORG, jobs, job, assignments, logged, media, notes, purchaseOrders, documents, quotePacks, jobWorkOrders, invoices, expenses, availability, groups, others: OTHERS, rate: persona === 'lead' ? 0 : 55, id, at, flags: { companyView: true, selfBooking: true, rateEditable: true }, now };
 }

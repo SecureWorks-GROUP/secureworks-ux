@@ -21027,21 +21027,23 @@
     _weeklyWoInvoiceLoadSeq++;
   }
 
+  // <invoice-week-perth> The invoice week is a Perth week whatever timezone the
+  // phone is set to. Work from Perth's date as plain text and never from a Date
+  // at the phone's own midnight: on a phone set east of Perth that lands a day
+  // early, the week starts on a Sunday and ops-api refuses every draft save and
+  // every submit ("week_start must be a Monday").
   function getWeekEndSunday(offset) {
-    var now = new Date();
-    var day = now.getDay(); // 0=Sun
+    var today = awstDateStr();
+    var day = new Date(today + 'T00:00:00Z').getUTCDay(); // 0=Sun
     var daysUntilSun = day === 0 ? 0 : 7 - day;
-    now.setDate(now.getDate() + daysUntilSun + (offset || 0) * 7);
-    return awstDateStr(now);
+    return _weeklyDatePlusDays(today, daysUntilSun + (offset || 0) * 7);
   }
 
   // Monday of the requested week. crew_charges_on_my_jobs and generate_trade_invoice
   // are Monday-keyed (trade_invoices.week_start). Passing a Sunday there silently
   // matches nothing — that was BUG-2 ("No crew charges this week"). [D4]
   function getWeekStartMonday(offset) {
-    var sun = new Date(getWeekEndSunday(offset) + 'T00:00:00');
-    sun.setDate(sun.getDate() - 6); // Sunday end -> Monday start of same Mon–Sun week
-    return awstDateStr(sun);
+    return _weeklyDatePlusDays(getWeekEndSunday(offset), -6); // Sunday end -> Monday start
   }
 
   function formatWeekRange(weekEnd) {
@@ -21054,9 +21056,7 @@
 
   function shiftWeek(dir) {
     if (!_hoursWeekEnd) return;
-    var d = new Date(_hoursWeekEnd + 'T00:00:00');
-    d.setDate(d.getDate() + dir * 7);
-    _hoursWeekEnd = awstDateStr(d);
+    _hoursWeekEnd = _weeklyDatePlusDays(_hoursWeekEnd, dir * 7);
     loadHoursView();
   }
 
@@ -21083,10 +21083,7 @@
 
     if (!_hoursWeekEnd) _hoursWeekEnd = getWeekEndSunday(0);
     // Compute Monday from Sunday
-    var sunDate = new Date(_hoursWeekEnd + 'T00:00:00');
-    var monDate = new Date(sunDate);
-    monDate.setDate(monDate.getDate() - 6);
-    _hoursWeekStart = awstDateStr(monDate);
+    _hoursWeekStart = _weeklyDatePlusDays(_hoursWeekEnd, -6);
 
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading hours...</div>';
@@ -21266,14 +21263,8 @@
 
   window.shiftInvoiceWeek = function(dir) {
     if (!_hoursWeekEnd) return;
-    var d = new Date(_hoursWeekEnd + 'T00:00:00');
-    d.setDate(d.getDate() + dir * 7);
-    _hoursWeekEnd = awstDateStr(d);
-    // Compute Monday
-    var sunDate = new Date(_hoursWeekEnd + 'T00:00:00');
-    var monDate = new Date(sunDate);
-    monDate.setDate(monDate.getDate() - 6);
-    _hoursWeekStart = awstDateStr(monDate);
+    _hoursWeekEnd = _weeklyDatePlusDays(_hoursWeekEnd, dir * 7);
+    _hoursWeekStart = _weeklyDatePlusDays(_hoursWeekEnd, -6);
     var label = document.getElementById('invoiceWeekLabel');
     if (label) label.textContent = formatWeekRange(_hoursWeekEnd);
     _paintInvoiceWeekStatus();
@@ -21284,10 +21275,7 @@
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading hours...</div>';
     // Compute week start
-    var sunDate = new Date(_hoursWeekEnd + 'T00:00:00');
-    var monDate = new Date(sunDate);
-    monDate.setDate(monDate.getDate() - 6);
-    _hoursWeekStart = awstDateStr(monDate);
+    _hoursWeekStart = _weeklyDatePlusDays(_hoursWeekEnd, -6);
 
     var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {

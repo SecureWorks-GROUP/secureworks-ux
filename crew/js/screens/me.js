@@ -7,6 +7,7 @@ import { outboxItems, onOutbox, flushOutbox } from '../lib/outbox.js';
 import { fmtTs } from '../lib/dates.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Button, Sheet, Field, Picks, openOverlay, ask, toast } from '../ui/kit.js';
+import { Logo } from '../ui/logo.js';
 
 export function Me() {
   const user = useStore((s) => s.user);
@@ -59,7 +60,7 @@ export function Me() {
         if (waiting.length && !(await ask({ title: 'Sign out with things waiting to send?', body: `${waiting.length} saved ${waiting.length === 1 ? 'change has' : 'changes have'} not reached the office yet. They stay on this phone and send when you sign back in.`, yes: 'Sign out anyway', danger: true }))) return;
         signOut();
       }}>Sign out<//>
-      <p class="t-small t-mute" style="text-align:center">SecureWorks Crew ${window.CREW_CONFIG.version}${getState().demo ? ' · demo' : ''}</p>
+      <div style="display:grid;justify-items:center;gap:8px;padding-top:18px;color:var(--ink-3)"><${Logo} height=${24} /><p class="t-small t-mute">Crew app ${window.CREW_CONFIG.version}${getState().demo ? ' · demo' : ''}</p></div>
     </div>
   </main>`;
 }

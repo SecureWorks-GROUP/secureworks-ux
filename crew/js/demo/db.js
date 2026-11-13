@@ -61,8 +61,9 @@ export function createDb(persona) {
     asg('j-dunc', me.id, addDays(today, 2), '07:30');
     asg('j-dunc', 'u-israel', addDays(today, 2), '07:30', { is_lead: true });
     asg('j-dunc', me.id, addDays(today, 3), '07:30');
-    asg('j-bays', me.id, addDays(today, 6), '07:00');
-    asg('j-hill', me.id, addDays(today, 4), '09:00');
+    // Booked by the office, waiting on the trade's OK.
+    asg('j-bays', me.id, addDays(today, 6), '07:00', { status: 'scheduled' });
+    asg('j-hill', me.id, addDays(today, 4), '09:00', { status: 'scheduled' });
     // earlier this week and last week
     const past = [dMon, dTue, yesterday].filter((d, i, arr) => d < today && arr.indexOf(d) === i);
     if (past[0]) { const a = asg('j-sper', me.id, past[0], '07:00', done(past[0], '07:02', '15:34', 30, 8)); logged.push({ assignment_id: a.id, user_id: me.id, work_date: past[0], start_time: '07:00', finish_time: '15:30', break_minutes: 30, hours: 8 }); }

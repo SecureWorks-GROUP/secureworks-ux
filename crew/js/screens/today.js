@@ -12,15 +12,19 @@ import { bookingsByDate, bookingState, jobTitle, jobAddress, mapsUrl } from '../
 import { Icon } from '../ui/icons.js';
 import { Tag, Chip, Sheet, Button, IconButton, SkelRows, Empty, LoadError, Slide, openOverlay, Avatar, buzz } from '../ui/kit.js';
 import { clockOn, openClockOff, useElapsed } from './clock.js';
+import { NeedsOk, needsOk, wasDeclined, useBookingChanges, ChangesBanner, markOnTheWay, useMyDaysOff } from './bookings.js';
 
 export function Today({ day: dayParam }) {
   const user = useStore((s) => s.user);
   const clock = useStore((s) => s.clock);
   const today = todayISO();
   const [day, setDay] = useState(dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : today);
-  const { bookings, loading, error, refetch, refreshing } = useMyBookings();
+  const { bookings, loading, error, refetch, refreshing, data } = useMyBookings();
   const byDate = useMemo(() => bookingsByDate(bookings), [bookings]);
   const monday = mondayOf(day);
+  const { changes, dismiss } = useBookingChanges(bookings, Boolean(data) && !refreshing && !error);
+  const daysOff = useMyDaysOff(monday);
+  const dayOff = daysOff.get(day);
   const list = byDate.get(day) || [];
   const isToday = day === today;
 
@@ -58,20 +62,23 @@ export function Today({ day: dayParam }) {
     <div class="week" role="group" aria-label="Pick a day">
       ${weekDays(monday).map((d) => {
         const items = byDate.get(d) || [];
-        return html`<button type="button" key=${d} class=${cx(d === today && 'today')} aria-pressed=${String(d === day)} aria-label=${fmtDay(d) + (items.length ? `, ${items.length} booked` : '')} onClick=${() => { buzz(6); setDay(d); }}>
+        const off = daysOff.get(d);
+        return html`<button type="button" key=${d} class=${cx(d === today && 'today', off && 'off')} aria-pressed=${String(d === day)} aria-label=${fmtDay(d) + (items.length ? `, ${items.length} booked` : '') + (off ? ', marked off' : '')} onClick=${() => { buzz(6); setDay(d); }}>
           <span class="dow">${fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>
-          <span class="pips">${items.slice(0, 3).map((b) => html`<i class=${'jt-' + b.vertical} style="background:var(--jt)" />`)}</span>
+          <span class="pips">${off && !items.length ? html`<em>Off</em>` : items.slice(0, 3).map((b) => html`<i class=${cx('jt-' + b.vertical, needsOk(b) && 'open')} />`)}</span>
         </button>`;
       })}
     </div>
 
     ${loading ? html`<${SkelRows} n=${2} />` : error && !bookings.length ? html`<${LoadError} error=${error} onRetry=${refetch} what="your jobs" />` : html`<div key=${day} class="rise">
+      <${ChangesBanner} changes=${changes} onDismiss=${dismiss} onPick=${(d) => { if (d) setDay(d); }} />
       ${live ? html`<${LiveCard} booking=${live} clock=${clock} />` : null}
       ${upNext ? html`<${NextCard} booking=${upNext} />` : null}
+      <${NeedsOk} bookings=${bookings} />
       ${rest.length ? html`<div class="list ruled" style="margin-top:6px">${rest.map((b) => html`<${BookingRow} key=${b.id} booking=${b} />`)}</div>` : null}
       ${!list.length ? html`<${Empty} title=${isToday ? `Nothing booked today, ${firstName(user.name)}` : 'Nothing booked'}
           action=${html`<div class="btnrow" style="margin-top:8px"><${Button} kind="line" small icon="jobs" onClick=${() => go('/jobs', { tab: true })}>Find a job<//></div>`}>
-        ${next ? html`Next up is ${jobTitle(next.job)} on ${fmtDay(next.date)}.` : 'No jobs coming up yet. If you are working somewhere, find the job and add yourself.'}
+        ${dayOff ? `You are marked as ${dayOff.status === 'leave' ? 'on leave' : 'not working'} this day. ` : ''}${next ? html`Next up is ${jobTitle(next.job)} on ${fmtDay(next.date)}.` : 'No jobs coming up yet. If you are working somewhere, find the job and add yourself.'}
       <//>` : null}
       ${next && list.length ? html`<button type="button" class="row" style="margin-top:18px" onClick=${() => setDay(next.date)}>
         <span class="lead t-label">Next</span><span class="main"><b>${jobTitle(next.job)}</b><span>${fmtDay(next.date)}${next.start ? ' at ' + fmtTime(next.start) : ''}</span></span><span class="trail"><${Icon} name="right" size=${18} /></span>
@@ -103,7 +110,7 @@ function NextCard({ booking }) {
     <div style="display:flex;justify-content:space-between;align-items:center"><span class="t-label">${booking.start ? 'Start ' + fmtTime(booking.start) : 'Up next'}</span><${Tag} vertical=${booking.vertical} /></div>
     <button type="button" class="where" onClick=${() => open(booking)}><b>${jobTitle(job)}</b><span>${jobAddress(job)}${job.client_name ? ' · ' + job.client_name : ''}</span></button>
     <div class="actions">
-      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener"><${Icon} name="navigate" size=${22} />Navigate</a>
+      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => markOnTheWay(booking)}><${Icon} name="navigate" size=${22} />Navigate</a>
       ${job.client_phone ? html`<a class="action" href=${'tel:' + job.client_phone}><${Icon} name="phone" size=${22} />Call</a>` : null}
       <button type="button" class="action" onClick=${() => open(booking)}><${Icon} name="file" size=${22} />Job details</button>
     </div>
@@ -122,6 +129,7 @@ export function BookingRow({ booking, showDate, showWho }) {
       <span class="meta"><${Tag} vertical=${booking.vertical} />
         ${job.job_number ? html`<span class="t-small t-mute t-num">${job.job_number}</span>` : null}
         ${showWho && booking.userName ? html`<span class="t-small">${booking.userName}</span>` : null}
+        ${wasDeclined(booking.id) ? html`<${Chip} kind="warn">You said you cannot<//>` : needsOk(booking) ? html`<${Chip} kind="hi">Needs your OK<//>` : null}
         ${state === 'live' ? html`<${Chip} kind="hi">On the clock<//>` : state === 'done' ? html`<${Chip} kind="ok" icon="check">${booking.hours ? fmtHours(booking.hours) : 'Done'}<//>` : null}
       </span>
     </span>

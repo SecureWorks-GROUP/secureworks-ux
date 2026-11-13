@@ -130,6 +130,11 @@ export function createDemoServer(persona) {
       if (!['confirmed', 'in_progress', 'complete', 'submitted'].includes(b.status)) fail(500, { error: 'Invalid status' });
       a.status = b.status; return { assignment: { ...a } };
     },
+    update_job_phase(p, b) {
+      const a = db.assignments.find((x) => x.id === b.assignmentId); if (!a || a.user_id !== me.id) fail(500, { error: 'Not your assignment' });
+      a.job_phase = b.phase; if (b.phase === 'travelling' && a.status === 'scheduled') a.status = 'confirmed';
+      return { assignment: { ...a }, changed: true };
+    },
     add_note(p, b) {
       need(b.jobId);
       const n = { id: db.id('n'), job_id: b.jobId, event_type: b.eventType || 'note', created_at: db.now().toISOString(), users: { name: me.name }, detail_json: { text: b.text } };

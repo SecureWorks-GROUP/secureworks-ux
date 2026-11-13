@@ -3,6 +3,7 @@ import { html, useState } from '../lib/h.js';
 import { signIn, sendReset } from '../lib/auth.js';
 import { getState, local } from '../lib/store.js';
 import { Button, Field } from '../ui/kit.js';
+import { Logo } from '../ui/logo.js';
 
 export function Login() {
   const [mode, setMode] = useState('in'); // in | forgot | sent
@@ -24,7 +25,7 @@ export function Login() {
 
   return html`<div class="login">
     <div class="login-top">
-      <div class="login-mark"><i />SecureWorks Crew</div>
+      <div class="login-mark"><${Logo} height=${34} /></div>
       <h1 class="login-hello">Your jobs.<br />Your hours.<br /><em>Your pay.</em></h1>
     </div>
     <form class="login-form" onSubmit=${submit}>

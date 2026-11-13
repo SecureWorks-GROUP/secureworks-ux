@@ -90,12 +90,20 @@ export async function keepPhoto(key, file) {
   return small;
 }
 
-/** State that is also written to this phone, so a refresh loses nothing. */
+/**
+ * State that is also written to this phone, so a refresh loses nothing.
+ * Returns [value, set, clear, get]. `set` writes at once; `get()` is always the
+ * latest value, even inside a long-running send.
+ */
 export function useSaved(key, make) {
   const [value, setValue] = useState(() => { const saved = local.get(key); return saved && typeof saved === 'object' ? { ...make(), ...saved } : make(); });
-  const set = (change) => setValue((cur) => { const next = typeof change === 'function' ? change(cur) : { ...cur, ...change }; local.set(key, next); return next; });
+  const ref = useRef(value);
+  const set = (change) => {
+    const next = typeof change === 'function' ? change(ref.current) : { ...ref.current, ...change };
+    ref.current = next; local.set(key, next); setValue(next);
+  };
   const clear = () => { local.del(key); };
-  return [value, set, clear];
+  return [value, set, clear, () => ref.current];
 }
 
 // --------------------------------------------------------- signature pad ---

@@ -25,6 +25,13 @@ export function slimJob(job) {
   };
 }
 
+/** Hours between clock on and clock off, less the break. null while the clock runs or was never used. */
+export function clockHours(on, off, breakMin = 0) {
+  if (!on || !off) return null;
+  const mins = (Date.parse(off) - Date.parse(on)) / 60000 - (Number(breakMin) || 0);
+  return mins > 0 ? Math.round((mins / 60) * 100) / 100 : null;
+}
+
 /** my_jobs (everyone) -> { bookings, open }. Other companies' rows and watcher rows are dropped. */
 export function teamFromMyJobs(res, user) {
   const org = user.org_id || null;
@@ -46,9 +53,18 @@ export function teamFromMyJobs(res, user) {
     }
     if (bucket !== 'makesafePool') kept[bucket] = list;
   }
-  const bookings = bookingsFromMyJobs(kept, user.id).map((b) => ({
-    ...b, job: slimJob(b.job), mine: Boolean(b.userId) && b.userId === user.id, note: noPrices(b.note, user.seesMoney)
-  }));
+  // The shared converter drops two things the team view reads: the phase a
+  // trade is in (on the way, working) and, when the server sends no hours, the
+  // hours the clock shows.
+  const raw = new Map();
+  for (const list of Object.values(kept)) for (const a of list) if (a && a.id) raw.set(a.id, a);
+  const bookings = bookingsFromMyJobs(kept, user.id).map((b) => {
+    const a = raw.get(b.id) || {};
+    return {
+      ...b, job: slimJob(b.job), mine: Boolean(b.userId) && b.userId === user.id, note: noPrices(b.note, user.seesMoney),
+      phase: String(a.job_phase || '').toLowerCase(), hours: b.hours != null ? b.hours : clockHours(b.clockOn, b.clockOff, b.breakMin)
+    };
+  });
   const booked = new Set(bookings.map((b) => b.jobId));
   return { bookings, open: [...open.values()].filter((o) => !booked.has(o.jobId)) };
 }
@@ -108,7 +124,7 @@ export function awayIndex(rows) {
   }
   return map;
 }
-export function awayWord(status) { return status === 'leave' ? 'On leave' : 'Cannot work'; }
+export function awayWord(status) { return status === 'leave' ? 'On leave' : 'Not working'; }
 
 /** 'Mon 16 Nov' for one day, 'Mon 16 to Wed 18 Nov' style lists kept short. */
 export function daysWords(dates, max = 3) {

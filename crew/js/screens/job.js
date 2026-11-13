@@ -17,6 +17,7 @@ import {
   Page, Tag, Chip, Button, Sheet, Slide, Skel, Empty, LoadError, PhotoGrid, Avatar, Field, Picks, toast, openOverlay, ask, buzz, openLightbox
 } from '../ui/kit.js';
 import { clockOn, openClockOff, useElapsed } from './clock.js';
+import { markOnTheWay, lockIn, openCantMakeIt, wasDeclined } from './bookings.js';
 
 const TABS = [['scope', 'Scope'], ['photos', 'Photos'], ['notes', 'Notes'], ['files', 'Files'], ['crew', 'Crew']];
 
@@ -65,7 +66,7 @@ export function Job({ jobId, tab: tabParam }) {
     </header>
 
     <div class="block actions" style="margin-top:16px">
-      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener"><${Icon} name="navigate" size=${22} />Navigate</a>
+      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => { const r = myRows.find((x) => x.date === today); if (r) markOnTheWay({ ...r, jobId, job }); }}><${Icon} name="navigate" size=${22} />Navigate</a>
       ${phone ? html`<a class="action" href=${'tel:' + phone}><${Icon} name="phone" size=${22} />Call</a>`
         : html`<button type="button" class="action off" onClick=${() => toast(viewOnly ? 'Add yourself to this job to see the customer number.' : 'No phone number on this job. Ask the office.')}><${Icon} name="phone" size=${22} />Call</button>`}
       ${canText ? html`<button type="button" class="action" onClick=${() => openText(job)}><${Icon} name="message" size=${22} />Text</button>` : null}
@@ -123,9 +124,16 @@ function Dock({ job, jobId, clock, myRows, today, closed, vertical }) {
     </div></div>`;
   }
   if (closed) return null;
+  if (ahead && ahead.status === 'scheduled' && !wasDeclined(ahead.id)) {
+    const b = { ...ahead, jobId, job, mine: true };
+    return html`<div class="dock"><div class="inset" style="display:grid;gap:10px">
+      <span><span class="t-strong">The office booked you for ${fmtDay(ahead.date)}</span><span class="t-small" style="display:block">Can you do it?</span></span>
+      <div class="btnrow"><${Button} small icon="check" busy=${busy} onClick=${async () => { setBusy(true); await lockIn(b); setBusy(false); }}>Yes, lock it in<//><${Button} kind="soft" small onClick=${() => openCantMakeIt(b)}>Cannot make it<//></div>
+    </div></div>`;
+  }
   if (ahead) {
     return html`<div class="dock"><div class="inset" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <span><span class="t-strong">You are on ${fmtRelDay(ahead.date) === 'Tomorrow' ? 'tomorrow' : fmtDay(ahead.date)}</span><span class="t-small" style="display:block">Here today instead?</span></span>
+      <span><span class="t-strong">Locked in for ${fmtRelDay(ahead.date) === 'Tomorrow' ? 'tomorrow' : fmtDay(ahead.date)}</span><span class="t-small" style="display:block">Here today instead?</span></span>
       <${Button} small busy=${busy} onClick=${async () => { setBusy(true); const r = await bookMyself(jobId, [today]); setBusy(false); if (!r.ok) toast(r.message, { kind: 'bad' }); else buzz(12); }}>I am here today<//>
     </div></div>`;
   }

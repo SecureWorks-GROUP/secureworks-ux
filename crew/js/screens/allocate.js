@@ -171,7 +171,7 @@ function AllocateSheet({ job, onClose }) {
       </div>` : html`<div class="stack loose">
         <div class="field"><span>Who is going</span>
           ${roster.length > 8 ? html`<input class="input" type="search" placeholder="Find a person" value=${find} onInput=${(e) => setFind(e.currentTarget.value)} aria-label="Find a person" />` : null}
-          ${users.loading && q.loading ? html`<div class="stack tight"><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /></div>` : html`<div>
+          ${users.loading ? html`<div class="stack tight"><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /></div>` : html`<div>
             ${shownRoster.map((u) => {
               const on = onJobById.get(u.id);
               const offDays = awayDays(u.id, days.length ? days : window14);

@@ -6,6 +6,11 @@ import { bookingsFromMyJobs, findRunningClock, verticalOf } from './model.js';
 import { todayISO } from './dates.js';
 import { syncClock } from '../screens/clock.js';
 
+// The trade changed their own bookings: the next jobs load is not "news".
+let silenceHook = () => {};
+export function onSilenceChanges(fn) { silenceHook = fn; }
+function silenceChanges() { silenceHook(); }
+
 /** The signed-in trade's own bookings (past month, today and everything ahead). */
 export function useMyBookings() {
   const user = useStore((s) => s.user);
@@ -57,7 +62,8 @@ export async function bookMyself(jobId, dates) {
       if (r && r.ok === false) throw new ApiError(r.error || 'Could not add you', { status: 409, code: r.code, body: r });
     } catch (err) { return { ok: false, message: friendly(err) }; }
   }
-  invalidate('myjobs'); invalidate('job:' + jobId); invalidate('hours'); invalidate('search');
+  silenceChanges();
+  invalidate('myjobs'); invalidate('job:' + jobId); invalidate('hours'); invalidate('search'); invalidate('team');
   if (plannedOff && ahead.some((d) => d > today)) {
     const didToday = viaInvoiceDoor.length > 0;
     return { ok: didToday, partial: true, message: didToday ? 'You are on it for today. Booking ahead is not switched on yet, so add the other days as they come.' : 'Booking ahead is not switched on yet. Add yourself on the day, or ask the office to book you.' };
@@ -73,7 +79,8 @@ export async function unbookMyself(assignmentId, jobId) {
     if (code === 'self_booking_disabled' || code === 'operator_access_required') return { ok: false, message: 'Ask the office to take you off this day.' };
     return { ok: false, message: friendly(err) };
   }
-  invalidate('myjobs'); invalidate('job:' + jobId); invalidate('hours');
+  silenceChanges();
+  invalidate('myjobs'); invalidate('job:' + jobId); invalidate('hours'); invalidate('team');
   return { ok: true };
 }
 

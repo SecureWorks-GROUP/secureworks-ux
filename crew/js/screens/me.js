@@ -47,13 +47,13 @@ export function Me() {
           ${canInstall ? html`<${Button} small style="margin-top:10px" onClick=${async () => { const ev = window.__crewInstall; if (!ev) return; ev.prompt(); await ev.userChoice; window.__crewInstall = null; setCanInstall(false); }}>Install<//>` : null}</div>` : null}
       </div>
       <div class="list ruled" style="margin-top:10px">
-        <${Row} icon="swap" title="Open the old Trade app" sub="Same jobs, same login" onClick=${() => { location.href = window.CREW_CONFIG.oldAppUrl; }} />
-        <${Row} icon="phone" title="Call the office" onClick=${() => { location.href = 'tel:' + window.CREW_CONFIG.officePhone; }} />
+        ${window.CREW_CONFIG.memoryRoutes ? null : html`<${Row} icon="swap" title="Open the old Trade app" sub="Same jobs, same login" onClick=${() => { location.href = window.CREW_CONFIG.oldAppUrl; }} />`}
+        ${window.CREW_CONFIG.officePhone ? html`<${Row} icon="phone" title="Call the office" onClick=${() => { location.href = 'tel:' + window.CREW_CONFIG.officePhone; }} />` : null}
       </div>
     </section>
 
     ${getState().demo ? html`<section class="section"><span class="t-label">Demo: look at it as</span>
-      <div class="block" style="margin-top:8px"><${Picks} value=${local.get('demoPersona', 'crew')} options=${[['crew', 'A crew member'], ['lead', 'A fencing lead'], ['office', 'The office'], ['new', 'Someone new']]} onChange=${(p) => { local.set('demoPersona', p); const u = new URL(location.href); if (u.searchParams.has('demo')) u.searchParams.set('demo', p); u.hash = '#/today'; location.href = u.toString(); location.reload(); }} /></div></section>` : null}
+      <div class="block" style="margin-top:8px"><${Picks} value=${local.get('demoPersona', 'crew')} options=${[['crew', 'A crew member'], ['lead', 'A fencing lead'], ['office', 'The office'], ['new', 'Someone new']]} onChange=${(p) => { local.set('demoPersona', p); if (window.CREW_CONFIG.memoryRoutes) { location.reload(); return; } const u = new URL(location.href); if (u.searchParams.has('demo')) u.searchParams.set('demo', p); u.hash = '#/today'; location.href = u.toString(); location.reload(); }} /></div></section>` : null}
 
     <div class="block" style="margin-top:28px;display:grid;gap:10px">
       <${Button} kind="line" block icon="signout" onClick=${async () => {

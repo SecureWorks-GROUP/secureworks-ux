@@ -16,7 +16,7 @@ registerDemo((db, h) => {
   const jobRef = (j) => ({ job_id: j.id, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, job_type: j.type });
 
   // ------------------------------------------------------- older invoices
-  if (!staff) {
+  if (!staff && db.persona !== 'new') {
     const w3 = addDays(mon, -21); const w4 = addDays(mon, -28); const w5 = addDays(mon, -35);
     const day = (wk, n, hrs, extra = {}) => ({ id: db.id('l'), line_date: addDays(wk, n), work_date: addDays(wk, n), start_time: '07:00', finish_time: hrs === 9 ? '16:30' : hrs === 11 ? '18:30' : '15:30', break_minutes: 30, job_number: n < 2 ? 'SWD-26088' : 'SWF-26168', client_name: n < 2 ? 'Marcus Lim' : 'Priya Nair', description: 'Labour', line_type: 'labour', total_hours: hrs, hourly_rate: 55, line_total_ex: hrs * 55, ...extra });
     db.invoices.push(

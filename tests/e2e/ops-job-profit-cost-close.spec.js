@@ -63,19 +63,20 @@ test('settling names the day it becomes final', async ({ page }) => {
 test('waiting lists each reason in plain words and never reads as final', async ({ page }) => {
   const note = await render(page, response(close({
     cost_state: 'waiting', cost_final: false, final_on: null, closed_by: null,
-    waiting_on: ['materials_not_linked', 'work_done_no_labour_overdue', 'no_finish_day', 'dispatch_order_not_billed', 'work_order_not_billed', 'variation_cost_not_in', 'some_new_code']
+    waiting_on: ['materials_not_linked', 'work_done_no_labour_overdue', 'no_finish_day', 'dispatch_order_not_billed', 'work_order_not_billed', 'variation_cost_not_in', 'draft_bill_on_job', 'some_new_code']
   })));
   await expect(note).toHaveAttribute('data-jp-cost-close', 'waiting');
   await expect(note).toContainText('Not final');
   const items = note.locator('[data-jp-cc-waiting] li');
-  await expect(items).toHaveCount(7);
+  await expect(items).toHaveCount(8);
   await expect(items.nth(0)).toHaveText('Materials owed but none linked');
   await expect(items.nth(1)).toHaveText('Work done and no labour linked after 14 days');
   await expect(items.nth(2)).toHaveText('No finish day is on record for this job');
   await expect(items.nth(3)).toHaveText('A supplier order sent from Dispatch has no bill yet');
   await expect(items.nth(4)).toHaveText('A work order agrees more labour than has been billed');
   await expect(items.nth(5)).toHaveText('A variation was agreed and its cost is not in yet');
-  await expect(items.nth(6)).toHaveText('some new code');
+  await expect(items.nth(6)).toHaveText('A bill for this job is still a draft in Xero');
+  await expect(items.nth(7)).toHaveText('some new code');
   await expect(note.locator('.jp-tag.ok')).toHaveCount(0);
 });
 

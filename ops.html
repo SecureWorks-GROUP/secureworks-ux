@@ -5207,6 +5207,7 @@ __swOpsStampAssets([
         <div class="jp-bar">
           <button class="filter-chip active" data-jp-mode="jobs" onclick="jpSetMode('jobs')">Jobs</button>
           <button class="filter-chip" data-jp-mode="company" onclick="jpSetMode('company')">Company</button>
+          <button class="filter-chip" data-jp-mode="tieout" onclick="jpSetMode('tieout')" title="Every supplier bill dollar in Xero by month: on a job, overhead, or not placed yet">Tie to Xero</button>
           <select class="form-input" id="jpType" onchange="loadJobProfit()" title="Work type">
             <option value="">All work types</option>
             <option value="fencing">Fencing</option>
@@ -5229,7 +5230,7 @@ __swOpsStampAssets([
           <input type="date" class="form-input" id="jpTo" onchange="loadJobProfit()" title="To date" style="width:130px;">
           <div style="flex:1;"></div>
           <input type="text" class="filter-search" id="jpJobNumber" placeholder="Open job # (e.g. SWF-26041)" style="width:190px;" onkeydown="if(event.key==='Enter')jpOpenByNumber()">
-          <button class="btn btn-secondary btn-sm" onclick="jpOpenByNumber()">Open</button>
+          <button class="btn btn-secondary btn-sm" data-jp-open-number onclick="jpOpenByNumber()">Open</button>
           <button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: place them in Financials > Bill Reconciliation, then Reread profit here">Bills to place</button>
           <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()" title="Re-read the profit engine (after placing bills)">&#8635; Reread profit</button>
         </div>
@@ -5259,6 +5260,8 @@ __swOpsStampAssets([
           <div class="jp-more" id="jpMore"></div>
         </div>
         <div id="jpCompany" style="display:none;"></div>
+        <!-- Tie to Xero (modules/ops-xero-tieout.js): read only, ops-api xero_tieout. Search // <xero-tieout> -->
+        <div id="jpTieout" style="display:none;"></div>
       </div>
     </div>
 
@@ -6473,6 +6476,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
 ]);
+</script>
+<!-- Tie to Xero (Financials > Job profit > Tie to Xero): read only (modules/ops-xero-tieout.js, // <xero-tieout>). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-xero-tieout.js?v=1'}]);
 </script>
 <!-- Restoration plan, quote and builder's answer on a make-safe job page: read only (modules/ops-restoration.js). -->
 <script>
@@ -20074,10 +20081,17 @@ function _jpFilters() {
 }
 
 function jpSetMode(mode) {
-  _jp.mode = mode === 'company' ? 'company' : 'jobs';
+  _jp.mode = mode === 'company' ? 'company' : (mode === 'tieout' ? 'tieout' : 'jobs');
   document.querySelectorAll('[data-jp-mode]').forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-jp-mode') === _jp.mode); });
   document.getElementById('jpJobs').style.display = _jp.mode === 'jobs' ? '' : 'none';
   document.getElementById('jpCompany').style.display = _jp.mode === 'company' ? '' : 'none';
+  // <xero-tieout> The Tie to Xero view has no job filters: the bar hides them and the basis line while it shows.
+  var tie = document.getElementById('jpTieout');
+  if (tie) tie.style.display = _jp.mode === 'tieout' ? '' : 'none';
+  var bar = document.querySelector('#subJobprofit .jp-bar');
+  if (bar) bar.setAttribute('data-jp-mode-now', _jp.mode);
+  var basis = document.querySelector('#subJobprofit .jp-basis');
+  if (basis) basis.style.display = _jp.mode === 'tieout' ? 'none' : '';
   loadJobProfit();
 }
 
@@ -20087,6 +20101,8 @@ function _jpRefused() {
   if (body) body.innerHTML = '<tr><td colspan="10">' + msg + '</td></tr>';
   var co = document.getElementById('jpCompany');
   if (co) co.innerHTML = msg;
+  var tie = document.getElementById('jpTieout');
+  if (tie) tie.innerHTML = msg;
   var more = document.getElementById('jpMore');
   if (more) more.innerHTML = '';
 }
@@ -20098,6 +20114,13 @@ function loadJobProfit() {
   _jp.typeAvg = {};
   if (_jp.open) openJobProfitDetail(_jp.open[0], _jp.open[1], true);
   if (_jp.mode === 'company') return loadJobProfitRollup();
+  // <xero-tieout> modules/ops-xero-tieout.js draws it; a missing module says so, never an empty view.
+  if (_jp.mode === 'tieout') {
+    if (window.XeroTieout && typeof XeroTieout.load === 'function') return XeroTieout.load();
+    var tie = document.getElementById('jpTieout');
+    if (tie) tie.innerHTML = '<div class="jp-note err">The Tie to Xero view did not load. Refresh the page.</div>';
+    return;
+  }
   return _jpLoadPage(true);
 }
 

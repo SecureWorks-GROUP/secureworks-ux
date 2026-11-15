@@ -19911,7 +19911,7 @@ function jpToggleTradeLines(btn, key) {
   btn.textContent = (open ? 'Hide ' : 'Show ') + btn.getAttribute('data-jp-lines-label');
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
-var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
+var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null, close: {} };
 
 // Owner, admins and office staff. Marnin, 3 Nov 2026 (call B): "yes office staff can see job profit in
 // ops dash or thorugh agents asking". Client-side gate by the signed-in login's role from list_users;
@@ -20131,7 +20131,7 @@ async function _jpLoadPage(reset) {
   if (!body) return;
   var seq = ++_jp.listSeq;
   if (reset) {
-    _jp.rows = []; _jp.offset = 0; _jp.more = false;
+    _jp.rows = []; _jp.offset = 0; _jp.more = false; _jp.close = {};
     body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--sw-text-sec);">Loading...</td></tr>';
   }
   if (more) more.innerHTML = '<span class="jp-sub">Loading...</span>';
@@ -20140,6 +20140,16 @@ async function _jpLoadPage(reset) {
     var data = await opsFetch('job_profit_list', params);
     if (seq !== _jp.listSeq) return;
     var rows = Array.isArray(data && data.jobs) ? data.jobs : [];
+    // Cost close by job for this page (// <job-profit-cost-close>). A page whose read failed, or a job
+    // it did not answer, is kept as not known; a page without the field keeps nothing.
+    if (data && Object.prototype.hasOwnProperty.call(data, 'cost_close')) {
+      var cc = data.cost_close;
+      var byJob = cc && cc.ok === true && cc.by_job && typeof cc.by_job === 'object' ? cc.by_job : null;
+      rows.forEach(function(r) {
+        if (!r || !r.job_id) return;
+        _jp.close[r.job_id] = byJob && Object.prototype.hasOwnProperty.call(byJob, r.job_id) ? byJob[r.job_id] : null;
+      });
+    }
     _jp.rows = _jp.rows.concat(rows);
     _jp.offset += rows.length;
     // The server says whether another page follows; it returns no row count.
@@ -20277,7 +20287,7 @@ function _jpRenderList() {
         + '<td class="num">' + _jpMoney(j.collected_ex) + '</td>'
         + '<td class="num">' + _jpProfit(_jpProfitOf(j), _jpCostUnknown(j)) + '</td>'
         + '<td class="num">' + _jpPct(_jpMarginOf(j), _jpCostUnknown(j)) + '</td>'
-        + '<td>' + _jpConfidence(j) + '</td>'
+        + '<td>' + _jpConfidence(j) + _jpCostCloseTag(_jp.close && Object.prototype.hasOwnProperty.call(_jp.close, j.job_id) ? _jp.close[j.job_id] : undefined) + '</td>'
         + '</tr>';
     }).join('');
   }
@@ -20496,6 +20506,99 @@ function _jpLineEvidence(data) {
   if (le.read_at) h += '<div class="jp-sub" style="margin-top:4px;">Read ' + _jpEsc(String(le.read_at).slice(0, 16).replace('T', ' ')) + ' UTC &middot; rule ' + _jpEsc(le.rule || '') + '</div>';
   return h;
 }
+// <job-profit-cost-close>
+// Cost close (backend job_profit `cost_close`, rule cost-close-v1): whether a
+// job's cost is final and, if not, what it is waiting on. The server works the
+// state out on every read; this only words it. A read that failed, or a job
+// the server gave no answer for, is Not known, never Final and never Open. An
+// answer without the field at all (an older server) draws nothing. It says the
+// cost is complete; it does not say the job was invoiced or that every line is
+// verified. Display only.
+var JP_CC_STATES = ['final', 'settling', 'waiting', 'open', 'not_applicable'];
+var JP_CC_BASIS = {
+  work_done: 'the work was recorded as done', first_invoice: 'its first invoice was raised',
+  repair_stage: 'its repair stage reached Complete', status: 'its status moved to finished',
+  did_not_go_ahead: 'it did not go ahead'
+};
+var JP_CC_WAIT = {
+  no_cost_date: 'No cost on this job carries a date',
+  no_finish_day: 'No finish day is on record for this job',
+  work_done_no_labour_overdue: 'Work done and no labour linked after 14 days',
+  po_no_bill_overdue: 'An order has no bill after 30 days',
+  ordered_not_billed: 'Ordered and not billed yet',
+  ordered_not_billed_over_30_days: 'Ordered and not billed after 30 days',
+  invoice_emailed_bill_not_placed: 'A supplier invoice was emailed and its bill is not placed',
+  materials_below_quote: 'Materials linked are well below the quote',
+  variation_not_costed: 'A variation has no cost',
+  employer_super_unknown: 'Employer super is not known',
+  dispatch_order_not_billed: 'A supplier order sent from Dispatch has no bill yet',
+  work_order_not_billed: 'A work order agrees more labour than has been billed',
+  variation_cost_not_in: 'A variation was agreed and its cost is not in yet',
+  draft_bill_on_job: 'A bill for this job is still a draft in Xero'
+};
+function _jpCcWaitText(code) { return JP_CC_WAIT[code] || _jpFlagText(code); }
+function _jpCcState(c) {
+  if (!c || typeof c !== 'object' || c.ok !== true) return null;
+  var st = String(c.cost_state || '');
+  if (JP_CC_STATES.indexOf(st) === -1) return null;
+  // Final only with the server's own yes and its day.
+  if ((st === 'final') !== (c.cost_final === true) || (st === 'final' && !c.final_on)) return null;
+  return st;
+}
+// The list tag. c: the job's cost_close answer; undefined when the read had no cost_close at all.
+function _jpCostCloseTag(c) {
+  if (c === undefined) return '';
+  var st = _jpCcState(c);
+  if (!st) return '<span class="jp-tag mute" data-jp-cc="unknown">Cost state not known</span>';
+  if (st === 'final') return '<span class="jp-tag ok" data-jp-cc="final" title="No cost has landed for ' + _jpEsc(c.quiet_days) + ' days since it finished">Cost final</span>';
+  if (st === 'settling') return '<span class="jp-tag inf" data-jp-cc="settling" title="Finished with nothing outstanding; final if no cost lands">Cost settling</span>';
+  if (st === 'waiting') {
+    var w = Array.isArray(c.waiting_on) ? c.waiting_on : [];
+    return '<span class="jp-tag bad" data-jp-cc="waiting" title="' + _jpEsc(w.map(_jpCcWaitText).join('; ')) + '">Cost not final</span>';
+  }
+  return '';
+}
+function _jpCostClose(data) {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, 'cost_close')) return '';
+  var c = data.cost_close;
+  var st = _jpCcState(c);
+  var h = '<div class="jp-sec">Is the cost final?</div>';
+  if (!st) {
+    var why = c && typeof c === 'object' && c.ok === false && c.reason ? _jpPlainText(c.reason) : 'The cost state could not be read';
+    return h + '<div class="jp-note" data-jp-cost-close="unknown"><span class="jp-tag mute">Not known</span> ' + _jpEsc(why)
+      + '. So this job\'s cost is not known to be final.</div>';
+  }
+  var days = _jpNum(c.quiet_days);
+  var daysText = days == null ? 'the quiet period' : days + ' days';
+  var finished = c.finished_on ? 'Finished ' + _jpDate(c.finished_on) + (JP_CC_BASIS[c.finished_basis] ? ' (' + JP_CC_BASIS[c.finished_basis] + ')' : '') + '.'
+    : (JP_CC_BASIS[c.finished_basis] ? 'Finished: ' + JP_CC_BASIS[c.finished_basis] + '.' : '');
+  var last = c.last_cost_on ? ' Newest cost ' + _jpDate(c.last_cost_on) + '.' : '';
+  var body;
+  if (st === 'final') {
+    body = '<span class="jp-tag ok">Final</span> No cost reason is open and no cost has landed for ' + _jpEsc(daysText) + '. Final since ' + _jpDate(c.final_on) + '.'
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + ' A cost that lands later reopens it.'
+      + (c.all_costs_paid === true ? ' Every cost is paid in Xero.' : c.all_costs_paid === false ? ' Not every cost is verified paid in Xero.' : '') + '</div>';
+  } else if (st === 'settling') {
+    body = '<span class="jp-tag inf">Settling</span> Finished with no cost reason open. It becomes final'
+      + (c.final_on ? ' on ' + _jpDate(c.final_on) : ' after ' + _jpEsc(daysText)) + ' if no cost lands before then.'
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + '</div>';
+  } else if (st === 'waiting') {
+    var w = Array.isArray(c.waiting_on) ? c.waiting_on.filter(function(x) { return !!x; }) : [];
+    body = '<span class="jp-tag bad">Not final</span> Finished, but the cost is not complete yet.'
+      + (w.length ? '<ul class="jp-sub" data-jp-cc-waiting style="margin:4px 0 0 18px;">' + w.map(function(x) { return '<li>' + _jpEsc(_jpCcWaitText(x)) + '</li>'; }).join('') + '</ul>'
+        : '<div class="jp-sub" style="margin-top:4px;">The server named no reason.</div>')
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + '</div>';
+  } else if (st === 'open') {
+    body = '<span class="jp-tag mute">Open</span> The work is not finished, or the job was sent back to work, so costs are still expected.'
+      + (last ? '<div class="jp-sub" style="margin-top:4px;">' + last.trim() + '</div>' : '');
+  } else {
+    body = '<span class="jp-tag mute">Does not apply</span> A holding job, or a job that did not go ahead and holds no cost.';
+  }
+  return h + '<div class="jp-note" data-jp-cost-close="' + st + '">' + body
+    + '<div class="jp-sub" style="margin-top:4px;">Says the cost is complete, not that the job was invoiced or that every line is verified.'
+    + (c.as_of ? ' As at ' + _jpDate(c.as_of) + '.' : '') + (c.rule ? ' Rule ' + _jpEsc(c.rule) + '.' : '') + '</div></div>';
+}
+// </job-profit-cost-close>
 // Won and still in delivery: profit is not due yet.
 function _jpInDelivery(j) {
   return JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
@@ -20550,6 +20653,7 @@ function _jpRenderDetail(data) {
     + _jpCard('Margin', _jpPct(_jpMarginOf(j), _jpCostUnknown(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
     + '</div>';
 
+  h += _jpCostClose(data);
   h += _jpLineEvidence(data);
 
   // Expected vs actual by lane

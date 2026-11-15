@@ -837,6 +837,19 @@ in the pure `XeroTieoutCore` between `// <xero-tieout-core>` sentinels. Same vie
 profit. Guards: `npm run test:xero-tieout` (in `test:e2e`, fails on a long dash or emoji) and
 `tests/e2e/ops-xero-tieout.spec.js`.
 
+## Financials > Work Orders: every job work order (`modules/ops-work-orders-list.js`)
+
+Listed like Quotes and Invoices (Marnin, 16 Nov 2026). One ops-api
+`list_work_orders?kind=job` read per open; each approved row's `cap` (allowed,
+billed by every trade, left, billed in full, over) is the server's, the same
+rule the invoice doors refuse by, and the page works none out. A cap not read
+is "Not read", never $0.00; a failed read never draws an empty list. Read
+only: a row opens `JobWorkOrderOps.openForJob`, a draft's Set amount / Approve
+scrolls to its row in the office fill queue below (`ops-office-wo-queue.js`,
+flag `job_work_order_office_fill_v1`), which owns those writes. Old crew work
+orders sit folded under it. Rules in `WorkOrdersListCore`
+(`// <work-orders-list-core>`). Guard: `tests/e2e/ops-work-orders-list.spec.js`.
+
 ## Job profit: is the cost final (`ops.html`)
 
 Financials > Job profit words the server's `cost_close` answer (ops-api `job_profit` and

@@ -5135,11 +5135,47 @@ __swOpsStampAssets([
 
       <!-- Work Orders -->
       <div id="subWorkorders" class="sub-view">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div class="section-heading">Work Orders</div>
+        <!-- Every job work order, listed like Quotes and Invoices
+             (modules/ops-work-orders-list.js, // <work-orders-list-core>). Read only;
+             a row opens the job's work order, Set amount goes to the fill queue below. -->
+        <div class="stat-grid" id="woJobStats" style="grid-template-columns: repeat(5, 1fr);"></div>
+        <div class="filter-bar wol-bar">
+          <button class="filter-chip active" onclick="WorkOrdersList.setFilter('all')" data-wo-filter="all">All</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('needs_amount')" data-wo-filter="needs_amount">Needs an amount</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('draft')" data-wo-filter="draft">Draft</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('approved')" data-wo-filter="approved">Approved</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('billed_in_full')" data-wo-filter="billed_in_full">Billed in full</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('over')" data-wo-filter="over">Over</button>
+          <select class="form-input" id="woTypeFilter" onchange="WorkOrdersList.setType(this.value)" aria-label="Job type" style="width:auto;min-width:130px;font-size:12px;padding:4px 8px;"><option value="all">All types</option></select>
+          <input type="text" class="filter-search" id="woSearch" placeholder="Search WO#, job#, client, suburb..." oninput="WorkOrdersList.setSearch(this.value)" style="width:220px;">
         </div>
+        <div class="wol-note" id="woJobNote"></div>
+        <div class="data-table-wrap">
+          <table class="data-table" id="woJobTable">
+            <thead>
+              <tr>
+                <th onclick="sortTable('woJobTable',0,'string')">WO #</th>
+                <th onclick="sortTable('woJobTable',1,'string')">Job #</th>
+                <th onclick="sortTable('woJobTable',2,'string')">Customer</th>
+                <th onclick="sortTable('woJobTable',3,'string')">Suburb</th>
+                <th onclick="sortTable('woJobTable',4,'string')">Type</th>
+                <th onclick="sortTable('woJobTable',5,'string')">Status</th>
+                <th onclick="sortTable('woJobTable',6,'number')" title="Labour the office agreed, ex GST">Agreed</th>
+                <th onclick="sortTable('woJobTable',7,'number')" title="Approved customer variations added for the trades">Variations</th>
+                <th onclick="sortTable('woJobTable',8,'number')" title="Billed on the job by every trade, except commission">Billed</th>
+                <th onclick="sortTable('woJobTable',9,'number')">Left</th>
+                <th onclick="sortTable('woJobTable',10,'date')">Approved / opened</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="woJobTableBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:20px;"></div>
         <div id="officeWoFill" data-office-wo-fill-host></div>
-        <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders open on each job page. Old crew work orders stay listed here, read-only, until they are retired.</div>
+        <details class="wol-fold" id="woOldCrewFold">
+          <summary>Old crew work orders</summary>
+        <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders are listed above. Old crew work orders stay listed here, read-only, until they are retired.</div>
         <div class="data-table-wrap">
           <table class="data-table" id="woTable">
             <thead>
@@ -5148,6 +5184,7 @@ __swOpsStampAssets([
             <tbody id="woTableBody"></tbody>
           </table>
         </div>
+        </details>
       </div>
 
       <!-- Bill Reconciliation: moved here from the retired Materials tab so finance
@@ -6474,7 +6511,8 @@ __swOpsStampAssets([
   {t:'js', u:'shared/client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
-  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
+  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'},
+  {t:'js', u:'modules/ops-work-orders-list.js?v=1'}
 ]);
 </script>
 <!-- Tie to Xero (Financials > Job profit > Tie to Xero): read only (modules/ops-xero-tieout.js, // <xero-tieout>). -->
@@ -19672,6 +19710,7 @@ function packetJobWorkOrder(data) {
 }
 
 async function loadWOs() {
+  if (window.WorkOrdersList) WorkOrdersList.load();
   if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {

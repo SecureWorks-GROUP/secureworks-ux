@@ -100,3 +100,34 @@ test('the week is kept as the saved weekly draft, in the shape the Trade App rea
   await expect(page.locator('.pay-row', { hasText: 'Wembley' })).toContainText('7:00 am to 2:00 pm');
   expect(errors).toEqual([]);
 });
+
+test('a trade sets their own rate for a job; above the office rate it says the office checks it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto(crewUrl('#/pay'));
+  await page.getByRole('button', { name: 'Open timesheet' }).click();
+
+  await page.locator('.pay-row', { hasText: 'Wembley' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Wembley' });
+  await sheet.locator('input[type="time"]').first().fill('07:00');
+  await sheet.locator('input[type="time"]').nth(1).fill('14:00');
+  await sheet.getByRole('button', { name: '30 min', exact: true }).click();
+  await expect(sheet.getByText('Your office rate is $55.', { exact: false })).toBeVisible();
+  await sheet.getByLabel('Your hourly rate').fill('70');
+  await expect(sheet.getByText('Above your office rate of $55. The office checks it before it is paid.')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Save' }).click();
+
+  await page.locator('.pay-row', { hasText: 'Joondalup' }).click();
+  const off = page.getByRole('dialog', { name: 'Joondalup' });
+  await off.getByRole('switch', { name: /Leave this off the invoice/ }).click();
+  await off.getByRole('button', { name: 'Save' }).click();
+
+  await page.getByRole('button', { name: 'Review invoice' }).click();
+  const wembley = page.locator('.pay-line', { hasText: 'Wembley' });
+  await expect(wembley).toContainText('6.5 h at $70.00');
+  await expect(wembley).toContainText('Above your office rate of $55.00. The office checks it before it is paid.');
+  await expect(wembley).not.toHaveClass(/todo/);
+  // A line at the office rate carries no such note, and the invoice can still be sent.
+  await expect(page.locator('.pay-line', { hasText: 'Morley' })).not.toContainText('Above your office rate');
+  await expect(page.getByRole('button', { name: 'Send invoice' })).toBeEnabled();
+  expect(errors).toEqual([]);
+});

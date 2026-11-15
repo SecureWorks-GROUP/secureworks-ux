@@ -98,8 +98,11 @@ export function Review({ monday: mondayParam }) {
     } else if (l.kind === 'commission') detail = 'commission, no super on it';
     else if (l.kind === 'other') detail = l.type || 'Other';
     else if (l.kind === 'deduction') detail = 'taken off this invoice';
+    // A rate above the office rate bills, and the office checks it before it is paid (owner, 15 Nov 2026).
+    const above = !problem && l.kind === 'hours' && !l.off && l.usualRate > 0 && Number(l.rate) > l.usualRate + 0.004
+      ? `Above your office rate of ${cash(l.usualRate)}. The office checks it before it is paid.` : '';
     return html`<${PayLine} key=${l.key} title=${l.kind === 'other' || l.kind === 'deduction' ? l.description || l.title : l.title} number=${l.jobNumber} detail=${detail}
-      tone=${problem ? 'todo' : ''} note=${problem || ''} amount=${problem || amt == null ? '' : cash(amt)} onClick=${() => w.edit(l)} />`;
+      tone=${problem ? 'todo' : ''} note=${problem || above} amount=${problem || amt == null ? '' : cash(amt)} onClick=${() => w.edit(l)} />`;
   };
 
   return html`<${Page} title="Invoice" back="Timesheet" onBack=${() => (route.query && route.query.from === 'pay' ? go('/pay/week/' + monday, { replace: true }) : back('/pay/week/' + monday))} right=${html`<${StatusBadge} status=${sentBack ? 'sent_back' : 'draft'} />`} flush

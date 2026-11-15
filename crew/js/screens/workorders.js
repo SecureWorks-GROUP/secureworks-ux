@@ -30,7 +30,7 @@ function stateOf(w, user) {
   if (w.already_invoiced === true || block === 'invoiced') return ['Invoiced', 'sent', 'This work order is already invoiced.'];
   if (ready) return ['Ready to invoice', 'not_sent', ''];
   if (!own) return [`${w.assigned_user_name || 'Someone else'}'s`, 'closed', 'This work order belongs to someone else. Its pay is between them and the office.'];
-  if (!money) return ['Agreed for the job', 'scheduled', 'This is what is agreed for the job. It is not invoiced from here: record your time on your timesheet or the group work order.'];
+  if (!money) return ['Agreed for the job', 'approved', 'This is what is agreed for the job. It is not invoiced from here: record your time on your timesheet or the group work order.'];
   if (block === 'weekly_draft') return ['On your weekly invoice', 'draft', 'This one is already on a weekly invoice you started. Send it from there.'];
   if (block === 'other_trade_draft') return ['On another invoice', 'on_hold', 'Someone else has this work order on their invoice. Ask the office to sort it out.'];
   if (block === 'completion_evidence') return ['Needs finish photos', 'on_hold', 'Add the finished photos on the job, then it can be invoiced.'];

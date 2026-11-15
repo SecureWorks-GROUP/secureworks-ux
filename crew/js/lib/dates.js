@@ -95,16 +95,14 @@ export function fmtWeek(monday) {
   const sameMonth = a.getUTCMonth() === b.getUTCMonth();
   return `${a.getUTCDate()}${sameMonth ? '' : ' ' + MON[a.getUTCMonth()]} to ${b.getUTCDate()} ${MON[b.getUTCMonth()]}`;
 }
-/** '07:30' or '07:30:00' -> '7:30am' */
+/** '07:30' or '07:30:00' -> '7:30 am'. One wording for a time everywhere. */
 export function fmtTime(hm) {
-  if (!hm) return '';
-  const m = /^(\d{1,2}):(\d{2})/.exec(String(hm));
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hm || ''));
   if (!m) return '';
-  let h = Number(m[1]); const min = m[2];
-  const ap = h >= 12 ? 'pm' : 'am';
-  h = h % 12; if (h === 0) h = 12;
-  return min === '00' ? `${h}${ap}` : `${h}:${min}${ap}`;
+  const h = Number(m[1]);
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h >= 12 ? 'pm' : 'am'}`;
 }
+export const fmtClock = fmtTime;
 export function fmtTs(ts) { return ts ? `${fmtRelDay(tsToDate(ts))}, ${fmtTime(tsToHM(ts))}` : ''; }
 export function hmToMinutes(hm) {
   const m = /^(\d{1,2}):(\d{2})/.exec(String(hm || ''));
@@ -117,12 +115,31 @@ export function hoursBetween(start, finish, breakMinutes = 0) {
   const mins = b - a - (Number(breakMinutes) || 0);
   return mins > 0 ? Math.round((mins / 60) * 100) / 100 : NaN;
 }
-/** 7.5 -> '7.5 h'; 7.25 -> '7.25 h'; 8 -> '8 h' */
+/** 8 -> '8.0 h'; 6.5 -> '6.5 h'; 2.58 -> '2.58 h'. A number always carries its unit. */
 export function fmtHours(h) {
-  if (h == null || isNaN(h)) return '';
+  if (h == null || h === '' || isNaN(Number(h))) return '';
   const r = Math.round(Number(h) * 100) / 100;
-  return `${String(r)} h`;
+  return `${Math.abs(r * 10 - Math.round(r * 10)) < 0.001 ? r.toFixed(1) : r.toFixed(2)} h`;
 }
+export const fmtHrs = fmtHours;
+/** 'Fri 13 Nov 2026' */
+export function fmtDayYear(iso) { return iso ? `${fmtDay(iso)} ${String(iso).slice(0, 4)}` : ''; }
+/** '9 to 15 Nov 2026' */
+export function fmtWeekYear(monday) {
+  const sunday = addDays(monday, 6);
+  const a = fmtDay(monday).split(' '); const b = fmtDay(sunday).split(' ');
+  return `${a[1]}${a[2] === b[2] ? '' : ' ' + a[2]} to ${b[1]} ${b[2]} ${sunday.slice(0, 4)}`;
+}
+/** '9 to 15 Nov' */
+export function fmtWeekShort(monday) { return fmtWeekYear(monday).replace(/ \d{4}$/, ''); }
+/** 'Henry Fence' -> 'Henry F.' */
+export function shortName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+}
+/** { h: 3, m: '41' } -> '3 h 41 min' */
+export function fmtElapsed(t) { return t.h > 0 ? `${t.h} h ${Number(t.m)} min` : `${Number(t.m)} min`; }
 /** Running timer text from a start timestamp: '2:07' (h:mm) and seconds. */
 export function elapsedParts(ts, breakMinutes = 0) {
   const ms = Math.max(0, now().getTime() - new Date(ts).getTime() - (breakMinutes || 0) * 60000);

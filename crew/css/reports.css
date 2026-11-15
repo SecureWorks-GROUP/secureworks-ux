@@ -77,7 +77,7 @@
 .rp-done p { color: var(--mid); max-width: 46ch; }
 
 /* ---------- times and hours ---------- */
-.rp-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rp-times { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .rp-out { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--frost); }
 .rp-out b { font-size: 22px; line-height: 28px; font-weight: 800; font-variant-numeric: tabular-nums; min-height: 28px; }
 .rp-hours { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }

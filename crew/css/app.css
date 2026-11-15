@@ -281,9 +281,9 @@ button.row:active, a.row:active { background: var(--frost); }
 .sumrow.total span:last-child { font-size: 22px; line-height: 28px; font-weight: 800; }
 
 /* ---------- fields ---------- */
-.field { display: grid; gap: 6px; }
+.field { display: grid; gap: 6px; min-width: 0; }
 .field > span, .field > label { font-size: 13px; line-height: 18px; font-weight: 700; color: var(--slate); }
-.input { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--edge); background: var(--card); font-size: 16px; line-height: 22px; font-weight: 700; appearance: none; -webkit-appearance: none; }
+.input { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--edge); background: var(--card); font-size: 16px; line-height: 22px; font-weight: 700; min-width: 0; appearance: none; -webkit-min-width: 0; appearance: none; }
 .input::placeholder { color: var(--mid); font-weight: 500; }
 .input:focus { outline: 3px solid var(--orange); outline-offset: 2px; border-color: var(--slate); }
 .input.bad { border-color: var(--bad-text); background: var(--bad-bg); }
@@ -472,7 +472,7 @@ video.clip-video { width: 100%; background: black; aspect-ratio: 16 / 9; }
 .line.todo .amt { color: var(--ember); }
 .line.ahead b, .line.ahead .how { color: var(--mid); }
 .line.off b, .line.off .how { color: var(--mid); text-decoration: line-through; }
-.timegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.timegrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .hoursout { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 14px; background: var(--card); border: 1px solid var(--mist); }
 .hoursout b { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 22px; line-height: 28px; }
 .hoursout b.words { font-size: 15px; font-weight: 700; color: var(--mid); }

@@ -837,6 +837,15 @@ in the pure `XeroTieoutCore` between `// <xero-tieout-core>` sentinels. Same vie
 profit. Guards: `npm run test:xero-tieout` (in `test:e2e`, fails on a long dash or emoji) and
 `tests/e2e/ops-xero-tieout.spec.js`.
 
+## Job profit: is the cost final (`ops.html`)
+
+Financials > Job profit words the server's `cost_close` answer (ops-api `job_profit` and
+`job_profit_list`, rule in secureworks-backend `docs/job-profit-read-contract.md`): a tag on each
+list row and the "Is the cost final?" section on a job. The page decides nothing: a failed read or a
+job the server did not answer is Not known, never Final and never Open, and an answer without the
+field draws nothing. Search `// <job-profit-cost-close>`. Guard:
+`tests/e2e/ops-job-profit-cost-close.spec.js`.
+
 ## Matching: the Context reconciliation list (`modules/ops-recon.js`)
 
 On by default since TP-11 (the tab, `data-recon-nav`, is headed Needs a person): after sign in

@@ -8,7 +8,7 @@ import { html, cx, useEffect, useMemo, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { getState, local, invalidate, useQuery } from '../lib/store.js';
 import { queueWrite } from '../lib/outbox.js';
-import { todayISO, addDays, fmtDay, fmtTime, fmtRelDay, fmtDow, fmtDom, tsToHM, firstName } from '../lib/dates.js';
+import { todayISO, addDays, fmtDay, fmtTime, fmtRelDay, fmtDow, fmtDom, tsToHM } from '../lib/dates.js';
 import { jobTitle, jobAddress, bookingState, VERTICAL_LABEL } from '../lib/model.js';
 import { go } from '../lib/router.js';
 import { onSilenceChanges, useJob, rememberJobStub } from '../lib/data.js';
@@ -102,7 +102,7 @@ export function BookingItem({ booking: b, day = null, today, onOpen }) {
     <span class="main">
       <${JobLine} job=${b.job} vertical=${b.vertical} />
       <b>${jobTitle(b.job)}</b>
-      <span class="sub t-nums">${bookingDetail(b, mates)}</span>
+      <span class="sub nums">${bookingDetail(b, mates)}</span>
     </span>
     <span class="side"><${StatusBadge} status=${bookingStatus(b)} /></span>
   </button>`;
@@ -158,15 +158,14 @@ function CantSheet({ b, onClose }) {
 }
 
 /** "Bookings to confirm": every booking waiting on the trade, each opening its booking screen. */
-export function NeedsOk({ bookings, skip }) {
-  const waiting = useMemo(() => bookings.filter((b) => needsOk(b) && b !== skip && (!skip || b.id !== skip.id))
-    .sort((a, b) => a.date.localeCompare(b.date) || String(a.start || '').localeCompare(String(b.start || ''))), [bookings, skip && skip.id]);
+export function NeedsOk({ bookings }) {
+  const waiting = useMemo(() => bookings.filter(needsOk).sort((a, b) => a.date.localeCompare(b.date) || String(a.start || '').localeCompare(String(b.start || ''))), [bookings]);
   if (!waiting.length) return null;
-  return html`<${Section} label="Bookings to confirm" right=${html`<span class="t-small t-strong t-nums">${waiting.length}</span>`}>
+  return html`<${Section} label="Bookings to confirm" right=${html`<span class="t-small t-strong nums">${waiting.length}</span>`}>
     <div class="block card">
       ${waiting.slice(0, 6).map((b) => html`<button type="button" class="item" key=${b.id} onClick=${() => openBooking(b)}>
         <span class="main">
-          <b class="t-nums">${fmtDay(b.date)}${b.start ? ' · ' + fmtClock(b.start) : ''}</b>
+          <b class="nums">${fmtDay(b.date)}${b.start ? ' · ' + fmtClock(b.start) : ''}</b>
           <${JobLine} job=${b.job}>${[VERTICAL_LABEL[b.vertical], jobTitle(b.job)].filter(Boolean).join(' · ')}<//>
         </span>
         <span class="side"><${StatusBadge} status="to_confirm" /></span>
@@ -239,4 +238,3 @@ export function useMyDaysOff(from, to) {
     return map;
   }, [q.data, user.id]);
 }
-export { firstName };

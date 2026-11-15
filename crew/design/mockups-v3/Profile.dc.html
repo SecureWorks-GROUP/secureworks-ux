@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Profile</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap">
+<style>
+body{margin:0}
+a{color:#C4481F}a:hover{color:#B5421C}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;position:relative;overflow:hidden;background:#F8F6F3;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;font-size:15px;line-height:1.35;display:flex;flex-direction:column">
+
+<header style="padding:54px 20px 14px;background:#293C46;display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<h1 style="margin:0;font-size:28px;line-height:34px;font-weight:800;letter-spacing:-0.02em;color:#FFFFFF">Profile</h1>
+<span aria-hidden="true" style="width:40px;height:3px;background:#F15A29"></span>
+</div>
+<div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+<svg role="img" aria-label="SecureWorks Group" width="20" height="27" viewBox="0 0 123.14 164.55"><polygon fill="#FFFFFF" points="115.73 59.77 115.73 40.18 62.27 6.68 7.48 40.11 7.48 69.94 96.74 88.91 96.74 114.41 79.63 114.41 62.24 96.53 44.64 114.41 26.48 114.41 26.48 80.79 7.49 76.91 7.48 133.4 52.6 133.4 62.16 123.69 71.61 133.4 115.73 133.4 115.73 73.53 26.48 54.56 26.48 50.77 62.14 29.01 96.74 50.69 96.74 63.65 115.73 67.21 115.73 59.77"></polygon><rect fill="#F15A29" x="7.71" y="139.12" width="108.25" height="18.9"></rect></svg>
+<span style="font-size:13px;font-weight:700;color:#C5D0D6">Sam Tane</span>
+</div>
+</header>
+
+<main style="flex:1;min-height:0;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+
+<section aria-label="You" style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;padding:14px;display:flex;align-items:center;gap:14px">
+<span aria-hidden="true" style="width:48px;height:48px;border-radius:0;background:#EDF1F4;border:1px solid #6F8796;box-sizing:border-box;color:#293C46;font-size:18px;font-weight:800;display:flex;align-items:center;justify-content:center">ST</span>
+<span style="display:flex;flex-direction:column;gap:1px">
+<span style="font-size:18px;font-weight:800">Sam Tane</span>
+<span style="font-size:13px;color:#4C6A7C">Crew · Fencing and patios · Paid hourly</span>
+</span>
+</section>
+
+<section aria-label="Business details" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Business details</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<sc-for list="{{ business }}" as="r" hint-placeholder-count="3">
+<a href="Profile.dc.html" style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:0 14px;border-bottom:1px solid #D4DEE4;text-decoration:none;color:#293C46">
+<span style="font-size:15px;font-weight:700">{{ r.label }}</span><span style="font-size:13px;color:#4C6A7C;font-variant-numeric:tabular-nums">{{ r.value }}</span>
+</a>
+</sc-for>
+</div>
+</section>
+
+<section aria-label="Pay" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Pay</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:0 14px">
+<span style="font-size:15px;font-weight:700">Hourly rate</span><span style="font-size:13px;color:#4C6A7C;font-variant-numeric:tabular-nums">$55.00 · set by the office</span>
+</div>
+</div>
+</section>
+
+<section aria-label="Work" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Work</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<a href="ScheduleMonth.dc.html" style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:0 14px;border-bottom:1px solid #D4DEE4;text-decoration:none;color:#293C46">
+<span style="font-size:15px;font-weight:700">Usual working days</span><span style="font-size:13px;color:#4C6A7C">Mon to Fri</span>
+</a>
+<a href="ScheduleMonth.dc.html" style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:0 14px;text-decoration:none;color:#293C46">
+<span style="font-size:15px;font-weight:700">Days unavailable</span><span style="font-size:13px;color:#4C6A7C">2 in November</span>
+</a>
+</div>
+</section>
+
+<section aria-label="Account" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Account</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<a href="Profile.dc.html" style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:0 14px;border-bottom:1px solid #D4DEE4;text-decoration:none;color:#293C46">
+<span style="font-size:15px;font-weight:700">Password</span><span style="font-size:13px;color:#4C6A7C">Change</span>
+</a>
+<button type="button" style="min-height:44px;padding:0 14px;border:0;background:none;text-align:left;color:#8A2E0E;font:700 15px Plus Jakarta Sans,system-ui,sans-serif">Sign out</button>
+</div>
+</section>
+
+</main>
+
+<nav aria-label="Main" style="background:#FFFFFF;border-top:1px solid #D4DEE4;padding:0 8px 24px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))">
+<a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Today</a>
+<a href="Schedule.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="1"></rect><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"></path></svg>Schedule</a>
+<a href="Jobs.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="17" height="12" rx="1"></rect><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 13h17"></path></svg>Jobs</a>
+<a href="Pay.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="17" height="11" rx="1"></rect><circle cx="12" cy="12" r="2.4"></circle></svg>Pay</a>
+<a href="Profile.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid #293C46;font-size:12px;font-weight:800;color:#293C46;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"></path></svg>Profile</a>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return { business: [
+{ label: 'ABN', value: 'On file' },
+{ label: 'Bank account', value: 'Ending 4821' },
+{ label: 'GST', value: 'Not registered' }
+] };
+}
+}
+</script>
+</body>
+</html>

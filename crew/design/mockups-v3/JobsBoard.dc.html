@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jobs, board</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap">
+<style>
+body{margin:0}
+a{color:#C4481F}a:hover{color:#B5421C}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;position:relative;overflow:hidden;background:#F8F6F3;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;font-size:15px;line-height:1.35;display:flex;flex-direction:column">
+
+<header style="padding:54px 20px 14px;background:#293C46;display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<h1 style="margin:0;font-size:28px;line-height:34px;font-weight:800;letter-spacing:-0.02em;color:#FFFFFF">Jobs</h1>
+<span aria-hidden="true" style="width:40px;height:3px;background:#F15A29"></span>
+</div>
+<div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+<svg role="img" aria-label="SecureWorks Group" width="20" height="27" viewBox="0 0 123.14 164.55"><polygon fill="#FFFFFF" points="115.73 59.77 115.73 40.18 62.27 6.68 7.48 40.11 7.48 69.94 96.74 88.91 96.74 114.41 79.63 114.41 62.24 96.53 44.64 114.41 26.48 114.41 26.48 80.79 7.49 76.91 7.48 133.4 52.6 133.4 62.16 123.69 71.61 133.4 115.73 133.4 115.73 73.53 26.48 54.56 26.48 50.77 62.14 29.01 96.74 50.69 96.74 63.65 115.73 67.21 115.73 59.77"></polygon><rect fill="#F15A29" x="7.71" y="139.12" width="108.25" height="18.9"></rect></svg>
+<span style="font-size:13px;font-weight:700;color:#C5D0D6;font-variant-numeric:tabular-nums">Manager view</span>
+</div>
+</header>
+
+<div style="background:#FFFFFF;border-bottom:1px solid #D4DEE4;padding:12px 16px 12px;display:flex;flex-direction:column;gap:8px">
+<label style="display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4C6A7C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4 4"></path></svg>
+<input type="search" aria-label="Search jobs" placeholder="Job number, address, suburb or client" style="flex:1;min-width:0;border:0;outline:0;background:none;font:500 16px Plus Jakarta Sans,system-ui,sans-serif;color:#293C46">
+</label>
+<div role="group" aria-label="View" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-radius:3px;overflow:hidden">
+<a href="Jobs.dc.html" style="height:44px;box-sizing:border-box;border:1px solid #6F8796;background:#FFFFFF;color:#293C46;font-size:15px;font-weight:700;text-decoration:none;display:flex;align-items:center;justify-content:center">List</a>
+<a href="JobsBoard.dc.html" aria-current="page" style="height:44px;box-sizing:border-box;border:1px solid #293C46;background:#293C46;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none;display:flex;align-items:center;justify-content:center">Board</a>
+</div>
+</div>
+
+<div role="group" aria-label="Stage" style="padding:10px 16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">
+<button type="button" aria-pressed="true" style="height:60px;border:1px solid #293C46;border-radius:3px;background:#293C46;color:#FFFFFF;font-family:Plus Jakarta Sans,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px"><span style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">6</span><span style="font-size:12px;font-weight:800">To schedule</span></button>
+<button type="button" style="height:60px;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px"><span style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">14</span><span style="font-size:12px;font-weight:700;color:#4C6A7C">Scheduled</span></button>
+<button type="button" style="height:60px;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px"><span style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">9</span><span style="font-size:12px;font-weight:700;color:#4C6A7C">In progress</span></button>
+<button type="button" style="height:60px;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px"><span style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">23</span><span style="font-size:12px;font-weight:700;color:#4C6A7C">Complete</span></button>
+</div>
+
+<main style="flex:1;min-height:0;overflow:hidden;background:#FFFFFF;border-top:1px solid #D4DEE4;display:flex;flex-direction:column">
+<sc-for list="{{ jobs }}" as="j" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px 8px 16px;border-bottom:1px solid #D4DEE4">
+<a href="Job.dc.html" style="display:flex;flex-direction:column;gap:1px;min-width:0;text-decoration:none;color:#293C46">
+<span style="display:flex;align-items:center;gap:6px;min-width:0"><span style="display:inline-flex;align-items:center;height:20px;padding:0 5px;box-sizing:border-box;border:1.5px solid #293C46;background:#FFFFFF;color:#293C46;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap">{{ j.tag }}</span><span style="font-size:13px;font-weight:500;color:#4C6A7C;white-space:nowrap">{{ j.kind }}</span></span>
+<span style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ j.address }}</span>
+<span style="font-size:13px;color:#4C6A7C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ j.detail }}</span>
+</a>
+<a href="ScheduleEveryone.dc.html" style="height:44px;padding:0 14px;box-sizing:border-box;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF;color:#293C46;font-size:13px;font-weight:700;text-decoration:none;display:flex;align-items:center">Allocate</a>
+</div>
+</sc-for>
+</main>
+
+<nav aria-label="Main" style="background:#FFFFFF;border-top:1px solid #D4DEE4;padding:0 8px 24px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))">
+<a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Today</a>
+<a href="Schedule.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="1"></rect><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"></path></svg>Schedule</a>
+<a href="Jobs.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid #293C46;font-size:12px;font-weight:800;color:#293C46;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="17" height="12" rx="1"></rect><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 13h17"></path></svg>Jobs</a>
+<a href="Pay.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="17" height="11" rx="1"></rect><circle cx="12" cy="12" r="2.4"></circle></svg>Pay</a>
+<a href="Profile.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"></path></svg>Profile</a>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+var rows = [
+['SWF-26840 · Fencing', '7 Rosher Road, Bayswater', '32 m Colorbond · 2 days · 2 people'],
+['SWF-26852 · Fencing', '30 Hepburn Avenue, Hillarys', '18 m pool fence · 1 day · 2 people'],
+['SWD-26088 · Decking', '60 Jersey Street, Wembley', '24 sq m deck · 3 days · 2 people'],
+['SWR-26033 · Repair', '11 Brighton Road, Scarborough', 'Storm repair · 1 day · 1 person'],
+['SWP-26455 · Patio', '4 Tuart Close, Kinross', 'Gable patio · 2 days · 3 people'],
+['SWF-26861 · Fencing', '19 Ewen Street, Scarborough', '12 m timber lap · 1 day · 2 people']
+];
+return { jobs: rows.map(function (r) { return { tag: r[0].split(' · ')[0], kind: r[0].split(' · ')[1], address: r[1], detail: r[2] }; }) };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoices and earnings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap">
+<style>
+body{margin:0}
+a{color:#C4481F}a:hover{color:#B5421C}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;position:relative;overflow:hidden;background:#F8F6F3;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;font-size:15px;line-height:1.35;display:flex;flex-direction:column">
+
+<header style="padding:54px 8px 6px;background:#293C46;display:grid;grid-template-columns:104px minmax(0,1fr) 104px;align-items:center">
+<a href="Pay.dc.html" style="height:44px;display:flex;align-items:center;gap:2px;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>Pay</a>
+<h1 style="margin:0;text-align:center;font-size:18px;font-weight:800;color:#FFFFFF">Invoices</h1>
+<span></span>
+</header>
+
+<main style="flex:1;min-height:0;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:16px">
+
+<section aria-label="Invoices" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Invoices by pay week</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<sc-for list="{{ invoices }}" as="i" hint-placeholder-count="5">
+<a href="Invoice.dc.html" style="display:grid;grid-template-columns:minmax(0,1fr) auto 92px;gap:10px;align-items:center;min-height:50px;padding:0 14px;border-bottom:1px solid #D4DEE4;text-decoration:none;color:#293C46">
+<span style="display:flex;flex-direction:column"><span style="font-size:15px;font-weight:700">{{ i.week }}</span><span style="font-size:12px;color:#4C6A7C;font-variant-numeric:tabular-nums">{{ i.detail }}</span></span>
+<span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:0;font-size:12px;font-weight:700;white-space:nowrap;background: {{ i.bg }};color: {{ i.fg }}">{{ i.status }}</span>
+<span style="font-size:15px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums">{{ i.amount }}</span>
+</a>
+</sc-for>
+</div>
+</section>
+
+<section aria-label="Earnings" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Earnings by month</h2>
+<div style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<div aria-hidden="true" style="display:grid;grid-template-columns:minmax(0,1fr) 80px 80px 80px;white-space:nowrap;gap:6px;padding:8px 14px 6px;border-bottom:1px solid #D4DEE4;font-size:12px;font-weight:700;color:#4C6A7C">
+<span>Month</span><span style="text-align:right">Earned</span><span style="text-align:right">Paid</span><span style="text-align:right">Owing</span>
+</div>
+<sc-for list="{{ months }}" as="m" hint-placeholder-count="3">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 80px 80px 80px;white-space:nowrap;gap:6px;align-items:center;min-height:40px;padding:0 14px;border-bottom:1px solid #D4DEE4;font-size:13px;font-variant-numeric:tabular-nums">
+<span style="font-weight:700">{{ m.month }}</span><span style="text-align:right">{{ m.earned }}</span><span style="text-align:right">{{ m.paid }}</span><span style="text-align:right;font-weight:700">{{ m.owing }}</span>
+</div>
+</sc-for>
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 14px">
+<span style="font-size:15px;font-weight:800">Financial year to date</span>
+<span style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">$31,460.75</span>
+</div>
+</div>
+</section>
+
+</main>
+
+<nav aria-label="Main" style="background:#FFFFFF;border-top:1px solid #D4DEE4;padding:0 8px 24px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))">
+<a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Today</a>
+<a href="Schedule.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="1"></rect><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"></path></svg>Schedule</a>
+<a href="Jobs.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="17" height="12" rx="1"></rect><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 13h17"></path></svg>Jobs</a>
+<a href="Pay.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid #293C46;font-size:12px;font-weight:800;color:#293C46;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="17" height="11" rx="1"></rect><circle cx="12" cy="12" r="2.4"></circle></svg>Pay</a>
+<a href="Profile.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"></path></svg>Profile</a>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+var sent = ['Sent', '#EDF1F4', '#293C46'];
+var approved = ['Approved', '#EDF1F4', '#293C46'];
+var paid = ['Paid', '#E3F2EA', '#1F6B45'];
+var rows = [
+['9 to 15 Nov', 'INV-0425 · 13 Nov', sent, '$2,355.85'],
+['2 to 8 Nov', 'INV-0417 · 10 Nov', approved, '$1,654.40'],
+['26 Oct to 1 Nov', 'INV-0409 · 6 Nov', paid, '$2,016.30'],
+['19 to 25 Oct', 'INV-0401 · 30 Oct', paid, '$1,774.70'],
+['12 to 18 Oct', 'INV-0394 · 23 Oct', paid, '$1,325.20']
+];
+return {
+invoices: rows.map(function (r) { return { week: r[0], detail: r[1], status: r[2][0], bg: r[2][1], fg: r[2][2], amount: r[3] }; }),
+months: [
+{ month: 'Nov 2026', earned: '$4,010.25', paid: '$0.00', owing: '$4,010.25' },
+{ month: 'Oct 2026', earned: '$7,841.60', paid: '$7,841.60', owing: '$0.00' },
+{ month: 'Sep 2026', earned: '$8,203.90', paid: '$8,203.90', owing: '$0.00' }
+]
+};
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A booking</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap">
+<style>
+body{margin:0}
+a{color:#C4481F}a:hover{color:#B5421C}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;position:relative;overflow:hidden;background:#F8F6F3;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;font-size:15px;line-height:1.35;display:flex;flex-direction:column">
+
+<header style="padding:54px 8px 6px;background:#293C46;display:grid;grid-template-columns:104px minmax(0,1fr) 104px;align-items:center">
+<a href="Schedule.dc.html" style="height:44px;display:flex;align-items:center;gap:2px;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>Schedule</a>
+<h1 style="margin:0;text-align:center;font-size:18px;font-weight:800;color:#FFFFFF">Booking</h1>
+<span></span>
+</header>
+
+<main style="flex:1;min-height:0;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+
+<section aria-label="Booking details" style="background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<a href="Job.dc.html" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px;text-decoration:none;color:#293C46;border-bottom:1px solid #D4DEE4">
+<span style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+<span style="display:flex;align-items:center;gap:6px"><span style="display:inline-flex;align-items:center;height:20px;padding:0 5px;box-sizing:border-box;border:1.5px solid #293C46;background:#FFFFFF;color:#293C46;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap">SWMS-261301</span><span style="font-size:13px;font-weight:500;color:#4C6A7C">Make safe</span></span>
+<span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:0;font-size:12px;font-weight:700;white-space:nowrap;background:#FBEFD6;color:#7A4F00">To confirm</span>
+</span>
+<span style="font-size:18px;font-weight:800">21 Flinders Avenue, Hillarys</span>
+</a>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px;padding:0 14px;border-bottom:1px solid #D4DEE4"><span style="font-size:13px;color:#4C6A7C">Date</span><span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">Tue 17 Nov 2026</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px;padding:0 14px;border-bottom:1px solid #D4DEE4"><span style="font-size:13px;color:#4C6A7C">Time</span><span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">9:00 am to 12:00 pm</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px;padding:0 14px"><span style="font-size:13px;color:#4C6A7C">Crew</span><span style="font-size:15px;font-weight:700">You, Dan R.</span></div>
+</section>
+
+<section aria-label="Status" style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0;padding:0 4px;font-size:12px;font-weight:700;color:#4C6A7C">Status</h2>
+<ol style="margin:0;padding:0;list-style:none;background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+<li style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;align-items:center;min-height:44px;padding:4px 14px;border-bottom:1px solid #D4DEE4">
+<span aria-hidden="true" style="width:22px;height:22px;box-sizing:border-box;border-radius:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;background: {{ s.dotBg }};color: {{ s.dotFg }};border: {{ s.dotBorder }}">{{ s.n }}</span>
+<span style="display:flex;flex-direction:column">
+<span style="font-size:15px;font-weight: {{ s.weight }}">{{ s.label }}</span>
+<span style="font-size:13px;color:#4C6A7C">{{ s.detail }}</span>
+</span>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<div style="display:flex;flex-direction:column;gap:8px;margin-top:auto">
+<a href="Schedule.dc.html" style="height:54px;border-radius:3px;background:#C4481F;color:#FFFFFF;font-weight:800;font-size:18px;text-decoration:none;display:flex;align-items:center;justify-content:center">Confirm booking</a>
+<button type="button" style="height:48px;border:1px solid #6F8796;border-radius:3px;background:#FFFFFF;color:#293C46;font:700 15px Plus Jakarta Sans,system-ui,sans-serif">Cannot make it</button>
+</div>
+
+</main>
+
+<nav aria-label="Main" style="background:#FFFFFF;border-top:1px solid #D4DEE4;padding:0 8px 24px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))">
+<a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Today</a>
+<a href="Schedule.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid #293C46;font-size:12px;font-weight:800;color:#293C46;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="1"></rect><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"></path></svg>Schedule</a>
+<a href="Jobs.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="17" height="12" rx="1"></rect><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 13h17"></path></svg>Jobs</a>
+<a href="Pay.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="17" height="11" rx="1"></rect><circle cx="12" cy="12" r="2.4"></circle></svg>Pay</a>
+<a href="Profile.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"></path></svg>Profile</a>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+var rows = [
+['1', 'Allocated', 'The office booked you · Thu 12 Nov', 'done'],
+['2', 'Confirmed', 'Waiting for you to confirm', 'now'],
+['3', 'On site', 'Set when you clock on', 'next'],
+['4', 'Done', 'Set when you clock off', 'next'],
+['5', 'On timesheet', 'Hours go to pay week 16 to 22 Nov', 'next']
+];
+return { steps: rows.map(function (r) {
+var st = r[3];
+return {
+n: r[0], label: r[1], detail: r[2],
+weight: st === 'next' ? '500' : '800',
+dotBg: st === 'done' ? '#293C46' : st === 'now' ? '#C4481F' : '#FFFFFF',
+dotFg: st === 'next' ? '#4C6A7C' : '#FFFFFF',
+dotBorder: st === 'next' ? '1.5px solid #6F8796' : '1.5px solid transparent'
+};
+}) };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap">
+<style>
+body{margin:0}
+a{color:#C4481F}a:hover{color:#B5421C}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;position:relative;overflow:hidden;background:#F8F6F3;color:#293C46;font-family:Plus Jakarta Sans,system-ui,sans-serif;font-size:15px;line-height:1.35;display:flex;flex-direction:column">
+
+<header style="padding:54px 8px 6px;background:#293C46;display:grid;grid-template-columns:116px minmax(0,1fr) 116px;align-items:center">
+<a href="Timesheet.dc.html" style="height:44px;display:flex;align-items:center;gap:2px;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>Timesheet</a>
+<h1 style="margin:0;text-align:center;font-size:18px;font-weight:800;color:#FFFFFF">Invoice</h1>
+<span style="display:flex;justify-content:flex-end;padding-right:8px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:0;font-size:12px;font-weight:700;background:#EDF1F4;color:#293C46">Draft</span></span>
+</header>
+
+<main style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+
+<div style="padding:8px 16px 6px;font-size:13px;font-weight:700;color:#4C6A7C;font-variant-numeric:tabular-nums">Pay week 9 to 15 Nov 2026 · Sam Tane</div>
+
+<div style="background:#FFFFFF;border-top:1px solid #D4DEE4;display:flex;flex-direction:column">
+<sc-for list="{{ lines }}" as="l" hint-placeholder-count="11">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;box-sizing:border-box;padding:0 16px;border-bottom:1px solid #D4DEE4;min-height: {{ l.minH }};background: {{ l.bg }}">
+<span style="display:flex;flex-direction:column;min-width:0">
+<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size: {{ l.titleSize }};font-weight: {{ l.titleWeight }};letter-spacing: {{ l.track }};text-transform: {{ l.transform }};color: {{ l.titleFg }}">{{ l.title }}</span>
+<span style="font-size:12px;color:#4C6A7C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums">{{ l.detail }}</span>
+</span>
+<span style="white-space:nowrap;font-variant-numeric:tabular-nums;font-size: {{ l.amountSize }};font-weight: {{ l.amountWeight }}">{{ l.amount }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="margin:10px 16px 0;background:#FFFFFF;border:1px solid #D4DEE4;border-radius:0;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between;min-height:28px;padding:2px 14px 0"><span style="font-size:13px;color:#4C6A7C">Gross earned</span><span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">$2,447.50</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;min-height:28px;padding:0 14px"><span style="font-size:13px;color:#4C6A7C">Super withheld, 6% of $2,297.50</span><span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">-$137.85</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;min-height:28px;padding:0 14px"><span style="font-size:13px;color:#4C6A7C">Expenses repaid</span><span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">$46.20</span></div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:8px 14px 10px;border-top:1px solid #D4DEE4"><span style="font-size:15px;font-weight:800">You are paid</span><span style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">$2,355.85</span></div>
+</div>
+
+<div style="margin-top:auto;padding:10px 16px 12px">
+<a href="Invoices.dc.html" style="height:54px;border-radius:3px;background:#C4481F;color:#FFFFFF;font-weight:800;font-size:18px;text-decoration:none;display:flex;align-items:center;justify-content:center">Send invoice</a>
+</div>
+
+</main>
+
+<nav aria-label="Main" style="background:#FFFFFF;border-top:1px solid #D4DEE4;padding:0 8px 24px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))">
+<a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Today</a>
+<a href="Schedule.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="1"></rect><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"></path></svg>Schedule</a>
+<a href="Jobs.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="17" height="12" rx="1"></rect><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 13h17"></path></svg>Jobs</a>
+<a href="Pay.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid #293C46;font-size:12px;font-weight:800;color:#293C46;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="17" height="11" rx="1"></rect><circle cx="12" cy="12" r="2.4"></circle></svg>Pay</a>
+<a href="Profile.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 6px;border-top:3px solid transparent;font-size:12px;font-weight:700;color:#4C6A7C;text-decoration:none">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"></path></svg>Profile</a>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+function head(title, amount) {
+return { title: title, detail: '', amount: amount, minH: '26px', bg: '#EDF1F4', titleSize: '12px', titleWeight: '700', track: '0', transform: 'none', titleFg: '#4C6A7C', amountSize: '13px', amountWeight: '800' };
+}
+function line(title, detail, amount) {
+return { title: title, detail: detail, amount: amount, minH: '44px', bg: '#FFFFFF', titleSize: '15px', titleWeight: '700', track: '0', transform: 'none', titleFg: '#293C46', amountSize: '15px', amountWeight: '700' };
+}
+return { lines: [
+head('Hourly · 10.5 h', '$577.50'),
+line('Morley', 'SWMS-261290 · 2.5 h at $55.00', '$137.50'),
+line('Joondalup', 'SWF-26767 · 8.0 h at $55.00', '$440.00'),
+head('Work order', '$1,200.00'),
+line('South Perth', 'SWF-26168 · agreed labour · 15.0 h recorded', '$1,200.00'),
+head('Group work order', '$520.00'),
+line('Duncraig', 'SWP-26412 · your share · 8.0 of 24.0 crew hours', '$520.00'),
+head('Commission', '$150.00'),
+line('Scarborough', 'SWF-26790 · job you brought in', '$150.00'),
+head('Expenses', '$46.20'),
+line('Fixings, Bunnings', 'SWF-26767 · receipt attached', '$46.20')
+] };
+}
+}
+</script>
+</body>
+</html>

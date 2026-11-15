@@ -63,15 +63,16 @@ test('settling names the day it becomes final', async ({ page }) => {
 test('waiting lists each reason in plain words and never reads as final', async ({ page }) => {
   const note = await render(page, response(close({
     cost_state: 'waiting', cost_final: false, final_on: null, closed_by: null,
-    waiting_on: ['materials_not_linked', 'work_done_no_labour_overdue', 'some_new_code']
+    waiting_on: ['materials_not_linked', 'work_done_no_labour_overdue', 'no_finish_day', 'some_new_code']
   })));
   await expect(note).toHaveAttribute('data-jp-cost-close', 'waiting');
   await expect(note).toContainText('Not final');
   const items = note.locator('[data-jp-cc-waiting] li');
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(4);
   await expect(items.nth(0)).toHaveText('Materials owed but none linked');
   await expect(items.nth(1)).toHaveText('Work done and no labour linked after 14 days');
-  await expect(items.nth(2)).toHaveText('some new code');
+  await expect(items.nth(2)).toHaveText('No finish day is on record for this job');
+  await expect(items.nth(3)).toHaveText('some new code');
   await expect(note.locator('.jp-tag.ok')).toHaveCount(0);
 });
 

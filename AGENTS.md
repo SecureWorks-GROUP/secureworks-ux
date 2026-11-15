@@ -828,7 +828,11 @@ writes nothing: by month, every supplier bill dollar in our copy of Xero as on a
 labour, overhead or not placed yet, with the reasons and whether the month adds up. Every figure
 is the server's (secureworks-backend `xero_tieout_monthly`); the page sorts no bill and adds no
 bucket. A part the server has not read (card spend, credit notes) reads "Not read yet", never
-$0.00, and a failed read or an answer without its months never draws an empty table. Rules live
+$0.00, and a failed read or an answer without its months never draws an empty table. The same
+answer may carry a second read, `spend_revenue` (`xero_spend_revenue_monthly`): card and bank
+spend by Xero account and customer invoices against Job Profit, drawn beside the bills and never
+added to them. A month whose card lines are not read says "Not read yet"; without the second
+read, or when it failed (said in words), the page is the bills page. Rules live
 in the pure `XeroTieoutCore` between `// <xero-tieout-core>` sentinels. Same viewers as Job
 profit. Guards: `npm run test:xero-tieout` (in `test:e2e`, fails on a long dash or emoji) and
 `tests/e2e/ops-xero-tieout.spec.js`.

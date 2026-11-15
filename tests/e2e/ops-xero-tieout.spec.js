@@ -11,9 +11,13 @@
 //  - A month that does not add up says No, and the headline warns.
 //  - A failed read says so in words and never draws an empty table; Retry reads again.
 //  - On a phone the month table stacks and nothing scrolls sideways.
+//  - When the answer carries the second read (spend_revenue), each month also shows card and bank spend by
+//    Xero account and customer invoices against Job Profit, beside the bills and never added to them. A month
+//    whose lines are not read says "Not read yet"; a month before the copy says "Not in our copy". Without the
+//    second read, or when it failed, the page is the bills page and a failed read says so in words.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
-const { answer } = require('../fixtures/xero-tieout.js');
+const { answer, answerWithSpendRevenue } = require('../fixtures/xero-tieout.js');
 
 async function open(page, { data = answer(), mode = 'ok', error = '' } = {}) {
   await page.goto('/ops.html');
@@ -164,6 +168,153 @@ test('choosing a range reads again with it', async ({ page }) => {
   await expect(page.locator('#xtMonths')).toHaveValue('24');
 });
 
+test('with the second read, a month shows card and bank spend by account and customer invoices', async ({ page }) => {
+  await open(page, { data: answerWithSpendRevenue() });
+  const head2 = page.locator('[data-xt-headline2]');
+  await expect(head2).toContainText('Customer invoices on a job');
+  await expect(head2).toContainText('93.15%');
+  await expect(head2).toContainText('$12,400.00 invoiced in the last 6 months, ex GST. $850.00 not on a job.');
+  await expect(head2).toContainText('$575.26');
+  await expect(head2).toContainText('$130.00 on direct cost accounts, on no job yet. 1 of the last 6 months read.');
+  // The bills headline and rows are untouched by it.
+  await expect(page.locator('[data-xt-headline]')).toContainText('$9,996.74');
+  const cells = await page.locator('[data-xt-month="2034-03"] td').allInnerTexts();
+  expect(cells.slice(0, 9).map((c) => c.trim())).toEqual([
+    'Mar 2034', '17', '$5,496.74', '$2,970.35', '$500.00', '$710.39', '$1,316.00', '23.95%', 'Yes',
+  ]);
+  await page.locator('[data-xt-month="2034-03"]').click();
+  const detail = page.locator('[data-xt-detail="2034-03"]');
+  const spend = detail.locator('[data-xt-spend]');
+  const rows = async (list) => (await list.locator('li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+  expect((await rows(spend)).map((t) => t.split(' $')[0].split(' Yes')[0])).toEqual([
+    'Spent, ex GST', 'Direct cost accounts', 'Overhead accounts', 'Not a cost', 'Coded to an income account',
+    'Account not in our copy of the chart', 'Lines not read yet', 'Adds up to the payments',
+  ]);
+  await expect(spend).toContainText('$575.26');
+  await expect(spend).toContainText('7 payments reconciled in Xero');
+  await expect(spend).toContainText('$130.00');
+  await expect(spend).toContainText('On no job yet: Job Profit does not read card spend.');
+  await expect(spend).toContainText('$70.00');
+  await expect(spend).toContainText('$200.00');
+  await expect(spend).toContainText('$30.00');
+  await expect(spend).toContainText('1 line we cannot sort');
+  await expect(spend).toContainText('$95.25');
+  await expect(spend).toContainText('2 of 7 payments');
+  await expect(detail.locator('[data-xt-accounts]')).toContainText('Largest accounts: 800 Vehicle loan $200.00, 305 Direct Material Cost $100.00');
+  await expect(detail.locator('[data-xt-accounts]')).toContainText('999 not in the chart $50.00');
+  await expect(detail.locator('[data-xt-accounts]')).toContainText('and 1 more');
+  const revenue = detail.locator('[data-xt-revenue]');
+  expect((await rows(revenue)).map((t) => t.split(' $')[0].split(' Yes')[0])).toEqual([
+    'Invoiced, ex GST', 'On a job', 'On the holding job', 'Not on a job', 'Counted above the invoice',
+    'Draft or submitted invoices', 'Adds up to the invoices',
+  ]);
+  await expect(revenue).toContainText('$2,400.00');
+  await expect(revenue).toContainText('5 invoices approved or paid in Xero');
+  await expect(revenue).toContainText('$1,600.00');
+  await expect(revenue).toContainText('$300.00');
+  await expect(revenue).toContainText('$550.00');
+  await expect(revenue).toContainText('2 invoices with dollars Job Profit does not count on any job');
+  await expect(revenue).toContainText('$50.00');
+  await expect(revenue).toContainText('$1,110.00');
+  // Beside the bills, the card spend line now carries the figure and points at the panel.
+  const beside = detail.locator('[data-xt-beside]');
+  await expect(beside).toContainText('Card and bank spend');
+  await expect(beside).toContainText('$575.26');
+  await expect(beside).toContainText('not part of the bills total');
+  await expect(beside).not.toContainText('12 reconciled payments');
+  // The server's "not read yet" line for card spend goes; the basis lines come.
+  const foot = page.locator('[data-xt-foot]');
+  await expect(foot).not.toContainText('Not read yet: Spend money');
+  await expect(foot).toContainText('None of it is on a job yet');
+  await expect(foot).toContainText('Customer invoices are sales invoices approved or paid in Xero');
+  expect((await tieoutReads(page)).length).toBe(1);
+  expect(await page.evaluate(() => window.__xtPosts.length)).toBe(0);
+});
+
+test('a month whose card lines are not read, or is before the copy, is unknown and never $0.00', async ({ page }) => {
+  await open(page, { data: answerWithSpendRevenue() });
+  await page.locator('[data-xt-month="2034-02"]').click();
+  const feb = page.locator('[data-xt-detail="2034-02"]');
+  await expect(feb.locator('[data-xt-spend]')).toContainText('Not read yet');
+  await expect(feb.locator('[data-xt-spend]')).toContainText('3 payments, $410.50 in the bank copy. The lines are not read yet, so nothing is sorted and this is unknown, not $0.');
+  await expect(feb.locator('[data-xt-spend] li')).toHaveCount(1);
+  await expect(feb.locator('[data-xt-accounts]')).toHaveCount(0);
+  // The bills answer's own line stays for that month.
+  await expect(feb.locator('[data-xt-beside]')).toContainText('Card and spend money');
+  await expect(feb.locator('[data-xt-beside]')).toContainText('Not read yet');
+  // Every invoice dollar on a job says so.
+  await expect(feb.locator('[data-xt-revenue]')).toContainText('Every invoice dollar is on a job.');
+  await expect(feb.locator('[data-xt-revenue]')).toContainText('$10,000.00');
+  await page.locator('[data-xt-month="2034-01"]').click();
+  const jan = page.locator('[data-xt-detail="2034-01"]');
+  await expect(jan.locator('[data-xt-spend]')).toContainText('Not in our copy');
+  await expect(jan.locator('[data-xt-spend]')).toContainText('unknown, not $0.');
+  await expect(jan.locator('[data-xt-spend]')).not.toContainText('$0.00');
+  // A month whose invoices do not add up says No.
+  await expect(jan.locator('[data-xt-revenue]')).toContainText('No');
+  await expect(jan.locator('[data-xt-revenue]')).toContainText('Do not rely on this month.');
+});
+
+test('money paid ahead, payments whose lines do not match and unread lines each get their own line', async ({ page }) => {
+  const data = answerWithSpendRevenue();
+  const mar = data.spend_revenue.answer.months.find((m) => m.month === '2034-03').spend;
+  // A plain month first: none of the three lines is drawn.
+  await open(page, { data });
+  await page.locator('[data-xt-month="2034-03"]').click();
+  const spend = page.locator('[data-xt-detail="2034-03"] [data-xt-spend]');
+  await expect(spend).not.toContainText('Paid ahead to suppliers');
+  await expect(spend).not.toContainText('do not match their total');
+  await expect(spend).not.toContainText('no amount we can read');
+  Object.assign(mar, { paid_ahead_ex: 345, paid_ahead_lines: 2, lines_differ_ex: 25, lines_differ_transactions: 3, unread_lines: 1, parts_add_up: false });
+  await open(page, { data });
+  await page.locator('[data-xt-month="2034-03"]').click();
+  await expect(spend).toContainText('Paid ahead to suppliers');
+  await expect(spend).toContainText('$345.00');
+  await expect(spend).toContainText('The cost usually arrives again on a supplier bill, so it is not counted as a cost here.');
+  await expect(spend).toContainText('Lines with no amount we can read');
+  await expect(spend).toContainText('Their dollars are in no part above. Unknown, not $0.');
+  await expect(spend).toContainText('Payments whose lines do not match their total');
+  await expect(spend).toContainText('Each is out by more than 5 cents, $25.00 in all once they are netted.');
+  await expect(spend).toContainText('Do not rely on this month.');
+  expect(await page.evaluate(() => window.__xtPosts.length)).toBe(0);
+});
+
+test('with no month of card spend read, the six-month card says Not read yet', async ({ page }) => {
+  const data = answerWithSpendRevenue({ last_6_months: { from: '2033-10', to: '2034-03', revenue_total_ex: 12400, revenue_not_on_job_ex: 0, revenue_on_job_share: 1, spend_months_read: 0, spend_total_ex: null, spend_direct_cost_ex: null } });
+  data.spend_revenue.answer.months.forEach((m) => { if (m.spend.status === 'partial') m.spend = Object.assign({}, data.spend_revenue.answer.months[1].spend); });
+  await open(page, { data });
+  const head2 = page.locator('[data-xt-headline2]');
+  await expect(head2).toContainText('100.00%');
+  await expect(head2).toContainText('Not read yet');
+  await expect(head2).toContainText('unknown, not $0.');
+  await expect(head2).not.toContainText('$0.00 on direct cost');
+  // Nothing is sorted, so the server's own "not read yet" line stays.
+  await expect(page.locator('[data-xt-foot]')).toContainText('Not read yet: Spend money and card spend are not in the bill intake yet.');
+});
+
+test('a second read that failed leaves the bills page whole and says so', async ({ page }) => {
+  const data = Object.assign(answer(), { spend_revenue: { ok: false, reason: 'function xero_spend_revenue_monthly does not exist' } });
+  await open(page, { data });
+  await expect(page.locator('[data-xt-months] tr.xt-row')).toHaveCount(3);
+  await expect(page.locator('[data-xt-headline]')).toContainText('$9,996.74');
+  await expect(page.locator('[data-xt-headline2]')).toHaveCount(0);
+  await page.locator('[data-xt-month="2034-03"]').click();
+  await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-spend]')).toHaveCount(0);
+  await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-revenue]')).toHaveCount(0);
+  await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-beside]')).toContainText('12 reconciled payments, $840.50, not sorted and not counted');
+  await expect(page.locator('[data-xt-extra-failed]')).toContainText('Card spend and customer invoices could not be read just now (function xero_spend_revenue_monthly does not exist), so they are not shown. The bills above are not affected.');
+  await expect(page.locator('[data-xt-error]')).toHaveCount(0);
+});
+
+test('an answer without the second read draws the bills page as before', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('[data-xt-headline2]')).toHaveCount(0);
+  await expect(page.locator('[data-xt-extra-failed]')).toHaveCount(0);
+  await page.locator('[data-xt-month="2034-03"]').click();
+  await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-spend]')).toHaveCount(0);
+  await expect(page.locator('#jpTieout .xt-lede')).toHaveText('Every supplier bill dollar in Xero, by month: on a job, trade-app labour, overhead, or not placed yet. Tap a month for the reasons.');
+});
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test('the months stack and nothing scrolls sideways', async ({ page }) => {
@@ -176,5 +327,18 @@ test.describe('on a phone', () => {
     });
     expect(wide.head).toBe('none');
     expect(wide.scroll).toBeLessThanOrEqual(wide.client + 1);
+  });
+  test('with card spend and customer invoices open, nothing scrolls sideways', async ({ page }) => {
+    await open(page, { data: answerWithSpendRevenue() });
+    await page.locator('[data-xt-month="2034-03"]').click();
+    await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-revenue]')).toBeVisible();
+    await expect(page.locator('[data-xt-headline2]')).toBeVisible();
+    const wide = await page.evaluate(() => {
+      const host = document.getElementById('jpTieout');
+      const doc = document.documentElement;
+      return { scroll: host.scrollWidth, client: host.clientWidth, page: doc.scrollWidth, view: doc.clientWidth };
+    });
+    expect(wide.scroll).toBeLessThanOrEqual(wide.client + 1);
+    expect(wide.page).toBeLessThanOrEqual(wide.view + 1);
   });
 });

@@ -3,11 +3,11 @@
 // App files: network first (updates land straight away), saved copy when
 // there is no signal. Fonts and vendored libraries: saved copy first.
 // Server calls (Supabase) are never touched.
-const CACHE = 'crew-shell-v1';
+const CACHE = 'crew-shell-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
-  './css/app.css', './css/more.css', './css/pay.css', './css/reports.css', './css/manager.css',
-  './fonts/archivo-var.woff2', './vendor/supabase.js', './vendor/preact.js', './vendor/preact-hooks.js', './vendor/htm.js',
+  './css/app.css', './css/more.css', './css/schedule.css', './css/jobs.css', './css/pay.css', './css/reports.css', './css/manager.css', './css/profile.css',
+  './fonts/plus-jakarta-sans-var.woff2', './vendor/supabase.js', './vendor/preact.js', './vendor/preact-hooks.js', './vendor/htm.js',
   './js/main.js', './icons/icon.svg'
 ];
 

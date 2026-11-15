@@ -48,6 +48,17 @@ const JOB_STATUS = {
   invoiced: 'Finished', final_payment: 'Finished', get_review: 'Finished', paid: 'Finished', closed: 'Closed', archived: 'Archived', cancelled: 'Cancelled', lost: 'Lost'
 };
 export function jobStatusLabel(status) { return JOB_STATUS[String(status || '').toLowerCase()] || ''; }
+/** A job's stage in one word, for StatusBadge: to_schedule | scheduled | in_progress | on_hold | complete | closed | draft. */
+export function jobStageKey(status) {
+  const s = String(status || '').toLowerCase();
+  if (['accepted', 'processing', 'order_materials'].includes(s)) return 'to_schedule';
+  if (s === 'scheduled') return 'scheduled';
+  if (['in_progress', 'rectification'].includes(s)) return 'in_progress';
+  if (s === 'on_hold') return 'on_hold';
+  if (['complete', 'completed', 'invoiced', 'final_payment', 'get_review', 'paid'].includes(s)) return 'complete';
+  if (['closed', 'archived', 'cancelled', 'lost'].includes(s)) return 'closed';
+  return 'draft';
+}
 export function jobIsClosed(status) { return ['complete', 'completed', 'invoiced', 'final_payment', 'get_review', 'paid', 'closed', 'archived', 'cancelled', 'lost'].includes(String(status || '').toLowerCase()); }
 
 const DONE = ['complete', 'completed', 'submitted', 'verified', 'disputed'];

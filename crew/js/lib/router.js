@@ -28,7 +28,7 @@ window.addEventListener('popstate', (e) => {
 });
 window.addEventListener('hashchange', () => { if (read('').path !== current.path) apply('push'); });
 
-export const ROOTS = ['today', 'jobs', 'pay', 'me'];
+export const ROOTS = ['today', 'schedule', 'jobs', 'pay', 'profile'];
 
 /** Go to a path. `replace` swaps the current entry; tabs animate differently. */
 export function go(path, { replace = false, tab = false } = {}) {

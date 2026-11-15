@@ -20,6 +20,14 @@ export function needsOk(b) {
 }
 function declined() { return local.get('declined', []); }
 export function wasDeclined(id) { return declined().includes(id); }
+/** One word for where a booking is at, for StatusBadge: to_confirm | confirmed | on_site | done | cannot. */
+export function bookingStatus(b) {
+  const st = bookingState(b);
+  if (st === 'live') return 'on_site';
+  if (st === 'done') return 'done';
+  if (wasDeclined(b.id)) return 'cannot';
+  return needsOk(b) ? 'to_confirm' : 'confirmed';
+}
 
 export async function lockIn(b) {
   try {

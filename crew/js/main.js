@@ -14,13 +14,16 @@ import { Today } from './screens/today.js';
 import { Jobs } from './screens/jobs.js';
 import { Job } from './screens/job.js';
 import { Pay } from './screens/pay.js';
-import { Me } from './screens/me.js';
+import { Profile } from './screens/profile.js';
 
 // Screens loaded when first opened.
 const lazy = {
-  week: () => import('./screens/week.js').then((m) => m.Week),
+  schedule: () => import('./screens/schedule.js').then((m) => m.Schedule),
+  booking: () => import('./screens/booking.js').then((m) => m.Booking),
+  timesheet: () => import('./screens/timesheet.js').then((m) => m.Timesheet),
+  review: () => import('./screens/review.js').then((m) => m.Review),
+  invoices: () => import('./screens/invoices.js').then((m) => m.Invoices),
   invoice: () => import('./screens/invoice.js').then((m) => m.Invoice),
-  money: () => import('./screens/money.js').then((m) => m.Money),
   receipt: () => import('./screens/receipt.js').then((m) => m.Receipt),
   receipts: () => import('./screens/receipt.js').then((m) => m.Receipts),
   group: () => import('./screens/group.js').then((m) => m.Group),
@@ -31,7 +34,6 @@ const lazy = {
   service: () => import('./screens/service.js').then((m) => m.ServiceReport),
   details: () => import('./screens/details.js').then((m) => m.Details),
   availability: () => import('./screens/availability.js').then((m) => m.Availability),
-  team: () => import('./screens/team.js').then((m) => m.Team),
   board: () => import('./screens/board.js').then((m) => m.Board),
   charges: () => import('./screens/charges.js').then((m) => m.Charges)
 };
@@ -46,13 +48,23 @@ function Lazy({ name, ...props }) {
     return () => { on = false; };
   }, [name]);
   if (failed) return html`<${Page} title=""><${Empty} title="Could not open that" action=${html`<${Button} kind="line" small onClick=${() => location.reload()}>Reload<//>`}>Check your signal and try again.<//><//>`;
-  if (!C) return html`<main class="page page-pad"><div style="display:grid;gap:14px;padding-top:60px"><${Skel} w="55%" h=${34} /><${Skel} h=${120} r=${22} /><${Skel} w="80%" /></div></main>`;
+  if (!C) return html`<${Page} title=""><div class="block" style="display:grid;gap:12px"><${Skel} w="55%" h=${24} /><${Skel} h=${120} /><${Skel} w="80%" /></div><//>`;
   return html`<${C} ...${props} />`;
 }
 
 function pick(route) {
   const [a, b, c, d] = route.parts;
-  if (a === 'jobs') return html`<${Jobs} key="jobs" />`;
+  if (a === 'schedule' || a === 'team') {
+    if (b === 'booking' && c) return html`<${Lazy} key=${route.key} name="booking" bookingId=${c} />`;
+    if (b === 'availability') return html`<${Lazy} key=${route.key} name="availability" />`;
+    // /schedule, /schedule/month, /schedule/everyone (managers); ?day=YYYY-MM-DD picks the day shown
+    return html`<${Lazy} key="schedule" name="schedule" view=${a === 'team' ? 'everyone' : b || 'week'} day=${route.query.day} />`;
+  }
+  if (a === 'jobs') {
+    if (b === 'board') return html`<${Lazy} key=${route.key} name="board" vertical=${c} />`;
+    return html`<${Jobs} key="jobs" />`;
+  }
+  if (a === 'board') return html`<${Lazy} key=${route.key} name="board" vertical=${b} />`;
   if (a === 'job' && b) {
     if (c === 'finish') return html`<${Lazy} key=${route.key} name="finish" jobId=${b} />`;
     if (c === 'report') return html`<${Lazy} key=${route.key} name="report" jobId=${b} />`;
@@ -61,9 +73,11 @@ function pick(route) {
     return html`<${Job} key=${'job:' + b} jobId=${b} tab=${route.query.tab} />`;
   }
   if (a === 'pay') {
-    if (b === 'week') return html`<${Lazy} key=${route.key} name="week" monday=${c} />`;
+    // /pay/week/<monday> is the timesheet; /pay/week/<monday>/invoice is the invoice made from it
+    if (b === 'week' && d === 'invoice') return html`<${Lazy} key=${route.key} name="review" monday=${c} />`;
+    if (b === 'week') return html`<${Lazy} key=${route.key} name="timesheet" monday=${c} />`;
     if (b === 'invoice' && c) return html`<${Lazy} key=${route.key} name="invoice" invoiceId=${c} />`;
-    if (b === 'money') return html`<${Lazy} key=${route.key} name="money" />`;
+    if (b === 'invoices' || b === 'money') return html`<${Lazy} key=${route.key} name="invoices" />`;
     if (b === 'receipt') return html`<${Lazy} key=${route.key} name="receipt" jobId=${route.query.job} poId=${route.query.po} />`;
     if (b === 'receipts') return html`<${Lazy} key=${route.key} name="receipts" />`;
     if (b === 'group' && c) return html`<${Lazy} key=${route.key} name="group" jobId=${c} />`;
@@ -71,25 +85,25 @@ function pick(route) {
     if (b === 'charges') return html`<${Lazy} key=${route.key} name="charges" />`;
     return html`<${Pay} key="pay" />`;
   }
-  if (a === 'me') {
+  if (a === 'profile' || a === 'me') {
     if (b === 'details') return html`<${Lazy} key=${route.key} name="details" />`;
     if (b === 'availability') return html`<${Lazy} key=${route.key} name="availability" />`;
-    return html`<${Me} key="me" />`;
+    return html`<${Profile} key="profile" />`;
   }
-  if (a === 'team') return html`<${Lazy} key=${route.key} name="team" />`;
-  if (a === 'board') return html`<${Lazy} key=${route.key} name="board" vertical=${b} />`;
-  return html`<${Today} key="today" day=${b} />`;
+  return html`<${Today} key="today" />`;
 }
-const FOCUS = ['finish', 'report', 'roof', 'service', 'week', 'receipt', 'group'];
+// Screens that take the whole phone: one job to finish, no tabs underneath.
+const FOCUS = ['finish', 'report', 'roof', 'service', 'receipt', 'group'];
+const TAB_OF = { today: 'today', schedule: 'schedule', team: 'schedule', jobs: 'jobs', job: 'jobs', board: 'jobs', pay: 'pay', profile: 'profile', me: 'profile' };
 
 function Nav({ route }) {
   const outbox = useStore((s) => s.outbox);
-  const tabs = [['today', 'Today', 'today'], ['jobs', 'Jobs', 'jobs'], ['pay', 'Pay', 'pay'], ['me', 'Me', 'me']];
-  const active = ROOTS.includes(route.parts[0]) ? route.parts[0] : route.parts[0] === 'job' || route.parts[0] === 'board' || route.parts[0] === 'team' ? 'jobs' : 'today';
+  const tabs = [['today', 'Today', 'clock'], ['schedule', 'Schedule', 'calendar'], ['jobs', 'Jobs', 'briefcase'], ['pay', 'Pay', 'cash'], ['profile', 'Profile', 'me']];
+  const active = TAB_OF[route.parts[0]] || 'today';
   return html`<nav class="nav" aria-label="Main">
     ${tabs.map(([id, label, icon]) => html`<button type="button" aria-current=${active === id ? 'page' : 'false'} onClick=${() => go('/' + id, { tab: true })}>
-      <${Icon} name=${icon} size=${25} stroke=${active === id ? 2.3 : 2} /><span>${label}</span>
-      ${id === 'me' && outbox > 0 ? html`<i class="dot" />` : null}
+      <${Icon} name=${icon} size=${24} stroke=${active === id ? 2.2 : 1.8} /><span>${label}</span>
+      ${id === 'profile' && outbox > 0 ? html`<i class="dot" />` : null}
     </button>`)}
   </nav>`;
 }
@@ -118,7 +132,7 @@ function App() {
     <div>
       ${!online ? html`<div class="strip"><${Icon} name="cloudoff" size=${15} />No signal. You can keep working.</div>` : null}
       ${demo ? html`<div class="strip">Demo with made-up jobs. Nothing here is real.</div>` : null}
-      ${focus ? null : html`<${ClockBar} />`}
+      ${focus || (TAB_OF[route.parts[0]] || 'today') === 'today' ? null : html`<${ClockBar} />`}
     </div>
     ${focus ? html`<span />` : html`<${Nav} route=${route} />`}
     <${Overlays} /><${Toasts} />

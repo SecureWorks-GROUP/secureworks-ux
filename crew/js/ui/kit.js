@@ -1,7 +1,8 @@
 // Shared interface pieces. Every screen is built from these.
 import { html, cx, useEffect, useRef, useState, useLayoutEffect, useCallback } from '../lib/h.js';
 import { Icon } from './icons.js';
-import { back, saveScroll, savedScroll, useRoute } from '../lib/router.js';
+import { back as back_, saveScroll, savedScroll, useRoute } from '../lib/router.js';
+import { Mark } from './logo.js';
 import { initials } from '../lib/dates.js';
 import { VERTICAL_LABEL } from '../lib/model.js';
 
@@ -18,38 +19,76 @@ export function IconButton({ name, label, size = 24, ...rest }) {
   return html`<button type="button" class="iconbtn" aria-label=${label} ...${rest}><${Icon} name=${name} size=${size} /></button>`;
 }
 
-// ---------- Page & TopBar ----------
-/** A scrolling page. Animates in by direction, remembers its scroll for Back. */
-export function Page({ children, class: cls, title, onBack, right, noBar }) {
+// ---------- Page & AppBar ----------
+/** The slate bar. `root` screens (the five tabs) show a big title, the orange
+ *  accent line and the SecureWorks mark; inner screens show Back and a title. */
+export function AppBar({ title, root, back = 'Back', onBack, right }) {
+  if (root) {
+    return html`<header class="appbar root">
+      <div class="bar-title"><h1>${title}</h1><i class="accent" aria-hidden="true" /></div>
+      <div class="bar-right"><${Mark} height=${26} />${right || null}</div>
+    </header>`;
+  }
+  return html`<header class="appbar">
+    <button type="button" class="bar-back" onClick=${onBack || (() => back_())}><${Icon} name="back" size=${20} stroke=${2.4} />${back}</button>
+    <h1>${title}</h1>
+    <div class="bar-right">${right || null}</div>
+  </header>`;
+}
+/** A screen: the bar, a scrolling page that remembers its place for Back, and
+ *  an optional foot that holds the screen's one strong button. */
+export function Page({ children, class: cls, title, root, back, onBack, right, noBar, foot, flush }) {
   const route = useRoute();
   const ref = useRef(null);
-  const [scrolled, setScrolled] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
     if (route.dir === 'pop') el.scrollTop = savedScroll(route.key);
   }, []);
-  const onScroll = useCallback((e) => {
-    const top = e.currentTarget.scrollTop;
-    saveScroll(route.key, top);
-    setScrolled(top > 44);
-  }, [route.key]);
+  const onScroll = useCallback((e) => { saveScroll(route.key, e.currentTarget.scrollTop); }, [route.key]);
   const anim = route.dir === 'pop' ? 'enter-pop' : route.dir === 'tab' ? 'enter-tab' : 'enter-push';
-  return html`<main ref=${ref} class=${cx('page', anim, cls)} onScroll=${onScroll}>
-    ${noBar ? null : html`<div class=${cx('topbar', scrolled && 'scrolled')}>
-      <${IconButton} name="back" label="Back" onClick=${onBack || (() => back())} />
-      <div class="grow clip topbar-title">${title}</div>
-      ${right || null}
-    </div>`}
-    ${children}
-  </main>`;
+  return html`<div class=${cx('screen', anim)}>
+    ${noBar ? html`<span />` : html`<${AppBar} title=${title} root=${root} back=${back} onBack=${onBack} right=${right} />`}
+    <main ref=${ref} class=${cx('page', flush && 'flush', cls)} onScroll=${onScroll}>${children}</main>
+    ${foot ? html`<div class="foot">${foot}</div>` : html`<span />`}
+  </div>`;
 }
 
-// ---------- Tag, chips, avatars ----------
-export function Tag({ vertical, children }) {
-  return html`<span class=${cx('tag', 'jt-' + (vertical || 'other'))}>${children || VERTICAL_LABEL[vertical] || 'Job'}</span>`;
+// ---------- job tag, type, status ----------
+/** The job number, drawn the same on every screen. */
+export function JobTag({ number }) { return number ? html`<span class="jobtag">${number}</span>` : null; }
+/** Job tag plus the kind of work: "[SWF-26767] Fencing". */
+export function JobLine({ job, vertical, children }) {
+  const kind = children || VERTICAL_LABEL[vertical] || '';
+  return html`<span class="jobline"><${JobTag} number=${job && job.job_number} />${kind ? html`<span>${kind}</span>` : null}</span>`;
 }
-export function Chip({ kind, icon, children }) {
-  return html`<span class=${cx('chip', kind)}>${icon ? html`<${Icon} name=${icon} size=${14} stroke=${2.4} />` : null}${children}</span>`;
+export function Tag({ vertical, children }) {
+  return html`<span class="tag">${children || VERTICAL_LABEL[vertical] || 'Job'}</span>`;
+}
+/** A square status word. kind: ok | warn | bad | live | line | '' (quiet). */
+export function Badge({ kind, children }) { return html`<span class=${cx('badge', kind)}>${children}</span>`; }
+export function Chip({ kind, children }) { return html`<span class=${cx('badge', kind === 'hi' ? 'warn' : kind === 'solid' ? 'live' : kind)}>${children}</span>`; }
+// One fixed vocabulary. Amber needs you, slate is happening now, green is settled, grey is plain.
+export const STATUS = {
+  to_confirm: ['warn', 'To confirm'], confirmed: ['ok', 'Confirmed'], on_site: ['live', 'On site'], done: ['', 'Done'], unavailable: ['', 'Unavailable'], cannot: ['bad', 'Cannot make it'],
+  to_schedule: ['warn', 'To schedule'], scheduled: ['', 'Scheduled'], in_progress: ['live', 'In progress'], complete: ['ok', 'Complete'], on_hold: ['warn', 'On hold'], closed: ['', 'Closed'],
+  draft: ['', 'Draft'], not_sent: ['', 'Not sent'], needs_times: ['warn', 'Needs times'], sent: ['', 'Sent'], approved: ['', 'Approved'], paid: ['ok', 'Paid'], sent_back: ['bad', 'Sent back'], waiting: ['', 'Waiting']
+};
+export function StatusBadge({ status, label }) {
+  const s = STATUS[status] || ['', label || status];
+  return html`<span class=${cx('badge', s[0])}>${label || s[1]}</span>`;
+}
+/** A group of things under a small caption. `right` is a link or count. */
+export function Section({ label, right, children, class: cls }) {
+  return html`<section class=${cx('sec', cls)}>
+    ${label || right ? html`<div class="sec-h"><h2 class="t-cap">${label}</h2>${right || null}</div>` : null}
+    ${children}
+  </section>`;
+}
+/** A label and its value on one line of a card. Give onClick for a row that opens something. */
+export function KV({ k, v, onClick, nav }) {
+  const cls = cx('kvrow', nav && 'nav-row');
+  if (onClick) return html`<button type="button" class=${cls} onClick=${onClick}><span class="k">${k}</span><span class="v">${v}</span></button>`;
+  return html`<div class=${cls}><span class="k">${k}</span><span class="v">${v}</span></div>`;
 }
 export function Avatar({ name, me, lg }) { return html`<span class=${cx('av', me && 'me', lg && 'lg')} title=${name}>${initials(name)}</span>`; }
 export function Avatars({ people, max = 4 }) {
@@ -172,40 +211,12 @@ export function Toasts() {
   </div>`)}</div>`;
 }
 
-// ---------- slide to confirm ----------
-/** A deliberate action: drag the knob across. Enter or Space also confirms. */
-export function Slide({ label, onConfirm, icon = 'right', kind, busy }) {
-  const track = useRef(null); const knob = useRef(null); const fill = useRef(null);
-  const st = useRef({ x: 0, max: 0, active: false });
-  const [done, setDone] = useState(false);
-  const paint = (x) => {
-    knob.current.style.transform = `translate3d(${x}px,0,0)`;
-    fill.current.style.transform = `scaleX(${st.current.max ? (x + 56) / (st.current.max + 61) : 0})`;
-  };
-  const fire = () => { setDone(true); buzz([12, 40, 24]); Promise.resolve(onConfirm()).finally(() => setTimeout(() => { setDone(false); if (knob.current) { track.current.classList.add('settle'); paint(0); } }, 500)); };
-  const down = (e) => {
-    if (done || busy) return;
-    st.current = { x: 0, start: e.clientX, max: track.current.clientWidth - 66, active: true };
-    track.current.classList.remove('settle');
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const move = (e) => {
-    const s = st.current; if (!s.active) return;
-    s.x = Math.min(s.max, Math.max(0, e.clientX - s.start));
-    paint(s.x);
-  };
-  const up = () => {
-    const s = st.current; if (!s.active) return; s.active = false;
-    track.current.classList.add('settle');
-    if (s.x >= s.max * 0.86) { paint(s.max); fire(); } else paint(0);
-  };
-  const key = (e) => { if ((e.key === 'Enter' || e.key === ' ') && !done && !busy) { e.preventDefault(); st.current.max = track.current.clientWidth - 66; track.current.classList.add('settle'); paint(st.current.max); fire(); } };
-  return html`<div ref=${track} class=${cx('slide', kind, done && 'done')} role="button" tabindex="0" aria-label=${label} onKeyDown=${key}
-      onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
-    <div ref=${fill} class="fill" />
-    <div class="label"><i>${done || busy ? 'One moment' : label}</i></div>
-    <div ref=${knob} class="knob">${done || busy ? html`<i class="spin" style="width:20px;height:20px;border-radius:50%;border:2.5px solid currentColor;border-right-color:transparent;animation:spin 700ms linear infinite" />` : html`<${Icon} name=${icon} size=${26} stroke=${2.4} />`}</div>
-  </div>`;
+// ---------- the big confirm button ----------
+/** A deliberate action as one large strong button. (It was a slide; callers keep the same props.) */
+export function Slide({ label, onConfirm, kind, busy }) {
+  const [going, setGoing] = useState(false);
+  const fire = () => { if (going || busy) return; setGoing(true); buzz([12, 40, 24]); Promise.resolve(onConfirm()).finally(() => setGoing(false)); };
+  return html`<button type="button" class=${cx('slide', kind)} disabled=${going || busy} onClick=${fire}>${going || busy ? html`<i class="spin" />` : label}</button>`;
 }
 
 // ---------- photos ----------

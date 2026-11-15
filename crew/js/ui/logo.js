@@ -11,6 +11,14 @@ export function Logo({ height = 30, group = true }) {
     ${WORD.map((d) => html`<path d=${d} />`)}
     <polygon points=${HOUSE} />
     <rect fill="#F15A29" x="8.96" y="62.99" width="44.53" height="7.77" />
-    ${group ? html`<text x="406" y="52" font-family="Archivo, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="450" letter-spacing="0.5" opacity="0.62">Group</text>` : null}
+    ${group ? html`<text x="406" y="52" font-family="Plus Jakarta Sans, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="500" letter-spacing="0.5" opacity="0.62">Group</text>` : null}
+  </svg>`;
+}
+
+/** The house mark on its own, white with the orange bar: for the slate bar. */
+export function Mark({ height = 26 }) {
+  return html`<svg class="mark" role="img" aria-label="SecureWorks Group" height=${height} width=${Math.round(height * 0.748)} viewBox="0 0 123.14 164.55">
+    <polygon fill="currentColor" points="115.73 59.77 115.73 40.18 62.27 6.68 7.48 40.11 7.48 69.94 96.74 88.91 96.74 114.41 79.63 114.41 62.24 96.53 44.64 114.41 26.48 114.41 26.48 80.79 7.49 76.91 7.48 133.4 52.6 133.4 62.16 123.69 71.61 133.4 115.73 133.4 115.73 73.53 26.48 54.56 26.48 50.77 62.14 29.01 96.74 50.69 96.74 63.65 115.73 67.21 115.73 59.77" />
+    <rect fill="#F15A29" x="7.71" y="139.12" width="108.25" height="18.9" />
   </svg>`;
 }

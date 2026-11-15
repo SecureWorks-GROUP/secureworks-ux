@@ -9,7 +9,7 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Button, Sheet, Field, Picks, openOverlay, ask, toast } from '../ui/kit.js';
 import { Logo } from '../ui/logo.js';
 
-export function Me() {
+export function Profile() {
   const user = useStore((s) => s.user);
   const online = useStore((s) => s.online);
   const [waiting, setWaiting] = useState(outboxItems);

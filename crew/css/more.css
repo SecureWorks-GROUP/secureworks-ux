@@ -1,0 +1,37 @@
+/* SecureWorks Crew: small shared extras used by more than one group of screens.
+   Tokens and the core components live in app.css. */
+
+/* day picker (booking yourself, adding a job to a week) */
+.daypicks { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.daypick { display: grid; justify-items: center; gap: 2px; padding: 6px 0; border-radius: var(--r); border: 1px solid var(--edge); background: var(--card); min-height: 56px; align-content: center; }
+.daypick:active:not(:disabled) { background: var(--press); }
+.daypick .dow { font-size: 12px; line-height: 16px; font-weight: 700; color: var(--mid); }
+.daypick .dom { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 18px; line-height: 22px; }
+.daypick .t-small { font-size: 12px; line-height: 14px; color: var(--ok-text); font-weight: 700; }
+.daypick.today .dow { color: var(--ember); }
+.daypick[aria-pressed='true'] { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+.daypick[aria-pressed='true'] .dow, .daypick[aria-pressed='true'] .t-small { color: var(--on-slate-muted); }
+.daypick:disabled { background: var(--frost); border-color: transparent; color: var(--mid); }
+
+/* progress steps (finish a job, reports) */
+.steps { display: flex; gap: 4px; padding: 0 var(--gut); }
+.steps i { flex: 1; height: 3px; background: var(--mist); }
+.steps i.on { background: var(--orange); }
+.steps i.done { background: var(--slate); }
+
+/* people rows (allocation) */
+.person { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; min-height: 48px; width: 100%; text-align: left; }
+.person + .person { border-top: 1px solid var(--mist); }
+.person[aria-pressed='true'] .av { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+
+/* receipts */
+.receipt-shot { width: 100%; max-height: 300px; object-fit: contain; background: var(--frost); }
+.bigadd { display: grid; place-items: center; gap: 8px; align-content: center; min-height: 160px; width: 100%; border-radius: var(--r); border: 1px solid var(--edge); background: var(--card); color: var(--slate); font-weight: 700; font-size: 15px; }
+.bigadd:active { background: var(--press); }
+
+/* long forms (reports, details) */
+.form { display: grid; gap: 16px; padding: 0 var(--gut); }
+.form h2 { margin-top: 8px; }
+.formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.logo { display: block; width: auto; }

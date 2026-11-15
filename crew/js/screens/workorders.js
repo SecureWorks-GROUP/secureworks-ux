@@ -5,11 +5,10 @@ import { html, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { useQuery, useStore, invalidate, primeQuery } from '../lib/store.js';
 import { go, back } from '../lib/router.js';
-import { mondayOf, fmtDate, fmtMoney, tsToDate } from '../lib/dates.js';
+import { mondayOf, fmtDate, tsToDate } from '../lib/dates.js';
 import { verticalOf } from '../lib/model.js';
-import { Icon } from '../ui/icons.js';
-import { Page, Button, Chip, Tag, Toggle, Skel, SkelRows, Empty, LoadError, toast, ask, buzz } from '../ui/kit.js';
-import { DoneScreen, PayRows, superNote, sendLanded, cash, num } from '../ui/paybits.js';
+import { Page, Section, KV, JobLine, StatusBadge, Button, Toggle, SkelRows, Empty, LoadError, toast, ask, buzz } from '../ui/kit.js';
+import { DoneScreen, PayRows, PayGroup, superNote, sendLanded, cash, num } from '../ui/paybits.js';
 import { useCharges, needsCheck } from './charges.js';
 
 const STATUS = { draft: 'Being set up', sent: 'Sent to you', accepted: 'Accepted', approved: 'Agreed', in_progress: 'In progress', complete: 'Finished', completed: 'Finished', cancelled: 'Cancelled' };
@@ -24,22 +23,22 @@ function facts(w, user) {
   const ready = money && own && w.can_invoice === true && w.can_invoice_direct !== false && w.already_invoiced !== true;
   return { own, money, ready };
 }
-/** [short words, chip kind, a sentence that says what to do] */
+/** [short words, one of the fixed status words, a sentence that says what to do] */
 function stateOf(w, user) {
   const { own, money, ready } = facts(w, user);
   const block = w.invoice_block_reason; const direct = w.direct_invoice_block_reason;
-  if (w.already_invoiced === true || block === 'invoiced') return ['Invoiced', 'ok', 'This work order is already invoiced.'];
-  if (ready) return ['Ready to invoice', 'hi', ''];
-  if (!own) return [`${w.assigned_user_name || 'Someone else'}'s`, '', 'This work order belongs to someone else. Its pay is between them and the office.'];
-  if (!money) return ['Agreed for the job', '', 'This is what is agreed for the job. It is not invoiced from here: bill your time on your weekly invoice or the crew work order.'];
-  if (block === 'weekly_draft') return ['On your weekly invoice', 'warn', 'This one is already on a weekly invoice you started. Send it from there.'];
-  if (block === 'other_trade_draft') return ['On another invoice', 'warn', 'Someone else has this work order on their invoice. Ask the office to sort it out.'];
-  if (block === 'completion_evidence') return ['Needs finish photos', 'warn', 'Add the finished photos on the job, then it can be invoiced.'];
-  if (block === 'client_signoff') return ['Needs a signature', 'warn', 'The customer has to sign the job off before this can be invoiced.'];
-  if (direct === 'work_order_not_complete') return ['Not finished yet', '', 'It can be invoiced once it is marked finished. Ask the office to mark it finished when the job is done.'];
-  if (direct === 'work_order_no_finish_date') return ['No finish day', '', 'It has no finish day yet. Ask the office to add one, then it can be invoiced.'];
-  if (w.can_add_to_weekly_invoice === true) return ['On your weekly invoice', 'hi', 'This one goes on your weekly invoice, not by itself.'];
-  return [STATUS[String(w.status || '').toLowerCase()] || 'Not ready yet', '', 'Not ready to invoice yet. The job is not finished.'];
+  if (w.already_invoiced === true || block === 'invoiced') return ['Invoiced', 'sent', 'This work order is already invoiced.'];
+  if (ready) return ['Ready to invoice', 'not_sent', ''];
+  if (!own) return [`${w.assigned_user_name || 'Someone else'}'s`, 'closed', 'This work order belongs to someone else. Its pay is between them and the office.'];
+  if (!money) return ['Agreed for the job', 'scheduled', 'This is what is agreed for the job. It is not invoiced from here: record your time on your timesheet or the group work order.'];
+  if (block === 'weekly_draft') return ['On your weekly invoice', 'draft', 'This one is already on a weekly invoice you started. Send it from there.'];
+  if (block === 'other_trade_draft') return ['On another invoice', 'on_hold', 'Someone else has this work order on their invoice. Ask the office to sort it out.'];
+  if (block === 'completion_evidence') return ['Needs finish photos', 'on_hold', 'Add the finished photos on the job, then it can be invoiced.'];
+  if (block === 'client_signoff') return ['Needs a signature', 'on_hold', 'The customer has to sign the job off before this can be invoiced.'];
+  if (direct === 'work_order_not_complete') return ['Not finished yet', 'in_progress', 'It can be invoiced once it is marked finished. Ask the office to mark it finished when the job is done.'];
+  if (direct === 'work_order_no_finish_date') return ['No finish day', 'on_hold', 'It has no finish day yet. Ask the office to add one, then it can be invoiced.'];
+  if (w.can_add_to_weekly_invoice === true) return ['On your weekly invoice', 'not_sent', 'This one goes on your weekly invoice, not by itself.'];
+  return [STATUS[String(w.status || '').toLowerCase()] || 'Not ready yet', /complete/.test(String(w.status || '')) ? 'complete' : 'in_progress', 'Not ready to invoice yet. The job is not finished.'];
 }
 
 export function WorkOrders({ openId }) {
@@ -63,36 +62,34 @@ export function WorkOrders({ openId }) {
     const ready = rows.filter((r) => r.f.ready);
     const paid = rows.filter((r) => !r.f.ready && r.f.money);
     const plain = rows.filter((r) => !r.f.money);
-    const row = ({ w, f, s }) => html`<button type="button" class="row" key=${w.id} onClick=${() => go('/pay/work-orders/' + w.id)}>
-      <span class="main" style="grid-column:1"><b>${titleOf(w)}</b><span>${[w.wo_number, w.client_name].filter(Boolean).join(' · ')}</span></span>
-      <span style="text-align:right;display:grid;gap:4px;justify-items:end">${f.money ? html`<span class="t-num" style="font-size:20px">${cash(w.subtotal)}</span>` : null}<${Chip} kind=${s[1]}>${s[0]}<//></span>
-      <span class="trail"><${Icon} name="right" size=${18} /></span></button>`;
-    return html`<${Page} title="Work orders" onBack=${() => back('/pay')}>
-      <header class="block"><h1 class="t-display">Work orders</h1>
-        <p class="t-small" style="margin-top:8px">A set amount for a job, agreed with the office. Amounts are before GST.</p></header>
-      ${anyCharges ? html`<button type="button" class=${'block note-banner linkbanner ' + (toCheck ? '' : 'plain')} onClick=${() => go('/pay/charges')}>
-        <${Icon} name="users" size=${18} /><span><span class="t-strong">Crew on my jobs</span><span style="display:block">${toCheck ? `${toCheck} ${toCheck === 1 ? 'line' : 'lines'} from other crew to check` : 'What other crew billed on jobs you lead'}</span></span><${Icon} name="right" size=${18} /></button>` : null}
+    const row = ({ w, f, s }) => html`<button type="button" class="item pay-inv" key=${w.id} onClick=${() => go('/pay/work-orders/' + w.id)}>
+      <span class="main"><b>${titleOf(w)}</b><${JobLine} job=${w}>${w.wo_number || ''}<//><span class="sub">${s[0]}</span></span>
+      <span class="side">${f.money ? html`<span class="pay-figure">${cash(w.subtotal)}</span>` : null}<${StatusBadge} status=${s[1]} /></span></button>`;
+    const group = (label, list) => (list.length ? html`<${Section} label=${label}><div class="block card">${list.map(row)}</div><//>` : null);
+    return html`<${Page} title="Work orders" back="Pay" onBack=${() => back('/pay')}>
+      <p class="block t-small pay-intro">A set amount for a job, agreed with the office. Amounts are before GST.</p>
+      ${anyCharges ? html`<div class="block card pay-gap"><${KV} nav k="Crew hours to check" v=${toCheck ? `${toCheck} to check` : 'All checked'} onClick=${() => go('/pay/charges')} /></div>` : null}
       ${q.loading ? html`<${SkelRows} n=${3} />` : q.error && !q.data ? html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="your work orders" />`
         : !list.length ? html`<${Empty} title="No work orders yet">When the office sets up a work order for a job you are on, it shows here with what it pays and when you can invoice it.<//>` : html`
-          ${ready.length ? html`<section class="section"><span class="t-label">Ready to invoice</span><div class="list ruled">${ready.map(row)}</div></section>` : null}
-          ${paid.length ? html`<section class="section"><span class="t-label">${ready.length ? 'The rest' : 'Your work orders'}</span><div class="list ruled">${paid.map(row)}</div></section>` : null}
-          ${plain.length ? html`<section class="section"><span class="t-label">What is agreed for each job</span><div class="list ruled">${plain.map(row)}</div></section>` : null}
-          ${q.data && (q.data.truncated || q.data.next_offset) ? html`<p class="block t-small t-mute" style="margin-top:12px">Showing your newest ${list.length}. Ask the office about an older one.</p>` : null}`}
+          ${group('Ready to invoice', ready)}
+          ${group(ready.length ? 'The rest' : 'Your work orders', paid)}
+          ${group('What is agreed for each job', plain)}
+          ${q.data && (q.data.truncated || q.data.next_offset) ? html`<p class="block t-small pay-note">Showing your newest ${list.length}. Ask the office about an older one.</p>` : null}`}
     <//>`;
   }
 
   // ------------------------------------------------------------ one of them
   const w = list.find((x) => x.id === openId) || null;
   if (!w) {
-    return html`<${Page} title="Work order" onBack=${() => back('/pay/work-orders')}>
-      ${q.loading ? html`<div class="block" style="display:grid;gap:14px;margin-top:6px"><${Skel} w="50%" h=${40} /><${Skel} w="70%" h=${60} r=${14} /></div><${SkelRows} n=${3} />`
+    return html`<${Page} title="Work order" back="Work orders" onBack=${() => back('/pay/work-orders')}>
+      ${q.loading ? html`<${SkelRows} n=${3} />`
         : q.error && !q.data ? html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="this work order" />`
         : html`<${Empty} title="That work order is not here" action=${html`<${Button} kind="line" small onClick=${() => go('/pay/work-orders', { replace: true })}>See your work orders<//>`}>It may have been changed at the office.<//>`}
     <//>`;
   }
 
   const f = facts(w, user);
-  const [words, kind, sentence] = stateOf(w, user);
+  const [words, status, sentence] = stateOf(w, user);
   const items = w.scope_items || [];
   const crewLines = f.ready ? (w.negative_charges || []).filter((c) => chargeId(c) && chargeAmt(c) > 0) : [];
   const taken = crewLines.filter((c) => !off.includes(chargeId(c)));
@@ -137,45 +134,43 @@ export function WorkOrders({ openId }) {
     setBusy(false);
   };
 
-  return html`<${Page} title=${titleOf(w)} class="paycol" onBack=${() => back('/pay/work-orders')}>
-    <header class="block invhead">
-      <div><span class="t-label">Work order${w.wo_number ? ' ' + w.wo_number : ''}</span><h1 class="t-title invtitle">${titleOf(w)}</h1>
-        <p class="t-small" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center"><${Tag} vertical=${verticalOf({ type: w.job_type, job_family: w.job_family, job_number: w.job_number }, w)} /><span>${[w.job_number, w.client_name].filter(Boolean).join(' · ')}</span></p></div>
-      <${Chip} kind=${kind}>${words}<//>
-    </header>
+  const vertical = verticalOf({ type: w.job_type, job_family: w.job_family, job_number: w.job_number }, w);
+  const weekly = !f.ready && f.own && f.money && (w.can_add_to_weekly_invoice === true || w.invoice_block_reason === 'weekly_draft');
+  const toJob = !f.ready && f.own && w.job_id && ['completion_evidence', 'client_signoff'].includes(w.invoice_block_reason);
+  return html`<${Page} title="Work order" back="Work orders" onBack=${() => back('/pay/work-orders')} right=${html`<${StatusBadge} status=${status} />`}
+    foot=${f.ready ? html`<${Button} block class="big" busy=${busy} onClick=${send}>Send invoice<//>`
+      : weekly ? html`<${Button} block class="big" onClick=${() => go('/pay/week/' + mondayOf(String(w.hours_week_ending || doneDay || '').slice(0, 10) || tsToDate(new Date())))}>Open the timesheet<//>`
+      : toJob ? html`<${Button} block class="big" onClick=${() => go('/job/' + w.job_id)}>Open the job<//>` : null}>
+    <div class="block card pad pay-ghead"><b class="t-head">${titleOf(w)}</b><${JobLine} job=${w} vertical=${vertical} />
+      <span class="t-small t-num">${[w.wo_number, w.client_name].filter(Boolean).join(' · ')}</span></div>
 
-    ${f.money ? html`<section class="block paytop">
-      <span class="t-label">This work order pays</span>
-      <span class="money xl">${cash(w.subtotal)}</span>
-      <p>Before GST and super${doneDay && /complete/.test(String(w.status)) ? `. Finished ${fmtDate(tsToDate(doneDay) || String(doneDay).slice(0, 10))}` : ''}.</p>
-    </section>` : null}
+    <div class="block card pay-gap">
+      <${KV} k="Where it is up to" v=${words} />
+      ${f.money ? html`<${KV} k="This work order pays" v=${html`<span class="t-figure">${cash(w.subtotal)}</span>`} />` : null}
+      ${f.money && doneDay && /complete/.test(String(w.status)) ? html`<${KV} k="Finished" v=${fmtDate(tsToDate(doneDay) || String(doneDay).slice(0, 10))} />` : null}
+    </div>
+    ${f.money ? html`<p class="block t-small pay-note">Before GST and super.</p>` : null}
+    ${!f.ready ? html`<div class="block note-banner plain pay-gap"><span>${w.direct_invoice_block_message || sentence}</span></div>` : null}
 
-    ${!f.ready ? html`<div class="block note-banner plain" style="margin-top:16px"><${Icon} name="info" size=${18} /><span>${w.direct_invoice_block_message || sentence}</span></div>` : null}
-    ${!f.ready && f.own && f.money && (w.can_add_to_weekly_invoice === true || w.invoice_block_reason === 'weekly_draft') ? html`<div class="block" style="margin-top:10px"><${Button} kind="line" block onClick=${() => go('/pay/week/' + mondayOf(String(w.hours_week_ending || doneDay || '').slice(0, 10) || tsToDate(new Date())))}>Open the weekly invoice<//></div>` : null}
-    ${!f.ready && f.own && w.job_id && ['completion_evidence', 'client_signoff'].includes(w.invoice_block_reason) ? html`<div class="block" style="margin-top:10px"><${Button} kind="line" block onClick=${() => go('/job/' + w.job_id)}>Open the job<//></div>` : null}
+    ${items.length ? html`<div class="pay-rows pay-gap"><${PayGroup} label="What it covers">
+      ${items.map((it, i) => { const qty = it.quantity != null ? it.quantity : it.qty; const amt = num(it.total != null ? it.total : it.amount); return html`<div class="pay-line" key=${i}>
+        <span class="main"><b>${it.description || it.name || 'Item'}</b>
+          <span class="pay-detail">${[[qty != null ? `${qty} ${it.unit || ''}`.trim() : '', f.money && num(it.rate) ? 'at ' + cash(it.rate) : ''].filter(Boolean).join(' '), !f.money && num(it.hours) ? `about ${it.hours} h` : ''].filter(Boolean).join(', ')}</span></span>
+        <span class="pay-amt">${f.money && amt != null ? cash(amt) : ''}</span></div>`; })}
+    <//></div>` : null}
 
-    ${items.length ? html`<section class="daygroup"><span class="t-label"><span>What it covers</span></span>
-      ${items.map((it, i) => { const qty = it.quantity != null ? it.quantity : it.qty; const amt = num(it.total != null ? it.total : it.amount); return html`<div class="line still" key=${i}>
-        <span><b>${it.description || it.name || 'Item'}</b>
-          <span class="how">${[[qty != null ? `${qty} ${it.unit || ''}`.trim() : '', f.money && num(it.rate) ? 'at ' + fmtMoney(it.rate) : ''].filter(Boolean).join(' '), !f.money && num(it.hours) ? `about ${it.hours} h` : ''].filter(Boolean).join(', ')}</span></span>
-        <span class="amt">${f.money && amt != null ? cash(amt) : ''}</span></div>`; })}
-    </section>` : null}
+    ${crewLines.length ? html`<${Section} label="Crew already billed on this job">
+      <div class="block card pad pay-opts">
+        <p class="t-small">You approved these. Leave one on and it comes off this work order: they bill the company themselves, so nobody is paid twice.</p>
+        ${crewLines.map((c) => html`<${Toggle} key=${chargeId(c)} label=${`${c.trade_name || 'Crew'} · ${cash(chargeAmt(c))}`} hint=${c.description || 'Take this off my work order'} checked=${!off.includes(chargeId(c))} onChange=${(on) => setOff((cur) => (on ? cur.filter((x) => x !== chargeId(c)) : [...cur, chargeId(c)]))} />`)}
+      </div><//>` : null}
 
-    ${crewLines.length ? html`<section class="block" style="margin-top:22px;display:grid;gap:6px">
-      <span class="t-label">Crew already billed on this job</span>
-      <p class="t-small">You approved these. Leave one on and it comes off this work order: they bill the company themselves, so nobody is paid twice.</p>
-      ${crewLines.map((c) => html`<${Toggle} key=${chargeId(c)} label=${`${c.trade_name || 'Crew'} · ${cash(chargeAmt(c))}`} hint=${c.description || 'Take this off my work order'} checked=${!off.includes(chargeId(c))} onChange=${(on) => setOff((cur) => (on ? cur.filter((x) => x !== chargeId(c)) : [...cur, chargeId(c)]))} />`)}
-    </section>` : null}
-
-    ${f.ready ? html`<section class="block" style="margin-top:18px;display:grid;gap:16px">
-      <${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gst} onChange=${setGst} />
-      ${taken.length ? html`<div class="inset"><div class="sumrows">
-        <div class="sumrow"><span>Work order</span><span>${cash(w.subtotal)}</span></div>
-        <div class="sumrow"><span>Crew taken off</span><span>-${cash(takenTotal)}</span></div>
-        <div class="sumrow total"><span>You invoice about</span><span>${cash(estimate)}</span></div>
-      </div><p class="t-small t-mute" style="margin-top:10px">An estimate, before super and GST. The office system works out the exact figures when you send.</p></div>` : null}
-    </section>
-    <div class="dock"><${Button} block busy=${busy} onClick=${send}>Invoice this work order · ${taken.length ? 'about ' : ''}${cash(taken.length ? estimate : w.subtotal)}<//></div>` : null}
+    ${f.ready ? html`<div class="block card pad pay-gap"><${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gst} onChange=${setGst} /></div>
+      ${taken.length ? html`<div class="block card pay-sum pay-gap">
+        <div class="pay-sumrow"><span>Work order</span><span>${cash(w.subtotal)}</span></div>
+        <div class="pay-sumrow"><span>Crew taken off</span><span>-${cash(takenTotal)}</span></div>
+        <div class="pay-sumrow total"><span>You invoice about</span><span>${cash(estimate)}</span></div>
+      </div><p class="block t-small pay-note">An estimate, before super and GST. The office system works out the exact figures when you send.</p>` : null}` : null}
   <//>`;
 }
 
@@ -183,12 +178,12 @@ function WoSent({ res, wo }) {
   const held = res.office_review === 'held';
   const later = res.code === 'XERO_PUSH_FAILED';
   const off = num(res.negative_charge_total_ex);
-  return html`<${DoneScreen} title=${later ? 'Invoice saved' : 'Invoice sent'}
-    lead=${held ? 'The office is checking a line on it. You are paid once they approve it.' : later ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}>
-    ${num(res.trade_payable) != null || num(res.gross_earned) != null ? html`<section class="inset"><${PayRows} m=${res} />
-      ${superNote(res) ? html`<p class="t-small t-mute" style="margin-top:10px">${superNote(res)}</p>` : null}</section>` : null}
+  return html`<${DoneScreen} bar="Work order" title=${later ? 'Invoice saved' : 'Invoice sent'}
+    lead=${held ? 'The office is checking a line on it. You are paid once they approve it.' : later ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}
+    foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>`}>
+    ${num(res.trade_payable) != null || num(res.gross_earned) != null ? html`<div class="card"><${PayRows} m=${res} /></div>
+      ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}` : null}
     ${off ? html`<p class="t-small">${cash(Math.abs(off))} of crew pay was taken off this work order. They bill the company themselves.</p>` : null}
-    <p class="t-small t-mute t-num">${[res.xero_bill_number || res.invoice_number, wo.wo_number, titleOf(wo)].filter(Boolean).join(' · ')}</p>
-    <${Button} block onClick=${() => go('/pay', { replace: true })}>Done<//>
+    <p class="t-small t-num">${[res.xero_bill_number || res.invoice_number, wo.wo_number, titleOf(wo)].filter(Boolean).join(' · ')}</p>
   <//>`;
 }

@@ -1,7 +1,8 @@
-// Days you cannot work. One calendar shows the three things that matter:
-// free, booked and off. Tap a day to change it: working, cannot work, leave.
-// The office sees days off when it books crew. Marking a day off never takes
-// you off a job by itself, so a booked day asks first and tells the office.
+// Availability: the days you cannot work. One calendar shows what matters:
+// booked, cannot work and leave. Tap a day to change it: cannot work, leave,
+// then back to working. The office sees days off when it books crew. Marking a
+// day off never takes you off a job by itself, so a booked day asks first and
+// tells the office.
 import { html, cx, useEffect, useMemo, useRef, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { useStore, invalidate, mutateQuery } from '../lib/store.js';
@@ -11,8 +12,7 @@ import { back } from '../lib/router.js';
 import { todayISO, addDays, addMonths, monthStart, monthGrid, dowOf, diffDays, fmtDom, fmtDow, fmtDay, fmtDayLong, fmtDate, fmtMonth, fmtDowLong } from '../lib/dates.js';
 import { jobTitle } from '../lib/model.js';
 import { useAvailability } from '../lib/roster.js';
-import { Icon } from '../ui/icons.js';
-import { Page, Button, IconButton, Sheet, Picks, Skel, LoadError, toast, ask, openOverlay, buzz } from '../ui/kit.js';
+import { Page, Section, Button, IconButton, Sheet, Picks, StatusBadge, Skel, LoadError, toast, ask, openOverlay, buzz } from '../ui/kit.js';
 
 const AHEAD = 90;          // how far ahead the calendar reaches
 const PATTERN_DAYS = 60;   // a weekly day off is written out this far ahead
@@ -170,86 +170,81 @@ export function Availability() {
   const leave = async () => {
     const real = changed - (carried && changed >= carried ? carried : 0);
     if (real > 0 && !(await ask({ title: 'Leave without saving?', body: `${real === 1 ? 'One day you changed has' : `${real} days you changed have`} not been saved.`, yes: 'Leave', no: 'Keep editing', danger: true }))) return;
-    back('/me');
+    back('/schedule');
   };
 
   const firstMonth = monthStart(today);
   const lastMonth = monthStart(last);
   const touchedRow = touched && at(touched).status !== 'available' ? at(touched) : null;
 
-  return html`<${Page} title="Days you cannot work" onBack=${leave}>
-    <header class="page-pad" style="padding-top:2px"><h1 class="t-display">Days you cannot work</h1></header>
-
-    ${q.loading ? html`<div class="page-pad" style="margin-top:22px;display:grid;gap:12px"><${Skel} h=${92} r=${14} /><${Skel} w="46%" h=${22} /><${Skel} h=${320} r=${16} /></div>`
+  return html`<${Page} title="Availability" back="Schedule" onBack=${leave}
+      foot=${changed ? html`<${Button} class="big" block busy=${busy} onClick=${save}>Save ${changed} ${changed === 1 ? 'day' : 'days'}${telling.length ? ' and tell the office' : ''}<//>` : null}>
+    ${q.loading ? html`<div class="block" style="display:grid;gap:12px"><${Skel} h=${92} /><${Skel} w="46%" h=${22} /><${Skel} h=${320} /></div>`
       : q.error && !q.data ? html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="your days off" />`
-      : html`<div class="rise">
-      <section class="block inset fortnight" style="margin-top:18px" aria-label="The next 14 days">
-        <p class="t-head">You are free ${fortnight.free} of the next 14 days.</p>
-        <p class="t-small" style="margin-top:3px">${fortnight.booked ? `Booked: ${fortnight.booked} ${fortnight.booked === 1 ? 'day' : 'days'}. ` : ''}${fortnight.off.length ? `Off: ${fortnight.off.slice(0, 5).map(short).join(', ')}${fortnight.off.length > 5 ? ` and ${fortnight.off.length - 5} more` : ''}.` : 'No days off.'}</p>
+      : html`<div>
+      <section class="block card pad avsum" aria-label="The next 14 days">
+        <p class="t-strong">You are free ${fortnight.free} of the next 14 days.</p>
+        <p class="t-small nums">${fortnight.booked ? `Booked: ${fortnight.booked} ${fortnight.booked === 1 ? 'day' : 'days'}. ` : ''}${fortnight.off.length ? `Off: ${fortnight.off.slice(0, 5).map(short).join(', ')}${fortnight.off.length > 5 ? ` and ${fortnight.off.length - 5} more` : ''}.` : 'No days off.'}</p>
         <div class="strip14" aria-hidden="true">${fortnight.days.map((x) => html`<span key=${x.d} class=${cx(x.state, x.d === today && 'today')}><small>${fmtDow(x.d)[0]}</small><i /></span>`)}</div>
       </section>
 
-      <section class="page-pad" style="margin-top:22px">
-        <div class="monthnav">
-          <${IconButton} name="back" label="Earlier month" disabled=${month <= firstMonth} onClick=${() => setMonth(addMonths(month, -1))} />
-          <span class="t-head">${fmtMonth(month)}</span>
-          <${IconButton} name="right" label="Later month" disabled=${month >= lastMonth} onClick=${() => setMonth(addMonths(month, 1))} />
+      <${Section} label="Tap a day to change it">
+        <div class="block card avcal">
+          <div class="avnav">
+            <${IconButton} name="back" label="Earlier month" size=${20} disabled=${month <= firstMonth} onClick=${() => setMonth(addMonths(month, -1))} />
+            <span class="t-strong nums">${fmtMonth(month)}</span>
+            <${IconButton} name="right" label="Later month" size=${20} disabled=${month >= lastMonth} onClick=${() => setMonth(addMonths(month, 1))} />
+          </div>
+          <div class="avhead" aria-hidden="true">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => html`<span>${d}</span>`)}</div>
+          <div class="avgrid" role="group" aria-label=${fmtMonth(month)}>
+            ${monthGrid(month).map((d) => {
+              if (d.slice(0, 7) !== month.slice(0, 7)) return html`<span key=${d} />`;
+              const r = at(d);
+              const openDay = d >= today && d <= last;
+              const jobs = bookedOn.get(d) || [];
+              const state = r.status === 'unavailable' ? 'offday' : r.status === 'leave' ? 'leave' : '';
+              return html`<button type="button" key=${d} disabled=${!openDay} class=${cx('aday', d === today && 'today', state, jobs.length && 'booked', edits[d] && 'changed')}
+                  aria-label=${`${fmtDay(d)}, ${r.status === 'available' ? (jobs.length ? 'booked at ' + jobs.map((b) => jobTitle(b.job)).join(' and ') : 'working, nothing booked') : WORD[r.status].toLowerCase() + (jobs.length ? ', and booked' : '')}`}
+                  onClick=${() => onDay(d)} onPointerDown=${() => holdStart(d)} onPointerUp=${holdEnd} onPointerLeave=${holdEnd} onPointerCancel=${holdEnd} onContextMenu=${(e) => e.preventDefault()}>
+                <span class="num">${fmtDom(d)}</span><i class="mark" />
+              </button>`;
+            })}
+          </div>
+          <div class="avlegend"><span><i class="booked" />Booked</span><span><i class="offday" />Cannot work</span><span><i class="leave" />Leave</span><span><i class="changed" />Not saved yet</span></div>
         </div>
-        <div class="month avail" role="group" aria-label=${fmtMonth(month)}>
-          ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => html`<span class="mh">${d}</span>`)}
-          ${monthGrid(month).map((d) => {
-            if (d.slice(0, 7) !== month.slice(0, 7)) return html`<span key=${d} />`;
-            const r = at(d);
-            const openDay = d >= today && d <= last;
-            const jobs = bookedOn.get(d) || [];
-            const state = r.status === 'unavailable' ? 'offday' : r.status === 'leave' ? 'leave' : jobs.length ? 'booked' : '';
-            return html`<button type="button" key=${d} disabled=${!openDay} class=${cx(d === today && 'today', state, edits[d] && 'changed')}
-                aria-label=${`${fmtDay(d)}, ${r.status === 'available' ? (jobs.length ? 'booked at ' + jobs.map((b) => jobTitle(b.job)).join(' and ') : 'working, nothing booked') : WORD[r.status].toLowerCase() + (jobs.length ? ', and booked' : '')}`}
-                onClick=${() => onDay(d)} onPointerDown=${() => holdStart(d)} onPointerUp=${holdEnd} onPointerLeave=${holdEnd} onPointerCancel=${holdEnd} onContextMenu=${(e) => e.preventDefault()}>
-              ${fmtDom(d)}<span class="pips">${jobs.slice(0, 3).map((b) => html`<i class=${'jt-' + b.vertical} style="background:var(--jt)" />`)}</span>
-            </button>`;
-          })}
-        </div>
-        <div class="daylegend"><span><i />Free</span><span><i class="booked" />Booked</span><span><i class="offday" />Cannot work</span><span><i class="leave" />Leave</span></div>
-        ${touchedRow ? html`<button type="button" class="reasonbar" onClick=${() => openReason([touched])}>
-          <span><b>${fmtDay(touched)}</b> · ${WORD[touchedRow.status]}${touchedRow.note && touchedRow.note !== PATTERN_NOTE ? ' · ' + touchedRow.note : ''}</span><u>${touchedRow.note && touchedRow.note !== PATTERN_NOTE ? 'Change the reason' : 'Add a reason'}</u>
-        </button>` : html`<p class="t-small t-mute" style="margin-top:12px">Tap a day: cannot work, then leave, then back to working. Hold a day to add a reason. A dot means you are booked that day.</p>`}
-      </section>
+        ${touchedRow ? html`<div class="block card" style="margin-top:8px"><button type="button" class="kvrow avreason" onClick=${() => openReason([touched])}>
+          <span class="v nums">${fmtDay(touched)} · ${WORD[touchedRow.status]}${touchedRow.note && touchedRow.note !== PATTERN_NOTE ? ' · ' + touchedRow.note : ''}</span><span class="link">${touchedRow.note && touchedRow.note !== PATTERN_NOTE ? 'Change the reason' : 'Add a reason'}</span>
+        </button></div>` : html`<p class="block t-small avhint">Tap once for cannot work, again for leave, again for working. Hold a day to add a reason.</p>`}
+      <//>
 
-      ${telling.length ? html`<div class="block note-banner" style="margin-top:16px"><${Icon} name="alert" size=${18} /><span>You are booked on ${telling.slice(0, 3).map((d) => `${short(d)} (${(bookedOn.get(d) || []).map((b) => jobTitle(b.job)).join(', ')})`).join(', ')}${telling.length > 3 ? ` and ${telling.length - 3} more` : ''}. Press Save and the office is told.</span></div>` : null}
-      ${carried && changed >= carried ? html`<div class="block note-banner plain" style="margin-top:16px"><${Icon} name="info" size=${18} /><span>Your weekly days off were about to run out. Save to carry them on.</span></div>` : null}
+      ${telling.length ? html`<div class="block note-banner" style="margin-top:16px"><span>You are booked on ${telling.slice(0, 3).map((d) => `${short(d)} (${(bookedOn.get(d) || []).map((b) => jobTitle(b.job)).join(', ')})`).join(', ')}${telling.length > 3 ? ` and ${telling.length - 3} more` : ''}. Press Save and the office is told.</span></div>` : null}
+      ${carried && changed >= carried ? html`<div class="block note-banner plain" style="margin-top:16px"><span>Your weekly days off were about to run out. Save to carry them on.</span></div>` : null}
 
-      <section class="section">
-        <span class="t-label">Every week</span>
+      <${Section} label="Every week">
         <div class="block">
-          <div class="weekdays" role="group" aria-label="Days you never work">
+          <div class="weekpicks" role="group" aria-label="Days you never work">
             ${WEEK.map(([dow, label]) => html`<button type="button" key=${dow} class="pick" aria-pressed=${String(weeklyOn(dow))} aria-label=${`Never work ${fmtDowLong(patternDates(dow)[0])}s`} onClick=${() => toggleWeekly(dow)}>${label}</button>`)}
           </div>
-          <p class="t-small t-mute" style="margin-top:8px">Pick the days you never work. They are marked off for the next two months, so open this now and then to carry them on.</p>
+          <p class="t-small avhint" style="margin:8px 0 0">Pick the days you never work. They are marked off for the next two months, so open this now and then to carry them on.</p>
         </div>
-      </section>
+      <//>
 
-      <section class="section">
-        <span class="t-label">Days off coming up</span>
-        ${upcoming.runs.length || upcoming.weekly.length ? html`<div class="list ruled">
-          ${upcoming.weekly.map((w) => html`<div class="row" key=${'w' + w.dow}>
-            <span class="lead offlead"><${Icon} name="refresh" size=${20} /></span>
-            <span class="main"><b>Every ${fmtDowLong(w.dates[0])}</b><span>Until ${fmtDate(w.dates[w.dates.length - 1])}${w.dates.some((d) => edits[d]) ? ' · not saved yet' : ''}</span></span>
-            <span class="trail" />
+      <${Section} label="Days off coming up">
+        ${upcoming.runs.length || upcoming.weekly.length ? html`<div class="list flat">
+          ${upcoming.weekly.map((w) => html`<div class="item day" key=${'w' + w.dow}>
+            <span class="daycell"><span class="dow">Every</span><span class="dom">${fmtDow(w.dates[0])}</span></span>
+            <span class="main"><b>Every ${fmtDowLong(w.dates[0])}</b><span class="sub nums">Until ${fmtDate(w.dates[w.dates.length - 1])}${w.dates.some((d) => edits[d]) ? ' · not saved yet' : ''}</span></span>
+            <span class="side"><${StatusBadge} status="unavailable" /></span>
           </div>`)}
-          ${upcoming.runs.map((run) => html`<button type="button" class="row" key=${run.dates[0]} onClick=${() => openReason(run.dates)}>
-            <span class=${cx('lead offlead', run.status)}><b>${fmtDom(run.dates[0])}</b><small>${fmtDate(run.dates[0]).replace(/^\d+\s/, '').slice(0, 3)}</small></span>
-            <span class="main"><b>${run.dates.length === 1 ? fmtDay(run.dates[0]) : `${fmtDay(run.dates[0])} to ${fmtDay(run.dates[run.dates.length - 1])}`}</b>
-              <span>${WORD[run.status]}${run.dates.length > 1 ? ` · ${run.dates.length} days` : ''}${run.note ? ' · ' + run.note : ''}${run.dates.some((d) => edits[d]) ? ' · not saved yet' : ''}</span></span>
-            <span class="trail"><${Icon} name="note" size=${18} /></span>
+          ${upcoming.runs.map((run) => html`<button type="button" class="item day" key=${run.dates[0]} onClick=${() => openReason(run.dates)}>
+            <span class="daycell"><span class="dow">${fmtDow(run.dates[0])}</span><span class="dom">${fmtDom(run.dates[0])}</span></span>
+            <span class="main"><b class="nums">${run.dates.length === 1 ? fmtDay(run.dates[0]) : `${fmtDay(run.dates[0])} to ${fmtDay(run.dates[run.dates.length - 1])}`}</b>
+              <span class="sub">${WORD[run.status]}${run.dates.length > 1 ? ` · ${run.dates.length} days` : ''}${run.note ? ' · ' + run.note : ''}${run.dates.some((d) => edits[d]) ? ' · not saved yet' : ''}</span></span>
+            <span class="side"><span class="link">Change</span></span>
           </button>`)}
-        </div>` : html`<p class="block t-small" style="margin-top:6px;max-width:34ch">No days off coming up. Tap a day on the calendar if you cannot work it.</p>`}
-      </section>
+        </div>` : html`<p class="block t-small avhint">No days off coming up. Tap a day on the calendar if you cannot work it.</p>`}
+      <//>
     </div>`}
-
-    ${changed ? html`<div class="dock savedock">
-      <${Button} block busy=${busy} onClick=${save}>Save ${changed} ${changed === 1 ? 'day' : 'days'}${telling.length ? ' and tell the office' : ''}<//>
-    </div>` : null}
   <//>`;
 }
 
@@ -265,7 +260,7 @@ function ReasonSheet({ dates, status: status0, note: note0, onSave, onClose }) {
         <${Picks} value=${status} options=${[['unavailable', 'Cannot work'], ['leave', 'Am on leave'], ['available', 'Can work']]} onChange=${setStatus} /></div>
       ${status === 'available' ? null : html`<label class="field"><span>Reason for the office (optional)</span>
         <input class="input" type="text" maxlength="80" placeholder="e.g. Family trip, back Thursday" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} /></label>`}
-      <p class="t-small t-mute">Press Save on the page after this to send it to the office.</p>
+      <p class="t-small">Press Save on the page after this to send it to the office.</p>
     </div>
   <//>`;
 }

@@ -1,17 +1,18 @@
-// Book crew on a job (managers). One sheet: pick people, pick days, book.
+// Allocate crew to a job (managers). One sheet: pick people, pick days, book.
 // The same sheet shows who is on the job now, sets the lead and takes a day off.
 import { html, cx, useMemo, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { useStore, invalidate } from '../lib/store.js';
 import { useJob } from '../lib/data.js';
-import { todayISO, addDays, fmtDay, fmtDow, fmtDom, fmtTime, firstName } from '../lib/dates.js';
-import { jobTitle } from '../lib/model.js';
+import { todayISO, addDays, fmtDay, fmtDow, fmtDom, firstName } from '../lib/dates.js';
+import { fmtClock } from './words.js';
+import { jobTitle, jobAddress } from '../lib/model.js';
 import { useUsers, useAvailability, awayIndex, awayWord, bookable, daysWords } from '../lib/roster.js';
 import { Icon } from '../ui/icons.js';
-import { Sheet, Button, IconButton, Seg, Picks, Avatar, Chip, Skel, toast, ask, openOverlay, buzz } from '../ui/kit.js';
+import { Sheet, Button, IconButton, Seg, Picks, Avatar, Badge, StatusBadge, JobLine, Skel, toast, ask, openOverlay, buzz } from '../ui/kit.js';
 
 const WORKED = ['complete', 'completed', 'submitted', 'verified', 'invoiced'];
-const TIMES = [['', 'No set time'], ['06:30', '6:30am'], ['07:00', '7am'], ['07:30', '7:30am'], ['other', 'Other']];
+const TIMES = [['', 'No set time'], ['06:30', '6:30 am'], ['07:00', '7:00 am'], ['07:30', '7:30 am'], ['other', 'Other']];
 
 /** Open the booking sheet for a job. `vertical` is the job type, as the job page worked it out. */
 export function openAllocate(job, vertical, preset) {
@@ -31,7 +32,7 @@ function words(err) {
 
 function refresh(jobId) { invalidate('job:' + jobId); invalidate('myjobs'); invalidate('team'); invalidate('board'); }
 
-function AllocateSheet({ job, preset, onClose }) {
+function AllocateSheet({ job, vertical, preset, onClose }) {
   const user = useStore((s) => s.user);
   const today = todayISO();
   const startDays = ((preset && preset.days) || []).filter((d) => d >= today && d <= addDays(today, 13));
@@ -163,51 +164,52 @@ function AllocateSheet({ job, preset, onClose }) {
   const label = !people.length ? 'Pick who is going' : !days.length ? 'Pick the days' : people.length === 1 ? `Book ${people[0] === user.id ? 'myself' : firstName(nameOf(people[0]))} for ${days.length} ${days.length === 1 ? 'day' : 'days'}` : `Book ${people.length} people for ${days.length} ${days.length === 1 ? 'day' : 'days'}`;
   const textsOthers = people.some((id) => id !== user.id);
 
-  return html`<${Sheet} tall title="Book crew" sub=${[jobTitle(job), job.job_number].filter(Boolean).join(' · ')} onClose=${onClose}
-    foot=${mode === 'book' ? (shut) => html`<${Button} block busy=${busy} disabled=${!n} onClick=${() => submit(shut)}>${busy ? step : label}<//>` : null}>
-    <div class="stack">
+  return html`<${Sheet} tall title="Allocate crew" onClose=${onClose}
+    foot=${mode === 'book' ? (shut) => html`<${Button} class="big" block busy=${busy} disabled=${!n} onClick=${() => submit(shut)}>${busy ? step : label}<//>` : null}>
+    <div class="stack alloc">
+      <div class="card aljob"><${JobLine} job=${job} vertical=${vertical} /><b class="t-head">${jobAddress(job) || jobTitle(job)}</b></div>
       ${onJob.length ? html`<${Seg} value=${mode} options=${[['book', 'Book'], ['crew', `On the job · ${onJob.length}`]]} onChange=${setMode} />` : null}
 
       ${mode === 'crew' ? html`<div class="stack">
-        ${onJob.map((p) => html`<div class="crewcard" key=${p.key}>
-          <div class="crewhead"><${Avatar} name=${p.name} me=${p.id === user.id} lg />
-            <span class="grow"><b>${p.id === user.id ? 'You' : p.name}</b>${p.lead ? html`<${Chip} kind="solid">Lead<//>` : null}</span>
+        ${onJob.map((p) => html`<div class="card alcrew" key=${p.key}>
+          <div class="alcrew-head"><${Avatar} name=${p.name} me=${p.id === user.id} />
+            <span class="grow"><b>${p.id === user.id ? 'You' : p.name}</b>${p.lead ? html`<${Badge} kind="live">Lead<//>` : null}</span>
             ${leadKnown && p.id ? html`<${Button} kind="quiet" small busy=${step === 'lead:' + p.key} onClick=${() => setLead(p, p.lead)}>${p.lead ? 'Clear lead' : 'Make lead'}<//>` : null}
           </div>
-          <div class="crewdays">${p.rows.map((r) => {
+          ${p.rows.map((r) => {
             const worked = WORKED.includes(r.status);
-            return html`<span key=${r.id} class=${cx('chip', worked && 'ok', r.date === today && !worked && 'hi')}>
-              ${worked ? html`<${Icon} name="check" size=${13} stroke=${2.6} />` : null}${r.date ? fmtDay(r.date) : 'No day set'}${r.start && !worked ? ' · ' + fmtTime(r.start) : ''}
-              ${worked ? null : step === 'remove:' + r.id ? html`<i class="minispin" />` : html`<button type="button" class="chipx" aria-label=${`Take ${p.name} off ${r.date ? fmtDay(r.date) : 'this job'}`} onClick=${() => removeDay(p, r)}><${Icon} name="close" size=${14} stroke=${2.6} /></button>`}
-            </span>`;
-          })}</div>
-          ${p.rows.some((r) => WORKED.includes(r.status)) ? html`<p class="t-small t-mute">Days already worked stay. The office changes those.</p>` : null}
+            return html`<div class="kvrow" key=${r.id}>
+              <span class="v nums" style="text-align:left">${r.date ? fmtDay(r.date) : 'No day set'}${r.start && !worked ? ' · ' + fmtClock(r.start) : ''}</span>
+              ${worked ? html`<${StatusBadge} status="done" />` : step === 'remove:' + r.id ? html`<i class="spin" />`
+                : html`<button type="button" class="link tap" aria-label=${`Take ${p.name} off ${r.date ? fmtDay(r.date) : 'this job'}`} onClick=${() => removeDay(p, r)}>Take off</button>`}
+            </div>`;
+          })}
+          ${p.rows.some((r) => WORKED.includes(r.status)) ? html`<p class="t-small alnote">Days already worked stay. The office changes those.</p>` : null}
         </div>`)}
-        <p class="t-small t-mute">Tap the cross on a day to take that person off it.</p>
       </div>` : html`<div class="stack loose">
         <div class="field"><span>Who is going</span>
           ${roster.length > 8 ? html`<input class="input" type="search" placeholder="Find a person" value=${find} onInput=${(e) => setFind(e.currentTarget.value)} aria-label="Find a person" />` : null}
-          ${users.loading ? html`<div class="stack tight"><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /><${Skel} h=${48} r=${14} /></div>` : html`<div>
+          ${users.loading ? html`<div class="stack tight"><${Skel} h=${48} /><${Skel} h=${48} /><${Skel} h=${48} /></div>` : html`<div>
             ${shownRoster.map((u) => {
               const on = onJobById.get(u.id);
               const offDays = awayDays(u.id, days.length ? days : window14);
               const picked = people.includes(u.id);
               return html`<button type="button" class="person" key=${u.id} aria-pressed=${String(picked)} onClick=${() => togglePerson(u.id)}>
-                <${Avatar} name=${u.name} me=${u.id === user.id} lg />
+                <${Avatar} name=${u.name} me=${u.id === user.id} />
                 <span style="min-width:0"><b class="t-strong">${u.id === user.id ? 'You' : u.name}</b>
                   ${on ? html`<span class="t-small" style="display:block">On this job ${daysWords(on.rows.map((r) => r.date).filter(Boolean), 2)}</span>` : null}
-                  ${offDays.length ? html`<span class=${cx('t-small', days.length ? 't-bad' : 't-mute')} style="display:block;font-weight:${days.length ? 620 : 440}">${awayWord(offDays[0].status)} ${daysWords(offDays.map((r) => r.date), 2)}</span>` : null}
+                  ${offDays.length ? html`<span class=${cx('t-small', days.length && 't-bad t-strong')} style="display:block">${awayWord(offDays[0].status)} ${daysWords(offDays.map((r) => r.date), 2)}</span>` : null}
                 </span>
-                <span class=${cx('picktick', picked && 'on')}><${Icon} name="check" size=${16} stroke=${3} /></span>
+                <span class=${cx('altick', picked && 'on')}><${Icon} name="check" size=${16} stroke=${3} /></span>
               </button>`;
             })}
-            ${term && !shownRoster.length ? html`<p class="t-small t-mute" style="padding:10px 0">Nobody by that name.</p>` : null}
+            ${term && !shownRoster.length ? html`<p class="t-small" style="padding:10px 0">Nobody by that name.</p>` : null}
           </div>`}
-          ${listRefused ? html`<p class="t-small t-mute">${users.error ? 'Could not load the full team list. ' : 'The full team list is for the office. '}You can book yourself and anyone already on this job.${users.error ? html` <button type="button" class="linkbtn" onClick=${() => users.refetch()}>Try again</button>` : null}</p>` : null}
+          ${listRefused ? html`<p class="t-small">${users.error ? 'Could not load the full team list. ' : 'The full team list is for the office. '}You can book yourself and anyone already on this job.${users.error ? html` <button type="button" class="link tap" onClick=${() => users.refetch()}>Try again</button>` : null}</p>` : null}
         </div>
 
-        <div class="field"><span style="display:flex;justify-content:space-between;align-items:center">Which days
-          <span style="display:flex;margin:-10px -8px -10px 0"><${IconButton} name="back" label="This week" size=${18} disabled=${page === 0} onClick=${() => setPage(0)} /><${IconButton} name="right" label="Next week" size=${18} disabled=${page === 1} onClick=${() => setPage(1)} /></span></span>
+        <div class="field"><span class="aldays-h">Which days
+          <span><${IconButton} name="back" label="This week" size=${18} disabled=${page === 0} onClick=${() => setPage(0)} /><${IconButton} name="right" label="Next week" size=${18} disabled=${page === 1} onClick=${() => setPage(1)} /></span></span>
           <div class="daypicks">
             ${pageDays.map((d) => html`<button type="button" key=${d} class=${cx('daypick', d === today && 'today')} aria-pressed=${String(days.includes(d))} aria-label=${fmtDay(d) + (countByDay.get(d) ? `, ${countByDay.get(d)} on the job` : '')} onClick=${() => toggleDay(d)}>
               <span class="dow">${d === today ? 'Today' : fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>${countByDay.get(d) ? html`<span class="t-small">${countByDay.get(d)} on</span>` : null}
@@ -218,15 +220,15 @@ function AllocateSheet({ job, preset, onClose }) {
 
         <div class="field"><span>Start time (optional)</span>
           <${Picks} value=${time} options=${TIMES} onChange=${setTime} />
-          ${time === 'other' ? html`<input class="input big" type="time" step="300" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} aria-label="Start time" />` : null}
+          ${time === 'other' ? html`<input class="input" type="time" step="300" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} aria-label="Start time" />` : null}
         </div>
 
         <label class="field"><span>Note on the booking (optional)</span>
           <textarea class="input" rows="2" style="min-height:72px" placeholder="e.g. Bring the auger. Park on the verge." value=${note} onInput=${(e) => setNote(e.currentTarget.value)} /></label>
 
-        <div class="note-banner plain"><${Icon} name="message" size=${18} /><span>${textsOthers || !people.length ? 'Each person gets a text for every day you book them. ' : ''}Booking yourself sends no text. The customer is not texted.</span></div>
+        <div class="note-banner plain"><span>${textsOthers || !people.length ? 'Each person gets a text for every day you book them. ' : ''}Booking yourself sends no text. The customer is not texted.</span></div>
 
-        ${failed.length ? html`<div class="note-banner bad bookfail" role="alert"><${Icon} name="alert" size=${18} /><span><b class="t-strong">Not booked</b>
+        ${failed.length ? html`<div class="note-banner bad bookfail" role="alert"><span><b class="t-strong">Not booked</b>
           <span style="display:block;margin-top:2px">${someOk ? 'The rest went through. These are still picked, so you can try again.' : 'Nothing was booked.'}</span>
           ${failed.slice(0, 5).map((f) => html`<span style="display:block;margin-top:4px">${nameOf(f.id)}, ${fmtDay(f.d)}: ${f.message}</span>`)}
           ${failed.length > 5 ? html`<span style="display:block;margin-top:4px">And ${failed.length - 5} more.</span>` : null}</span></div>` : null}

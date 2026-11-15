@@ -1,32 +1,71 @@
-// One job: where it is, what to build, photos, notes, files and who is on it.
-// Any trade can open any job. What you can do on it depends on whether you
-// are on it yet, and adding yourself is one tap.
+// One job's record: where it is, its details, the scope, photos, notes and
+// files. Any trade can open any job. What you can do on it depends on whether
+// you are on it yet, and adding yourself is one tap.
 import { html, cx, useEffect, useMemo, useState } from '../lib/h.js';
 import { api, apiText, ghl, ApiError, friendly } from '../lib/api.js';
-import { useQuery, useStore, invalidate, mutateQuery } from '../lib/store.js';
+import { useQuery, useStore, local, invalidate } from '../lib/store.js';
 import { useJob, jobStub, bookMyself, unbookMyself, noteBody, optimisticNote, useMyBookings } from '../lib/data.js';
 import { go, back } from '../lib/router.js';
-import { todayISO, addDays, fmtDay, fmtDow, fmtDom, fmtDate, fmtTime, fmtTs, fmtHours, fmtRelDay, tsToDate } from '../lib/dates.js';
+import { todayISO, addDays, mondayOf, fmtDay, fmtDow, fmtDom, fmtDate, fmtTs, fmtRelDay } from '../lib/dates.js';
 import {
-  verticalOf, isReportJob, jobTitle, jobAddress, mapsUrl, jobStatusLabel, jobIsClosed, jobNotOpenYet, tradeNotes, noteText, noteAuthor, splitMedia, PHASES, noPrices
+  verticalOf, isReportJob, jobTitle, jobAddress, mapsUrl, jobStageKey, jobIsClosed, jobNotOpenYet, tradeNotes, noteText, noteAuthor, splitMedia, PHASES, noPrices, VERTICAL_LABEL
 } from '../lib/model.js';
 import { queueWrite, outboxItems, onOutbox } from '../lib/outbox.js';
 import { uploadPhoto, pickPhotos } from '../lib/upload.js';
-import { Icon } from '../ui/icons.js';
 import {
-  Page, Tag, Chip, Button, Sheet, Slide, Skel, Empty, LoadError, PhotoGrid, Avatar, Field, Picks, toast, openOverlay, ask, buzz, openLightbox
+  Page, Section, KV, JobLine, Badge, StatusBadge, STATUS, Button, Sheet, Skel, Empty, LoadError, PhotoGrid, Avatar, Field, Picks, toast, openOverlay, ask, buzz
 } from '../ui/kit.js';
 import { clockOn, openClockOff, useElapsed } from './clock.js';
-import { markOnTheWay, lockIn, openCantMakeIt, wasDeclined } from './bookings.js';
+import { markOnTheWay, lockIn, openCantMakeIt, wasDeclined, bookingStatus } from './bookings.js';
+import { fmtHrs, shortName } from './words.js';
 
-const TABS = [['scope', 'Scope'], ['photos', 'Photos'], ['notes', 'Notes'], ['files', 'Files'], ['crew', 'Crew']];
+const TABS = [['overview', 'Overview'], ['scope', 'Scope'], ['photos', 'Photos'], ['notes', 'Notes'], ['files', 'Files']];
+const WORKED = ['complete', 'completed', 'submitted', 'verified'];
+// The server's invoice mode for the job, in the words the pay screens use. Never worked out here.
+const PAY_TYPE = { hourly: 'Hourly', work_order: 'Work order', group_work_order: 'Group work order', commission: 'Commission' };
+
+const liveCrew = (data) => ((data && data.crew) || []).filter((c) => String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer');
+/** The signed-in trade's own bookings on a job: from the job when it is open to them, else from their own list. */
+function myRowsOf(crew, bookings, jobId, userId) {
+  const fromCrew = crew.filter((c) => c.user_id === userId).map((c) => ({ id: c.id, date: (c.scheduled_date || '').slice(0, 10), status: String(c.status || '').toLowerCase(), clockOn: c.clocked_on_at, clockOff: c.clocked_off_at, hours: c.hours_worked, start: c.start_time }));
+  if (fromCrew.length) return fromCrew;
+  return bookings.filter((b) => b.jobId === jobId && b.mine).map((b) => ({ id: b.id, date: b.date, status: b.status, clockOn: b.clockOn, clockOff: b.clockOff, hours: b.hours, start: b.start }));
+}
+/** Everyone on the job, one entry a person, the lead first. */
+function peopleOf(crew, lead, userId) {
+  const map = new Map();
+  for (const c of crew) {
+    const id = c.user_id || c.name;
+    const p = map.get(id) || { id, name: c.name || (c.users && c.users.name) || c.crew_name || 'Crew', phone: (c.users && c.users.phone) || c.phone || null, days: [], lead: false };
+    p.days.push({ id: c.id, date: (c.scheduled_date || '').slice(0, 10), status: String(c.status || '').toLowerCase() });
+    if (c.is_lead || (lead && lead.user_id === c.user_id)) p.lead = true;
+    map.set(id, p);
+  }
+  return [...map.values()].map((p) => ({ ...p, days: p.days.sort((a, b) => a.date.localeCompare(b.date)) })).sort((a, b) => (b.lead - a.lead) || (a.id === userId ? -1 : 1));
+}
+/** 'Fri 13 Nov' for one day, 'Fri 13 to Sat 14 Nov' for a run of days. */
+function spanWords(dates) {
+  const list = [...new Set(dates.filter(Boolean))].sort();
+  if (!list.length) return '';
+  const a = list[0]; const b = list[list.length - 1];
+  if (a === b) return fmtDay(a);
+  return a.slice(0, 7) === b.slice(0, 7) ? `${fmtDow(a)} ${fmtDom(a)} to ${fmtDay(b)}` : `${fmtDay(a)} to ${fmtDay(b)}`;
+}
+const DOC_LABEL = { council_plans: 'Council plans', engineering: 'Engineering', work_order: 'Work order', roof_report: 'Roof report', makesafe_report: 'Make safe report', swms: 'Safe work statement', approval: 'Approval', supplier_quote: 'Supplier quote', quote: 'Quote', site_plan: 'Site plan', scope_of_works: 'Scope of works', other: 'Document' };
+// Priced paperwork (quotes, invoices, work orders, supplier quotes) is for the office only.
+const PRICED_DOCS = ['quote', 'invoice', 'work_order', 'supplier_work_order', 'supplier_quote', 'purchase_order'];
+function docUrl(d) { return [d.pdf_url, d.public_url, d.signed_url, d.download_url, d.url, d.file_url, d.storage_url].find((u) => typeof u === 'string' && /^https?:/.test(u)); }
+function docName(d) { return d.label || d.file_name || d.name || d.filename || DOC_LABEL[d.type] || 'Document'; }
+function visibleDocs(data, user) {
+  return ((data && data.documents) || []).filter((d) => d.visible_to_trades !== false && d.type !== 'site_photo' && docUrl(d) && (user.seesMoney || !PRICED_DOCS.includes(String(d.type || '').toLowerCase())));
+}
 
 export function Job({ jobId, tab: tabParam }) {
   const user = useStore((s) => s.user);
   const clock = useStore((s) => s.clock);
   const q = useJob(jobId);
   const { bookings } = useMyBookings();
-  const [tab, setTab] = useState(TABS.some((t) => t[0] === tabParam) ? tabParam : 'scope');
+  const [tab, setTab] = useState(TABS.some((t) => t[0] === tabParam) ? tabParam : 'overview');
   const data = q.data;
   const stub = jobStub(jobId) || (bookings.find((b) => b.jobId === jobId) || {}).job || null;
   const job = (data && data.job) || stub;
@@ -35,109 +74,108 @@ export function Job({ jobId, tab: tabParam }) {
   const today = todayISO();
   const tier = data ? data.access_tier : null;
   const viewOnly = q.locked || tier === 'company_view';
-  const crew = ((data && data.crew) || []).filter((c) => String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer');
-  const myRows = useMemo(() => {
-    const fromCrew = crew.filter((c) => c.user_id === user.id).map((c) => ({ id: c.id, date: (c.scheduled_date || '').slice(0, 10), status: String(c.status || '').toLowerCase(), clockOn: c.clocked_on_at, clockOff: c.clocked_off_at, hours: c.hours_worked, start: c.start_time }));
-    if (fromCrew.length) return fromCrew;
-    return bookings.filter((b) => b.jobId === jobId && b.mine).map((b) => ({ id: b.id, date: b.date, status: b.status, clockOn: b.clockOn, clockOff: b.clockOff, hours: b.hours, start: b.start }));
-  }, [data, bookings, jobId, user.id]);
+  const crew = useMemo(() => liveCrew(data), [data]);
+  const myRows = useMemo(() => myRowsOf(crew, bookings, jobId, user.id), [crew, bookings, jobId, user.id]);
   const onJob = myRows.length > 0;
   const notOpen = job ? jobNotOpenYet(job.status) : false;
   const closed = job ? jobIsClosed(job.status) || notOpen : false;
   const { photos, videos } = useMemo(() => splitMedia(data && data.media), [data]);
   const notes = useMemo(() => tradeNotes(data && data.notes), [data]);
   const pendingNotes = usePendingNotes(jobId);
+  const docs = useMemo(() => visibleDocs(data, user), [data, user]);
   const phone = job && !viewOnly ? job.client_phone : null;
   const canText = Boolean(job && !viewOnly && job.ghl_contact_id && (user.manager || Number(user.trade_tier) >= 2));
+  // Pay type is the server's invoice mode for this job, asked only for a job the trade is booked on.
+  const modeQ = useQuery(onJob && data && !viewOnly ? 'jobmode:' + jobId : null, () => api('trade_invoice_job_modes', { job_ids: jobId }, null, { keepSession: true }), { ttl: 300000 });
+  const modeRow = ((modeQ.data && modeQ.data.jobs) || []).find((r) => r && r.job_id === jobId);
+  const payType = modeRow ? PAY_TYPE[String(modeRow.invoice_mode || '')] || '' : '';
+  const report = data && data.serviceReport;
+  const foot = useFoot({ job, jobId, clock, myRows, today, closed, vertical, viewOnly, reportSent: Boolean(report && ['submitted', 'approved'].includes(String(report.status || '').toLowerCase())) });
 
-  const counts = { photos: photos.length, notes: notes.length + pendingNotes.length, crew: new Set(crew.map((c) => c.user_id)).size };
+  const toJobs = () => back('/jobs');
+  if (!job && q.loading) return html`<${Page} title="Job" back="Jobs" onBack=${toJobs}><div class="block" style="display:grid;gap:12px"><${Skel} w="70%" h=${24} /><${Skel} w="45%" h=${14} /><${Skel} h=${44} /><${Skel} h=${180} /></div><//>`;
+  if (!job) return html`<${Page} title="Job" back="Jobs" onBack=${toJobs}>${q.locked ? html`<${Empty} title="Job not found">It may have been removed, or the link is old. Search for it by suburb or job number.<//>` : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="this job" />`}<//>`;
 
-  if (!job && q.loading) return html`<${Page} title=""><div class="page-pad" style="display:grid;gap:14px"><${Skel} w="30%" h=${12} /><${Skel} w="70%" h=${40} /><${Skel} w="90%" /><${Skel} h=${72} r=${14} style="margin-top:10px" /><${Skel} h=${180} r=${14} /></div><//>`;
-  if (!job) return html`<${Page} title="">${q.locked ? html`<${Empty} title="Job not found">It may have been removed, or the link is old. Search for it by suburb or job number.<//>` : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="this job" />`}<//>`;
+  const counts = { photos: photos.length, notes: notes.length + pendingNotes.length, files: docs.length + ((data && data.purchaseOrders) || []).length };
+  const live = Boolean(clock && clock.jobId === jobId);
 
-  return html`<${Page} title=${jobTitle(job)} right=${html`<button type="button" class="iconbtn" aria-label="Refresh" onClick=${() => { q.refetch(); buzz(6); }}><${Icon} name="refresh" size=${20} class=${q.refreshing ? 'spin-slow' : ''} /></button>`}>
-    <header class="jobhero">
-      <div class="ref"><${Tag} vertical=${vertical} />${job.job_number ? html`<span class="t-small t-num t-mute">${job.job_number}</span>` : null}
-        ${closed && jobStatusLabel(job.status) ? html`<${Chip}>${jobStatusLabel(job.status)}<//>` : null}
-        ${onJob ? html`<${Chip} kind="ok" icon="check">You are on it<//>` : null}</div>
-      <h1 class="t-display">${jobTitle(job)}</h1>
-      ${jobAddress(job) ? html`<a class="addr" href=${mapsUrl(job)} target="_blank" rel="noopener"><${Icon} name="pin" size=${18} /><span>${jobAddress(job)}</span></a>` : null}
-      ${job.client_name ? html`<p class="t-small">For ${job.client_name}</p>` : null}
-    </header>
-
-    <div class="block actions" style="margin-top:16px">
-      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => { const r = myRows.find((x) => x.date === today); if (r) markOnTheWay({ ...r, jobId, job }); }}><${Icon} name="navigate" size=${22} />Navigate</a>
-      ${phone ? html`<a class="action" href=${'tel:' + phone}><${Icon} name="phone" size=${22} />Call</a>`
-        : html`<button type="button" class="action off" onClick=${() => toast(viewOnly ? 'Add yourself to this job to see the customer number.' : 'No phone number on this job. Ask the office.')}><${Icon} name="phone" size=${22} />Call</button>`}
-      ${canText ? html`<button type="button" class="action" onClick=${() => openText(job)}><${Icon} name="message" size=${22} />Text</button>` : null}
-      <button type="button" class="action" onClick=${() => (viewOnly ? toast('Add yourself to this job first.') : openProblem(job))}><${Icon} name="alert" size=${22} />Problem</button>
+  return html`<${Page} flush title=${job.job_number || 'Job'} back="Jobs" onBack=${toJobs} right=${html`<${StatusBadge} status=${jobStageKey(job.status)} />`} foot=${foot}>
+    <div class="jr-band">
+      <div class="jr-where">
+        <h2 class="jr-addr">${jobAddress(job) || jobTitle(job)}</h2>
+        <span class="jr-sub">${[VERTICAL_LABEL[vertical] || 'Job', job.client_name].filter(Boolean).join(' · ')}</span>
+      </div>
+      <div class="jr-acts">
+        <a class="jr-act" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => { const r = myRows.find((x) => x.date === today); if (r) markOnTheWay({ ...r, jobId, job }); }}>Navigate</a>
+        ${phone ? html`<a class="jr-act" href=${'tel:' + phone}>Call</a>` : null}
+        ${canText ? html`<button type="button" class="jr-act" onClick=${() => openText(job)}>Message</button>` : null}
+        ${viewOnly ? null : html`<button type="button" class="jr-act" onClick=${() => openProblem(job)}>Problem</button>`}
+      </div>
     </div>
 
-    ${viewOnly && !closed ? html`<div class="block note-banner plain" style="margin-top:14px"><${Icon} name="info" size=${18} /><span>You are looking at this job. Add yourself to clock on, add photos and notes, and see the customer's number.</span></div>` : null}
-    ${isReportJob(vertical) && !viewOnly ? html`<${ReportCard} jobId=${jobId} data=${data} vertical=${vertical} />` : null}
-    ${q.error && data ? html`<div class="block note-banner" style="margin-top:14px">Showing the last saved copy. ${q.error.offline ? 'No signal.' : ''}</div>` : null}
-
-    <div class="tabs" role="tablist">
-      ${TABS.map(([id, label]) => html`<button type="button" role="tab" aria-selected=${String(tab === id)} onClick=${() => { setTab(id); buzz(5); }}>${label}${counts[id] ? html`<span class="n">${counts[id]}</span>` : null}</button>`)}
+    <div class="tabs jr-tabs" role="tablist">
+      ${TABS.map(([id, label]) => html`<button type="button" role="tab" aria-selected=${String(tab === id)} onClick=${() => { setTab(id); buzz(5); }}>${label}${counts[id] ? html` <span class="n">${counts[id]}</span>` : null}</button>`)}
     </div>
 
-    <div key=${tab} class="rise" style="padding-top:18px;min-height:46vh">
+    <div key=${tab} class="jr-body">
+      ${viewOnly && !closed ? html`<div class="note-banner plain jr-banner"><span>You are looking at this job. Add yourself to clock on, add photos and notes, and see the customer's number.</span></div>` : null}
+      ${q.error && data ? html`<div class="note-banner jr-banner"><span>Showing the last saved copy.${q.error.offline ? ' No signal.' : ''}</span></div>` : null}
       ${q.locked ? (notOpen ? html`<${Empty} title="Not a live job yet">This one is still being quoted. It opens up for the crew once the customer says yes.<//>`
           : closed ? html`<${Empty} title="This job is closed">Ask the office if you need something from it.<//>`
           : html`<${Empty} title="Add yourself to open this job">The scope, photos and notes open up once you are on the job.<//>`)
-        : !data ? html`<div class="page-pad" style="display:grid;gap:12px"><${Skel} h=${90} r=${14} /><${Skel} w="80%" /><${Skel} w="60%" /></div>`
-        : tab === 'scope' ? html`<${ScopeTab} data=${data} job=${job} vertical=${vertical} videos=${videos} user=${user} viewOnly=${viewOnly} onJob=${onJob} />`
-        : tab === 'photos' ? html`<${PhotosTab} jobId=${jobId} photos=${photos} viewOnly=${viewOnly} live=${Boolean(clock && clock.jobId === jobId)} started=${myRows.some((r) => r.clockOn)} />`
+        : !data ? html`<div class="block" style="display:grid;gap:12px"><${Skel} h=${132} /><${Skel} w="80%" /><${Skel} w="60%" /></div>`
+        : tab === 'overview' ? html`<${Overview} jobId=${jobId} job=${job} data=${data} vertical=${vertical} user=${user} crew=${crew} myRows=${myRows} onJob=${onJob} viewOnly=${viewOnly} closed=${closed} payType=${payType} today=${today} live=${live} refreshing=${q.refreshing} onRefresh=${() => { q.refetch(); buzz(6); }} />`
+        : tab === 'scope' ? html`<${ScopeTab} data=${data} job=${job} vertical=${vertical} videos=${videos} docs=${docs} user=${user} viewOnly=${viewOnly} onJob=${onJob} />`
+        : tab === 'photos' ? html`<${PhotosTab} jobId=${jobId} photos=${photos} viewOnly=${viewOnly} live=${live} started=${myRows.some((r) => r.clockOn)} />`
         : tab === 'notes' ? html`<${NotesTab} jobId=${jobId} job=${job} notes=${notes} pending=${pendingNotes} user=${user} viewOnly=${viewOnly} />`
-        : tab === 'files' ? html`<${FilesTab} jobId=${jobId} data=${data} user=${user} viewOnly=${viewOnly} />`
-        : html`<${CrewTab} jobId=${jobId} job=${job} crew=${crew} lead=${data.leadInstaller} user=${user} myRows=${myRows} vertical=${vertical} />`}
+        : html`<${FilesTab} jobId=${jobId} data=${data} docs=${docs} user=${user} viewOnly=${viewOnly} />`}
     </div>
-
-    <${Dock} job=${job} jobId=${jobId} clock=${clock} myRows=${myRows} today=${today} closed=${closed} vertical=${vertical} />
   <//>`;
 }
 
-// ---------------------------------------------------------------- dock ----
-function Dock({ job, jobId, clock, myRows, today, closed, vertical }) {
+// ---------------------------------------------------------------- foot ----
+/** The one strong button for this job right now, with a line of words above it when they help. */
+function useFoot({ job, jobId, clock, myRows, today, closed, vertical, viewOnly, reportSent }) {
   const [busy, setBusy] = useState(false);
-  const liveHere = clock && clock.jobId === jobId;
+  const liveHere = Boolean(clock && clock.jobId === jobId);
   const t = useElapsed(liveHere ? clock.since : null, liveHere ? clock.breakMin : 0);
+  if (!job) return null;
   const todayRow = myRows.find((r) => r.date === today);
-  const doneToday = todayRow && (todayRow.clockOff || ['complete', 'completed', 'submitted', 'verified'].includes(todayRow.status));
+  const doneToday = todayRow && (todayRow.clockOff || WORKED.includes(todayRow.status));
   const ahead = myRows.filter((r) => r.date > today).sort((a, b) => a.date.localeCompare(b.date))[0];
-  const canFinish = !closed && !isReportJob(vertical);
+  const reportJob = isReportJob(vertical);
+  const canFinish = !closed && !reportJob;
+  const reportDue = reportJob && !closed && !viewOnly && myRows.length > 0 && !reportSent;
+  const strong = (label, onClick, extra = {}) => html`<${Button} block class="big" busy=${busy} onClick=${onClick} ...${extra}>${label}<//>`;
+  const toFinish = () => go(`/job/${jobId}/finish`);
+  const toReport = () => go(`/job/${jobId}/report`);
+  const addMe = () => openBook(jobId, job, myRows);
 
   if (liveHere) {
-    return html`<div class="dock">
-      <div style="display:flex;align-items:baseline;justify-content:space-between"><span class="t-label" style="color:var(--hi);display:flex;gap:8px;align-items:center"><i class="pulse" />On the clock</span><span class="t-num" style="font-size:26px">${t.h}:${t.m}<small class="t-mute" style="font-size:15px">:${t.s}</small></span></div>
-      <div class="btnrow"><${Button} onClick=${() => openClockOff()}>Clock off<//>${canFinish ? html`<${Button} kind="line" onClick=${() => go(`/job/${jobId}/finish`)}>Job finished<//>` : null}</div>
-    </div>`;
+    const second = canFinish ? html`<${Button} kind="line" onClick=${toFinish}>Start sign-off<//>` : reportDue ? html`<${Button} kind="line" onClick=${toReport}>Fill in the report<//>` : null;
+    return html`<div class="jr-footline"><span class="jr-live"><i />On site</span><span class="jr-timer">${t.h}:${t.m}<span class="t-small">:${t.s}</span></span></div>
+      <div class=${cx('jr-footbtns', !second && 'one')}>${second}<${Button} onClick=${() => openClockOff()}>Clock off<//></div>`;
   }
   if (closed && !myRows.length) return null;
-  if (todayRow && !doneToday && !closed) {
-    return html`<div class="dock"><${Slide} label="Slide to clock on" busy=${busy} onConfirm=${async () => { setBusy(true); await clockOn({ id: todayRow.id, jobId, job }); setBusy(false); }} /></div>`;
-  }
+  if (todayRow && !doneToday && !closed) return strong('Clock on', async () => { setBusy(true); await clockOn({ id: todayRow.id, jobId, job }); setBusy(false); });
   if (doneToday) {
-    return html`<div class="dock"><div class="inset" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <span><span class="t-strong">Done for today</span>${todayRow.hours ? html`<span class="t-small" style="display:block">${fmtHours(Number(todayRow.hours))} on the clock</span>` : null}</span>
-      ${canFinish ? html`<${Button} kind="line" small onClick=${() => go(`/job/${jobId}/finish`)}>Job finished<//>` : html`<${Icon} name="check" size=${24} class="t-ok" />`}
-    </div></div>`;
+    return html`<div class="jr-footline"><b>Done for today</b>${todayRow.hours ? html`<span class="t-num">${fmtHrs(Number(todayRow.hours))} recorded</span>` : null}</div>
+      ${canFinish ? strong('Start sign-off', toFinish) : reportDue ? strong('Fill in the report', toReport) : null}`;
   }
   if (closed) return null;
   if (ahead && ahead.status === 'scheduled' && !wasDeclined(ahead.id)) {
     const b = { ...ahead, jobId, job, mine: true };
-    return html`<div class="dock"><div class="inset" style="display:grid;gap:10px">
-      <span><span class="t-strong">The office booked you for ${fmtDay(ahead.date)}</span><span class="t-small" style="display:block">Can you do it?</span></span>
-      <div class="btnrow"><${Button} small icon="check" busy=${busy} onClick=${async () => { setBusy(true); await lockIn(b); setBusy(false); }}>Yes, lock it in<//><${Button} kind="soft" small onClick=${() => openCantMakeIt(b)}>Cannot make it<//></div>
-    </div></div>`;
+    return html`<div class="jr-footline"><span><b>The office booked you for ${fmtDay(ahead.date)}.</b> Can you do it?</span></div>
+      <div class="jr-footbtns"><${Button} kind="line" onClick=${() => openCantMakeIt(b)}>Cannot make it<//><${Button} busy=${busy} onClick=${async () => { setBusy(true); await lockIn(b); setBusy(false); }}>Confirm<//></div>`;
   }
   if (ahead) {
-    return html`<div class="dock"><div class="inset" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <span><span class="t-strong">Locked in for ${fmtRelDay(ahead.date) === 'Tomorrow' ? 'tomorrow' : fmtDay(ahead.date)}</span><span class="t-small" style="display:block">Here today instead?</span></span>
-      <${Button} small busy=${busy} onClick=${async () => { setBusy(true); const r = await bookMyself(jobId, [today]); setBusy(false); if (!r.ok) toast(r.message, { kind: 'bad' }); else buzz(12); }}>I am here today<//>
-    </div></div>`;
+    return html`<div class="jr-footline"><span><b>Booked for ${fmtRelDay(ahead.date) === 'Tomorrow' ? 'tomorrow' : fmtDay(ahead.date)}.</b> Here today instead?</span></div>
+      ${strong('Add me for today', async () => { setBusy(true); const r = await bookMyself(jobId, [today]); setBusy(false); if (!r.ok) toast(r.message, { kind: 'bad' }); else buzz(12); })}`;
   }
-  return html`<div class="dock"><${Button} block icon="plus" onClick=${() => openBook(jobId, job, myRows)}>I am on this job<//></div>`;
+  if (myRows.length && (canFinish || reportDue)) {
+    return html`<div class="jr-footbtns"><${Button} kind="line" onClick=${addMe}>Add another day<//>${canFinish ? html`<${Button} onClick=${toFinish}>Start sign-off<//>` : html`<${Button} onClick=${toReport}>Fill in the report<//>`}</div>`;
+  }
+  return strong(myRows.length ? 'Add another day' : 'Add me to this job', addMe);
 }
 
 // ------------------------------------------------------------- booking ----
@@ -171,21 +209,96 @@ function BookSheet({ jobId, job, taken, onClose }) {
   <//>`;
 }
 
-// -------------------------------------------------------------- report ----
-function ReportCard({ jobId, data, vertical }) {
-  const ms = (data && data.makesafe_details) || {};
-  const report = data && data.serviceReport;
-  const submitted = report && String(report.status || '').toLowerCase() === 'submitted';
-  const reportType = ms.report_type;
-  return html`<button type="button" class="block panel" style="margin-top:14px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;width:calc(100% - 2 * var(--gut));text-align:left" onClick=${() => go(`/job/${jobId}/report`)}>
-    <span><span class="t-label">${vertical === 'restoration' ? 'Restoration report' : reportType ? 'Builder report' : 'Make safe report'}</span>
-      <span class="t-head" style="display:block;margin-top:3px">${submitted ? 'Report sent' : report ? 'Finish your report' : 'Write the report'}</span></span>
-    ${submitted ? html`<${Chip} kind="ok" icon="check">Done<//>` : html`<${Icon} name="right" size=${20} />`}
-  </button>`;
+// ------------------------------------------------------------ overview ----
+function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewOnly, closed, payType, today, live, refreshing, onRefresh }) {
+  const money = user.seesMoney;
+  const people = useMemo(() => peopleOf(crew, data.leadInstaller, user.id), [crew, data.leadInstaller, user.id]);
+  const booked = spanWords(crew.map((c) => (c.scheduled_date || '').slice(0, 10)));
+  const crewWords = people.map((p) => (p.id === user.id ? 'You' : shortName(p.name)) + (p.lead ? ' (lead)' : '')).join(', ');
+  const siteNotes = noPrices(job.notes || (typeof data.scopeSummary === 'string' ? data.scopeSummary : '') || '', money).trim();
+  const stage = STATUS[jobStageKey(job.status)] || ['', ''];
+
+  // Sign-off, or the report on a make safe.
+  const reportJob = isReportJob(vertical);
+  const report = data.serviceReport;
+  const reportStatus = report ? String(report.status || '').toLowerCase() : '';
+  const reportLabel = vertical === 'restoration' ? 'Restoration report' : (data.makesafe_details || {}).report_type ? 'Builder report' : 'Make safe report';
+  const reportWords = reportStatus === 'approved' ? 'Approved' : reportStatus === 'submitted' ? 'Sent' : report ? 'Draft saved' : 'Not started';
+  const saved = local.get('finish:' + jobId);
+  const signoffWords = jobIsClosed(job.status) ? 'Done' : saved && (saved.step || (saved.photos || []).length) ? 'Started' : 'Not started';
+  const canSignOff = onJob && !viewOnly && !closed && !reportJob;
+
+  // My own bookings on it: today's first, then what is coming, then the last one worked.
+  const mine = [...myRows].sort((a, b) => a.date.localeCompare(b.date));
+  const key = mine.find((r) => r.date === today) || mine.find((r) => r.date > today) || mine[mine.length - 1] || null;
+  const also = mine.filter((r) => r !== key && r.date >= today).slice(0, 3);
+  const hours = mine.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+  const bookingRow = (r, label) => html`<${KV} key=${r.id} k=${label} onClick=${() => go('/schedule/booking/' + encodeURIComponent(r.id))}
+    v=${html`<span class="jr-val"><span>${r.date ? fmtDay(r.date) : 'No day set'}</span><${StatusBadge} status=${live && r === key ? 'on_site' : bookingStatus({ ...r, mine: true })} /></span>`} />`;
+
+  return html`
+    <${Section} label="Details" right=${html`<button type="button" class="link jr-call" onClick=${onRefresh}>${refreshing ? 'Checking' : 'Refresh'}</button>`}>
+      <div class="block card">
+        <${KV} k="Stage" v=${stage[1] || 'Not set'} />
+        <${KV} k="Booked" v=${booked || 'Not booked yet'} />
+        <${KV} k="Crew" v=${crewWords || 'Nobody yet'} onClick=${() => openCrew(jobId)} />
+        ${siteNotes ? (siteNotes.length > 34 ? html`<div class="jr-stack"><span class="k">Site notes</span><span class="v">${siteNotes}</span></div>` : html`<${KV} k="Site notes" v=${siteNotes} />`) : null}
+        ${reportJob
+          ? html`<${KV} k=${reportLabel} v=${reportWords} onClick=${viewOnly ? null : () => go(`/job/${jobId}/report`)} />`
+          : html`<${KV} k="Sign-off" v=${signoffWords} onClick=${canSignOff ? () => go(`/job/${jobId}/finish`) : null} />`}
+      </div>
+    <//>
+
+    ${onJob && key ? html`<${Section} label="Your work on this job">
+      <div class="block card">
+        ${bookingRow(key, 'Booking')}
+        ${also.map((r) => bookingRow(r, 'Also booked'))}
+        <${KV} k="Time recorded" v=${fmtHrs(hours)} onClick=${() => go('/pay/week/' + mondayOf(key.date && key.date <= today ? key.date : today))} />
+        ${payType ? html`<${KV} k="Pay type" v=${payType} />` : null}
+      </div>
+    <//>` : null}`;
+}
+
+// ---------------------------------------------------------------- crew ----
+function openCrew(jobId) { openOverlay((close) => html`<${CrewSheet} jobId=${jobId} onClose=${close} />`); }
+function CrewSheet({ jobId, onClose }) {
+  const user = useStore((s) => s.user);
+  const q = useJob(jobId);
+  const { bookings } = useMyBookings();
+  const data = q.data || {};
+  const job = data.job || jobStub(jobId) || {};
+  const vertical = verticalOf(job, data);
+  const today = todayISO();
+  const crew = useMemo(() => liveCrew(data), [q.data]);
+  const people = useMemo(() => peopleOf(crew, data.leadInstaller, user.id), [crew, data.leadInstaller, user.id]);
+  const myRows = myRowsOf(crew, bookings, jobId, user.id);
+  const closed = jobIsClosed(job.status) || jobNotOpenYet(job.status);
+  const canAllocate = !closed && (user.office || user.managed.includes(vertical));
+  const remove = async (day) => {
+    if (!(await ask({ title: `Take yourself off ${fmtDay(day.date)}?`, body: 'The office will see you are no longer booked that day.', yes: 'Take me off', danger: true }))) return;
+    const r = await unbookMyself(day.id, jobId);
+    if (r.ok) toast('Done. You are off that day.', { kind: 'ok' }); else toast(r.message, { kind: 'bad' });
+  };
+  const after = (shut, fn) => { shut(); setTimeout(fn, 220); };
+  return html`<${Sheet} title="Crew on this job" sub=${jobAddress(job) || jobTitle(job)} onClose=${onClose}
+    foot=${closed ? null : (shut) => html`
+      <${Button} kind="line" block onClick=${() => after(shut, () => openBook(jobId, job, myRows))}>${myRows.length ? 'Add another day for me' : 'Add me to this job'}<//>
+      ${canAllocate ? html`<${Button} kind="line" block onClick=${() => after(shut, () => import('./allocate.js').then((m) => m.openAllocate(job, vertical)).catch(() => toast('Could not open that. Check your signal.', { kind: 'bad' })))}>Allocate crew<//>` : null}`}>
+    ${people.length ? html`<div>${people.map((p) => html`<div class="jr-person" key=${p.id}>
+      <${Avatar} name=${p.name} me=${p.id === user.id} />
+      <div style="min-width:0">
+        <div class="jr-name"><span>${p.id === user.id ? 'You' : p.name}</span>${p.lead ? html`<${Badge} kind="live">Lead<//>` : null}</div>
+        <div class="jr-days">${p.days.map((d) => { const done = WORKED.includes(d.status); const removable = p.id === user.id && !done && d.date >= today && d.status !== 'in_progress';
+          return html`<div class=${cx('jr-day', removable && 'mine')} key=${d.id}><span>${d.date ? fmtDay(d.date) : 'No day set'}${done ? ', done' : d.date === today ? ', today' : ''}</span>
+            ${removable ? html`<button type="button" class="link jr-call" onClick=${() => remove(d)}>Take me off</button>` : null}</div>`; })}</div>
+      </div>
+      ${p.phone && p.id !== user.id ? html`<a class="link jr-call" href=${'tel:' + p.phone} aria-label=${'Call ' + p.name}>Call</a>` : html`<span />`}
+    </div>`)}</div>` : html`<${Empty} title="Nobody is booked yet">Be the first. Add yourself and it shows on the office calendar.<//>`}
+  <//>`;
 }
 
 // --------------------------------------------------------------- scope ----
-function ScopeTab({ data, job, vertical, videos, user, viewOnly, onJob }) {
+function ScopeTab({ data, job, vertical, videos, docs, user, viewOnly, onJob }) {
   const money = user.seesMoney;
   const eligible = (vertical === 'fencing' || vertical === 'patio');
   const jwo = useQuery(eligible ? 'jwo:' + job.id : null, () => api('my_job_work_order', { job_id: job.id }, null, { keepSession: true }), { ttl: 120000 });
@@ -207,42 +320,59 @@ function ScopeTab({ data, job, vertical, videos, user, viewOnly, onJob }) {
   const quoteNotes = mainPack ? [...(mainPack.quote_notes || []), ...(mainPack.items || []).filter((i) => i.kind === 'note').map((i) => i.description), mainPack.notes].filter(Boolean) : [];
   const extract = (data.quote_extracts || data.quoteExtracts || []).find((x) => x.action === 'trade_quote_extract' && x.quote_number);
   const summary = data.scopeSummary || job.notes || '';
+  const plans = docs.filter((d) => ['council_plans', 'engineering', 'site_plan', 'scope_of_works', 'approval'].includes(String(d.type || '').toLowerCase()));
   const nothing = !instructions && !tasks.length && !spec.length && !sealed && !scoperNotes.length && !quoteNotes.length && !summary && !videos.length;
+  const allNotes = [...scoperNotes, clientNote].filter(Boolean);
+  const taskRow = (t, flagged) => html`<div class=${cx('jr-row', (flagged || t.variation) && 'var')}>
+    <span class="jr-what">${noPrices(t.text, money)}${t.variation ? html`<span class="jr-kind">Variation${t.variation === true ? '' : ' ' + t.variation}</span>` : null}</span>
+    ${t.qty ? html`<span class="jr-qty">${t.qty}</span>` : null}</div>`;
 
-  return html`<div class="stack loose page-pad">
-    ${instructions ? html`<section class="note-banner"><${Icon} name="info" size=${18} /><div><span class="t-label" style="color:inherit;opacity:.7">From the office</span><p class="prose" style="margin-top:2px">${noPrices(instructions, money)}</p></div></section>` : null}
+  return html`
+    ${instructions ? html`<${Section} label="From the office"><p class="block card pad jr-para">${noPrices(instructions, money)}</p><//>` : null}
 
-    ${tasks.length ? html`<section>
-      <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="t-head">What to do</h2>${wo && wo.wo_number ? html`<span class="t-small t-mute t-num">${wo.wo_number}</span>` : mainPack && mainPack.quote_number ? html`<span class="t-small t-mute t-num">Quote ${mainPack.quote_number}</span>` : null}</div>
-      <div class="tasks" style="margin-top:6px">${tasks.map((t) => html`<div class=${cx('task', t.variation && 'var')}><span><span class="prose">${noPrices(t.text, money)}</span>${t.variation ? html`<span class="t-small" style="display:block;color:var(--warn);font-weight:650">Variation${t.variation === true ? '' : ' ' + t.variation}</span>` : null}</span><span class="q">${t.qty}</span></div>`)}</div>
-      ${wo && (wo.addenda || []).map((ad) => html`<div style="margin-top:14px"><span class="t-label" style="color:var(--warn)">${ad.label || 'Variation ' + (ad.variation_number || '')}</span>
-        ${ad.description ? html`<p class="prose" style="margin-top:4px">${noPrices(ad.description, money)}</p>` : null}
-        <div class="tasks">${(ad.scope_items || ad.lines || []).map(taskFromItem).map((t) => html`<div class="task var"><span class="prose">${noPrices(t.text, money)}</span><span class="q">${t.qty}</span></div>`)}</div></div>`)}
-    </section>` : null}
+    ${tasks.length ? html`<${Section} label="What to do" right=${wo && wo.wo_number ? html`<span class="t-small t-num">${wo.wo_number}</span>` : mainPack && mainPack.quote_number ? html`<span class="t-small t-num">Quote ${mainPack.quote_number}</span>` : null}>
+      <div class="block card">${tasks.map((t) => taskRow(t))}</div>
+    <//>` : null}
+    ${wo ? (wo.addenda || []).map((ad) => html`<${Section} label=${ad.label || 'Variation ' + (ad.variation_number || '')}>
+      <div class="block card">
+        ${ad.description ? html`<div class="jr-row var"><span class="jr-what">${noPrices(ad.description, money)}</span></div>` : null}
+        ${(ad.scope_items || ad.lines || []).map(taskFromItem).map((t) => taskRow(t, true))}
+      </div>
+    <//>`) : null}
 
     ${sealed ? html`<${SealedScope} sealed=${sealed} />` : null}
 
-    ${spec.length ? html`<section><h2 class="t-head" style="margin-bottom:10px">Build details</h2>
-      <dl class="kv">${spec.map(([k, v, wide]) => html`<div class=${wide ? 'wide' : ''}><dt>${k}</dt><dd>${v}</dd></div>`)}</dl></section>` : null}
+    ${spec.length ? html`<${Section} label="Build details">
+      <div class="block card">${spec.map(([k, v, wide]) => (wide
+        ? html`<div class="jr-stack"><span class="k">${k}</span><span class="v">${v}</span></div>`
+        : html`<div class="jr-row"><span class="jr-what">${k}</span><span class="jr-qty">${v}</span></div>`))}</div>
+    <//>` : null}
 
-    ${scoperNotes.length || clientNote ? html`<section><h2 class="t-head" style="margin-bottom:8px">Notes from the site visit</h2>
-      <div class="stack tight">${[...scoperNotes, clientNote].filter(Boolean).map((n) => html`<p class="prose quote-note">${noPrices(n, money)}</p>`)}</div></section>` : null}
+    ${allNotes.length ? html`<${Section} label="Scoper's notes">
+      <div class="block card pad">${allNotes.map((n) => html`<p class="jr-para">${noPrices(n, money)}</p>`)}</div>
+    <//>` : null}
 
-    ${quoteNotes.length ? html`<section><h2 class="t-head" style="margin-bottom:8px">From the quote</h2>
-      <div class="stack tight">${quoteNotes.map((n) => html`<p class="prose quote-note">${noPrices(n, money)}</p>`)}</div></section>` : null}
+    ${quoteNotes.length ? html`<${Section} label="From the quote">
+      <div class="block card pad">${quoteNotes.map((n) => html`<p class="jr-para">${noPrices(n, money)}</p>`)}</div>
+    <//>` : null}
 
-    ${!tasks.length && summary ? html`<section><h2 class="t-head" style="margin-bottom:8px">About this job</h2><p class="prose">${noPrices(typeof summary === 'string' ? summary : '', money)}</p></section>` : null}
+    ${!tasks.length && summary ? html`<${Section} label="About this job"><p class="block card pad jr-para">${noPrices(typeof summary === 'string' ? summary : '', money)}</p><//>` : null}
 
-    ${videos.length ? html`<section><h2 class="t-head" style="margin-bottom:10px">Site video${videos.length > 1 ? 's' : ''}</h2>
-      <div class="stack tight">${videos.map((v) => html`<div><video class="clip-video" controls playsinline preload="metadata" src=${v.url} />${v.label ? html`<p class="t-small" style="margin-top:4px">${v.label}</p>` : null}</div>`)}</div></section>` : null}
+    ${videos.length ? html`<${Section} label=${videos.length > 1 ? 'Site videos' : 'Site video'}>
+      <div class="block stack tight">${videos.map((v) => html`<div><video class="jr-video" controls playsinline preload="metadata" src=${v.url} />${v.label ? html`<p class="t-small" style="margin-top:4px">${v.label}</p>` : null}</div>`)}</div>
+    <//>` : null}
 
-    ${extract ? html`<${Button} kind="line" block icon="file" onClick=${() => openQuote(job.id, extract)}>Open the full quote (no prices)<//>` : null}
-    ${otherPacks.length ? html`<p class="t-small t-mute">${otherPacks.length} earlier quote${otherPacks.length > 1 ? 's' : ''} on this job. This shows the ${mainPack && (mainPack.status === 'accepted' || mainPack.accepted) ? 'accepted' : 'latest'} one.</p>` : null}
+    ${extract || plans.length ? html`<${Section} label="Documents">
+      <div class="block card">
+        ${extract ? html`<button type="button" class="jr-row link" onClick=${() => openQuote(job.id, extract)}><b>Quote ${extract.quote_number}<span class="jr-kind">Prices left out</span></b><span class="jr-open">Open</span></button>` : null}
+        ${plans.map((d) => html`<a class="jr-row link" href=${docUrl(d)} target="_blank" rel="noopener"><b>${docName(d)}<span class="jr-kind">${DOC_LABEL[d.type] || 'Document'}</span></b><span class="jr-open">Open</span></a>`)}
+      </div>
+      ${otherPacks.length ? html`<p class="block t-small" style="margin-top:6px">${otherPacks.length} earlier quote${otherPacks.length > 1 ? 's' : ''} on this job. This shows the ${mainPack && (mainPack.status === 'accepted' || mainPack.accepted) ? 'accepted' : 'latest'} one.</p>` : null}
+    <//>` : null}
 
     ${nothing ? html`<${Empty} title="No scope on this job yet">The office has not attached a scope of works. Check the notes and files, or call the office.<//>` : null}
 
-    ${onJob && !viewOnly ? html`<section style="margin-top:6px"><${Button} kind="soft" block icon="plus" onClick=${() => openVariation(job)}>Extra work? Ask for a variation<//></section>` : null}
-  </div>`;
+    ${onJob && !viewOnly ? html`<div class="block" style="margin-top:24px"><${Button} kind="line" block onClick=${() => openVariation(job)}>Extra work? Ask for a variation<//></div>` : null}`;
 }
 function taskFromItem(item) {
   if (typeof item === 'string') return { text: item, qty: '' };
@@ -290,11 +420,12 @@ function SealedScope({ sealed }) {
     }).catch(() => on && setState('differs'));
     return () => { on = false; };
   }, [sealed]);
-  if (state === 'checking') return html`<${Skel} h=${220} r=${14} />`;
-  if (state !== 'ok') return html`<section class="note-banner"><${Icon} name="alert" size=${18} /><span>${state === 'not-proved' ? (sealed.reason || 'Which version the customer accepted could not be confirmed.') : 'The scope page on this phone does not match the sealed one.'} So it is not shown here. Ask the office for it.</span></section>`;
-  return html`<section><h2 class="t-head" style="margin-bottom:10px">Scope of works</h2>
-    <iframe title="Scope of works" sandbox="" srcdoc=${sealed.page} style="width:100%;height:70vh;border:0;border-radius:var(--r-m);background:white" />
-    <p class="t-small t-mute" style="margin-top:6px">The version the customer accepted. Same page the office sees.</p></section>`;
+  if (state === 'checking') return html`<${Section} label="Scope of works"><div class="block"><${Skel} h=${220} /></div><//>`;
+  if (state !== 'ok') return html`<${Section} label="Scope of works"><div class="block note-banner"><span>${state === 'not-proved' ? (sealed.reason || 'Which version the customer accepted could not be confirmed.') : 'The scope page on this phone does not match the sealed one.'} So it is not shown here. Ask the office for it.</span></div><//>`;
+  return html`<${Section} label="Scope of works">
+    <div class="block card"><iframe class="jr-frame" title="Scope of works" sandbox="" srcdoc=${sealed.page} /></div>
+    <p class="block t-small" style="margin-top:6px">The version the customer accepted. Same page the office sees.</p>
+  <//>`;
 }
 function openQuote(jobId, extract) {
   openOverlay((close) => html`<${QuoteSheet} jobId=${jobId} extract=${extract} onClose=${close} />`);
@@ -303,7 +434,7 @@ function QuoteSheet({ jobId, extract, onClose }) {
   const [page, setPage] = useState(null); const [err, setErr] = useState(null);
   useEffect(() => { apiText('trade_quote_extract', { format: 'html', jobId, document_id: extract.job_document_id }).then(setPage).catch(setErr); }, []);
   return html`<${Sheet} title=${'Quote ' + extract.quote_number} sub="Prices are left out." onClose=${onClose} tall>
-    ${err ? html`<${Empty} title="Could not open the quote">${friendly(err)}<//>` : page == null ? html`<${Skel} h=${300} r=${14} />` : html`<iframe title="Quote" sandbox="" srcdoc=${page} style="width:100%;height:100%;min-height:60vh;border:0;border-radius:var(--r-m);background:white" />`}
+    ${err ? html`<${Empty} title="Could not open the quote">${friendly(err)}<//>` : page == null ? html`<${Skel} h=${300} />` : html`<iframe class="jr-frame" title="Quote" sandbox="" srcdoc=${page} style="height:100%;min-height:60vh" />`}
   <//>`;
 }
 
@@ -329,15 +460,13 @@ function PhotosTab({ jobId, photos, viewOnly, live, started }) {
   };
   const groups = PHASES.map(([phase, label]) => ({ phase, label, items: photos.filter((p) => (p.phase || 'scope') === phase), pend: pending.filter((p) => p.phase === phase) }));
   const other = photos.filter((p) => !PHASES.some(([ph]) => ph === (p.phase || 'scope')));
-  return html`<div class="stack loose page-pad">
-    ${viewOnly ? null : html`<${Button} block icon="camera" onClick=${() => add(defaultPhase)}>Add ${defaultPhase === 'scope' ? 'before' : defaultPhase === 'in_progress' ? 'progress' : 'finished'} photos<//>`}
-    ${groups.map((g) => (g.items.length || g.pend.length || !viewOnly) ? html`<section key=${g.phase}>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><h2 class="t-head">${g.label}</h2><span class="t-small t-mute t-num">${g.items.length || ''}</span></div>
-      <${PhotoGrid} photos=${g.items} pending=${g.pend} onAdd=${viewOnly ? null : () => add(g.phase)} addLabel="Add" />
-    </section>` : null)}
-    ${other.length ? html`<section><h2 class="t-head" style="margin-bottom:8px">Other</h2><${PhotoGrid} photos=${other} /></section>` : null}
-    ${viewOnly && !photos.length ? html`<${Empty} title="No photos yet" />` : null}
-  </div>`;
+  return html`
+    ${viewOnly ? null : html`<div class="block"><${Button} kind="line" block icon="camera" onClick=${() => add(defaultPhase)}>Add ${defaultPhase === 'scope' ? 'before' : defaultPhase === 'in_progress' ? 'progress' : 'finished'} photos<//></div>`}
+    ${groups.map((g) => (g.items.length || g.pend.length || !viewOnly) ? html`<${Section} key=${g.phase} label=${g.label} right=${g.items.length ? html`<span class="t-small t-num">${g.items.length} ${g.items.length === 1 ? 'photo' : 'photos'}</span>` : null}>
+      <div class="block"><${PhotoGrid} photos=${g.items} pending=${g.pend} onAdd=${viewOnly ? null : () => add(g.phase)} addLabel="Add" /></div>
+    <//>` : null)}
+    ${other.length ? html`<${Section} label="Other"><div class="block"><${PhotoGrid} photos=${other} /></div><//>` : null}
+    ${viewOnly && !photos.length ? html`<${Empty} title="No photos yet">Photos of this job show here once somebody adds them.<//>` : null}`;
 }
 
 // --------------------------------------------------------------- notes ----
@@ -365,26 +494,25 @@ function NotesTab({ jobId, job, notes, pending, user, viewOnly }) {
     }
     setBusy(false);
   };
-  return html`<div class="stack loose page-pad">
-    ${viewOnly ? null : html`<div><div class="composer">
-      <textarea class="input" rows="1" placeholder="Write a note for the office and crew" value=${text} onInput=${(e) => { setText(e.currentTarget.value); e.currentTarget.style.height = 'auto'; e.currentTarget.style.height = Math.min(140, e.currentTarget.scrollHeight) + 'px'; }} />
-      <button type="button" class="send" aria-label="Send note" disabled=${!text.trim() || busy} onClick=${send}><${Icon} name="send" size=${22} stroke=${2.4} /></button>
-    </div><p class="t-small t-mute" style="margin-top:6px">Notes go to the office and crew. The customer does not see them.</p></div>`}
-    ${notes.length || pending.length ? html`<div class="notes">
-      ${pending.map((p) => html`<div class="note pending" key=${p.id}><${Avatar} name=${user.name} me /><div><div class="who"><b>You</b> · waiting for signal</div><div class="bubble prose">${p.body.text}</div></div></div>`).reverse()}
-      ${[...notes].reverse().map((n) => { const who = noteAuthor(n); const office = who === 'Office'; return html`<div class=${cx('note', office && 'office')} key=${n.id}>
-        <${Avatar} name=${who} me=${n._mine || (n.users && n.users.name === user.name)} /><div><div class="who"><b>${who}</b> · ${fmtTs(n.created_at)}</div><div class="bubble prose">${noPrices(noteText(n), user.seesMoney)}</div></div></div>`; })}
-    </div>` : html`<${Empty} title="No notes yet">${viewOnly ? '' : 'Anything the next person should know? Gate codes, dogs, where the materials are.'}<//>`}
-  </div>`;
+  return html`
+    ${viewOnly ? null : html`<div class="block jr-compose">
+      <textarea class="input" rows="1" aria-label="Note" placeholder="Write a note for the office and crew" value=${text} onInput=${(e) => { setText(e.currentTarget.value); e.currentTarget.style.height = 'auto'; e.currentTarget.style.height = Math.min(140, e.currentTarget.scrollHeight) + 'px'; }} />
+      <div class="jr-composefoot">
+        <span class="t-small">Notes go to the office and crew. The customer does not see them.</span>
+        <${Button} kind="line" aria-label="Send note" busy=${busy} disabled=${!text.trim()} onClick=${send}>Send<//>
+      </div>
+    </div>`}
+    ${notes.length || pending.length ? html`<${Section} label="Notes, newest first">
+      <div class="block card">
+        ${[...pending].reverse().map((p) => html`<div class="jr-note pending" key=${p.id}><span class="jr-who"><b>You</b> · waiting for signal</span><span class="jr-para">${p.body.text}</span></div>`)}
+        ${[...notes].reverse().map((n) => { const who = noteAuthor(n); const mine = n._mine || (n.users && n.users.name === user.name); return html`<div class=${cx('jr-note', who === 'Office' && 'office')} key=${n.id}>
+          <span class="jr-who"><b>${mine ? 'You' : who}</b> · ${fmtTs(n.created_at)}</span><span class="jr-para">${noPrices(noteText(n), user.seesMoney)}</span></div>`; })}
+      </div>
+    <//>` : html`<${Empty} title="No notes yet">${viewOnly ? 'Notes from the office and crew show here.' : 'Anything the next person should know? Gate codes, dogs, where the materials are.'}<//>`}`;
 }
 
 // --------------------------------------------------------------- files ----
-const DOC_LABEL = { council_plans: 'Council plans', engineering: 'Engineering', work_order: 'Work order', roof_report: 'Roof report', makesafe_report: 'Make safe report', swms: 'Safe work statement', approval: 'Approval', supplier_quote: 'Supplier quote', quote: 'Quote', other: 'Document' };
-function docUrl(d) { return [d.pdf_url, d.public_url, d.signed_url, d.download_url, d.url, d.file_url, d.storage_url].find((u) => typeof u === 'string' && /^https?:/.test(u)); }
-function FilesTab({ jobId, data, user, viewOnly }) {
-  // Priced paperwork (quotes, invoices, work orders, supplier quotes) is for the office only.
-  const priced = ['quote', 'invoice', 'work_order', 'supplier_work_order', 'supplier_quote', 'purchase_order'];
-  const docs = (data.documents || []).filter((d) => d.visible_to_trades !== false && d.type !== 'site_photo' && docUrl(d) && (user.seesMoney || !priced.includes(String(d.type || '').toLowerCase())));
+function FilesTab({ jobId, data, docs, user, viewOnly }) {
   const pos = data.purchaseOrders || [];
   const receipts = (data.media || []).filter((m) => m.phase === 'receipt');
   const [busyPo, setBusyPo] = useState(null);
@@ -399,67 +527,26 @@ function FilesTab({ jobId, data, user, viewOnly }) {
     } catch (err) { toast(friendly(err), { kind: 'bad' }); }
     setBusyPo(null);
   };
-  return html`<div class="stack loose page-pad">
-    ${pos.length ? html`<section><h2 class="t-head" style="margin-bottom:10px">Materials</h2><div class="stack tight">
+  return html`
+    ${pos.length ? html`<${Section} label="Materials"><div class="block stack tight">
       ${pos.map((po) => { const approved = ['authorised', 'billed', 'sent', 'confirmed', 'delivered', 'submitted'].includes(String(po.status).toLowerCase()); const mine = receipts.filter((r) => r.po_id === po.id); const when = po.confirmed_delivery_date || po.delivery_date;
-        return html`<div class="inset" key=${po.id}>
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><span><span class="t-strong">${po.supplier_name || po.contact_name || 'Supplier'}</span><span class="t-small t-num" style="display:block">${po.po_number || ''}</span></span>
-            ${!approved ? html`<${Chip} kind="warn">Not approved yet<//>` : when ? html`<${Chip} kind="ok" icon="truck">${fmtDate(when)}<//>` : html`<${Chip}>Pick up<//>`}</div>
-          ${(po.line_items || []).length ? html`<ul style="margin:10px 0 0;padding-left:18px;color:var(--ink-2);font-size:15px">${po.line_items.map((li) => html`<li>${li.quantity || li.Quantity ? (li.quantity || li.Quantity) + ' x ' : ''}${noPrices(li.description || li.Description || '', user.seesMoney)}</li>`)}</ul>` : null}
-          ${!approved ? html`<p class="t-small" style="margin-top:8px">Do not buy against this order until the office approves it.</p>` : null}
-          ${mine.length ? html`<div style="margin-top:10px"><${PhotoGrid} four photos=${mine.map((m) => ({ ...m, url: m.storage_url, thumb: m.thumbnail_url || m.storage_url }))} /></div>` : null}
-          ${approved && !viewOnly ? html`<${Button} kind="line" small icon="receipt" busy=${busyPo === po.id} style="margin-top:12px" onClick=${() => addReceipt(po)}>Add receipt photo<//>` : null}
+        return html`<div class="card jr-po" key=${po.id}>
+          <div class="jr-pohead"><span><b class="t-strong">${po.supplier_name || po.contact_name || 'Supplier'}</b><span class="t-small t-num" style="display:block">${po.po_number || ''}</span></span>
+            ${!approved ? html`<${Badge} kind="warn">Not approved yet<//>` : when ? html`<${Badge} kind="ok">Delivery ${fmtDate(when)}<//>` : html`<${Badge}>Pick up<//>`}</div>
+          ${(po.line_items || []).length ? html`<ul>${po.line_items.map((li) => html`<li>${li.quantity || li.Quantity ? (li.quantity || li.Quantity) + ' x ' : ''}${noPrices(li.description || li.Description || '', user.seesMoney)}</li>`)}</ul>` : null}
+          ${!approved ? html`<p class="t-small">Do not buy against this order until the office approves it.</p>` : null}
+          ${mine.length ? html`<${PhotoGrid} four photos=${mine.map((m) => ({ ...m, url: m.storage_url, thumb: m.thumbnail_url || m.storage_url }))} />` : null}
+          ${approved && !viewOnly ? html`<${Button} kind="line" busy=${busyPo === po.id} onClick=${() => addReceipt(po)}>Add receipt photo<//>` : null}
         </div>`; })}
-    </div></section>` : null}
-    ${docs.length ? html`<section><h2 class="t-head" style="margin-bottom:4px">Documents</h2>
-      ${docs.map((d) => html`<a class="filerow" href=${docUrl(d)} target="_blank" rel="noopener"><span class="ico"><${Icon} name="file" size=${20} /></span>
-        <span style="min-width:0"><b class="clip">${d.label || d.file_name || d.name || d.filename || DOC_LABEL[d.type] || 'Document'}</b><span>${DOC_LABEL[d.type] || 'Document'}</span></span><${Icon} name="external" size=${18} class="t-mute" /></a>`)}</section>` : null}
+    </div><//>` : null}
+    ${docs.length ? html`<${Section} label="Documents"><div class="block card">
+      ${docs.map((d) => html`<a class="jr-row link" href=${docUrl(d)} target="_blank" rel="noopener"><b>${docName(d)}<span class="jr-kind">${DOC_LABEL[d.type] || 'Document'}</span></b><span class="jr-open">Open</span></a>`)}
+    </div><//>` : null}
     ${!pos.length && !docs.length ? html`<${Empty} title="No files on this job">Plans, approvals and material orders show here when the office adds them.<//>` : null}
-    ${viewOnly ? null : html`<div class="stack tight">
-      <${Button} kind="soft" block icon="receipt" onClick=${() => go('/pay/receipt?job=' + jobId)}>Bought something for this job? Add the receipt<//>
-      ${isReportJob(verticalOf(data.job, data)) ? null : html`<${Button} kind="soft" block icon="pen" onClick=${() => go(`/job/${jobId}/service`)}>Service report for the customer<//>`}
-    </div>`}
-  </div>`;
-}
-
-// ---------------------------------------------------------------- crew ----
-function CrewTab({ jobId, job, crew, lead, user, myRows, vertical }) {
-  const today = todayISO();
-  const people = useMemo(() => {
-    const map = new Map();
-    for (const c of crew) {
-      const id = c.user_id || c.name;
-      const p = map.get(id) || { id, name: c.name || (c.users && c.users.name) || c.crew_name || 'Crew', phone: (c.users && c.users.phone) || c.phone || null, days: [], lead: false };
-      p.days.push({ id: c.id, date: (c.scheduled_date || '').slice(0, 10), status: String(c.status || '').toLowerCase() });
-      if (c.is_lead || (lead && lead.user_id === c.user_id)) p.lead = true;
-      map.set(id, p);
-    }
-    return [...map.values()].map((p) => ({ ...p, days: p.days.sort((a, b) => a.date.localeCompare(b.date)) })).sort((a, b) => (b.lead - a.lead) || (a.id === user.id ? -1 : 1));
-  }, [crew, lead, user.id]);
-  const remove = async (day) => {
-    if (!(await ask({ title: `Take yourself off ${fmtDay(day.date)}?`, body: 'The office will see you are no longer booked that day.', yes: 'Take me off', danger: true }))) return;
-    const r = await unbookMyself(day.id, jobId);
-    if (r.ok) toast('Done. You are off that day.', { kind: 'ok' }); else toast(r.message, { kind: 'bad' });
-  };
-  const canAllocate = user.office || user.managed.includes(vertical);
-  return html`<div class="stack loose page-pad">
-    ${people.length ? html`<div class="stack">${people.map((p) => html`<div key=${p.id} style="display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;align-items:start">
-      <${Avatar} name=${p.name} me=${p.id === user.id} lg />
-      <div><div class="t-strong" style="font-size:17px">${p.id === user.id ? 'You' : p.name}${p.lead ? html` <${Chip} kind="solid">Lead<//>` : null}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${p.days.map((d) => html`<${DayChip} day=${d} today=${today} mine=${p.id === user.id} onRemove=${() => remove(d)} />`)}</div></div>
-      ${p.phone && p.id !== user.id ? html`<a class="iconbtn" href=${'tel:' + p.phone} aria-label=${'Call ' + p.name}><${Icon} name="phone" size=${20} /></a>` : html`<span />`}
-    </div>`)}</div>` : html`<${Empty} title="Nobody is booked yet">Be the first. Add yourself and it shows on the office calendar.<//>`}
-    <div class="btnrow">
-      <${Button} kind="line" icon="plus" onClick=${() => openBook(jobId, job, myRows)}>${myRows.length ? 'Add another day' : 'Add myself'}<//>
-      ${canAllocate ? html`<${Button} kind="soft" icon="users" onClick=${() => import('./allocate.js').then((m) => m.openAllocate(job, vertical)).catch(() => toast('Could not open that. Check your signal.', { kind: 'bad' }))}>Book crew<//>` : null}
-    </div>
-  </div>`;
-}
-function DayChip({ day, today, mine, onRemove }) {
-  const done = ['complete', 'completed', 'submitted', 'verified'].includes(day.status);
-  const removable = mine && !done && day.date >= today && day.status !== 'in_progress';
-  return html`<span class=${cx('chip', done && 'ok', day.date === today && !done && 'hi')}>${done ? html`<${Icon} name="check" size=${13} stroke=${2.6} />` : null}${day.date ? fmtDay(day.date) : 'No date'}
-    ${removable ? html`<button type="button" aria-label="Take me off this day" onClick=${onRemove} style="margin:-4px -6px -4px 0;padding:4px"><${Icon} name="close" size=${13} stroke=${2.6} /></button>` : null}</span>`;
+    ${viewOnly ? null : html`<div class="block stack tight" style="margin-top:24px">
+      <${Button} kind="line" block onClick=${() => go('/pay/receipt?job=' + jobId)}>Add a receipt for this job<//>
+      ${isReportJob(verticalOf(data.job, data)) ? null : html`<${Button} kind="line" block onClick=${() => go(`/job/${jobId}/service`)}>Service report for the customer<//>`}
+    </div>`}`;
 }
 
 // ------------------------------------------------- problem, text, variation
@@ -494,9 +581,9 @@ function TextSheet({ job, onClose }) {
     try { await ghl('send_sms', null, { contactId: job.ghl_contact_id, message: msg.trim(), jobId: job.id }); toast('Text sent to the customer.', { kind: 'ok' }); shut(); } catch (err) { toast(friendly(err), { kind: 'bad' }); }
     setBusy(false);
   };
-  return html`<${Sheet} title="Text the customer" sub="Sent from the SecureWorks number, so replies go to the office." onClose=${onClose} foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!msg.trim()} onClick=${() => send(shut)}>Send text<//>`}>
+  return html`<${Sheet} title="Message the customer" sub="A text sent from the SecureWorks number, so replies go to the office." onClose=${onClose} foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!msg.trim()} onClick=${() => send(shut)}>Send text<//>`}>
     <div class="stack">
-      <div class="stack tight">${quick.map((qm) => html`<button type="button" class="inset" style="text-align:left" onClick=${() => { setMsg(qm); buzz(6); }}>${qm}</button>`)}</div>
+      <div class="stack tight">${quick.map((qm) => html`<button type="button" class="jr-quick" onClick=${() => { setMsg(qm); buzz(6); }}>${qm}</button>`)}</div>
       <${Field} label="Your message"><textarea class="input" value=${msg} onInput=${(e) => setMsg(e.currentTarget.value)} placeholder="Pick one above or write your own" /><//>
     </div>
   <//>`;
@@ -525,7 +612,7 @@ function VariationSheet({ job, onClose }) {
     foot=${(shut) => html`<${Button} block busy=${busy} disabled=${desc.trim().length < 4} onClick=${() => send(shut)}>Send to the office<//>`}>
     <div class="stack">
       <${Field} label="What is the extra work?"><textarea class="input" value=${desc} onInput=${(e) => setDesc(e.currentTarget.value)} placeholder="e.g. Extra 3 m of fence down the left side, customer asked on site" /><//>
-      <${Field} label="Your guess at the cost (optional)"><input class="input" type="number" inputmode="decimal" min="0" value=${cost} onInput=${(e) => setCost(e.currentTarget.value)} placeholder="$" /><//>
+      <${Field} label="Your guess at the cost (optional)"><input class="input" type="number" inputmode="decimal" min="0" value=${cost} onInput=${(e) => setCost(e.currentTarget.value)} placeholder="Dollars" /><//>
       <${Button} kind="line" icon="camera" onClick=${async () => { const f = await pickPhotos({ multiple: false }); if (f[0]) setPhoto(f[0]); }}>${photo ? 'Photo added. Change it' : 'Add a photo'}<//>
     </div>
   <//>`;

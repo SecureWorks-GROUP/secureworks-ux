@@ -8,40 +8,14 @@ import { html, cx, useEffect, useMemo, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { getState, local, invalidate, useQuery } from '../lib/store.js';
 import { queueWrite } from '../lib/outbox.js';
-import { todayISO, addDays, fmtDay, fmtTime, fmtRelDay, fmtDow, fmtDom, tsToHM } from '../lib/dates.js';
-import { jobTitle, jobAddress, bookingState, VERTICAL_LABEL } from '../lib/model.js';
+import { todayISO, addDays, fmtDay, fmtRelDay, fmtDow, fmtDom, tsToHM } from '../lib/dates.js';
+import { jobTitle, bookingState, VERTICAL_LABEL } from '../lib/model.js';
 import { go } from '../lib/router.js';
+import { fmtClock, fmtHrs, fmtDayYear, fmtWeekYear, fmtWeekShort, shortName } from './words.js';
 import { onSilenceChanges, useJob, rememberJobStub } from '../lib/data.js';
 import { Button, Sheet, Field, Picks, Toggle, JobLine, StatusBadge, Section, toast, openOverlay, buzz } from '../ui/kit.js';
 
-// ---------------------------------------------------------------- words
-/** '07:00' -> '7:00 am' */
-export function fmtClock(hm) {
-  const m = /^(\d{1,2}):(\d{2})/.exec(String(hm || ''));
-  if (!m) return '';
-  const h = Number(m[1]);
-  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h >= 12 ? 'pm' : 'am'}`;
-}
-/** 8 -> '8.0 h'; 6.5 -> '6.5 h'; 2.58 -> '2.58 h' */
-export function fmtHrs(h) {
-  if (h == null || h === '' || isNaN(Number(h))) return '';
-  const r = Math.round(Number(h) * 100) / 100;
-  return `${Math.abs(r * 10 - Math.round(r * 10)) < 0.001 ? r.toFixed(1) : r.toFixed(2)} h`;
-}
-/** 'Fri 13 Nov 2026' */
-export function fmtDayYear(iso) { return iso ? `${fmtDay(iso)} ${String(iso).slice(0, 4)}` : ''; }
-/** '9 to 15 Nov 2026' */
-export function fmtWeekYear(monday) {
-  const sunday = addDays(monday, 6);
-  const a = fmtDay(monday).split(' '); const b = fmtDay(sunday).split(' ');
-  return `${a[1]}${a[2] === b[2] ? '' : ' ' + a[2]} to ${b[1]} ${b[2]} ${sunday.slice(0, 4)}`;
-}
-/** 'Henry Fence' -> 'Henry F.' */
-export function shortName(name) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '';
-  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
-}
+export { fmtClock, fmtHrs, fmtDayYear, fmtWeekYear, fmtWeekShort, shortName };
 
 // ---------------------------------------------------------------- status
 /** A booking the office made that the trade has not said yes to yet. */
@@ -83,11 +57,12 @@ export function useCrewWith(b, on = true) {
 export function bookingDetail(b, mates = []) {
   const st = bookingState(b);
   if (st === 'done') {
-    const span = b.clockOn && b.clockOff ? `${fmtClock(tsToHM(b.clockOn))} to ${fmtClock(tsToHM(b.clockOff))}` : '';
+    // The clock's own stamps, when they span a real stretch of time.
+    const span = b.clockOn && b.clockOff && Date.parse(b.clockOff) - Date.parse(b.clockOn) >= 300000 ? `${fmtClock(tsToHM(b.clockOn))} to ${fmtClock(tsToHM(b.clockOff))}` : '';
     return [span, b.hours ? fmtHrs(b.hours) : span ? '' : 'Worked'].filter(Boolean).join(' · ');
   }
   const first = st === 'live' ? `Clocked on ${fmtClock(tsToHM(b.clockOn))}` : b.start ? `Starts ${fmtClock(b.start)}` : 'No start time set';
-  return [first, mates.length ? 'with ' + mates.slice(0, 2).join(', ') + (mates.length > 2 ? ` +${mates.length - 2}` : '') : ''].filter(Boolean).join(' · ');
+  return [first, mates.length ? `with ${mates[0]}${mates.length > 1 ? ` +${mates.length - 1}` : ''}` : ''].filter(Boolean).join(' · ');
 }
 
 /**
@@ -206,9 +181,9 @@ export function useBookingChanges(bookings, fresh) {
     const today = todayISO(); const list = [];
     for (const [id, b] of Object.entries(now)) {
       const was = seen[id];
-      if (!was) list.push({ id, kind: 'new', text: `New: ${b.t}, ${fmtDay(b.d)}${b.s ? ' at ' + fmtTime(b.s) : ''}`, day: b.d });
+      if (!was) list.push({ id, kind: 'new', text: `New: ${b.t}, ${fmtDay(b.d)}${b.s ? ' at ' + fmtClock(b.s) : ''}`, day: b.d });
       else if (was.d !== b.d) list.push({ id, kind: 'moved', text: `${b.t} moved from ${fmtDay(was.d)} to ${fmtDay(b.d)}`, day: b.d });
-      else if (was.s !== b.s && b.s) list.push({ id, kind: 'time', text: `${b.t} on ${fmtDay(b.d)} now starts ${fmtTime(b.s)}`, day: b.d });
+      else if (was.s !== b.s && b.s) list.push({ id, kind: 'time', text: `${b.t} on ${fmtDay(b.d)} now starts ${fmtClock(b.s)}`, day: b.d });
     }
     for (const [id, was] of Object.entries(seen)) if (!now[id] && was.d >= today) list.push({ id, kind: 'gone', text: `${was.t} on ${fmtDay(was.d)} is off your list`, day: was.d });
     setChanges(list);

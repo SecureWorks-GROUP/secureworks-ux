@@ -1,1 +1,108 @@
-/* SecureWorks Crew: schedule screens. Tokens and shared components live in app.css. */
+/* SecureWorks Crew: Today, Schedule, Booking and the clock. Tokens and shared
+   components live in app.css; every class here is this group's own. */
+
+.nums { font-variant-numeric: tabular-nums; }
+
+/* ---------- Today: the one card ---------- */
+.today { display: grid; }
+.nowjob { display: grid; gap: 14px; }
+.nowjob-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
+.nowjob-where { display: grid; gap: 3px; text-align: left; width: 100%; min-width: 0; }
+button.nowjob-where { min-height: 44px; }
+button.nowjob-where:active { background: var(--frost); }
+.nowjob .t-head { display: block; overflow-wrap: anywhere; }
+.nowjob-sub { display: block; font-size: 15px; line-height: 22px; color: var(--mid); margin-top: 2px; }
+.nowjob-time { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--mist); border-bottom: 1px solid var(--mist); }
+.nowjob-time .t-title { white-space: nowrap; }
+.nowjob-go { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; }
+.nowjob-go .tall { min-height: 56px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.grid2 > * { min-height: 54px; padding: 0 8px; }
+
+/* what the office changed since you last looked */
+.changes { background: var(--warn-bg); padding: 6px 14px 10px; margin-bottom: 16px; }
+.changes-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.changes ul { display: grid; }
+.changes li + li { border-top: 1px solid rgba(122, 79, 0, 0.18); }
+.changes li button { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; min-height: 44px; padding: 6px 0; text-align: left; font-size: 13px; line-height: 18px; }
+.changes li .badge { background: var(--card); min-width: 64px; justify-content: center; }
+.changes .t-small { color: var(--warn-text); margin-top: 4px; }
+
+/* ---------- Schedule ---------- */
+.sched-band { background: var(--card); padding: 12px var(--gut) 4px; display: grid; gap: 6px; border-bottom: 1px solid var(--mist); }
+.sched-band.tight { padding: 8px var(--gut) 10px; }
+.sched-nav { display: flex; align-items: center; justify-content: space-between; }
+.sched-sum { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 calc(var(--gut) + 4px); font-size: 13px; line-height: 18px; font-weight: 700; color: var(--mid); }
+.sched-load { display: grid; gap: 10px; padding: 16px var(--gut); }
+.sched-week { border-top: 1px solid var(--mist); }
+.sched-week > .item { padding-top: 6px; padding-bottom: 6px; min-height: 58px; }
+.sched-week .item .main { gap: 1px; }
+
+/* month grid */
+.sched-month { background: var(--card); border-bottom: 1px solid var(--mist); padding: 4px 10px 8px; }
+.sched-month .mhead { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); font-size: 12px; line-height: 16px; font-weight: 700; color: var(--mid); text-align: center; padding-bottom: 4px; }
+.sched-month .mgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.mday { height: 44px; border-radius: var(--r); border: 2px solid transparent; display: grid; justify-items: center; align-content: center; gap: 2px; background: var(--card); }
+.mday:active { background: var(--press); }
+.mday .num { width: 26px; height: 26px; border-radius: var(--r); display: grid; place-items: center; font-size: 15px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mday .mark { width: 18px; height: 5px; border-radius: var(--r); display: block; }
+.mday.booked .mark { background: var(--slate); }
+.mday.tent .mark { background: var(--warn-bg); border: 1.5px solid var(--warn-text); }
+.mday.off, .mday.isoff { background: var(--frost); }
+.mday.off .num, .mday.isoff .num { color: var(--mid); }
+.mday.today .num { background: var(--ember); color: #FFFFFF; }
+.mday[aria-pressed='true'] { border-color: var(--slate); }
+.sched-under { margin-top: 12px; }
+.sched-stats { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.85fr) minmax(0, 1.35fr); }
+.sched-stats .mk { width: 14px; height: 5px; border-radius: var(--r); display: inline-block; flex: none; }
+.sched-stats .mk.booked { background: var(--slate); }
+.sched-stats .mk.tent { background: var(--warn-bg); border: 1.5px solid var(--warn-text); }
+.sched-stats .mk.off { width: 10px; height: 10px; background: var(--mist); }
+.sched-day { margin-top: 14px; }
+
+/* ---------- Booking ---------- */
+.bk-head { display: grid; gap: 4px; padding: 12px 14px; width: 100%; text-align: left; min-height: 44px; }
+.bk-head:active { background: var(--frost); }
+.bk-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bk-head .t-head { overflow-wrap: anywhere; }
+.steps5 { display: grid; }
+.steps5 li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 48px; padding: 5px 14px; }
+.steps5 li + li { border-top: 1px solid var(--mist); }
+.steps5 .n { width: 22px; height: 22px; display: grid; place-items: center; font-size: 12px; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; background: var(--card); color: var(--mid); border: 1.5px solid var(--edge); }
+.steps5 .done .n { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+.steps5 .now .n { background: var(--ember); border-color: var(--ember); color: #FFFFFF; }
+.steps5 .what { display: grid; min-width: 0; }
+.steps5 .what b { font-size: 15px; line-height: 20px; font-weight: 500; }
+.steps5 .done .what b, .steps5 .now .what b { font-weight: 800; }
+.steps5 .what .sub { font-size: 13px; line-height: 18px; color: var(--mid); }
+.steps5 .what .sub.t-bad { color: var(--bad-text); }
+
+/* ---------- Clock off ---------- */
+.clockoff { display: grid; gap: 16px; }
+.clockoff .t-cap { display: block; padding: 0 4px 6px; }
+.clockoff-job { display: grid; gap: 2px; padding: 12px 14px; }
+.clockoff-job .t-head { overflow-wrap: anywhere; }
+.frow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 56px; padding: 6px 14px; }
+.frow + .frow { border-top: 1px solid var(--mist); }
+.frow > span:first-child { font-size: 15px; line-height: 20px; font-weight: 700; flex: none; }
+.frow .input { width: 160px; min-height: 44px; padding: 6px 10px; text-align: right; font-weight: 700; }
+.frow select.input { text-align-last: right; }
+.frow select.input.unset { color: var(--mid); font-weight: 500; }
+.frow.total > span:first-child { font-weight: 800; }
+.clockoff-note { padding: 6px 4px 0; }
+.choice2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.choice2 button { min-height: 48px; padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--card); color: var(--slate); font-size: 15px; line-height: 20px; font-weight: 700; text-align: center; }
+.choice2 button:active { background: var(--press); }
+.choice2 button[aria-pressed='true'] { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+.clockoff-goes { text-align: center; }
+.clockoff-later { justify-content: center; width: 100%; font-size: 13px; }
+.clockoff-later:disabled { color: var(--mid); }
+
+/* the joined switch sits centred in this group's bands (app.css leaves button text left) */
+.sched-band .seg button { text-align: center; }
+.frow select.input { padding-right: 30px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23293C46' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.5 9.5 12 16l6.5-6.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+/* the link in the slate bar keeps its small look; its tap area reaches 44 px */
+.sched-avail { position: relative; }
+.sched-avail::after { content: ''; position: absolute; inset: -8px -10px; }
+/* a free day: an outlined word, not a filled status */
+.freeday { background: var(--card); box-shadow: inset 0 0 0 1.5px var(--edge); }

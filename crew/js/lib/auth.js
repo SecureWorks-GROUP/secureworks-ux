@@ -92,7 +92,9 @@ export function decorate(p) {
     name: p.name || p.full_name || details.fullName || (p.email || '').split('@')[0] || 'You',
     managed,
     office,
-    manager: office || managed.length > 0,
+    // users.trade_sees_all_jobs is the office's per-person "sees everything" switch (scopers and owners).
+    seesAll: p.trade_sees_all_jobs === true,
+    manager: office || managed.length > 0 || p.trade_sees_all_jobs === true,
     seesMoney: office,
     perMetre: p.invoice_type === 'per_metre',
     gstDefault: details.gstRegistered === true,

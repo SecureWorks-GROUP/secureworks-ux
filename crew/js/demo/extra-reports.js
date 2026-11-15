@@ -82,6 +82,25 @@ registerDemo((db, h) => {
   });
 
   return {
+    // ------------------------------------------------------------- job list
+    // The job list as ops-api answers it: one page at a time with a total, and
+    // `lens` saying what the list is. A plain trade without the company view
+    // gets only the jobs they are booked on (lens 'assigned').
+    search_all_jobs(p) {
+      const q = String(p.q || '').toLowerCase().replace(/[-\s]/g, '');
+      const hit = (j) => !q || [j.job_number, j.client_name, j.site_suburb, j.site_address, (j.metadata || {}).external_ref].some((v) => String(v || '').toLowerCase().replace(/[-\s]/g, '').includes(q));
+      const seesCompany = isOffice || (me.managed_verticals || []).length > 0 || db.flags.companyView;
+      const all = db.jobs.filter((j) => hit(j) && (db.flags.companyView || onJob(j.id) || manages(j))).map((j) => {
+        const assigned = onJob(j.id);
+        const row = { id: j.id, type: j.type, status: j.status, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, site_address: j.site_address, assigned_to_me: assigned, external_ref: (j.metadata || {}).external_ref, completed_at: j.completed_at || null };
+        if (assigned) row.client_phone = j.client_phone;
+        return row;
+      });
+      const size = Math.min(500, Math.max(1, Number(p.page_size) || 200)); const offset = Math.max(0, Number(p.offset) || 0);
+      const jobs = all.slice(offset, offset + size); const more = offset + jobs.length < all.length;
+      return { jobs, lens: q ? 'search' : seesCompany ? 'company' : 'assigned', total: all.length, page_size: size, offset, truncated: more, next_offset: more ? offset + size : null };
+    },
+
     // ------------------------------------------------------ finishing a job
     complete_my_job(p, b) {
       const jobId = b.jobId || b.job_id; if (!jobId) fail(400, { error: 'jobId required' });

@@ -1,164 +1,185 @@
-// Today: what am I doing, where, and the one thing to press next.
-// The week strip is the calendar. Tap a day, swipe a week, open the month.
-import { html, cx, useMemo, useRef, useState } from '../lib/h.js';
-import { useStore } from '../lib/store.js';
-import { useMyBookings, rememberJobStub } from '../lib/data.js';
+// Today: only "what do I do now". The next job and Clock on; or, once on
+// site, the running clock and the four things done on a job. Under that: what
+// needs an answer and this pay week's timesheet. The calendar is in Schedule.
+import { html, useMemo, useState } from '../lib/h.js';
+import { api, ApiError, friendly } from '../lib/api.js';
+import { useStore, useQuery, local } from '../lib/store.js';
+import { useMyBookings, rememberJobStub, jobStub } from '../lib/data.js';
+import { queueWrite } from '../lib/outbox.js';
 import { go } from '../lib/router.js';
-import {
-  todayISO, addDays, mondayOf, weekDays, fmtDow, fmtDom, fmtDowLong, fmtDate, fmtTime, fmtMonth, fmtRelDay, fmtHours, fmtDay,
-  monthGrid, addMonths, monthStart, firstName, diffDays
-} from '../lib/dates.js';
+import { todayISO, addDays, mondayOf, fmtDay, fmtRelDay, tsToHM, tsToDate } from '../lib/dates.js';
 import { bookingsByDate, bookingState, jobTitle, jobAddress, mapsUrl } from '../lib/model.js';
-import { Icon } from '../ui/icons.js';
-import { Tag, Chip, Sheet, Button, IconButton, SkelRows, Empty, LoadError, Slide, openOverlay, Avatar, buzz } from '../ui/kit.js';
-import { clockOn, openClockOff, useElapsed } from './clock.js';
-import { NeedsOk, needsOk, wasDeclined, useBookingChanges, ChangesBanner, markOnTheWay, useMyDaysOff } from './bookings.js';
+import { buildLines, lineHours } from '../lib/invoice.js';
+import { Page, Section, Sheet, Button, Field, Picks, Skel, LoadError, JobLine, StatusBadge, toast, openOverlay } from '../ui/kit.js';
+import { clockOn, openClockOff, openBreak, useElapsed } from './clock.js';
+import { NeedsOk, needsOk, bookingStatus, useBookingChanges, ChangesBanner, markOnTheWay, useMyDaysOff, useCrewWith, BookingItem, openBooking, openBookingJob } from './bookings.js';
+import { fmtClock, fmtHrs, fmtDayYear, fmtWeekShort, fmtElapsed } from './words.js';
 
-export function Today({ day: dayParam }) {
+export function Today() {
   const user = useStore((s) => s.user);
   const clock = useStore((s) => s.clock);
   const today = todayISO();
-  const [day, setDay] = useState(dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : today);
+  const monday = mondayOf(today);
   const { bookings, loading, error, refetch, refreshing, data } = useMyBookings();
   const byDate = useMemo(() => bookingsByDate(bookings), [bookings]);
-  const monday = mondayOf(day);
   const { changes, dismiss } = useBookingChanges(bookings, Boolean(data) && !refreshing && !error);
   const daysOff = useMyDaysOff(monday);
-  const dayOff = daysOff.get(day);
-  const list = byDate.get(day) || [];
-  const isToday = day === today;
+  const dayOff = daysOff.get(today);
+  const list = byDate.get(today) || [];
 
-  // Swipe the content sideways to change day.
-  const swipe = useRef(null);
-  const onTouchStart = (e) => { const t = e.touches[0]; swipe.current = { x: t.clientX, y: t.clientY }; };
-  const onTouchEnd = (e) => {
-    if (!swipe.current) return; const t = e.changedTouches[0];
-    const dx = t.clientX - swipe.current.x; const dy = t.clientY - swipe.current.y; swipe.current = null;
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8) { buzz(6); setDay(addDays(day, dx < 0 ? 1 : -1)); }
-  };
-
-  const next = useMemo(() => bookings.filter((b) => b.date > day && bookingState(b) !== 'done').sort((a, b) => a.date.localeCompare(b.date))[0], [bookings, day]);
-  const live = isToday && clock ? list.find((b) => b.id === clock.assignmentId) || bookings.find((b) => b.id === clock.assignmentId) : null;
-  const upNext = isToday && !live ? list.find((b) => bookingState(b) === 'booked') : null;
+  const live = clock ? bookings.find((b) => b.id === clock.assignmentId) || null : null;
+  const upNext = !clock ? list.find((b) => bookingState(b) === 'booked') || null : null;
   const rest = list.filter((b) => b !== live && b !== upNext);
+  const next = useMemo(() => bookings.filter((b) => b.date > today && bookingState(b) !== 'done')
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.start || '99').localeCompare(String(b.start || '99')))[0] || null, [bookings, today]);
+  const doneHours = list.filter((b) => bookingState(b) === 'done').reduce((s, b) => s + (Number(b.hours) || 0), 0);
+  // The next booking is shown once there is nothing left to start today.
+  const showNext = next && (clock || !upNext);
 
-  return html`<main class="page enter-tab" onTouchStart=${onTouchStart} onTouchEnd=${onTouchEnd}>
-    <header class="dayhead">
-      <div>
-        <span class="t-label">${isToday ? 'Today' : fmtRelDay(day) === fmtDay(day) ? (diffDays(day, today) > 0 ? 'Coming up' : 'Earlier') : fmtRelDay(day)} · ${fmtDate(day)}</span>
-        <h1 class="t-display" style="margin-top:4px">${fmtDowLong(day)}</h1>
-      </div>
-      <button type="button" class="who" aria-label="Your profile" onClick=${() => go('/me', { tab: true })}><${Avatar} name=${user.name} me lg /></button>
-    </header>
+  return html`<${Page} root title="Today" right=${html`<span class="nums">${fmtDayYear(today)}</span>`}>
+    ${loading ? html`<div class="block" style="display:grid;gap:12px"><${Skel} h=${236} /><${Skel} w="40%" h=${16} /><${Skel} h=${64} /></div>`
+      : error && !bookings.length ? html`<${LoadError} error=${error} onRetry=${refetch} what="your bookings" />`
+      : html`<div class="today">
+      <${ChangesBanner} changes=${changes} onDismiss=${dismiss} onPick=${(d) => { if (d) go('/schedule?day=' + d); }} />
 
-    <div class="weeknav">
-      <button type="button" class="t-label" onClick=${() => openMonth(day, byDate, setDay)}>${fmtMonth(day)} <${Icon} name="down" size=${14} stroke=${2.6} /></button>
-      <span style="display:flex;align-items:center">
-        ${!isToday ? html`<${Button} kind="quiet" small onClick=${() => setDay(today)}>Today<//>` : null}
-        <${IconButton} name="back" label="Earlier week" size=${20} onClick=${() => setDay(addDays(day, -7))} />
-        <${IconButton} name="right" label="Later week" size=${20} onClick=${() => setDay(addDays(day, 7))} />
-      </span>
-    </div>
-    <div class="week" role="group" aria-label="Pick a day">
-      ${weekDays(monday).map((d) => {
-        const items = byDate.get(d) || [];
-        const off = daysOff.get(d);
-        return html`<button type="button" key=${d} class=${cx(d === today && 'today', off && 'off')} aria-pressed=${String(d === day)} aria-label=${fmtDay(d) + (items.length ? `, ${items.length} booked` : '') + (off ? ', marked off' : '')} onClick=${() => { buzz(6); setDay(d); }}>
-          <span class="dow">${fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>
-          <span class="pips">${off && !items.length ? html`<em>Off</em>` : items.slice(0, 3).map((b) => html`<i class=${cx('jt-' + b.vertical, needsOk(b) && 'open')} />`)}</span>
-        </button>`;
-      })}
-    </div>
+      ${clock ? html`<${OnSiteCard} clock=${clock} booking=${live} />`
+        : upNext ? html`<${NextCard} booking=${upNext} />`
+        : list.length ? html`<section class="block card pad nowjob" aria-label="Today">
+            <div class="nowjob-top"><span class="t-cap">Today</span><${StatusBadge} status="done" /></div>
+            <div><b class="t-head">Done for today</b>
+              <p class="nowjob-sub">${doneHours ? `${fmtHrs(doneHours)} worked. ` : ''}Check the times on your timesheet.</p></div>
+          </section>`
+        : html`<section class="block card pad nowjob" aria-label="Today">
+            <div class="nowjob-top"><span class="t-cap">Today</span>${dayOff ? html`<${StatusBadge} status="unavailable" />` : null}</div>
+            <div><b class="t-head">Nothing booked today</b>
+              <p class="nowjob-sub">${dayOff ? `You marked today as ${dayOff.status === 'leave' ? 'leave' : 'unavailable'}. ` : ''}${next ? `Your next booking is ${fmtDay(next.date)}.` : 'No bookings coming up yet. If you are working somewhere, find the job and add yourself.'}</p></div>
+            <${Button} kind="line" block onClick=${() => go('/jobs', { tab: true })}>Find a job<//>
+          </section>`}
 
-    ${loading ? html`<${SkelRows} n=${2} />` : error && !bookings.length ? html`<${LoadError} error=${error} onRetry=${refetch} what="your jobs" />` : html`<div key=${day} class="rise">
-      <${ChangesBanner} changes=${changes} onDismiss=${dismiss} onPick=${(d) => { if (d) setDay(d); }} />
-      ${live ? html`<${LiveCard} booking=${live} clock=${clock} />` : null}
-      ${upNext ? html`<${NextCard} booking=${upNext} />` : null}
-      <${NeedsOk} bookings=${bookings} />
-      ${rest.length ? html`<div class="list ruled" style="margin-top:6px">${rest.map((b) => html`<${BookingRow} key=${b.id} booking=${b} />`)}</div>` : null}
-      ${!list.length ? html`<${Empty} title=${isToday ? `Nothing booked today, ${firstName(user.name)}` : 'Nothing booked'}
-          action=${html`<div class="btnrow" style="margin-top:8px"><${Button} kind="line" small icon="jobs" onClick=${() => go('/jobs', { tab: true })}>Find a job<//></div>`}>
-        ${dayOff ? `You are marked as ${dayOff.status === 'leave' ? 'on leave' : 'not working'} this day. ` : ''}${next ? html`Next up is ${jobTitle(next.job)} on ${fmtDay(next.date)}.` : 'No jobs coming up yet. If you are working somewhere, find the job and add yourself.'}
+      ${clock ? html`<${Section} label="On this job">
+        <div class="block grid2">
+          <${Button} kind="line" onClick=${() => go(`/job/${clock.jobId}?tab=scope`)}>Scope of works<//>
+          <${Button} kind="line" onClick=${() => go(`/job/${clock.jobId}?tab=photos`)}>Add photos<//>
+          <${Button} kind="line" onClick=${() => go(`/job/${clock.jobId}?tab=notes`)}>Add note<//>
+          <${Button} kind="line" onClick=${() => openProblem({ id: clock.jobId, ...(live ? live.job : jobStub(clock.jobId) || {}) }, clock.title)}>Report a problem<//>
+        </div>
       <//>` : null}
-      ${next && list.length ? html`<button type="button" class="row" style="margin-top:18px" onClick=${() => setDay(next.date)}>
-        <span class="lead t-label">Next</span><span class="main"><b>${jobTitle(next.job)}</b><span>${fmtDay(next.date)}${next.start ? ' at ' + fmtTime(next.start) : ''}</span></span><span class="trail"><${Icon} name="right" size=${18} /></span>
-      </button>` : null}
+
+      ${rest.length ? html`<${Section} label=${clock || upNext ? 'Also today' : 'Today'}>
+        <div class="list flat">${rest.map((b) => html`<${BookingItem} key=${b.id} booking=${b} day=${true} />`)}</div>
+      <//>` : null}
+
+      ${showNext ? html`<${Section} label=${fmtRelDay(next.date) === 'Tomorrow' ? 'Tomorrow' : 'Next booking'}>
+        <div class="block card"><button type="button" class="item" onClick=${() => openBooking(next)}>
+          <span class="main"><b class="nums">${fmtDay(next.date)}${next.start ? ' · ' + fmtClock(next.start) : ''}</b>
+            <${JobLine} job=${next.job}>${jobTitle(next.job)}<//></span>
+          <span class="side"><${StatusBadge} status=${bookingStatus(next)} /></span>
+        </button></div>
+      <//>` : null}
+
+      <${NeedsOk} bookings=${showNext && needsOk(next) ? bookings.filter((b) => b.id !== next.id) : bookings} />
+
+      <${Section} label=${`Pay week ${fmtWeekShort(monday)}`}>
+        <${TimesheetRow} monday=${monday} user=${user} />
+      <//>
     </div>`}
-    ${refreshing && !loading ? html`<p class="t-small t-mute" style="text-align:center;margin-top:18px">Checking for changes</p>` : null}
-  </main>`;
-}
-
-function open(booking) { rememberJobStub(booking.job); go('/job/' + booking.jobId); }
-
-function LiveCard({ booking, clock }) {
-  const t = useElapsed(clock.since, clock.breakMin);
-  return html`<section class="nowcard">
-    <div style="display:flex;justify-content:space-between;align-items:center"><span class="t-label" style="display:flex;gap:8px;align-items:center;color:var(--hi)"><i class="pulse" />On the clock</span><${Tag} vertical=${booking.vertical} /></div>
-    <button type="button" class="where" onClick=${() => open(booking)}><b>${jobTitle(booking.job)}</b><span>${jobAddress(booking.job)}</span></button>
-    <div class="bigtimer" aria-label="Time on the clock">${t.h}:${t.m}<small>${t.s}</small></div>
-    <div class="btnrow">
-      <${Button} onClick=${() => openClockOff()}>Clock off<//>
-      <${Button} kind="soft" class="on-night" onClick=${() => open(booking)}>Open job<//>
-    </div>
-  </section>`;
+    ${refreshing && !loading ? html`<p class="t-small" style="text-align:center;margin-top:16px">Checking for changes</p>` : null}
+  <//>`;
 }
 
 function NextCard({ booking }) {
   const [busy, setBusy] = useState(false);
   const job = booking.job;
-  return html`<section class="nowcard">
-    <div style="display:flex;justify-content:space-between;align-items:center"><span class="t-label">${booking.start ? 'Start ' + fmtTime(booking.start) : 'Up next'}</span><${Tag} vertical=${booking.vertical} /></div>
-    <button type="button" class="where" onClick=${() => open(booking)}><b>${jobTitle(job)}</b><span>${jobAddress(job)}${job.client_name ? ' · ' + job.client_name : ''}</span></button>
-    <div class="actions">
-      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => markOnTheWay(booking)}><${Icon} name="navigate" size=${22} />Navigate</a>
-      ${job.client_phone ? html`<a class="action" href=${'tel:' + job.client_phone}><${Icon} name="phone" size=${22} />Call</a>` : null}
-      <button type="button" class="action" onClick=${() => open(booking)}><${Icon} name="file" size=${22} />Job details</button>
+  const mates = useCrewWith(booking);
+  const who = [job.client_name, mates.length ? 'with ' + mates.slice(0, 2).join(', ') + (mates.length > 2 ? ` +${mates.length - 2}` : '') : ''].filter(Boolean).join(' · ');
+  return html`<section class="block card pad nowjob" aria-label="Next job">
+    <div class="nowjob-top"><span class="t-cap nums">Next job${booking.start ? ' · ' + fmtClock(booking.start) : ''}</span><${StatusBadge} status=${bookingStatus(booking)} /></div>
+    <div class="nowjob-where">
+      <${JobLine} job=${job} vertical=${booking.vertical} />
+      <b class="t-head">${jobAddress(job) || jobTitle(job)}</b>
+      ${who ? html`<span class="nowjob-sub">${who}</span>` : null}
     </div>
-    <${Slide} label="Slide to clock on" busy=${busy} onConfirm=${async () => { setBusy(true); await clockOn(booking); setBusy(false); }} />
+    <div class="actions">
+      <a class="action" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => markOnTheWay(booking)}>Navigate</a>
+      ${job.client_phone ? html`<a class="action" href=${'tel:' + job.client_phone}>Call</a>` : null}
+      <button type="button" class="action" onClick=${() => openBookingJob(booking)}>Open job</button>
+    </div>
+    <${Button} class="big" block busy=${busy} onClick=${async () => { setBusy(true); await clockOn(booking); setBusy(false); }}>Clock on<//>
   </section>`;
 }
 
-export function BookingRow({ booking, showDate, showWho }) {
-  const state = bookingState(booking);
-  const job = booking.job;
-  return html`<button type="button" class=${cx('booking', state)} onClick=${() => open(booking)}>
-    <span class="when">${showDate ? html`${fmtDom(booking.date)}<small>${fmtDow(booking.date)}</small>` : booking.start ? html`${fmtTime(booking.start).replace(/[ap]m$/, '')}<small>${/pm$/.test(fmtTime(booking.start)) ? 'pm' : 'am'}</small>` : html`<${Icon} name="clock" size=${20} />`}</span>
-    <span class="what">
-      <b>${jobTitle(job)}</b>
-      <span class="addr">${jobAddress(job) || job.client_name || ''}</span>
-      <span class="meta"><${Tag} vertical=${booking.vertical} />
-        ${job.job_number ? html`<span class="t-small t-mute t-num">${job.job_number}</span>` : null}
-        ${showWho && booking.userName ? html`<span class="t-small">${booking.userName}</span>` : null}
-        ${wasDeclined(booking.id) ? html`<${Chip} kind="warn">You said you cannot<//>` : needsOk(booking) ? html`<${Chip} kind="hi">Needs your OK<//>` : null}
-        ${state === 'live' ? html`<${Chip} kind="hi">On the clock<//>` : state === 'done' ? html`<${Chip} kind="ok" icon="check">${booking.hours ? fmtHours(booking.hours) : 'Done'}<//>` : null}
-      </span>
-    </span>
-    <span class="t-mute" style="align-self:center"><${Icon} name="right" size=${18} /></span>
-  </button>`;
+function OnSiteCard({ clock, booking }) {
+  const t = useElapsed(clock.since);
+  const job = booking ? booking.job : jobStub(clock.jobId);
+  const sameDay = tsToDate(clock.since) === todayISO();
+  const open = () => { if (job) rememberJobStub(job); go('/job/' + clock.jobId); };
+  return html`<section class="block card pad nowjob" aria-label="On site">
+    <div class="nowjob-top"><span class="t-cap nums">Clocked on ${sameDay ? '' : fmtDay(tsToDate(clock.since)) + ', '}${fmtClock(tsToHM(clock.since))}${clock.pending ? ' · waiting for signal' : ''}</span><${StatusBadge} status="on_site" /></div>
+    <button type="button" class="nowjob-where" onClick=${open}>
+      <${JobLine} job=${job || {}} vertical=${booking ? booking.vertical : null} />
+      <b class="t-head">${job ? jobAddress(job) || jobTitle(job) : clock.title}</b>
+    </button>
+    <div class="nowjob-time"><span class="t-cap">Time on site${clock.breakMin ? ` · ${clock.breakMin} min break` : ''}</span><span class="t-title nums" aria-live="off">${fmtElapsed(t)}</span></div>
+    <div class="nowjob-go">
+      <${Button} kind="line" class="tall" onClick=${() => openBreak()}>Break<//>
+      <${Button} class="big tall" onClick=${() => openClockOff()}>Clock off<//>
+    </div>
+  </section>`;
 }
 
-function openMonth(day, byDate, setDay) {
-  openOverlay((close) => html`<${MonthSheet} day=${day} byDate=${byDate} onPick=${(d) => { setDay(d); }} onClose=${close} />`);
+/** This pay week's timesheet in one row: how many worked days have their times, and the hours so far. */
+function TimesheetRow({ monday, user }) {
+  const q = useQuery('hours:' + monday, () => api('my_hours', { week_ending: addDays(monday, 6) }), { persist: true, ttl: 45000 });
+  const words = useMemo(() => {
+    if (!q.data) return q.error ? 'Could not load your hours. Open it to try again.' : 'Loading';
+    if (q.data.already_submitted) return 'Invoice sent for this week';
+    const today = todayISO();
+    const draft = local.get('week:' + monday, { edits: {}, added: [], gst: null, notes: '' });
+    const lines = buildLines(q.data, draft, { perMetre: user.perMetre }).filter((l) => !l.off);
+    const days = new Map(); let total = 0;
+    for (const l of lines) {
+      if (l.kind !== 'hours' || l.ahead || !l.date || l.date > today) continue;
+      const h = lineHours(l);
+      const good = !isNaN(h) && l.breakMin != null;
+      if (good) total += h;
+      days.set(l.date, (days.has(l.date) ? days.get(l.date) : true) && good);
+    }
+    const complete = [...days.values()].filter(Boolean).length;
+    const orders = lines.filter((l) => l.kind === 'work_order').length;
+    const parts = [];
+    if (days.size) parts.push(`${complete} of ${days.size} ${days.size === 1 ? 'day' : 'days'} complete`, fmtHrs(total));
+    if (orders) parts.push(`${orders} work order ${orders === 1 ? 'job' : 'jobs'}`);
+    return parts.length ? parts.join(' · ') : 'Nothing on it yet';
+  }, [q.data, q.error, monday]);
+  return html`<div class="block card"><button type="button" class="item" onClick=${() => go('/pay/week/' + monday)}>
+    <span class="main"><b>Timesheet</b><span class="sub nums">${words}</span></span>
+    <span class="link">Open</span>
+  </button></div>`;
 }
-function MonthSheet({ day, byDate, onPick, onClose }) {
-  const [month, setMonth] = useState(monthStart(day));
-  const today = todayISO();
-  return html`<${Sheet} title=${fmtMonth(month)} onClose=${onClose}>
-    ${(shut) => html`<div class="stack">
-      <div style="display:flex;justify-content:space-between;margin:-8px -8px 0">
-        <${IconButton} name="back" label="Earlier month" onClick=${() => setMonth(addMonths(month, -1))} />
-        <${Button} kind="quiet" small onClick=${() => { setMonth(monthStart(today)); }}>This month<//>
-        <${IconButton} name="right" label="Later month" onClick=${() => setMonth(addMonths(month, 1))} />
-      </div>
-      <div class="month">
-        ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => html`<span class="mh">${d}</span>`)}
-        ${monthGrid(month).map((d) => {
-          const items = byDate.get(d) || [];
-          return html`<button type="button" key=${d} class=${cx(d.slice(0, 7) !== month.slice(0, 7) && 'out', d === today && 'today')} aria-pressed=${String(d === day)} onClick=${() => { onPick(d); shut(); }}>
-            ${fmtDom(d)}<span class="pips">${items.slice(0, 3).map((b) => html`<i class=${'jt-' + b.vertical} style="background:var(--jt)" />`)}</span>
-          </button>`;
-        })}
-      </div>
-    </div>`}
+
+// The same message the job page sends for "Problem", so it can be raised without leaving Today.
+const PROBLEMS = ['Materials missing', 'Site access issue', 'Client not home', 'Damage found', 'Other'];
+function openProblem(job, title) { openOverlay((close) => html`<${ProblemSheet} job=${job} title=${title} onClose=${close} />`); }
+function ProblemSheet({ job, title, onClose }) {
+  const [type, setType] = useState(null); const [detail, setDetail] = useState(''); const [busy, setBusy] = useState(false);
+  const name = job.site_suburb || job.site_address || job.client_name ? jobTitle(job) : title || 'this job';
+  const send = async (shut) => {
+    setBusy(true);
+    const body = { jobId: job.id, issueType: type, detail: detail.trim() || null, notify_telegram: true };
+    try { await api('create_trade_alert', null, body); toast('Sent to the office.', { kind: 'ok' }); } catch (err) {
+      if (err instanceof ApiError && err.refused) { toast(friendly(err), { kind: 'bad' }); setBusy(false); return; }
+      queueWrite({ action: 'create_trade_alert', body, jobId: job.id, label: 'Problem on ' + name });
+      toast('Saved. It will reach the office when you have signal. If it is urgent, call them.');
+    }
+    setBusy(false); shut();
+  };
+  return html`<${Sheet} title="Report a problem" sub=${name} onClose=${onClose} foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!type} onClick=${() => send(shut)}>Send to the office<//>`}>
+    <div class="stack">
+      <${Field} label="What is wrong?"><${Picks} value=${type} options=${PROBLEMS.map((p) => [p, p])} onChange=${setType} /><//>
+      <${Field} label="Anything to add?"><textarea class="input" placeholder="What you can see, what you need" value=${detail} onInput=${(e) => setDetail(e.currentTarget.value)} /><//>
+    </div>
   <//>`;
 }
+
+/** Kept for older callers: a booking as a row. */
+export const BookingRow = BookingItem;

@@ -1,113 +1,104 @@
-/* SecureWorks Crew: styles for the reports screens. Tokens and shared components are in app.css. */
+/* SecureWorks Crew: sign-off and report screens (finish a job, make safe
+   report, roof report, service report). Tokens and shared components are in
+   app.css. Every class here starts with rp-, so nothing shared is restyled. */
 
-/* ---------- step screens (finish a job, roof report) ---------- */
-.stephead { padding: 18px var(--gut) 16px; display: grid; gap: 6px; }
-.stephead p { color: var(--ink-2); max-width: 38ch; }
-.footnote { text-align: center; font-size: 14px; font-weight: 620; color: var(--ink-2); }
-.stepfoot .footnote + .btn { margin-top: 0; }
+/* ---------- the white band under the bar: progress and the step's name ---------- */
+.rp-band { background: var(--card); border-bottom: 1px solid var(--mist); padding: 12px 0; display: grid; gap: 8px; }
+.rp-band .rp-count { padding: 0 var(--gut); }
+.rp-stephead { padding: 0 var(--gut); display: grid; gap: 4px; }
+.rp-stephead p { font-size: 13px; line-height: 18px; color: var(--mid); max-width: 52ch; }
+.rp-head { background: var(--card); border-bottom: 1px solid var(--mist); padding: 10px var(--gut) 12px; display: grid; gap: 4px; }
+.rp-head .rp-headline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.rp-head p { font-size: 13px; line-height: 18px; color: var(--mid); }
+.rp-body { padding: 16px 0 28px; }
+.rp-save { font-size: 12px; line-height: 16px; font-weight: 700; white-space: nowrap; }
+.rp-save.bad { color: #FFFFFF; text-decoration: underline; }
 
-/* finished photos: big squares, one per prompt */
-.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.shot { position: relative; aspect-ratio: 4 / 3; border-radius: var(--r-m); overflow: hidden; background: var(--paper-3); display: block; width: 100%; transition: transform 140ms var(--ease), background 140ms; }
-.shot img { width: 100%; height: 100%; object-fit: cover; }
-.shot:active:not(:disabled) { transform: scale(0.975); }
-.shot.empty { display: grid; place-items: center; align-content: center; gap: 8px; padding: 10px; background: transparent; box-shadow: inset 0 0 0 2px var(--line-2); color: var(--ink-2); text-align: center; font-weight: 650; font-size: 15px; line-height: 1.2; }
-.shot.empty:active { background: var(--paper-2); }
-.shot .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 10px 8px; background: linear-gradient(to top, oklch(15% 0.02 232 / 0.8), transparent); color: white; font-size: 13px; font-weight: 650; text-align: left; line-height: 1.2; }
-.shot .tick { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--ok); color: white; display: none; place-items: center; }
-.shot.sent .tick { display: grid; }
-.shot-large { width: 100%; max-height: 52vh; object-fit: contain; border-radius: var(--r-m); background: var(--paper-3); }
+/* ---------- the foot ---------- */
+.rp-need { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; text-align: center; font-size: 13px; line-height: 18px; font-weight: 700; color: var(--ember); }
+.rp-need:active { color: var(--ember-press); }
+.rp-footnote { text-align: center; font-size: 13px; line-height: 18px; color: var(--mid); }
+.rp-footnote.warn { color: var(--warn-text); font-weight: 700; }
 
-/* neighbour sign-off rows */
-.evid { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
-.evid-pic { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; background: var(--paper-2); display: grid; place-items: center; color: var(--ink-3); }
-.evid b { display: block; font-weight: 650; font-size: 17px; }
+/* ---------- finished photos: one square per prompt ---------- */
+.rp-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rp-shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--frost); display: block; width: 100%; }
+.rp-shot img { width: 100%; height: 100%; object-fit: cover; }
+.rp-shot.empty { display: grid; place-items: center; align-content: center; gap: 6px; padding: 10px; background: var(--card); border: 1px solid var(--edge); border-radius: var(--r); color: var(--slate); text-align: center; font-size: 13px; line-height: 18px; font-weight: 700; }
+.rp-shot.empty:active { background: var(--press); }
+.rp-shot .rp-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; background: rgba(26, 39, 46, 0.72); color: #FFFFFF; font-size: 12px; line-height: 16px; font-weight: 700; text-align: left; }
+.rp-shot .rp-tick { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; background: var(--ok-bg); color: var(--ok-text); display: none; place-items: center; }
+.rp-shot.sent .rp-tick { display: grid; }
+.rp-shot-large { width: 100%; max-height: 52vh; object-fit: contain; background: var(--frost); }
 
-/* the customer's turn */
-.handover { margin: 14px var(--gut) 0; padding: 22px 20px 18px; border-radius: var(--r-l); background: var(--night); color: var(--night-ink); display: grid; gap: 12px; }
-.handover .t-label { color: var(--hi); }
-.handover p { color: var(--night-ink-2); }
-.handover .stars button { color: oklch(100% 0 0 / 0.2); }
-.handover .stars button.on { color: oklch(84% 0.16 85); }
-.stars.big { gap: 0; justify-content: space-between; margin-top: 4px; }
-.stars.big button { width: 60px; height: 60px; }
-.starword { min-height: 21px; font-weight: 650; font-size: 15px; margin-top: 2px; }
-.handover .starword { color: var(--night-ink); }
+/* ---------- rows inside a card ---------- */
+.rp-rows { padding: 0 14px; }
+.rp-evid { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px; }
+.rp-evid + .rp-evid { border-top: 1px solid var(--mist); }
+.rp-evid-pic { width: 48px; height: 48px; object-fit: cover; background: var(--frost); display: grid; place-items: center; color: var(--mid); }
+.rp-evid b { display: block; font-weight: 700; }
+.rp-evid .rp-sub { display: block; font-size: 13px; line-height: 18px; color: var(--mid); }
+.rp-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px; width: 100%; text-align: left; }
+.rp-link + .rp-link { border-top: 1px solid var(--mist); }
+.rp-link:active { background: var(--frost); }
+.rp-link b { display: block; font-weight: 700; overflow-wrap: anywhere; }
+.rp-link .rp-sub { display: block; font-size: 13px; line-height: 18px; color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-link .rp-go { font-size: 13px; line-height: 18px; font-weight: 700; color: var(--ember); white-space: nowrap; }
+.rp-link .rp-go.ok { color: var(--ok-text); }
+.rp-lines p { padding: 10px 14px; }
+.rp-lines p + p { border-top: 1px solid var(--mist); }
 
-/* signature pad: always ink on white paper, so it reads the same in the dark theme and on the saved picture */
-.sigwrap { position: relative; }
-.sigwrap .sigpad { height: 190px; background: #fff; box-shadow: inset 0 0 0 1.5px var(--line-2); }
-.sigline { position: absolute; left: 22px; right: 22px; bottom: 48px; height: 1.5px; background: oklch(25% 0.028 232 / 0.2); pointer-events: none; }
-.sighint { position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 26px; color: oklch(52% 0.026 232); font-weight: 560; pointer-events: none; }
-.sigclear { position: absolute; top: 8px; right: 8px; height: 38px; padding: 0 13px; border-radius: 38px; background: oklch(25% 0.028 232 / 0.08); color: oklch(30% 0.03 232); font-size: 13.5px; font-weight: 650; display: inline-flex; gap: 6px; align-items: center; }
-.sigclear:active { background: oklch(25% 0.028 232 / 0.16); }
+/* ---------- the customer's turn ---------- */
+.rp-stars { gap: 0; justify-content: space-between; }
+.rp-stars button { width: 56px; height: 56px; }
+.rp-starword { min-height: 18px; margin-top: 4px; font-size: 13px; line-height: 18px; font-weight: 700; color: var(--mid); }
+.rp-sig { position: relative; }
+.rp-sig .sigpad { height: 180px; background: #FFFFFF; }
+.rp-sigline { position: absolute; left: 20px; right: 20px; bottom: 44px; height: 1px; background: var(--mist); pointer-events: none; }
+.rp-sighint { position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 24px; font-size: 13px; line-height: 18px; color: var(--mid); pointer-events: none; }
+.rp-sigclear { position: absolute; top: 2px; right: 2px; height: 44px; padding: 0 12px; display: inline-flex; align-items: center; font-size: 13px; line-height: 18px; font-weight: 700; color: var(--ember); }
+.rp-sigshown { width: 100%; max-height: 160px; object-fit: contain; background: #FFFFFF; border: 1px solid var(--mist); margin-top: 8px; }
 
-/* one of a few big choices */
-.choices { display: grid; gap: 8px; }
-.choice { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 14px; align-items: center; min-height: 64px; padding: 10px 16px; border-radius: var(--r-m); background: var(--paper-2); text-align: left; width: 100%; transition: background 160ms, color 160ms, transform 140ms var(--ease); }
-.choice:active { transform: scale(0.985); }
-.choice b { display: block; font-stretch: 86%; font-weight: 700; font-size: 19px; line-height: 1.15; }
-.choice span span { display: block; font-size: 14px; color: var(--ink-2); margin-top: 1px; }
-.choice .ring { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line-2); transition: box-shadow 200ms var(--ease); }
-.choice[aria-checked='true'], .choice[aria-pressed='true'] { background: var(--ink); color: var(--paper); }
-.choice[aria-checked='true'] span span, .choice[aria-pressed='true'] span span { color: color-mix(in oklab, var(--paper) 72%, transparent); }
-.choice[aria-checked='true'] .ring, .choice[aria-pressed='true'] .ring { box-shadow: inset 0 0 0 7px var(--hi); background: var(--hi-ink); }
-textarea.input.short { min-height: 64px; }
+/* ---------- what is being sent, item by item ---------- */
+.rp-send li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 44px; padding: 8px 14px; }
+.rp-send li + li { border-top: 1px solid var(--mist); }
+.rp-send .rp-box { width: 22px; height: 22px; border: 1.5px solid var(--edge); border-radius: var(--r); display: grid; place-items: center; color: transparent; }
+.rp-send li.sent .rp-box { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+.rp-send li.failed .rp-box { background: var(--bad-bg); border-color: var(--bad-text); color: var(--bad-text); }
+.rp-send li.sending .rp-box { border-color: transparent; color: var(--slate); }
+.rp-send .rp-what { font-weight: 700; }
+.rp-send li.failed .rp-what { color: var(--bad-text); }
+.rp-send li.waiting .rp-what { font-weight: 500; }
+.rp-send .rp-state { font-size: 13px; line-height: 18px; color: var(--mid); }
 
-/* what is being sent, item by item */
-.sendlist { list-style: none; padding: 0; display: grid; }
-.sendlist li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 0; }
-.sendlist li + li { box-shadow: inset 0 1px 0 var(--line); }
-.sendlist .dot { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line-2); display: grid; place-items: center; color: white; transition: background 200ms; }
-.sendlist li.sent .dot { background: var(--ok); box-shadow: none; }
-.sendlist li.failed .dot { background: var(--bad); box-shadow: none; }
-.sendlist li.sending .dot { box-shadow: none; color: var(--hi); }
-.sendlist .spin { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin 700ms linear infinite; }
-.sendlist .what { font-weight: 600; }
-.sendlist li.failed .what { color: var(--bad); }
-.sendlist li.waiting .what { color: var(--ink-2); }
+/* ---------- done ---------- */
+.rp-done { display: grid; gap: 8px; padding: 0 var(--gut); }
+.rp-donemark { width: 44px; height: 44px; background: var(--ok-bg); color: var(--ok-text); display: grid; place-items: center; }
+.rp-done p { color: var(--mid); max-width: 46ch; }
 
-/* done screens */
-.nextlist { display: grid; gap: 12px; }
-.nextlist p { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; }
-.nextlist svg { color: var(--ink-3); margin-top: 2px; }
-
-/* hours row */
-.hourscard { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.hoursform { display: grid; gap: 16px; }
+/* ---------- times and hours ---------- */
+.rp-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rp-out { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--frost); }
+.rp-out b { font-size: 22px; line-height: 28px; font-weight: 800; font-variant-numeric: tabular-nums; min-height: 28px; }
+.rp-hours { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.rp-blank { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--mid); white-space: nowrap; }
 
 /* ---------- report forms ---------- */
-.form section { display: grid; gap: 16px; scroll-margin-top: 70px; }
-.form section + section { padding-top: 22px; box-shadow: inset 0 1px 0 var(--line); }
-.form section > h2 { margin-top: 0; }
-.form section > h2 small { display: block; font-size: 14px; font-weight: 440; font-stretch: 100%; color: var(--ink-2); margin-top: 3px; }
-.savestate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-3); padding-right: 12px; white-space: nowrap; }
-.savestate.bad { color: var(--bad); }
-.matrow { display: grid; grid-template-columns: minmax(0, 1fr) 168px 36px; gap: 6px; align-items: center; }
-.matrow b { font-weight: 620; font-size: 16.5px; }
-.matrow .input { min-height: var(--tap); }
-.matrow .counter { grid-template-columns: 46px 1fr 46px; }
-.matrow .counter b span { white-space: nowrap; font-size: 13px !important; }
-.form .pick:disabled { opacity: 0.4; }
-.form .pick svg { vertical-align: -1px; }
-.matrow .iconbtn { width: 36px; height: 40px; color: var(--ink-3); }
-.need { display: block; width: 100%; text-align: center; font-size: 14px; font-weight: 650; color: var(--hi); padding: 2px 0; }
-.sumlist { display: grid; gap: 14px; }
-.sumlist > div > .t-label { display: block; margin-bottom: 2px; }
-.sumlist ul { margin: 0; padding-left: 18px; }
-.linkrow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 0; width: 100%; text-align: left; }
-.linkrow + .linkrow { box-shadow: inset 0 1px 0 var(--line); }
-.linkrow .ico { width: 40px; height: 40px; border-radius: 10px; background: var(--paper-2); display: grid; place-items: center; color: var(--ink-2); }
-.linkrow b { display: block; font-weight: 620; font-size: 16px; }
-.linkrow span span { display: block; font-size: 13.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.yn { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.yn button { text-align: center; min-height: var(--tap); border-radius: var(--r-m); background: var(--paper-2); font-weight: 650; font-size: 16.5px; transition: background 140ms, color 140ms; }
-.yn button[aria-pressed='true'] { background: var(--ink); color: var(--paper); }
-select.input { background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%); background-position: calc(100% - 22px) 55%, calc(100% - 16px) 55%; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 40px; }
-.sigshown { width: 100%; max-height: 160px; object-fit: contain; border-radius: var(--r-m); background: #fff; box-shadow: inset 0 0 0 1.5px var(--line-2); }
-.managerbox { margin-top: 28px; padding-top: 20px; box-shadow: inset 0 1px 0 var(--line); display: grid; gap: 10px; }
-
-/* a step screen fills the page, so its button sits low where the thumb is */
-.page.steppage { display: flex; flex-direction: column; padding-bottom: 0; }
-.page.steppage > .rise { flex: 1; display: flex; flex-direction: column; }
-.page.steppage .stepfoot { margin-top: auto; padding-top: 22px; }
+.rp-form .rp-section { scroll-margin-top: 12px; }
+.rp-mat { display: grid; grid-template-columns: minmax(0, 1fr) 148px 44px; gap: 6px; align-items: center; }
+.rp-mat b { font-weight: 700; overflow-wrap: anywhere; }
+.rp-mat .input { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
+.rp-form .pick:disabled { background: var(--frost); border-color: transparent; color: var(--mid); }
+.rp-sum > div { padding: 10px 14px; display: grid; gap: 2px; }
+.rp-sum > div + div { border-top: 1px solid var(--mist); }
+.rp-sum ul { padding-left: 18px; list-style: disc; }
+.rp-sum .rp-tickline { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; }
+.rp-sum .rp-tickline.off { color: var(--mid); }
+.rp-sum .rp-tickline svg { margin-top: 2px; }
+.rp-para { white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.input.rp-short { min-height: 72px; }
+select.rp-select { background-image: linear-gradient(45deg, transparent 50%, var(--slate) 50%), linear-gradient(135deg, var(--slate) 50%, transparent 50%); background-position: calc(100% - 20px) 55%, calc(100% - 14px) 55%; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 40px; }
+.rp-yn button { text-align: center; }
+.rp-form [id^='sec-'] { scroll-margin-top: 44px; }
+.rp-asklink { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; line-height: 18px; font-weight: 700; color: var(--ember); }
+.rp-asklink:active { color: var(--ember-press); }

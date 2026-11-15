@@ -54,6 +54,17 @@ registerDemo((db, h) => {
   row('j-sper', 'u-dan', today, '06:00', { status: 'complete', job_phase: 'complete', clocked_on_at: minsAgo(330), started_at: minsAgo(330), clocked_off_at: minsAgo(105), completed_at: minsAgo(105), break_minutes: 15, hours_worked: 3.5 });
   row('j-hill', 'u-dan', addDays(today, 4), '09:00', { status: 'scheduled' });
 
+  // Earlier this week, already worked, so a week of the crew has history as well as plans.
+  const mon = mondayOf(today);
+  const worked = (jid, uid, n, on, off, hrs) => {
+    const d = addDays(mon, n);
+    if (d < today) row(jid, uid, d, on, { status: 'complete', job_phase: 'complete', clocked_on_at: db.at(d, on), started_at: db.at(d, on), clocked_off_at: db.at(d, off), completed_at: db.at(d, off), break_minutes: 30, hours_worked: hrs });
+  };
+  worked('j-sper', 'u-tendo', 0, '07:00', '15:30', 8); worked('j-sper', 'u-tendo', 1, '07:00', '14:30', 7);
+  worked('j-sper', 'u-mia', 2, '07:00', '15:30', 8); worked('j-sper', 'u-mia', 3, '07:00', '13:00', 5.5);
+  worked('j-wemb', 'u-israel', 0, '07:00', '15:30', 8); worked('j-wemb', 'u-israel', 2, '07:00', '15:00', 7.5);
+  worked('j-wemb', 'u-dan', 1, '07:10', '14:05', 6.5); worked('j-wemb', 'u-jo', 3, '07:00', '15:30', 8);
+
   // ---- days off ----
   const off = (uid, date, status, note) => db.availability.push({ id: db.id('av'), user_id: uid, date, status, note: note || null, created_at: db.now().toISOString() });
   off('u-jo', today, 'unavailable', 'Sick');

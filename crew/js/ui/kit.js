@@ -70,7 +70,7 @@ export function Chip({ kind, children }) { return html`<span class=${cx('badge',
 // One fixed vocabulary. Amber needs you, slate is happening now, green is settled, grey is plain.
 export const STATUS = {
   to_confirm: ['warn', 'To confirm'], confirmed: ['ok', 'Confirmed'], on_site: ['live', 'On site'], done: ['', 'Done'], unavailable: ['', 'Unavailable'], cannot: ['bad', 'Cannot make it'],
-  to_schedule: ['warn', 'To schedule'], scheduled: ['', 'Scheduled'], in_progress: ['live', 'In progress'], complete: ['ok', 'Complete'], on_hold: ['warn', 'On hold'], closed: ['', 'Closed'],
+  to_schedule: ['warn', 'To schedule'], scheduled: ['ok', 'Scheduled'], in_progress: ['live', 'In progress'], complete: ['', 'Complete'], on_hold: ['warn', 'On hold'], closed: ['', 'Closed'],
   draft: ['', 'Draft'], not_sent: ['', 'Not sent'], needs_times: ['warn', 'Needs times'], sent: ['', 'Sent'], approved: ['', 'Approved'], paid: ['ok', 'Paid'], sent_back: ['bad', 'Sent back'], waiting: ['', 'Waiting']
 };
 export function StatusBadge({ status, label }) {

@@ -1,14 +1,15 @@
 // Clocking on and off. One clock runs at a time. The server stamps the real
 // times; at clock off the trade confirms start, finish and break once, and
-// those saved times are what fill their invoice later.
-import { html, useEffect, useState } from '../lib/h.js';
+// those saved times are what fill their timesheet later.
+import { html, cx, useEffect, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
-import { getState, setState, local, invalidate, useStore } from '../lib/store.js';
+import { getState, setState, local, invalidate, useStore, peekQuery } from '../lib/store.js';
 import { queueWrite } from '../lib/outbox.js';
-import { todayISO, tsToDate, tsToHM, nowHM, hoursBetween, fmtHours, elapsedParts, now } from '../lib/dates.js';
-import { jobTitle } from '../lib/model.js';
-import { Sheet, Button, Picks, TimeInput, BREAKS, toast, openOverlay, buzz, Field } from '../ui/kit.js';
+import { todayISO, tsToDate, tsToHM, nowHM, hoursBetween, elapsedParts, now, mondayOf } from '../lib/dates.js';
+import { jobTitle, jobAddress, verticalOf, isReportJob, jobIsClosed } from '../lib/model.js';
+import { Sheet, Button, JobLine, BREAKS, toast, openOverlay, buzz, Picks, Field } from '../ui/kit.js';
 import { go } from '../lib/router.js';
+import { fmtClock, fmtHrs, fmtDayYear, fmtWeekShort, fmtElapsed } from './words.js';
 
 function key() { return crypto.randomUUID ? crypto.randomUUID() : 'ik-' + Date.now() + '-' + Math.random().toString(36).slice(2); }
 function position() {
@@ -66,7 +67,34 @@ function clockRefusal(err) {
   return friendly(err);
 }
 
-/** Open the clock-off sheet for the running clock (or a given booking). */
+/** The job a running clock is on, from whatever is already loaded. May be null. */
+function clockJob(clock) {
+  const detail = peekQuery('job:' + clock.jobId);
+  if (detail && detail.job) return detail.job;
+  const stub = peekQuery('stub:' + clock.jobId);
+  if (stub) return stub;
+  const mine = peekQuery('myjobs');
+  for (const bucket of ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted']) {
+    for (const a of (mine && mine[bucket]) || []) { const j = a && (a.jobs || a.job); if (j && j.id === clock.jobId) return j; }
+  }
+  return null;
+}
+
+/** Break taken so far today. Kept on this phone until clock off, when it is sent with the times. */
+export function openBreak() {
+  const clock = getState().clock;
+  if (!clock) return;
+  openOverlay((close) => html`<${BreakSheet} clock=${clock} onClose=${close} />`);
+}
+function BreakSheet({ clock, onClose }) {
+  const [brk, setBrk] = useState(clock.breakMin || 0);
+  return html`<${Sheet} title="Break" sub="How long have you stopped for today? It comes off your hours when you clock off." onClose=${onClose}
+    foot=${(shut) => html`<${Button} kind="line" block onClick=${() => { const cur = getState().clock; if (cur) setClock({ ...cur, breakMin: brk }); shut(); toast(brk ? `Break set: ${brk} min.` : 'No break set.', { kind: 'ok' }); }}>Save break<//>`}>
+    <${Field} label="Break so far"><${Picks} value=${brk} options=${BREAKS} onChange=${setBrk} /><//>
+  <//>`;
+}
+
+/** Open the clock-off sheet for the running clock. `onDone` is for a flow that carries on by itself (finishing a job). */
 export function openClockOff(opts = {}) {
   const clock = getState().clock;
   if (!clock) return;
@@ -74,15 +102,23 @@ export function openClockOff(opts = {}) {
 }
 
 function ClockOffSheet({ clock, onClose, onDone }) {
-  const sameDay = tsToDate(clock.since) === todayISO();
+  const today = todayISO();
+  const sameDay = tsToDate(clock.since) === today;
   const [start, setStart] = useState(sameDay ? roundHM(tsToHM(clock.since)) : '');
   const [finish, setFinish] = useState(roundHM(nowHM()));
-  const [brk, setBrk] = useState(clock.breakMin > 0 ? clock.breakMin : null);
-  const [other, setOther] = useState('');
+  const [brk, setBrk] = useState(clock.breakMin > 0 ? (BREAKS.some(([v]) => v === clock.breakMin) ? clock.breakMin : 'other') : null);
+  const [other, setOther] = useState(clock.breakMin > 0 && !BREAKS.some(([v]) => v === clock.breakMin) ? String(clock.breakMin) : '');
+  const [finished, setFinished] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [recorded] = useState(() => `${fmtClock(tsToHM(clock.since))} to ${fmtClock(nowHM())}`);
   const breakMin = brk === 'other' ? Number(other) || 0 : brk;
   const hours = brk == null ? NaN : hoursBetween(start, finish, breakMin);
   const ok = !isNaN(hours) && hours > 0 && hours <= 24;
+  const job = clockJob(clock);
+  const vertical = job ? verticalOf(job) : 'other';
+  const report = isReportJob(vertical);
+  // Asking "is the job finished?" only makes sense here when nothing else is already finishing it.
+  const canFinish = !onDone && Boolean(job) && !jobIsClosed(job.status);
 
   const save = async (shut, withTimes) => {
     setBusy(true);
@@ -105,7 +141,7 @@ function ClockOffSheet({ clock, onClose, onDone }) {
           const r = await api('log_my_job_hours', null, timesBody);
           if (r && r.ok === false) throw new ApiError(r.error || r.message || 'Times not saved', { status: 409, body: r });
         } catch (err) {
-          if (err instanceof ApiError && err.refused) toast('Clocked off, but your times were not saved: ' + friendly(err) + ' Add them on your invoice.', { kind: 'bad', ms: 7000 });
+          if (err instanceof ApiError && err.refused) toast('Clocked off, but your times were not saved: ' + friendly(err) + ' Add them on your timesheet.', { kind: 'bad', ms: 7000 });
           else queueWrite({ action: 'log_my_job_hours', body: timesBody, jobId: clock.jobId, label: 'Hours for ' + clock.title });
         }
       }
@@ -115,25 +151,45 @@ function ClockOffSheet({ clock, onClose, onDone }) {
     buzz([10, 40, 10]);
     setBusy(false);
     shut();
-    if (onDone) onDone({ hours: withTimes ? hours : null, queued });
-    else toast(withTimes ? `Clocked off. ${fmtHours(hours)} saved for your invoice.` : 'Clocked off.', { kind: 'ok', action: { label: 'Pay', run: () => go('/pay') } });
+    if (onDone) { onDone({ hours: withTimes ? hours : null, queued }); return; }
+    toast(withTimes ? `Clocked off. ${fmtHrs(hours)} saved to your timesheet.` : 'Clocked off. Add your times on your timesheet.', { kind: 'ok', action: finished && canFinish ? null : { label: 'Timesheet', run: () => go('/pay/week/' + mondayOf(today)) } });
+    if (finished && canFinish) setTimeout(() => go(`/job/${clock.jobId}/${report ? 'report' : 'finish'}`), 240);
   };
 
-  return html`<${Sheet} title="Clock off" sub=${clock.title} onClose=${onClose}
+  return html`<${Sheet} tall title="Clock off" onClose=${onClose}
     foot=${(shut) => html`
-      <${Button} block busy=${busy} disabled=${!ok} onClick=${() => save(shut, true)}>${ok ? `Clock off, save ${fmtHours(hours)}` : 'Clock off'}<//>
-      <${Button} kind="quiet" block disabled=${busy} onClick=${() => save(shut, false)}>Clock off, I will add times later<//>`}>
-    <div class="stack">
-      ${sameDay ? null : html`<div class="note-banner">You clocked on before today. Put in the start time you worked today.</div>`}
-      <div class="timegrid">
-        <${TimeInput} label="Started" value=${start} onInput=${setStart} />
-        <${TimeInput} label="Finished" value=${finish} onInput=${setFinish} />
+      <${Button} class="big" block busy=${busy} disabled=${!ok} onClick=${() => save(shut, true)}>Save to timesheet<//>
+      <p class="t-small clockoff-goes">${ok ? `Goes on your timesheet for pay week ${fmtWeekShort(mondayOf(today))}.` : brk == null ? 'Choose your break to save.' : 'Check the start and finish times.'}</p>
+      <button type="button" class="link tap clockoff-later" disabled=${busy} onClick=${() => save(shut, false)}>Clock off now, add times later</button>`}>
+    <div class="clockoff">
+      <div class="card clockoff-job">
+        <${JobLine} job=${job || {}} vertical=${job ? vertical : null} />
+        <b class="t-head">${job ? jobAddress(job) || jobTitle(job) : clock.title}</b>
       </div>
-      <${Field} label="Break">
-        <${Picks} value=${brk} options=${[...BREAKS, ['other', 'Other']]} onChange=${setBrk} />
-      <//>
-      ${brk === 'other' ? html`<${Field} label="Break in minutes"><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} /><//>` : null}
-      <div class="hoursout"><span class="t-label">Hours today</span><b class=${ok ? '' : 'words'}>${ok ? fmtHours(hours) : brk == null ? 'Pick a break' : 'Check the times'}</b></div>
+
+      <section>
+        <h3 class="t-cap">Time worked</h3>
+        <div class="card">
+          <div class="frow"><span>Date</span><span class="t-value nums">${fmtDayYear(today)}</span></div>
+          <label class="frow"><span>Start</span><input class="input" type="time" step="300" value=${start} onInput=${(e) => setStart(e.currentTarget.value)} /></label>
+          <label class="frow"><span>Finish</span><input class="input" type="time" step="300" value=${finish} onInput=${(e) => setFinish(e.currentTarget.value)} /></label>
+          <label class="frow"><span>Break</span><select class=${cx('input', brk == null && 'unset')} value=${brk == null ? '' : String(brk)} onChange=${(e) => { const v = e.currentTarget.value; setBrk(v === '' ? null : v === 'other' ? 'other' : Number(v)); }}>
+            <option value="">Choose</option>${BREAKS.map(([v, label]) => html`<option value=${String(v)}>${label}</option>`)}<option value="other">Other</option>
+          </select></label>
+          ${brk === 'other' ? html`<label class="frow"><span>Break in minutes</span><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} /></label>` : null}
+          <div class="frow total"><span>Hours</span><span class=${ok ? 't-figure' : 't-small'}>${ok ? fmtHrs(hours) : brk == null ? 'Choose your break' : 'Check the times'}</span></div>
+        </div>
+        <p class="t-small clockoff-note">${sameDay ? `The clock recorded ${recorded}. Check the times before you save.` : 'You clocked on before today. Put in the start time you worked today.'}</p>
+      </section>
+
+      ${canFinish ? html`<section>
+        <h3 class="t-cap">Is the job finished?</h3>
+        <div class="choice2" role="group" aria-label="Is the job finished?">
+          <button type="button" aria-pressed=${String(!finished)} onClick=${() => { buzz(6); setFinished(false); }}>More days to go</button>
+          <button type="button" aria-pressed=${String(finished)} onClick=${() => { buzz(6); setFinished(true); }}>${report ? 'Finished, send report' : 'Finished, sign off'}</button>
+        </div>
+        ${finished ? html`<p class="t-small clockoff-note">${report ? 'After you save, the report opens.' : 'After you save, the sign off opens: photos and the customer signature.'}</p>` : null}
+      </section>` : null}
     </div>
   <//>`;
 }
@@ -159,8 +215,8 @@ export function ClockBar() {
   if (!clock) return null;
   return html`<div class="clockbar">
     <i class="pulse" />
-    <button type="button" class="where" onClick=${() => go('/job/' + clock.jobId)}><b class="clip">${clock.title}</b><span>${clock.pending ? 'On the clock, waiting for signal' : 'On the clock'}</span></button>
-    <span class="timer">${t.h}:${t.m}</span>
+    <button type="button" class="where" onClick=${() => go('/job/' + clock.jobId)}><b class="clip">${clock.title}</b><span>${clock.pending ? 'On site, waiting for signal' : 'On site'}</span></button>
+    <span class="timer">${fmtElapsed(t)}</span>
     <button type="button" class="off" onClick=${() => openClockOff()}>Clock off</button>
   </div>`;
 }

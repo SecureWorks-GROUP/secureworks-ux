@@ -4,10 +4,11 @@
 import { html, cx, useEffect, useLayoutEffect, useRef, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { local, invalidate } from '../lib/store.js';
-import { todayISO, addDays, fmtDay, fmtRelDay, fmtHours, hoursBetween, hmToMinutes, tsToDate, tsToHM, isISODate } from '../lib/dates.js';
+import { todayISO, addDays, fmtDay, fmtRelDay, hoursBetween, hmToMinutes, tsToDate, tsToHM, isISODate } from '../lib/dates.js';
+import { fmtHrs as fmtHours } from '../screens/words.js';
 import { compressImage } from '../lib/upload.js';
 import { Icon } from './icons.js';
-import { Button, Field, Picks, TimeInput, BREAKS, toast, buzz } from './kit.js';
+import { Button, Field, Picks, TimeInput, BREAKS, JobLine, toast, buzz } from './kit.js';
 
 // ---------------------------------------------------------------- words ----
 const SWAPS = [
@@ -192,20 +193,20 @@ export function SignaturePad({ initial, onChange, hint = 'Sign here with your fi
   const up = () => { const s = st.current; if (!s.cur) return; s.strokes.push(s.cur); s.cur = null; queue(); emit(); };
   const clear = () => { const s = st.current; s.strokes = []; s.cur = null; s.img = null; clearTimeout(s.timer); paint(); setEmpty(true); onChange(null); buzz(6); };
 
-  return html`<div class="sigwrap">
+  return html`<div class="rp-sig">
     <canvas ref=${canvas} class="sigpad" aria-label="Signature" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} />
-    <span class="sigline" />
-    ${empty ? html`<span class="sighint">${hint}</span>` : html`<button type="button" class="sigclear" onClick=${clear}><${Icon} name="refresh" size=${16} />Clear</button>`}
+    <span class="rp-sigline" />
+    ${empty ? html`<span class="rp-sighint">${hint}</span>` : html`<button type="button" class="rp-sigclear" onClick=${clear}>Clear</button>`}
   </div>`;
 }
 
 // ------------------------------------------------------------ small parts --
 const STAR_WORD = ['', 'Not happy', 'Could be better', 'It is okay', 'Happy', 'Very happy'];
 export function Stars({ value, onChange, big }) {
-  return html`<div><div class=${cx('stars', big && 'big')} role="radiogroup" aria-label="Rating out of 5">
+  return html`<div><div class=${cx('stars', big && 'rp-stars')} role="radiogroup" aria-label="Rating out of 5">
     ${[1, 2, 3, 4, 5].map((n) => html`<button type="button" role="radio" aria-checked=${String(value === n)} aria-label=${n + (n === 1 ? ' star' : ' stars')} class=${n <= value ? 'on' : ''} onClick=${() => { buzz(8); onChange(n); }}>
-      <${Icon} name="star" size=${big ? 44 : 34} fill=${n <= value} stroke=${1.6} /></button>`)}
-  </div>${big ? html`<p class="starword">${STAR_WORD[value] || ''}</p>` : null}</div>`;
+      <${Icon} name="star" size=${big ? 40 : 32} fill=${n <= value} stroke=${1.6} /></button>`)}
+  </div>${big ? html`<p class="rp-starword">${value ? `${value} out of 5. ${STAR_WORD[value]}` : ''}</p>` : null}</div>`;
 }
 export function CheckRow({ checked, onChange, label, sub, disabled }) {
   return html`<button type="button" class="check" role="checkbox" aria-checked=${String(Boolean(checked))} disabled=${disabled} onClick=${() => { buzz(6); onChange(!checked); }}>
@@ -217,7 +218,7 @@ export function Counter({ value, onChange, min = 0, max = 99, label, blank = '' 
   const n = value == null ? null : Number(value);
   return html`<div class="counter" role="group" aria-label=${label}>
     <button type="button" aria-label="One less" disabled=${n == null || n <= min} onClick=${() => { buzz(5); onChange(n - 1 < min ? min : n - 1); }}><${Icon} name="minus" size=${22} /></button>
-    <b>${n == null ? html`<span class="t-mute" style="font-size:15px;font-weight:560;font-stretch:100%">${blank}</span>` : n}</b>
+    <b>${n == null ? html`<span class="rp-blank">${blank}</span>` : n}</b>
     <button type="button" aria-label="One more" disabled=${n != null && n >= max} onClick=${() => { buzz(5); onChange(n == null ? Math.max(min, 1) : n + 1); }}><${Icon} name="plus" size=${22} /></button>
   </div>`;
 }
@@ -240,8 +241,15 @@ export function StepBar({ index, total }) {
     ${Array.from({ length: total }, (_, i) => html`<i class=${i < index ? 'done' : i === index ? 'on' : ''} />`)}
   </div>`;
 }
-export function StepHead({ kicker, title, children }) {
-  return html`<header class="stephead">${kicker ? html`<span class="t-label">${kicker}</span>` : null}<h1 class="t-title">${title}</h1>${children ? html`<p>${children}</p>` : null}</header>`;
+/** A step's name and one line about it. `job` puts the job tag in front of the caption. */
+export function StepHead({ kicker, job, vertical, title, children }) {
+  return html`<header class="rp-stephead">
+    ${job ? html`<${JobLine} job=${job} vertical=${vertical}>${kicker || null}<//>` : kicker ? html`<span class="t-cap">${kicker}</span>` : null}
+    <h2 class="t-head">${title}</h2>${children ? html`<p>${children}</p>` : null}</header>`;
+}
+/** The white band under the bar on a step screen: progress, then the step's name. */
+export function StepTop({ index, total, children }) {
+  return html`<div class="rp-band"><${StepBar} index=${index} total=${total} /><span class="t-cap rp-count">Step ${index + 1} of ${total}</span>${children}</div>`;
 }
 
 /** Round to the nearest 5 minutes, which is how trades give times. */
@@ -269,13 +277,13 @@ export function TimesBlock({ value, onChange, outLabel = 'Hours' }) {
   const [otherBrk, setOtherBrk] = useState(value.breakMin != null && !BREAKS.some(([v]) => v === value.breakMin));
   const hours = value.breakMin == null ? NaN : hoursBetween(value.start, value.finish, value.breakMin);
   return html`<div class="stack">
-    <div class="timegrid">
+    <div class="rp-times">
       <${TimeInput} label="Started" value=${value.start} onInput=${(v) => onChange({ start: v })} />
       <${TimeInput} label="Finished" value=${value.finish} onInput=${(v) => onChange({ finish: v })} />
     </div>
     <${Field} label="Break"><${Picks} value=${otherBrk ? 'other' : value.breakMin} options=${[...BREAKS, ['other', 'Other']]} onChange=${(v) => { if (v === 'other') { setOtherBrk(true); onChange({ breakMin: null }); } else { setOtherBrk(false); onChange({ breakMin: v }); } }} /><//>
     ${otherBrk ? html`<${Field} label="Break in minutes"><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${value.breakMin == null ? '' : value.breakMin} onInput=${(e) => onChange({ breakMin: e.currentTarget.value === '' ? null : Math.max(0, Math.round(Number(e.currentTarget.value))) })} /><//>` : null}
-    <div class="hoursout"><span class="t-label">${outLabel}</span><b>${isNaN(hours) ? '' : fmtHours(hours)}</b></div>
+    <div class="rp-out"><span class="t-cap">${outLabel}</span><b>${isNaN(hours) ? '' : fmtHours(hours)}</b></div>
   </div>`;
 }
 
@@ -316,18 +324,22 @@ export function HoursCard({ jobId, crew, userId, title = 'Your hours for this jo
   if (office && !mine.length) return null; // office staff looking at a job they did not work
   const last = done || (saved[0] ? { hours: Number(saved[0].hours_worked), date: String(saved[0].scheduled_date || '').slice(0, 10) } : null);
   if (last && !open) {
-    return html`<section class="inset hourscard">
-      <div><span class="t-label">${title}</span><p class="t-head" style="margin-top:4px">${fmtHours(last.hours)} saved${last.date ? ` for ${fmtRelDay(last.date).toLowerCase() === 'today' ? 'today' : fmtDay(last.date)}` : ''}</p>
-        <p class="t-small" style="margin-top:2px">They are on that week's invoice, ready to send.</p></div>
-      <${Button} kind="line" small onClick=${() => setOpen(true)}>Change<//>
+    return html`<section class="sec"><div class="sec-h"><h2 class="t-cap">${title}</h2></div>
+      <div class="block card rp-hours">
+        <div><p class="t-strong">${fmtHours(last.hours)} saved${last.date ? ` for ${fmtRelDay(last.date).toLowerCase() === 'today' ? 'today' : fmtDay(last.date)}` : ''}</p>
+          <p class="t-small">They are on that week's timesheet, ready for your invoice.</p></div>
+        <${Button} kind="line" small onClick=${() => setOpen(true)}>Change<//>
+      </div>
     </section>`;
   }
-  return html`<section class="hoursform">
-    <div><h2 class="t-head">${title}</h2><p class="t-small" style="margin-top:3px">So this job is on your invoice. Give the times you worked, the hours are worked out for you.</p></div>
-    ${offered && !touched ? html`<div class="note-banner plain"><${Icon} name="clock" size=${18} /><span>${offered.from || 'Saved times'}${offered.date ? `, ${fmtDay(offered.date)}` : ''}. Change them if they are not right.</span></div>` : null}
+  return html`<section class="sec"><div class="sec-h"><h2 class="t-cap">${title}</h2></div>
+    <div class="block card pad stack">
+    <p class="t-small">So this job is on your invoice. Give the times you worked, the hours are worked out for you.</p>
+    ${offered && !touched ? html`<div class="note-banner plain"><span>${offered.from || 'Saved times'}${offered.date ? `, ${fmtDay(offered.date)}` : ''}. Change them if they are not right.</span></div>` : null}
     <${DayPick} label="Day you worked" value=${f.date} onChange=${(v) => { setTouched(true); setF((p) => ({ ...p, date: v })); }} />
     <${TimesBlock} value=${f} onChange=${(c) => { setTouched(true); setF((p) => ({ ...p, ...c })); }} />
-    <${Button} block busy=${busy} disabled=${Boolean(problem)} onClick=${save}>${problem ? problem : `Save ${fmtHours(hours)} for my invoice`}<//>
+    <${Button} kind="line" block busy=${busy} disabled=${Boolean(problem)} onClick=${save}>${problem ? problem : `Save ${fmtHours(hours)} for my invoice`}<//>
     ${last ? html`<${Button} kind="quiet" block onClick=${() => setOpen(false)}>Leave them as they are<//>` : null}
+    </div>
   </section>`;
 }

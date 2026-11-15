@@ -46,6 +46,18 @@ export function createDemoServer(persona) {
     const mode = modeOf(job); const wo = db.jobWorkOrders[job.id];
     return { job_id: job.id, invoice_mode: mode, invoice_mode_reason: mode === 'hourly' ? 'other_job' : mode === 'work_order' ? 'fencing_job' : 'patio_job', can_claim_commission: manages(job), work_order_agreed_ex: mode === 'work_order' && wo && wo.agreed_labour_ex ? wo.agreed_labour_ex : null, job_work_order_id: wo ? wo.id : null };
   }
+  // ---- the saved weekly draft
+  db.running = {};
+  const draftKey = (c) => (!c ? '' : c.source_key ? String(c.source_key) : c.work_order_id ? 'wo:' + c.work_order_id : c.assignment_id ? 'as:' + c.assignment_id : c.job_id && (c.work_date || c.scheduled_date) ? 'job:' + c.job_id + ':' + String(c.work_date || c.scheduled_date).slice(0, 10) : '');
+  const draftGate = () => { if ((me.trade_details || {}).runningInvoiceDraft === false) fail(403, { ok: false, code: 'running_draft_off', error: 'Saving a weekly draft is not switched on for this account.' }); };
+  const mustBeMonday = (iso) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || mondayOf(iso) !== iso) fail(400, { ok: false, code: 'week_start_invalid', error: 'week_start must be a Monday.' }); };
+  // What the server would put on the week by itself: one card a booking, group jobs left out.
+  function draftSuggested(weekStart) {
+    const weekEnd = addDays(weekStart, 6); const groupJobIds = new Set(db.groups.map((g) => g.job_id));
+    return db.assignments.filter((a) => mine(a) && a.scheduled_date >= weekStart && a.scheduled_date <= weekEnd && !(a.invoiced_in && db.invoices.some((i) => i.id === a.invoiced_in && !['draft', 'ops-reject'].includes(i.status))))
+      .filter((a) => { const j = db.job(a.job_id); return !(groupJobIds.has(j.id) || (j.type === 'patio' && me.invoice_type !== 'per_metre')); })
+      .map((a) => { const j = db.job(a.job_id); return { assignment_id: a.id, job_id: j.id, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, job_type: j.type, scheduled_date: a.scheduled_date, included: true, auto: true }; });
+  }
   const liveInvoice = (monday) => db.invoices.find((i) => i.week_start === monday && !['draft', 'ops-reject'].includes(i.status));
 
   const ops = {
@@ -196,7 +208,7 @@ export function createDemoServer(persona) {
         const j = db.job(a.job_id);
         if (groupJobIds.has(j.id) || (j.type === 'patio' && me.invoice_type !== 'per_metre')) {
           const g = db.groups.find((x) => x.job_id === j.id);
-          const cur = groupRoute.get(j.id) || { job_id: j.id, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, booked_dates: [], route: g ? 'group' : 'group_setup_required', group_id: g ? g.group_id : null, setup_reason: g ? null : 'group_missing', discovery: { state: g ? 'member' : 'create' }, next_step: g ? 'Add your hours on the crew work order for this job.' : 'This job is paid as a crew. Start the crew work order to add your hours.' };
+          const cur = groupRoute.get(j.id) || { job_id: j.id, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, booked_dates: [], route: g ? 'group' : 'group_setup_required', group_id: g ? g.group_id : null, setup_reason: g ? null : 'group_missing', discovery: { state: g ? 'member' : 'create' }, next_step: g ? 'Add your hours on the group work order for this job.' : 'This job is paid as a group. Start the group work order to add your hours.' };
           cur.booked_dates.push(a.scheduled_date); groupRoute.set(j.id, cur); continue;
         }
         const m = modeRow(j); const hours = a.hours_worked != null ? a.hours_worked : 0;
@@ -206,7 +218,7 @@ export function createDemoServer(persona) {
       }
       const total_hours = round2(cards.reduce((s, c) => s + c.hours, 0)); const subtotal = round2(total_hours * db.rate);
       return { assignments: cards, rate: db.rate, rate_resolved: db.rate > 0, is_per_metre: me.invoice_type === 'per_metre', week_ending: sunday, week_start: monday, total_hours, subtotal, ...money(subtotal, { gstOn: me.trade_details.gstRegistered === true }),
-        already_submitted: Boolean(liveInvoice(monday)), running_invoice_draft: true, group_route_jobs: [...groupRoute.values()], ...(db.flags.rateEditable ? { trade_rate_editable: true } : {}) };
+        already_submitted: Boolean(liveInvoice(monday)), running_invoice_draft: (me.trade_details || {}).runningInvoiceDraft !== false, invoice_mode_unavailable: false, group_route_jobs: [...groupRoute.values()], ...(db.flags.rateEditable ? { trade_rate_editable: true } : {}) };
     },
     trade_invoice_job_modes(p) { const ids = String(p.job_ids || '').split(',').filter(Boolean); return { ok: true, jobs: ids.map((i) => db.job(i)).filter(Boolean).map(modeRow), not_found: ids.filter((i) => !db.job(i)) }; },
     my_trade_invoices() { return { invoices: [...db.invoices].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).map(({ lines, ...row }) => ({ ...row, week_ending: row.week_end, paid: row.status === 'paid' })) }; },
@@ -247,7 +259,42 @@ export function createDemoServer(persona) {
       (b.manual_assignments || []).forEach((x) => { const a = db.assignments.find((y) => y.id === x.assignment_id); if (a) a.invoiced_in = inv.id; });
       return { ok: true, success: true, invoice_id: inv.id, invoice_number: inv.invoice_number, total_hours: inv.total_hours, line_count: lines.length, ...m, ...(heldLine ? { office_review: 'held', code: 'lines_awaiting_office_review', xero_bill_id: null } : { xero_bill_id: inv.xero_bill_id, xero_bill_number: inv.invoice_number }), pending_ops_review: false };
     },
-    delete_trade_invoice(p, b) { db.invoices = db.invoices.filter((i) => !(i.id === b.invoice_id && i.status === 'draft')); return { success: true }; },
+    // The saved weekly draft: one a person a week, in the shape the current Trade App writes.
+    // It never sends anything and bills nothing.
+    get_running_invoice_draft(p) {
+      draftGate();
+      const weekStart = String(p.week_start || '').slice(0, 10); mustBeMonday(weekStart);
+      const d = db.running[weekStart] || null;
+      return { ok: true, draft_id: d ? d.id : null, status: 'draft', created_by_agent: false, draft_origin: d ? d.origin : null, agent_label: null, xero: false, draft_builder: d ? d.builder : null,
+        suggested: draftSuggested(weekStart), claimed: [], dismissed_source_keys: d ? d.builder.dismissedKeys || [] : [], pay_rules: 'unchanged_until_submit' };
+    },
+    save_running_invoice_draft(p, b) {
+      ['submit', 'send', 'authorise', 'authorize', 'pay', 'xero', 'xero_bill_id', 'xero_status', 'create_xero'].forEach((k) => { if (b[k]) fail(403, { ok: false, code: 'agent_draft_only', error: 'Save does not send an invoice.' }); });
+      draftGate();
+      const incoming = b.draft_builder && typeof b.draft_builder === 'object' ? b.draft_builder : {};
+      const weekStart = String(b.week_start || incoming.weekStart || '').slice(0, 10); mustBeMonday(weekStart);
+      const prior = db.running[weekStart] || null;
+      if (b.draft_id && (!prior || String(b.draft_id) !== String(prior.id))) fail(409, { ok: false, code: 'draft_replaced', error: 'That draft was replaced. Open the week again.' });
+      const dismissed = new Set((Array.isArray(incoming.dismissedKeys) ? incoming.dismissedKeys : b.dismissed_source_keys || (prior ? prior.builder.dismissedKeys : []) || []).map(String));
+      const cards = JSON.parse(JSON.stringify(Array.isArray(incoming.jobCards) ? incoming.jobCards : []));
+      const have = new Set(cards.map(draftKey).filter(Boolean)); const added = [];
+      for (const sug of draftSuggested(weekStart)) { const k = draftKey(sug); if (!k || have.has(k) || dismissed.has(k)) continue; cards.push({ ...sug, source_key: k }); have.add(k); added.push(k); }
+      const builder = { version: 1, ...(Array.isArray(incoming.groupIds) && incoming.groupIds.length ? { groupIds: incoming.groupIds.map(String) } : {}), jobCards: cards, invRows: Array.isArray(incoming.invRows) ? incoming.invRows : [], invLumpLines: Array.isArray(incoming.invLumpLines) ? incoming.invLumpLines : [],
+        dismissedKeys: [...dismissed], ...(incoming.manualLock || (prior && prior.builder.manualLock) || b.manual_lock === true ? { manualLock: true } : {}), notes: b.notes != null ? b.notes : incoming.notes || '', gst_on: b.gst_on != null ? Boolean(b.gst_on) : Boolean(incoming.gst_on), weekStart, weekEnd: addDays(weekStart, 6) };
+      // The draft row holds hours lines only, as on the server: a work order or commission card bills nothing until it is sent.
+      const lines = cards.filter((c) => c && c.included !== false && !c.wo_mode && !c.commission_mode && Number(c.hours) > 0 && !dismissed.has(draftKey(c))).map((c) => ({ id: db.id('l'), line_date: String(c.work_date || c.scheduled_date || '').slice(0, 10), work_date: c.work_date || null, start_time: c.start_time || null, finish_time: c.finish_time || null, break_minutes: c.break_minutes || 0,
+        job_number: c.job_number || '', client_name: c.client_name || '', site_suburb: c.site_suburb || '', description: c.description || 'Labour', line_type: 'labour', total_hours: round2(Number(c.hours)), hourly_rate: round2(Number(c.rate) || 0), line_total_ex: round2(Number(c.hours) * (Number(c.rate) || 0)) }));
+      const id = db.id('inv');
+      db.invoices = db.invoices.filter((i) => !(prior && i.id === prior.id));
+      db.invoices.push({ id, user_id: me.id, week_start: weekStart, week_end: addDays(weekStart, 6), invoice_number: null, status: 'draft', invoice_source: 'hourly', notes: builder.notes || '', ...money(round2(lines.reduce((t, l) => t + l.line_total_ex, 0)), { gstOn: builder.gst_on }), total_hours: round2(lines.reduce((t, l) => t + l.total_hours, 0)), xero_bill_id: null, submitted_at: null, created_at: db.now().toISOString(), paid_at: null, lines });
+      db.running[weekStart] = { id, builder, origin: (prior && prior.origin) || 'staff' };
+      return { ok: true, draft_id: id, status: 'draft', created_by_agent: false, draft_origin: db.running[weekStart].origin, agent_label: null, xero: false, submitted: false, draft_builder: builder, added, removed: [], edited: [], missing: [], pay_rules: 'unchanged_until_submit' };
+    },
+    delete_trade_invoice(p, b) {
+      db.invoices = db.invoices.filter((i) => !(i.id === b.invoice_id && i.status === 'draft'));
+      Object.keys(db.running).forEach((wk) => { if (db.running[wk].id === b.invoice_id) delete db.running[wk]; });
+      return { success: true };
+    },
     my_money() {
       const rows = db.invoices.map(({ lines, ...i }) => ({ ...i, bucket: (i.week_end || '').slice(0, 7), counts: !['draft', 'ops-reject'].includes(i.status), payable: i.trade_payable, paid: i.status === 'paid' ? i.trade_payable : 0, outstanding: i.status === 'paid' ? 0 : i.trade_payable, figures_ok: true }));
       const sum = (list) => ({ invoices: list.length, gross_earned: round2(list.reduce((s, r) => s + r.gross_earned, 0)), super_amount: round2(list.reduce((s, r) => s + r.super_amount, 0)), gst: round2(list.reduce((s, r) => s + r.gst, 0)), payable: round2(list.reduce((s, r) => s + r.payable, 0)), paid_total: round2(list.reduce((s, r) => s + r.paid, 0)), outstanding: round2(list.reduce((s, r) => s + r.outstanding, 0)), figures_incomplete: false });

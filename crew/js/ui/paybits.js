@@ -1,8 +1,11 @@
-// Pieces the pay screens share: the done state, money rows as the server sent
-// them, a signature pad and star ratings. No reads or writes in here.
+// Pieces the pay screens share: figures and words in one format, the rows of a
+// timesheet, the lines of an invoice, the done screen, money rows as the
+// server sent them, a signature pad and star ratings. No reads or writes here.
 import { html, cx, useEffect, useRef } from '../lib/h.js';
-import { fmtMoney, fmtTime, fmtHours } from '../lib/dates.js';
+import { fmtMoney, fmtWeek, fmtDow, fmtDom, fmtDowLong, addDays, todayISO, hoursBetween } from '../lib/dates.js';
+import { lineHours, lineProblem, invoiceBadge, UNKNOWN_MODE_WORDS } from '../lib/invoice.js';
 import { Icon } from './icons.js';
+import { JobTag, Badge } from './kit.js';
 
 export function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -14,11 +17,133 @@ export function uuid() {
 export const cash = (n) => fmtMoney(n, { cents: true });
 export const num = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : Number(v));
 
-/** '7am to 3:30pm, 30 min break' from a row with start_time, finish_time, break_minutes. */
+// ---------- words and figures ----------
+/** 8 -> '8.0 h', 7.25 -> '7.25 h'. Always with its unit. */
+export function hrs(n) {
+  if (n == null || n === '' || isNaN(Number(n))) return '';
+  const r = Math.round(Number(n) * 100) / 100;
+  return `${Number.isInteger(r * 10) ? r.toFixed(1) : r.toFixed(2)} h`;
+}
+/** '07:00' -> '7:00 am' */
+export function clock(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+  if (!m) return '';
+  let h = Number(m[1]); const ap = h >= 12 ? 'pm' : 'am';
+  h = h % 12; if (h === 0) h = 12;
+  return `${h}:${m[2]} ${ap}`;
+}
+/** '7:00 am to 3:30 pm · 30 min break' */
+export function timeLine(start, finish, breakMin) {
+  if (!start || !finish) return '';
+  const b = Number(breakMin) || 0;
+  return `${clock(start)} to ${clock(finish)} · ${b ? b + ' min break' : 'no break'}`;
+}
+/** The same, from a server row with start_time, finish_time, break_minutes. */
 export function whenWords(row) {
   if (!row || !row.start_time || !row.finish_time) return '';
-  const brk = Number(row.break_minutes) || 0;
-  return `${fmtTime(row.start_time)} to ${fmtTime(row.finish_time)}${brk ? `, ${brk} min break` : ''}`;
+  return timeLine(row.start_time, row.finish_time, row.break_minutes);
+}
+/** '9 to 15 Nov 2026' */
+export function weekWords(monday) { return `${fmtWeek(monday)} ${addDays(monday, 6).slice(0, 4)}`; }
+export function plural(n, one, many) { return `${n} ${n === 1 ? one : many || one + 's'}`; }
+function listWords(names) {
+  if (names.length <= 1) return names.join('');
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+/** How a line is paid, in the words used on every pay screen. The server decides which. */
+export const PAY_TYPE = { hours: 'Hourly', work_order: 'Work order', commission: 'Commission', group: 'Group work order', other: 'Other item', deduction: 'Taken off', unknown: '' };
+
+// ---------- the timesheet ----------
+/** My days on a group work order: what the server sent, else the days saved on this phone. */
+export function groupDays(share, saved) {
+  const server = share && (share.my_entries || share.entries || share.time_entries);
+  return (Array.isArray(server) ? server : saved || []).filter((d) => d && d.work_date);
+}
+/**
+ * One row for one job on one day worked. `groups` is
+ * [{ job_id, job_number, site_suburb, client_name, booked_dates, days: [...] }].
+ * Days booked but not reached yet are counted, not listed.
+ */
+export function sheetRows(lines, groups, { monday, rateEditable }) {
+  const today = todayISO(); const sunday = addDays(monday, 6);
+  const rows = []; let ahead = 0;
+  for (const l of lines) {
+    if (l.kind === 'other' || l.kind === 'deduction') continue;
+    const head = { title: l.title, jobNumber: l.jobNumber, line: l, open: 'line' };
+    if (l.kind === 'hours' || l.kind === 'unknown') {
+      if (l.ahead) { ahead += 1; continue; }
+      if (l.unknown) { rows.push({ ...head, key: l.key, date: l.date, type: '', tone: 'mute', timeText: l.viaGroup ? 'Paid through the group work order' : l.modePending ? 'Checking how this job is billed' : UNKNOWN_MODE_WORDS, hours: null }); continue; }
+      if (l.off) { rows.push({ ...head, key: l.key, date: l.date, type: PAY_TYPE.hours, tone: 'off', timeText: 'Left off this invoice', hours: null }); continue; }
+      const problem = lineProblem(l, { monday, rateEditable });
+      const h = lineHours(l);
+      rows.push({ ...head, key: l.key, date: l.date, type: PAY_TYPE.hours, tone: problem ? 'todo' : '', problem,
+        timeText: !l.start || !l.finish ? 'Add start and finish times' : problem || timeLine(l.start, l.finish, l.breakMin), hours: problem || isNaN(h) ? null : h });
+      continue;
+    }
+    // Work order and commission: the hours are a record, the amount is the job's.
+    const days = l.dayCards && l.dayCards.length ? l.dayCards : [{ key: l.key, date: l.date, saved: null, clocked: null }];
+    for (const d of days) {
+      if (d.date > today) { ahead += 1; continue; }
+      const h = d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) : d.clocked;
+      rows.push({ ...head, key: l.key + ':' + d.key, date: d.date, type: PAY_TYPE[l.kind], tone: l.off ? 'off' : '',
+        timeText: l.off ? 'Left off this invoice' : d.saved ? timeLine(d.saved.start, d.saved.finish, d.saved.breakMin) : h > 0 ? 'From the clock' : 'No times recorded', hours: l.off || !(h > 0) ? null : h });
+    }
+  }
+  for (const g of groups || []) {
+    const head = { title: g.site_suburb || g.client_name || g.job_number || 'Job', jobNumber: g.job_number || '', open: 'group', jobId: g.job_id, type: PAY_TYPE.group };
+    const days = (g.days || []).filter((d) => d.work_date >= monday && d.work_date <= sunday);
+    for (const d of days) {
+      const h = d.hours != null ? Number(d.hours) : hoursBetween(d.start_time, d.finish_time, d.break_minutes || 0);
+      rows.push({ ...head, key: 'g:' + g.job_id + ':' + d.work_date, date: d.work_date, tone: '', timeText: whenWords(d) || 'Recorded on the group work order', hours: h > 0 ? h : null });
+    }
+    for (const d of g.booked_dates || []) {
+      const day = String(d).slice(0, 10);
+      if (days.some((x) => x.work_date === day)) continue;
+      if (day > today) { ahead += 1; continue; }
+      rows.push({ ...head, key: 'g:' + g.job_id + ':' + day, date: day, tone: 'mute', timeText: 'Add your hours on the group work order', hours: null });
+    }
+  }
+  rows.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.title.localeCompare(b.title));
+  return { rows, ahead };
+}
+/** What the timesheet adds up to, and what it still needs, in words. */
+export function sheetSummary(rows) {
+  const live = rows.filter((r) => r.tone !== 'off' && r.tone !== 'mute');
+  const todo = live.filter((r) => r.tone === 'todo');
+  const hours = Math.round(live.reduce((s, r) => s + (r.hours || 0), 0) * 100) / 100;
+  const days = [...new Set(live.map((r) => r.date))];
+  const openDays = [...new Set(todo.map((r) => r.date))];
+  const names = openDays.map((d) => fmtDowLong(d));
+  const needs = !todo.length ? '' : names.length > 3 ? `${names.length} days still need their times` : `${listWords(names)} still ${names.length === 1 ? 'needs its' : 'need their'} times`;
+  return { hours, todo: todo.length, days: days.length, daysDone: days.length - openDays.length, needs, count: live.length };
+}
+
+/** The day cell of a table row: 'Mon' over '9'. */
+export function DayCell({ date }) {
+  return html`<span class="pay-day"><span class="dow">${date ? fmtDow(date) : ''}</span><span class="dom">${date ? fmtDom(date) : ''}</span></span>`;
+}
+
+// ---------- the lines of an invoice ----------
+/** A group of lines under a tinted caption with its subtotal. */
+export function PayGroup({ label, right, children }) {
+  return html`<div class="pay-cap"><span>${label}</span>${right != null && right !== '' ? html`<span class="t-num">${right}</span>` : null}</div>${children}`;
+}
+/** One line: the suburb, the job tag with how it is priced, and the amount. */
+export function PayLine({ title, number, detail, amount, tone, note, badge, onClick }) {
+  const body = html`<span class="main"><b>${title}</b>
+      <span class="pay-detail"><${JobTag} number=${number} />${detail ? html`<span>${detail}</span>` : null}</span>
+      ${note ? html`<span class="pay-linenote">${note}</span>` : null}
+      ${badge || null}</span>
+    <span class="pay-amt">${amount}</span>`;
+  if (onClick) return html`<button type="button" class=${cx('pay-line', tone)} onClick=${onClick}>${body}</button>`;
+  return html`<div class=${cx('pay-line', tone)}>${body}</div>`;
+}
+
+/** An invoice's state as a badge. The words are the server's (or invoiceState's), never made up here. */
+export function InvoiceBadge({ inv }) {
+  const [words, kind] = invoiceBadge(inv);
+  return html`<${Badge} kind=${kind}>${words}<//>`;
 }
 
 /** The server says yes: the same test for every invoice send. */
@@ -31,20 +156,24 @@ export function sendLanded(res) {
   return res.success === true || res.ok === true || named;
 }
 
-/** The full-screen end of a flow: a mark, a heading, a sentence, then whatever follows. */
-export function DoneScreen({ title, lead, wait, children }) {
-  return html`<main class="page enter-push page-pad donescreen">
-    <div class=${cx('done-mark', wait && 'wait')}><${Icon} name=${wait ? 'clock' : 'check'} size=${44} stroke=${wait ? 2.4 : 3} /></div>
-    <div><h1 class="t-display">${title}</h1>${lead ? html`<p class="donelead">${lead}</p>` : null}</div>
-    ${children}
-  </main>`;
+/** The end of a flow: the bar with its name, a mark, a heading, a sentence, then whatever follows. */
+export function DoneScreen({ bar, title, lead, wait, children, foot }) {
+  return html`<div class="screen enter-push">
+    <header class="appbar"><span class="pay-barpad" /><h1>${bar || ''}</h1><span /></header>
+    <main class="page"><div class="block pay-done">
+      <div class=${cx('pay-mark', wait && 'wait')}><${Icon} name=${wait ? 'clock' : 'check'} size=${30} stroke=${wait ? 2.2 : 2.8} /></div>
+      <div><h2 class="t-title">${title}</h2>${lead ? html`<p class="pay-lead">${lead}</p>` : null}</div>
+      ${children}
+    </div></main>
+    ${foot ? html`<div class="foot">${foot}</div>` : html`<span />`}
+  </div>`;
 }
 
 /**
  * What an invoice pays, exactly as the server sent it. `m` is an invoice or a
  * send result. Nothing is worked out here: a figure that was not sent is left out.
  */
-export function PayRows({ m, totalLabel = 'You get paid', hours }) {
+export function PayRows({ m, totalLabel = 'You are paid', hours }) {
   const gst = num(m.gst != null ? m.gst : m.gst_amount);
   const ded = m.recurring_deduction && num(m.recurring_deduction.amount) ? m.recurring_deduction : null;
   const adj = m.xero_adjustments && Array.isArray(m.xero_adjustments.lines) ? m.xero_adjustments.lines.filter((l) => num(l.amount)) : [];
@@ -52,17 +181,17 @@ export function PayRows({ m, totalLabel = 'You get paid', hours }) {
   const after = num(m.payable_after_xero);
   const withheld = num(m.worker_withhold);
   const pays = adj.length && after != null ? after : before != null ? before : num(m.payable);
-  const hrs = hours != null ? hours : num(m.total_hours);
-  return html`<div class="sumrows">
-    ${num(m.grand_total) != null ? html`<div class="sumrow"><span>Work orders</span><span>${cash(m.grand_total)}</span></div>` : null}
-    ${num(m.final_deductions_total) ? html`<div class="sumrow"><span>Taken off</span><span>-${cash(Math.abs(m.final_deductions_total))}</span></div>` : null}
-    ${num(m.gross_earned) != null ? html`<div class="sumrow"><span>Earned${hrs ? ` (${fmtHours(hrs)})` : ''}</span><span>${cash(m.gross_earned)}</span></div>` : null}
-    ${withheld ? html`<div class="sumrow"><span>Super held from you</span><span>-${cash(withheld)}</span></div>` : null}
-    ${gst ? html`<div class="sumrow"><span>GST</span><span>${cash(gst)}</span></div>` : null}
-    ${ded ? html`<div class="sumrow"><span>${ded.label || 'Weekly deduction'}</span><span>-${cash(ded.amount)}</span></div>` : null}
-    ${adj.length && before != null ? html`<div class="sumrow"><span>Before the office changed it</span><span>${cash(before)}</span></div>` : null}
-    ${adj.map((l) => html`<div class="sumrow"><span>${l.description || 'Changed by the office'}</span><span>${cash(l.amount)}</span></div>`)}
-    <div class="sumrow total"><span>${totalLabel}</span><span>${pays != null ? cash(pays) : 'Ask the office'}</span></div>
+  const h = hours != null ? hours : num(m.total_hours);
+  return html`<div class="pay-sum">
+    ${num(m.grand_total) != null ? html`<div class="pay-sumrow"><span>Work orders</span><span>${cash(m.grand_total)}</span></div>` : null}
+    ${num(m.final_deductions_total) ? html`<div class="pay-sumrow"><span>Taken off</span><span>-${cash(Math.abs(m.final_deductions_total))}</span></div>` : null}
+    ${num(m.gross_earned) != null ? html`<div class="pay-sumrow"><span>Gross earned${h ? ` · ${hrs(h)}` : ''}</span><span>${cash(m.gross_earned)}</span></div>` : null}
+    ${withheld ? html`<div class="pay-sumrow"><span>Super withheld</span><span>-${cash(withheld)}</span></div>` : null}
+    ${gst ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(gst)}</span></div>` : null}
+    ${ded ? html`<div class="pay-sumrow"><span>${ded.label || 'Weekly deduction'}</span><span>-${cash(ded.amount)}</span></div>` : null}
+    ${adj.length && before != null ? html`<div class="pay-sumrow"><span>Before the office changed it</span><span>${cash(before)}</span></div>` : null}
+    ${adj.map((l) => html`<div class="pay-sumrow"><span>${l.description || 'Changed by the office'}</span><span>${cash(l.amount)}</span></div>`)}
+    <div class="pay-sumrow total"><span>${totalLabel}</span><span>${pays != null ? cash(pays) : 'Ask the office'}</span></div>
   </div>`;
 }
 
@@ -95,15 +224,15 @@ export function SigPad({ onChange }) {
   };
   const up = () => { const s = st.current; if (!s.on) return; s.on = false; if (s.drawn) onChange(ref.current.toDataURL('image/png')); };
   const clear = () => { const c = ref.current; const r = c.getBoundingClientRect(); st.current.ctx.fillRect(0, 0, r.width, r.height); st.current.drawn = false; onChange(null); };
-  return html`<div class="sigwrap">
-    <canvas ref=${ref} class="sigpad" aria-label="Sign here" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} />
-    <button type="button" class="sigclear" onClick=${clear}>Clear</button>
+  return html`<div class="pay-sig">
+    <canvas ref=${ref} class="pay-sigpad" aria-label="Sign here" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} />
+    <button type="button" class="pay-sigclear" onClick=${clear}>Clear</button>
   </div>`;
 }
 
 /** One to five stars. */
 export function Stars({ value, onChange, label }) {
-  return html`<div class="starrow"><span class="t-strong">${label}</span>
-    <div class="stars" role="group" aria-label=${label}>${[1, 2, 3, 4, 5].map((n) => html`<button type="button" class=${cx(value >= n && 'on')} aria-label=${`${n} out of 5`} aria-pressed=${String(value === n)} onClick=${() => onChange(n)}><${Icon} name="star" size=${30} fill=${value >= n} /></button>`)}</div>
+  return html`<div class="pay-starrow"><span class="t-strong">${label}</span>
+    <div class="pay-stars" role="group" aria-label=${label}>${[1, 2, 3, 4, 5].map((n) => html`<button type="button" class=${cx(value >= n && 'on')} aria-label=${`${n} out of 5`} aria-pressed=${String(value === n)} onClick=${() => onChange(n)}><${Icon} name="star" size=${28} fill=${value >= n} /></button>`)}</div>
   </div>`;
 }

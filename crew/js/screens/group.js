@@ -1,16 +1,15 @@
-// The crew work order for one job: the job pays the crew one amount, and it is
+// The group work order for one job: the job pays the crew one amount, and it is
 // shared by the hours each person worked. One screen that always says what
-// happens next. Only your own share is ever shown.
+// happens next. Only your own share is ever shown, as the server works it out.
 import { html, cx, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { useQuery, useStore, local, invalidate, primeQuery } from '../lib/store.js';
 import { go, back } from '../lib/router.js';
-import { todayISO, mondayOf, addDays, weekDays, fmtDay, fmtDow, fmtDom, fmtHours, hoursBetween, tsToDate } from '../lib/dates.js';
+import { todayISO, mondayOf, addDays, weekDays, fmtDay, fmtDow, fmtDom, hoursBetween, tsToDate } from '../lib/dates.js';
 import { jobTitle, jobAddress } from '../lib/model.js';
 import { useJob, jobStub } from '../lib/data.js';
-import { Icon } from '../ui/icons.js';
-import { Page, Button, Sheet, Field, Picks, Toggle, TimeInput, BREAKS, Skel, Empty, LoadError, IconButton, toast, ask, openOverlay, buzz } from '../ui/kit.js';
-import { DoneScreen, PayRows, SigPad, Stars, superNote, whenWords, cash, num, uuid } from '../ui/paybits.js';
+import { Page, Section, KV, JobLine, Button, Sheet, Field, Picks, Toggle, TimeInput, BREAKS, SkelRows, Empty, LoadError, IconButton, toast, ask, openOverlay, buzz } from '../ui/kit.js';
+import { DoneScreen, PayRows, SigPad, Stars, superNote, whenWords, cash, hrs, num, uuid } from '../ui/paybits.js';
 
 const HOURS_STATES = ['needs_join', 'needs_hours', 'awaiting_others', 'awaiting_rate', 'awaiting_office', 'awaiting_crew_approval'];
 const CREW_STATE = {
@@ -37,8 +36,9 @@ export function Group({ jobId }) {
   const row = ((listQ.data && listQ.data.groups) || []).find((x) => x.job_id === jobId) || null;
   const g = { ...(row || {}), ...(share || {}) };
   const job = (jobQ.data && jobQ.data.job) || jobStub(jobId) || {};
-  const title = g.site_suburb || (jobTitle(job) !== 'Job' ? jobTitle(job) : g.client_name || g.job_number || 'Crew job');
-  const sub = [g.job_number || job.job_number, g.client_name || job.client_name].filter(Boolean).join(' · ');
+  const title = g.site_suburb || (jobTitle(job) !== 'Job' ? jobTitle(job) : g.client_name || g.job_number || 'Group job');
+  const jobNumber = g.job_number || job.job_number || '';
+  const client = g.client_name || job.client_name || '';
   const off = (share && share.enabled === false) || (listQ.data && listQ.data.enabled === false) || isOff(shareQ.error);
 
   const refresh = (fresh) => {
@@ -61,24 +61,22 @@ export function Group({ jobId }) {
     } catch (err) {
       setBusy('');
       const code = (err.body && err.body.code) || err.code || '';
-      toast(/removed/.test(code) ? 'The office took you off this crew work order. Ask them if that is wrong.' : friendly(err), { kind: 'bad', ms: 6500 });
+      toast(/removed/.test(code) ? 'The office took you off this group work order. Ask them if that is wrong.' : friendly(err), { kind: 'bad', ms: 6500 });
       shareQ.refetch();
       return null;
     }
   };
 
-  const head = html`<header class="block ghead"><span class="t-label">Crew work order</span><h1 class="t-display">${title}</h1>${sub ? html`<p class="t-small t-num" style="font-weight:600">${sub}</p>` : null}</header>`;
+  const head = html`<div class="block card pad pay-ghead"><b class="t-head">${title}</b><${JobLine} job=${{ job_number: jobNumber }}>${client}<//></div>`;
+  const page = (body, foot) => html`<${Page} title="Group work order" back="Pay" onBack=${() => back('/pay')} foot=${foot || null}>${head}${body}<//>`;
 
   if (result) return html`<${ShareSent} result=${result} title=${title} onDone=${() => { setResult(null); shareQ.refetch(); }} />`;
 
   if (off) {
-    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
-      <${Empty} title="Crew work orders are not switched on" action=${html`<${Button} kind="line" small onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's invoice<//>`}>Bill your hours for this job on your weekly invoice, the same as any other job.<//><//>`;
+    return page(html`<${Empty} title="Group work orders are not switched on" action=${html`<${Button} kind="line" small onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's timesheet<//>`}>Record your hours for this job on your timesheet, the same as any other job.<//>`);
   }
   if (!share) {
-    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
-      ${shareQ.loading ? html`<div class="block" style="display:grid;gap:14px;margin-top:22px"><${Skel} h=${120} r=${22} /><${Skel} w="70%" h=${22} /><${Skel} w="86%" h=${22} /><${Skel} w="60%" h=${22} /></div>`
-        : html`<${LoadError} error=${shareQ.error} onRetry=${shareQ.refetch} what="the crew work order" />`}<//>`;
+    return page(shareQ.loading ? html`<div class="pay-gap"><${SkelRows} n=${3} /></div>` : html`<${LoadError} error=${shareQ.error} onRetry=${shareQ.refetch} what="the group work order" />`);
   }
 
   const disc = g.discovery || {};
@@ -88,20 +86,17 @@ export function Group({ jobId }) {
   if (!member) {
     const canCreate = disc.state === 'create';
     const canJoin = disc.state === 'join' || g.awaiting === 'needs_join' || (Boolean(g.group_id) && !disc.state);
-    return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
-      <section class="block gnext">
-        ${canCreate || canJoin ? html`<span class="t-label">Next</span>` : null}
-        <b class="t-title">${canCreate ? 'Start the crew work order' : canJoin ? 'Join the crew work order' : 'Nothing for you to do here'}</b>
-        <p>${disc.message || (canCreate ? 'This job is paid as a crew, not by the hour. Start the crew work order so everyone can add their hours.' : canJoin ? 'The crew work order for this job is open. Join it to add your hours and get your share.' : 'You are not part of the crew work order for this job. If you worked on it, ask the office to book you on.')}</p>
-      </section>
-      ${canCreate || canJoin ? html`<div class="block gexplain">
-        <p><span class="t-strong">How it works.</span> The job pays the crew one agreed amount. Everyone adds the days they worked, the customer signs the job off, and the amount is shared by hours. Then each person invoices their own share.</p>
-      </div>` : html`<div class="block" style="margin-top:14px"><${Button} kind="line" small onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's invoice<//></div>`}
-      ${canCreate || canJoin ? html`<div class="dock">
-        ${canCreate ? html`<${Button} block busy=${busy === 'create'} onClick=${() => write('create', 'create_group_work_order', { job_id: jobId }, { done: 'Crew work order started. Add your hours.' })}>Start the crew work order<//>`
-          : html`<${Button} block busy=${busy === 'join'} onClick=${() => write('join', 'join_group_work_order', g.group_id ? { group_id: g.group_id } : { job_id: jobId }, { done: 'You are in. Add your hours.' })}>Join the crew work order<//>`}
-      </div>` : null}
-    <//>`;
+    return page(html`
+      <${Section} label=${canCreate || canJoin ? 'Next' : 'Where it is up to'}>
+        <div class="block card pad pay-next">
+          <b>${canCreate ? 'Start the group work order' : canJoin ? 'Join the group work order' : 'Nothing for you to do here'}</b>
+          <p class="t-small">${disc.message || (canCreate ? 'This job is paid as a group, not by the hour. Start the group work order so everyone can add their hours.' : canJoin ? 'The group work order for this job is open. Join it to add your hours and get your share.' : 'You are not part of the group work order for this job. If you worked on it, ask the office to book you on.')}</p>
+        </div>
+      <//>
+      ${canCreate || canJoin ? html`<p class="block t-small pay-note"><span class="t-strong">How it works.</span> The job pays the crew one agreed amount. Everyone adds the days they worked, the customer signs the job off, and the amount is shared by hours. Then each person invoices their own share.</p>`
+        : html`<div class="block pay-gap"><${Button} kind="line" block onClick=${() => go('/pay/week/' + mondayOf(todayISO()))}>Open this week's timesheet<//></div>`}`,
+    canCreate ? html`<${Button} block class="big" busy=${busy === 'create'} onClick=${() => write('create', 'create_group_work_order', { job_id: jobId }, { done: 'Group work order started. Add your hours.' })}>Start the group work order<//>`
+      : canJoin ? html`<${Button} block class="big" busy=${busy === 'join'} onClick=${() => write('join', 'join_group_work_order', g.group_id ? { group_id: g.group_id } : { job_id: jobId }, { done: 'You are in. Add your hours.' })}>Join the group work order<//>` : null);
   }
 
   // -------------------------------------------------------------- in the crew
@@ -127,7 +122,7 @@ export function Group({ jobId }) {
   const dropDay = (date) => { const next = savedDays.filter((x) => x.work_date !== date); local.set(daysKey, next); setSavedDays(next); };
   const addDay = () => openOverlay((close) => html`<${DaySheet} idBody=${idBody} taken=${myDays} onClose=${close} onSaved=${(day, res) => { keepDay(day); refresh(res); }} />`);
   const removeDay = async (d) => {
-    if (!(await ask({ title: `Remove ${fmtDay(d.work_date)}?`, body: 'Your hours for that day come off the crew work order.', yes: 'Remove the day', danger: true }))) return;
+    if (!(await ask({ title: `Remove ${fmtDay(d.work_date)}?`, body: 'Your hours for that day come off the group work order.', yes: 'Remove the day', danger: true }))) return;
     const res = await write('day:' + d.work_date, 'delete_group_work_order_hours', { ...idBody, work_date: d.work_date }, { done: 'Day removed.' });
     if (res) dropDay(d.work_date);
   };
@@ -165,79 +160,73 @@ export function Group({ jobId }) {
   const next = nextWords({ awaiting, signed, submitted, release, blocked, myHours, notHappy });
   const serverSays = g.next_step || (disc.state !== 'member' ? disc.message : '') || '';
   const primary = blocked || submitted ? null
-    : step === 0 && (awaiting === 'needs_hours' || !myHours) ? html`<${Button} block icon="plus" onClick=${addDay}>Add a day you worked<//>`
-    : step === 1 ? html`<${Button} block icon="pen" onClick=${sign}>${notHappy ? 'All fixed? Get the customer to sign' : 'Get the customer to sign'}<//>`
-    : step === 2 && awaiting === 'ready' ? html`<${Button} block icon="lock" busy=${busy === 'lock'} onClick=${lock}>Lock in the shares<//>`
-    : step === 3 && num(g.my_share) > 0 ? html`<${Button} block busy=${busy === 'invoice'} onClick=${invoice}>Invoice my share · ${cash(g.my_share)}<//>` : null;
+    : step === 0 && (awaiting === 'needs_hours' || !myHours) ? html`<${Button} block class="big" onClick=${addDay}>Add a day you worked<//>`
+    : step === 1 ? html`<${Button} block class="big" onClick=${sign}>${notHappy ? 'All fixed? Get the customer to sign' : 'Get the customer to sign'}<//>`
+    : step === 2 && awaiting === 'ready' ? html`<${Button} block class="big" busy=${busy === 'lock'} onClick=${lock}>Lock in the shares<//>`
+    : step === 3 && num(g.my_share) > 0 ? html`<${Button} block class="big" busy=${busy === 'invoice'} onClick=${invoice}>Invoice my share<//>` : null;
+  const stepNo = (i, done) => html`<span class=${cx('pay-stepno', done ? 'done' : i === step ? 'now' : '')}>${i + 1}</span>`;
 
-  return html`<${Page} title=${title} class="paycol" onBack=${() => back('/pay')}>${head}
-    <section class=${cx('block gnext', (step === 3 || submitted) && !blocked && 'night')}>
-      <span class="t-label">${submitted ? 'Where it is up to' : 'Next'}</span>
-      <b class="t-title">${next[0]}</b>
-      <p>${serverSays || next[1]}</p>
-      ${frozen && num(g.my_share) != null ? html`<div class="gshare">
-        <div><span class="t-label">Your share</span><span class="money xl">${cash(g.my_share)}</span></div>
-        ${paidDiffers ? html`<div class="pair">
-          <div><span class="t-label">Paid to you</span><span class="money md">${cash(g.my_cash_pay)}</span></div>
-          ${num(g.my_super) != null ? html`<div><span class="t-label">Into your super</span><span class="money md">${cash(g.my_super)}</span></div>` : null}
-        </div>` : num(g.my_super) ? html`<p>Plus ${cash(g.my_super)} into your super.</p>` : null}
+  return page(html`
+    <${Section} label=${submitted ? 'Where it is up to' : 'Next'}>
+      <div class="block card pad pay-next">
+        <b>${next[0]}</b>
+        <p class="t-small">${serverSays || next[1]}</p>
+      </div>
+      ${frozen && num(g.my_share) != null ? html`<div class="block card pay-gap">
+        <${KV} k="Your share" v=${html`<span class="t-figure">${cash(g.my_share)}</span>`} />
+        ${paidDiffers ? html`<${KV} k="Paid to you" v=${cash(g.my_cash_pay)} />` : null}
+        ${num(g.my_super) ? html`<${KV} k="Into your super" v=${cash(g.my_super)} />` : null}
       </div>` : null}
-    </section>
+    <//>
 
-    ${blocked ? html`<div class="block note-banner" style="margin-top:12px"><${Icon} name="alert" size=${18} /><span><span class="t-strong">Do not send your share again.</span> We could not tell if it went through. The office needs to check first.
-        <span style="display:flex;gap:16px;margin-top:8px"><button type="button" class="textlink" onClick=${() => { shareQ.refetch(); listQ.refetch(); toast('Checked again.'); }}>Check again</button><button type="button" class="textlink" onClick=${sendAgainAnyway}>The office said to resend</button></span></span></div>` : null}
+    ${blocked ? html`<div class="block note-banner pay-gap"><span><span class="t-strong">Do not send your share again.</span> We could not tell if it went through. The office needs to check first.
+        <span class="pay-linkpair"><button type="button" class="link tap" onClick=${() => { shareQ.refetch(); listQ.refetch(); toast('Checked again.'); }}>Check again</button><button type="button" class="link tap" onClick=${sendAgainAnyway}>The office said to resend</button></span></span></div>` : null}
 
-    ${!frozen && (num(g.pot_total) != null || num(g.projected_my_share) != null) ? html`<div class="block inset" style="margin-top:12px"><div class="sumrows">
-      ${num(g.pot_total) != null ? html`<div class="sumrow"><span>The job pays the crew</span><span>${cash(g.pot_total)}</span></div>` : null}
-      ${num(g.projected_my_share) != null ? html`<div class="sumrow"><span>Your share so far</span><span>${cash(g.projected_my_share)}</span></div>` : null}
-    </div>${num(g.projected_my_share) != null ? html`<p class="t-small t-mute" style="margin-top:8px">Your share moves as hours come in. It is set when the shares are locked in.</p>` : null}</div>` : null}
-    ${frozen && !submitted && num(g.my_budget) != null && g.budget_includes_super ? html`<p class="block t-small t-mute" style="margin-top:10px">Your part of the job is ${cash(g.my_budget)}, with your super inside it. The company pays the super, so nothing is held from your pay.</p>` : null}
+    ${!frozen && (num(g.pot_total) != null || num(g.projected_my_share) != null) ? html`<div class="block card pay-gap">
+      ${num(g.pot_total) != null ? html`<${KV} k="The job pays the crew" v=${cash(g.pot_total)} />` : null}
+      ${num(g.projected_my_share) != null ? html`<${KV} k="Your share so far" v=${cash(g.projected_my_share)} />` : null}
+    </div>${num(g.projected_my_share) != null ? html`<p class="block t-small pay-note">Your share moves as hours come in. It is set when the shares are locked in.</p>` : null}` : null}
+    ${frozen && !submitted && num(g.my_budget) != null && g.budget_includes_super ? html`<p class="block t-small pay-note">Your part of the job is ${cash(g.my_budget)}, with your super inside it. The company pays the super, so nothing is held from your pay.</p>` : null}
 
-    ${step === 3 && !blocked ? html`<div class="block" style="margin-top:14px"><${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gst} onChange=${setGst} /></div>` : null}
+    ${step === 3 && !blocked ? html`<div class="block card pad pay-gap"><${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gst} onChange=${setGst} /></div>` : null}
 
-    <ol class="gsteps">
-      <li class=${stepClass(0, step, hoursDone)}>
-        <span class="gdot">${hoursDone ? html`<${Icon} name="check" size=${16} stroke=${3} />` : '1'}</span>
-        <div><b class="gt">Hours</b>
-          <span class="how">${myHours == null ? 'Add the days you worked.' : myHours ? `You have ${fmtHours(myHours)} in.` : 'You have not added any yet.'}${frozen ? '' : ' Saving a day again replaces it.'}</span>
-          ${myDays.length ? html`<div class="gdays">${myDays.map((d) => html`<div class="gday" key=${d.work_date}>
-            <span><b>${fmtDay(d.work_date)}</b><span>${[whenWords(d), d.hours != null ? fmtHours(d.hours) : ''].filter(Boolean).join(' · ')}</span></span>
-            ${frozen ? null : html`<${IconButton} name="trash" label=${'Remove ' + fmtDay(d.work_date)} size=${19} disabled=${busy === 'day:' + d.work_date} onClick=${() => removeDay(d)} />`}</div>`)}</div>` : null}
-          ${!frozen && (primary == null || step !== 0 || myHours > 0) ? html`<div style="margin-top:10px"><${Button} kind="soft" small icon="plus" onClick=${addDay}>${myDays.length || myHours ? 'Add another day' : 'Add a day'}<//></div>` : null}
-          ${crew.length ? html`<div class="gcrew">${crew.map((c) => html`<div class="gcrewrow" key=${c.name + (c.me ? ':me' : '')}>
-            <span>${c.me ? 'You' : c.name}</span><span class=${Number(c.hours) > 0 ? '' : 't-mute'}>${Number(c.hours) > 0 ? fmtHours(c.hours) : 'No hours yet'}</span></div>`)}</div>` : null}
+    <${Section} label="Steps">
+      <div class="block card pay-gsteps">
+        <div class="pay-gstep">${stepNo(0, hoursDone)}
+          <div class="main"><b>Hours</b>
+            <span class="how">${myHours == null ? 'Add the days you worked.' : myHours ? `You have ${hrs(myHours)} in.` : 'You have not added any yet.'}${frozen ? '' : ' Saving a day again replaces it.'}</span>
+            ${myDays.length ? html`<div class="pay-gdays">${myDays.map((d) => html`<div class="pay-gday" key=${d.work_date}>
+              <span class="main"><b>${fmtDay(d.work_date)}</b><span class="how t-num">${[whenWords(d), d.hours != null ? hrs(d.hours) : ''].filter(Boolean).join(' · ')}</span></span>
+              ${frozen ? null : html`<${IconButton} name="trash" label=${'Remove ' + fmtDay(d.work_date)} size=${20} disabled=${busy === 'day:' + d.work_date} onClick=${() => removeDay(d)} />`}</div>`)}</div>` : null}
+            ${!frozen && (primary == null || step !== 0 || myHours > 0) ? html`<div><${Button} kind="line" small onClick=${addDay}>${myDays.length || myHours ? 'Add another day' : 'Add a day'}<//></div>` : null}
+            ${crew.length ? html`<div class="pay-gcrew">${crew.map((c) => html`<div class="pay-gcrewrow" key=${c.name + (c.me ? ':me' : '')}>
+              <span>${c.me ? 'You' : c.name}</span><span class=${Number(c.hours) > 0 ? 't-num' : 't-mute'}>${Number(c.hours) > 0 ? hrs(c.hours) : 'No hours yet'}</span></div>`)}</div>` : null}
+          </div>
         </div>
-      </li>
-      <li class=${stepClass(1, step, signed)}>
-        <span class="gdot">${signed ? html`<${Icon} name="check" size=${16} stroke=${3} />` : '2'}</span>
-        <div><b class="gt">Customer signs off</b>
-          <span class="how">${signed ? `Signed${signoff && signoff.name ? ' by ' + signoff.name : ''}${signoff && signoff.at ? ', ' + fmtDay(tsToDate(signoff.at)) : ''}.` : notHappy ? `${signoff && signoff.name ? signoff.name : 'The customer'} listed things to fix${signoff && signoff.at ? ' on ' + fmtDay(tsToDate(signoff.at)) : ''}. They sign again once those are done.` : hoursDone ? 'Hand them your phone, or the office can send them a link.' : 'Once everyone has their hours in.'}</span>
-          ${signed && signoff && signoff.happy === false ? html`<span class="how" style="color:var(--bad)">They listed things to fix. The office will be in touch about them.</span>` : null}
-          ${signed && !frozen ? html`<span class="how">If anyone changes their hours now, the customer has to sign again.</span>` : null}
+        <div class="pay-gstep">${stepNo(1, signed)}
+          <div class="main"><b>Customer signs off</b>
+            <span class="how">${signed ? `Signed${signoff && signoff.name ? ' by ' + signoff.name : ''}${signoff && signoff.at ? ', ' + fmtDay(tsToDate(signoff.at)) : ''}.` : notHappy ? `${signoff && signoff.name ? signoff.name : 'The customer'} listed things to fix${signoff && signoff.at ? ' on ' + fmtDay(tsToDate(signoff.at)) : ''}. They sign again once those are done.` : hoursDone ? 'Hand them your phone, or the office can send them a link.' : 'Once everyone has their hours in.'}</span>
+            ${signed && signoff && signoff.happy === false ? html`<span class="how t-bad">They listed things to fix. The office will be in touch about them.</span>` : null}
+            ${signed && !frozen ? html`<span class="how">If anyone changes their hours now, the customer has to sign again.</span>` : null}
+          </div>
         </div>
-      </li>
-      <li class=${stepClass(2, step, frozen)}>
-        <span class="gdot">${frozen ? html`<${Icon} name="check" size=${16} stroke=${3} />` : '3'}</span>
-        <div><b class="gt">Shares locked in</b>
-          <span class="how">${frozen ? 'Done. Hours can no longer change.' : awaiting === 'ready' ? 'Everything is in. Anyone in the crew can do this.' : 'After the hours and the signature.'}</span></div>
-      </li>
-      <li class=${stepClass(3, step, Boolean(submitted))}>
-        <span class="gdot">${submitted ? html`<${Icon} name="check" size=${16} stroke=${3} />` : '4'}</span>
-        <div><b class="gt">Invoice your share</b>
-          <span class="how">${submitted ? `Sent${submitted.invoice_number ? ', ' + submitted.invoice_number : ''}.` : frozen ? 'One tap. It goes in by itself, not on your weekly invoice.' : 'Each person sends their own.'}</span>
-          ${submitted && submitted.invoice_id ? html`<div style="margin-top:10px"><${Button} kind="soft" small onClick=${() => go('/pay/invoice/' + submitted.invoice_id)}>See the invoice<//></div>` : null}
-          ${submitted ? html`<div class="gcrew">
-            ${(g.crew_status || []).map((c) => html`<div class="gcrewrow" key=${c.name + (c.me ? ':me' : '')}><span>${c.me ? 'You' : c.name}</span><span class=${c.state === 'not_invoiced' ? 't-mute' : ''}>${CREW_STATE[c.state] || 'With the office'}</span></div>`)}
-          </div>` : null}
-          ${submitted && Array.isArray(release.hold) && release.hold.length ? html`<div class="stack tight" style="margin-top:10px">${release.hold.map((h) => html`<p class="how">${typeof h === 'string' ? h : h.message || h.reason || ''}</p>`)}</div>` : null}
+        <div class="pay-gstep">${stepNo(2, frozen)}
+          <div class="main"><b>Shares locked in</b>
+            <span class="how">${frozen ? 'Done. Hours can no longer change.' : awaiting === 'ready' ? 'Everything is in. Anyone in the crew can do this.' : 'After the hours and the signature.'}</span></div>
         </div>
-      </li>
-    </ol>
-    ${primary ? html`<div class="dock">${primary}</div>` : null}
-  <//>`;
+        <div class="pay-gstep">${stepNo(3, Boolean(submitted))}
+          <div class="main"><b>Invoice your share</b>
+            <span class="how">${submitted ? `Sent${submitted.invoice_number ? ', ' + submitted.invoice_number : ''}.` : frozen ? 'One tap. It goes in by itself, not on your weekly invoice.' : 'Each person sends their own.'}</span>
+            ${submitted && submitted.invoice_id ? html`<div><${Button} kind="line" small onClick=${() => go('/pay/invoice/' + submitted.invoice_id)}>View invoice<//></div>` : null}
+            ${submitted ? html`<div class="pay-gcrew">
+              ${(g.crew_status || []).map((c) => html`<div class="pay-gcrewrow" key=${c.name + (c.me ? ':me' : '')}><span>${c.me ? 'You' : c.name}</span><span class=${c.state === 'not_invoiced' ? 't-mute' : ''}>${CREW_STATE[c.state] || 'With the office'}</span></div>`)}
+            </div>` : null}
+            ${submitted && Array.isArray(release.hold) && release.hold.length ? release.hold.map((h) => html`<span class="how">${typeof h === 'string' ? h : h.message || h.reason || ''}</span>`) : null}
+          </div>
+        </div>
+      </div>
+    <//>`, primary);
 }
-
-function stepClass(i, step, done) { return cx('gstep', done ? 'done' : i === step ? 'now' : 'later'); }
 
 function nextWords({ awaiting, signed, submitted, release, blocked, myHours, notHappy }) {
   if (blocked) return ['Waiting on the office', 'Your share may already be in. The office needs to check before anything else happens.'];
@@ -256,7 +245,7 @@ function nextWords({ awaiting, signed, submitted, release, blocked, myHours, not
   if (awaiting === 'awaiting_signoff' || (!signed && awaiting !== 'ready' && awaiting !== 'frozen')) return ['Get the customer to sign', 'All the hours are in. The customer signs the job off on your phone, then the shares can be locked in.'];
   if (awaiting === 'ready') return ['Lock in the shares', 'Hours are in and the customer has signed. Lock it in to set your share.'];
   if (awaiting === 'frozen') return ['Invoice your share', 'The shares are set. Send yours and you are done.'];
-  return ['Crew work order', 'Open each step below to see where it is up to.'];
+  return ['Group work order', 'Open each step below to see where it is up to.'];
 }
 
 // ------------------------------------------------------------- add a day
@@ -284,23 +273,23 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
       const res = await api('submit_group_work_order_hours', null, body);
       if (res && res.ok === false) throw new ApiError(res.userMessage || res.error || 'Not saved', { status: 409, code: res.code, body: res });
       buzz(10);
-      toast(`${fmtDay(date)} saved, ${fmtHours(hours)}.`, { kind: 'ok' });
+      toast(`${fmtDay(date)} saved, ${hrs(hours)}.`, { kind: 'ok' });
       onSaved({ work_date: date, start_time: start, finish_time: finish, break_minutes: breakMin || 0, hours }, res);
       shut();
     } catch (err) { setBusy(false); toast(friendly(err), { kind: 'bad', ms: 6500 }); }
   };
   return html`<${Sheet} title="Add a day you worked" sub="Hours are worked out from your start, finish and break." onClose=${onClose}
-    foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!ok} onClick=${() => save(shut)}>${ok ? `Save ${fmtDay(date)} · ${fmtHours(hours)}` : 'Save the day'}<//>`}>
+    foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!ok} onClick=${() => save(shut)}>${ok ? `Save ${fmtDay(date)} · ${hrs(hours)}` : 'Save the day'}<//>`}>
     <div class="stack">
       <${Field} label=${week === mondayOf(today) ? 'This week' : 'Last week'}>
         <div class="daypicks">${weekDays(week).map((d) => html`<button type="button" class=${cx('daypick', d === today && 'today')} disabled=${d > today} aria-pressed=${String(date === d)} onClick=${() => pick(d)}>
           <span class="dow">${fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>${has(d) ? html`<span class="t-small">in</span>` : null}</button>`)}</div>
-        <button type="button" class="textlink" style="justify-self:start;margin-top:4px" onClick=${() => { setWeek(week === mondayOf(today) ? addDays(week, -7) : mondayOf(today)); setDate(null); }}>${week === mondayOf(today) ? 'It was last week' : 'Back to this week'}</button>
+        <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === mondayOf(today) ? addDays(week, -7) : mondayOf(today)); setDate(null); }}>${week === mondayOf(today) ? 'It was last week' : 'Back to this week'}</button>
       <//>
-      <div class="timegrid"><${TimeInput} label="Started" value=${start} onInput=${setStart} /><${TimeInput} label="Finished" value=${finish} onInput=${setFinish} /></div>
+      <div class="pay-two"><${TimeInput} label="Started" value=${start} onInput=${setStart} /><${TimeInput} label="Finished" value=${finish} onInput=${setFinish} /></div>
       <${Field} label="Break"><${Picks} value=${brk} options=${[...BREAKS, ['other', 'Other']]} onChange=${setBrk} /><//>
       ${brk === 'other' ? html`<${Field} label="Break in minutes"><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} /><//>` : null}
-      <div class="hoursout"><span class="t-label">Hours</span><b>${!isNaN(hours) && hours > 0 ? fmtHours(hours) : !date ? 'Pick the day' : brk == null ? 'Pick a break' : 'Check times'}</b></div>
+      <div class="card pay-out"><span class="t-cap">Hours</span>${!isNaN(hours) && hours > 0 ? html`<b class="t-figure">${hrs(hours)}</b>` : html`<span class="t-small">${!date ? 'Pick the day' : brk == null ? 'Pick a break' : 'Check the times'}</span>`}</div>
     </div>
   <//>`;
 }
@@ -337,16 +326,16 @@ function SignSheet({ idBody, job, title, onDone, onClose }) {
   };
   return html`<${Sheet} title="Customer sign-off" sub=${[title, jobAddress(job)].filter(Boolean).join(' · ')} onClose=${onClose} tall
     foot=${(shut) => (stuck ? html`<${Button} block kind="ink" onClick=${() => { onDone(null); shut(); }}>Close and check<//>` : html`
-      ${missing ? html`<p class="t-small" style="text-align:center;color:var(--hi);font-weight:650">${missing}</p>` : null}
+      ${missing ? html`<p class="t-small pay-center">${missing}</p>` : null}
       <${Button} block busy=${busy} disabled=${Boolean(missing)} onClick=${() => save(shut)}>Save sign-off<//>`)}>
-    ${stuck ? html`<div class="stack"><div class="note-banner"><${Icon} name="alert" size=${18} /><span><span class="t-strong">We could not tell if that saved.</span> Do not fill it in again. Close this, then check the job in a minute. If it still says not signed, call the office.</span></div></div>` : html`<div class="stack loose">
-      <p style="color:var(--ink-2)">Hand the phone to the customer. They confirm the work is done, then sign.</p>
+    ${stuck ? html`<div class="stack"><div class="note-banner"><span><span class="t-strong">We could not tell if that saved.</span> Do not fill it in again. Close this, then check the job in a minute. If it still says not signed, call the office.</span></div></div>` : html`<div class="stack loose">
+      <p>Hand the phone to the customer. They confirm the work is done, then sign.</p>
       <${Field} label="Your name"><input class="input" autocomplete="off" value=${name} onInput=${(e) => setName(e.currentTarget.value)} /><//>
       <${Field} label="Are you happy with the job?"><${Picks} value=${happy} options=${[[true, 'Yes, all done'], [false, 'No, something needs fixing']]} onChange=${setHappy} /><//>
       ${happy === true ? html`<div class="stack tight">
-        <span class="t-label">How did we go?</span>
+        <span class="t-cap">How did we go?</span>
         ${RATINGS.map(([k, label]) => html`<${Stars} key=${k} label=${label} value=${ratings[k] || 0} onChange=${(n) => setRatings((r) => ({ ...r, [k]: n }))} />`)}
-        <${Field} label="Anything you want to say (optional)"><textarea class="input" style="min-height:64px" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} /><//>
+        <${Field} label="Anything you want to say (optional)"><textarea class="input pay-notebox" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} /><//>
       </div>` : null}
       ${happy === false ? html`<${Field} label="What needs fixing?"><textarea class="input" placeholder="List each thing" value=${items} onInput=${(e) => setItems(e.currentTarget.value)} /><//>` : null}
       ${happy != null ? html`<${Field} label="Sign here with your finger"><${SigPad} onChange=${setSig} /><//>` : null}
@@ -360,13 +349,13 @@ function ShareSent({ result, title, onDone }) {
   const good = outcome !== 'unsure';
   const lead = outcome === 'released' ? 'Sent for payment with the whole crew.'
     : outcome === 'saved' ? 'Saved. The crew is paid together, once the whole crew is in.'
-    : outcome === 'review' ? 'Your crew invoice is saved for the office to check.'
+    : outcome === 'review' ? 'Your share is saved for the office to check.'
     : 'We could not tell if your share went through. The office needs to check. Do not send it again.';
-  return html`<${DoneScreen} title=${good ? 'Share invoiced' : 'Do not send it again'} lead=${lead} wait=${!good}>
-    ${good && (num(res.trade_payable) != null || num(res.gross_earned) != null) ? html`<section class="inset"><${PayRows} m=${res} />
-      ${superNote(res) ? html`<p class="t-small t-mute" style="margin-top:10px">${superNote(res)}</p>` : null}</section>` : null}
-    ${good ? html`<p class="t-small t-mute t-num">${[res.invoice_number, title].filter(Boolean).join(' · ')}</p>` : html`<p class="t-small">Call the office and tell them your share for ${title} may not have saved. They can see it from their side.</p>`}
-    <div style="display:grid;gap:8px"><${Button} block onClick=${() => go('/pay', { replace: true })}>Done<//>
-      <${Button} kind="quiet" block onClick=${onDone}>Back to the crew work order<//></div>
+  return html`<${DoneScreen} bar="Group work order" title=${good ? 'Share invoiced' : 'Do not send it again'} lead=${lead} wait=${!good}
+    foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>
+      <${Button} kind="line" block onClick=${onDone}>Back to the group work order<//>`}>
+    ${good && (num(res.trade_payable) != null || num(res.gross_earned) != null) ? html`<div class="card"><${PayRows} m=${res} /></div>
+      ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}` : null}
+    ${good ? html`<p class="t-small t-num">${[res.invoice_number, title].filter(Boolean).join(' · ')}</p>` : html`<p class="t-small">Call the office and tell them your share for ${title} may not have saved. They can see it from their side.</p>`}
   <//>`;
 }

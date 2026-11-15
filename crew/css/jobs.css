@@ -4,7 +4,10 @@
 
 /* ---------- the controls under the bar ---------- */
 .jb-top { background: var(--card); border-bottom: 1px solid var(--mist); padding: 12px var(--gut); display: grid; gap: 8px; }
-.jb-top .jb-search { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
+.jb-top .jb-search { min-height: 44px; padding: 8px 8px 8px 36px; text-overflow: ellipsis; }
+.jb-top .jb-search:not(:placeholder-shown) { padding-right: 44px; }
+.jb-top .jb-search::placeholder { font-size: 15px; }
+.jb-top .seg button { text-align: center; }
 .jb-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .jb-filter { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 44px; min-width: 0; padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--card); color: var(--slate); font-size: 13px; line-height: 18px; font-weight: 500; }
 .jb-filter:active { background: var(--press); }
@@ -80,7 +83,8 @@
 .jr-days { display: grid; gap: 0; margin-top: 2px; }
 .jr-day { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; font-size: 13px; line-height: 18px; color: var(--mid); }
 .jr-day.mine { min-height: 44px; }
-.jr-call { display: inline-flex; align-items: center; height: 44px; padding: 0 4px; }
+.jr-call { display: inline-flex; align-items: center; height: 44px; padding: 0 4px; font-size: 13px; line-height: 18px; }
+.sec-h .jr-call { margin: -14px -4px -14px 0; }
 /* notes */
 .jr-note { padding: 10px 14px; display: grid; gap: 2px; }
 .jr-note + .jr-note { border-top: 1px solid var(--mist); }
@@ -88,8 +92,9 @@
 .jr-note .jr-who b { color: var(--slate); font-weight: 800; }
 .jr-note.office { background: var(--heat); }
 .jr-note.pending { color: var(--mid); }
-.jr-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
-.jr-compose textarea { min-height: 48px; max-height: 140px; }
+.jr-compose { display: grid; gap: 8px; }
+.jr-compose textarea.input { min-height: 48px; max-height: 140px; }
+.jr-composefoot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 /* materials */
 .jr-po { padding: 12px 14px; display: grid; gap: 8px; }
 .jr-po .jr-pohead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
@@ -100,5 +105,8 @@
 .jr-footline .jr-timer { font-size: 22px; line-height: 28px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--slate); }
 .jr-footbtns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .jr-footbtns.one { grid-template-columns: minmax(0, 1fr); }
+.jr-footbtns .btn { min-height: 48px; padding: 0 8px; }
 .jr-live { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; font-weight: 700; color: var(--slate); }
 .jr-live i { width: 8px; height: 8px; background: var(--ok-text); animation: pulse 1.8s ease-in-out infinite; }
+.jr-quick { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--card); text-align: left; }
+.jr-quick:active { background: var(--press); }

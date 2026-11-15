@@ -11,8 +11,8 @@ import { todayISO, fmtTs, fmtDay, fmtTime } from '../lib/dates.js';
 import { jobTitle, splitMedia } from '../lib/model.js';
 import { uploadPhoto, pickPhotos } from '../lib/upload.js';
 import { Icon } from '../ui/icons.js';
-import { Page, Button, Skel, Empty, LoadError, PhotoGrid, Field, Picks, toast, ask, buzz } from '../ui/kit.js';
-import { plain, isRefusal, StepBar, StepHead, HoursCard } from '../ui/report-kit.js';
+import { Page, Section, JobLine, Button, Skel, Empty, LoadError, PhotoGrid, Field, Picks, toast, ask, buzz } from '../ui/kit.js';
+import { plain, isRefusal, StepTop, StepHead, HoursCard } from '../ui/report-kit.js';
 
 const docUrl = (d) => [d.pdf_url, d.public_url, d.signed_url, d.download_url, d.url, d.file_url, d.storage_url].find((u) => typeof u === 'string' && /^https?:/.test(u));
 const blankValue = (v) => v == null || (typeof v === 'string' && v.trim() === '');
@@ -23,10 +23,10 @@ export function RoofReport({ jobId }) {
   const jobQ = useJob(jobId);
   const toBack = () => back(`/job/${jobId}/report`);
 
-  if (q.loading) return html`<${Page} title="Roof report" onBack=${toBack}><div class="page-pad" style="display:grid;gap:14px"><${Skel} h=${4} r=${4} /><${Skel} w="55%" h=${30} style="margin-top:14px" /><${Skel} w="85%" /><${Skel} h=${64} r=${14} style="margin-top:8px" /><${Skel} h=${64} r=${14} /><${Skel} h=${64} r=${14} /></div><//>`;
+  if (q.loading) return html`<${Page} title="Roof report" back="Report" onBack=${toBack}><div class="block" style="display:grid;gap:12px"><${Skel} h=${3} /><${Skel} w="55%" h=${24} /><${Skel} w="85%" /><${Skel} h=${64} /><${Skel} h=${64} /><${Skel} h=${64} /></div><//>`;
   if (!q.data || !q.data.template) {
     const refused = q.error && isRefusal(q.error);
-    return html`<${Page} title="Roof report" onBack=${toBack}>${refused
+    return html`<${Page} title="Roof report" back="Report" onBack=${toBack}>${refused
       ? html`<${Empty} title="No roof report on this job" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>${plain(q.error)}<//>`
       : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="the roof report" />`}<//>`;
   }
@@ -95,7 +95,7 @@ function RoofFlow({ jobId, template, draft, jobData, refetchJob, user }) {
     clearTimeout(ref.current.timer);
     ref.current.timer = setTimeout(save, 1200);
   };
-  const setStep = (n) => { ref.current.step = n; setStepState(n); keep(); setShowErrors(false); const page = document.querySelector('.page'); if (page) page.scrollTop = 0; };
+  const setStep = (n) => { ref.current.step = n; setStepState(n); keep(); setShowErrors(false); const page = document.querySelector('main.page'); if (page) page.scrollTop = 0; };
   useEffect(() => () => { clearTimeout(ref.current.timer); }, []);
 
   const photos = useMemo(() => splitMedia(jobData && jobData.media).photos, [jobData]);
@@ -141,27 +141,28 @@ function RoofFlow({ jobId, template, draft, jobData, refetchJob, user }) {
   };
 
   if (done) return html`<${RoofDone} jobId=${jobId} fresh=${done.fresh} draft=${draft} values=${values} steps=${steps} jobData=${jobData} refetchJob=${refetchJob} photos=${photos} pending=${pending} addPhotos=${addPhotos} user=${user} />`;
-  if (!steps.length) return html`<${Page} title="Roof report" onBack=${() => back(`/job/${jobId}/report`)}><${Empty} title="The roof report form did not load">Go back and open it again. If it keeps happening, tell the office.<//><//>`;
+  if (!steps.length) return html`<${Page} title="Roof report" back="Report" onBack=${() => back(`/job/${jobId}/report`)}><${Empty} title="The roof report form did not load">Go back and open it again. If it keeps happening, tell the office.<//><//>`;
 
   const cur = steps[step];
   const last = step === steps.length - 1;
   const gapsHere = showErrors ? missing(cur.fields).map((f) => f.key) : [];
   const next = () => { if (missing(cur.fields).length) { setShowErrors(true); buzz([20, 60, 20]); return; } setStep(step + 1); };
-  const place = jobData && jobData.job ? jobTitle(jobData.job) : 'Roof report';
+  const job = jobData && jobData.job ? jobData.job : null;
   const stateWord = saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : saveState === 'phone' ? 'Saved on this phone' : saveState === 'failed' ? 'Not saved' : '';
+  const gapCount = missing(cur.fields).length;
 
-  return html`<${Page} class="steppage" title="Roof report" onBack=${() => (step > 0 ? setStep(step - 1) : back(`/job/${jobId}/report`))}
-      right=${stateWord ? html`<span class=${cx('savestate', saveState === 'failed' && 'bad')}>${saveState === 'saved' ? html`<${Icon} name="check" size=${14} stroke=${2.6} />` : null}${stateWord}</span>` : null}>
-    <${StepBar} index=${step} total=${steps.length} />
-    <div class="rise" key=${cur.key}>
-      <${StepHead} kicker=${`${place} · roof report`} title=${cur.title}>${step === 0 ? 'Word for word: exactly what you type here goes onto the report the builder receives.' : null}<//>
-      ${saveState === 'failed' && ref.current.lastError ? html`<div class="block note-banner bad" style="margin-bottom:14px"><${Icon} name="alert" size=${18} /><span>${plain(ref.current.lastError)}</span></div>` : null}
-      <div class="block stack">
+  return html`<${Page} flush title="Roof report" back=${step > 0 ? 'Back' : 'Report'} onBack=${() => (step > 0 ? setStep(step - 1) : back(`/job/${jobId}/report`))}
+      right=${stateWord ? html`<span class=${cx('rp-save', saveState === 'failed' && 'bad')}>${stateWord}</span>` : null}
+      foot=${html`${showErrors && gapCount ? html`<p class="rp-footnote warn">${gapCount === 1 ? 'One thing on this step is still needed' : `${gapCount} things on this step are still needed`}</p>` : null}
+        ${last ? html`<${Button} block class="big" busy=${busy} onClick=${send}>Send roof report<//>` : html`<${Button} block class="big" onClick=${next}>Continue<//>`}`}>
+    <${StepTop} index=${step} total=${steps.length}>
+      <${StepHead} job=${job} vertical="makesafe" kicker=${job ? jobTitle(job) : 'Roof report'} title=${cur.title}>${step === 0 ? 'Word for word: exactly what you type here goes onto the report the builder receives.' : null}<//>
+    <//>
+    <div class="rp-body rp-form" key=${cur.key}>
+      ${saveState === 'failed' && ref.current.lastError ? html`<div class="block note-banner bad" style="margin-bottom:12px"><span>${plain(ref.current.lastError)}</span></div>` : null}
+      <div class="block card pad stack">
         ${cur.fields.map((f) => html`<${RoofField} key=${f.key} field=${f} value=${values[f.key]} bad=${gapsHere.includes(f.key)} seesMoney=${user.seesMoney} onChange=${(v) => change(f.key, v)}
           photos=${photos} pending=${pending} addPhotos=${addPhotos} />`)}
-      </div>
-      <div class="stepfoot">
-        ${last ? html`<${Button} block busy=${busy} onClick=${send}>Send roof report<//>` : html`<${Button} block onClick=${next}>Continue<//>`}
       </div>
     </div>
   <//>`;
@@ -179,13 +180,13 @@ function RoofField({ field, value, bad, seesMoney, onChange, photos, pending, ad
   const label = field.label || field.key;
   if (field.type === 'photos') {
     return html`<div class="stack tight">
-      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="t-label">${label}</span><span class="t-num t-mute">${photos.length}</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="t-cap">${label}</span><span class="t-small t-num">${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}</span></div>
       <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" />
-      <p class="t-small t-mute">${photos.length ? `The ${photos.length === 1 ? 'photo' : `${photos.length} photos`} already on this job ${photos.length === 1 ? 'goes' : 'go'} into the report. Add more if the roof needs them.` : 'Photos on this job go into the report. Add the roof photos here.'}</p>
+      <p class="t-small">${photos.length ? `The ${photos.length === 1 ? 'photo' : `${photos.length} photos`} already on this job ${photos.length === 1 ? 'goes' : 'go'} into the report. Add more if the roof needs them.` : 'Photos on this job go into the report. Add the roof photos here.'}</p>
     </div>`;
   }
   if (field.type === 'toggle') {
-    return html`<${Field} label=${label} error=${error} hint=${help}><div class="yn" role="group" aria-label=${label}>
+    return html`<${Field} label=${label} error=${error} hint=${help}><div class="seg rp-yn" role="group" aria-label=${label}>
       <button type="button" aria-pressed=${String(value === true)} onClick=${() => { buzz(6); onChange(value === true ? null : true); }}>Yes</button>
       <button type="button" aria-pressed=${String(value === false)} onClick=${() => { buzz(6); onChange(value === false ? null : false); }}>No</button>
     </div><//>`;
@@ -193,7 +194,7 @@ function RoofField({ field, value, bad, seesMoney, onChange, photos, pending, ad
   if (field.type === 'select') {
     const options = Array.isArray(field.options) ? field.options : [];
     if (options.length <= 6) return html`<${Field} label=${label} error=${error} hint=${help}><${Picks} value=${value || null} options=${options.map((o) => [o, o])} onChange=${(v) => onChange(v === value ? '' : v)} /><//>`;
-    return html`<${Field} label=${label} error=${error} hint=${help}><select class=${cx('input', bad && 'bad')} value=${value || ''} onChange=${(e) => onChange(e.currentTarget.value)}><option value="">Choose</option>${options.map((o) => html`<option value=${o}>${o}</option>`)}</select><//>`;
+    return html`<${Field} label=${label} error=${error} hint=${help}><select class=${cx('input rp-select', bad && 'bad')} value=${value || ''} onChange=${(e) => onChange(e.currentTarget.value)}><option value="">Choose</option>${options.map((o) => html`<option value=${o}>${o}</option>`)}</select><//>`;
   }
   if (field.type === 'textarea') return html`<${Field} label=${label} error=${error} hint=${help}><textarea class=${cx('input', bad && 'bad')} value=${value || ''} placeholder=${field.placeholder || ''} onInput=${(e) => onChange(e.currentTarget.value)} /><//>`;
   if (field.type === 'date') return html`<${Field} label=${label} error=${error} hint=${help}><input class=${cx('input', bad && 'bad')} type="date" max=${todayISO()} value=${value || ''} onInput=${(e) => onChange(e.currentTarget.value)} /><//>`;
@@ -225,27 +226,26 @@ function RoofDone({ jobId, fresh, draft, values, steps, jobData, refetchJob, pho
     setBusy(false);
   };
 
-  return html`<${Page} title="Roof report" onBack=${() => back(`/job/${jobId}/report`)}>
-    <div class="page-pad stack loose rise" style="padding-top:8px">
-      ${fresh ? html`<div class="done-mark"><${Icon} name="check" size=${44} stroke=${3} /></div>` : null}
-      <div><h1 class=${fresh ? 't-display' : 't-title'} style=${fresh ? '' : 'font-size:30px'}>Roof report sent</h1>
-        <p style="margin-top:8px;color:var(--ink-2)">${fresh ? 'It is on SecureWorks letterhead and with the office now.' : `The office has it${draft && draft.submitted_at ? `, sent ${fmtTs(draft.submitted_at).toLowerCase()}` : ''}.`}</p></div>
-      <div class="stack tight">
-        ${pdf ? html`<a class="btn primary block" href=${pdf} target="_blank" rel="noopener noreferrer"><${Icon} name="file" size=${20} />Open the roof report</a>`
-          : html`<div class="note-banner plain"><${Icon} name="clock" size=${18} /><span>The PDF is being put together. It shows here and under Files on the job in a moment.</span></div>`}
-      </div>
-      <section class="stack tight">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="t-head">Photos on this job</h2><span class="t-num t-mute">${photos.length}</span></div>
-        <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" max=${8} />
-        <${Button} kind="line" block icon="refresh" busy=${busy} onClick=${rebuild}>Rebuild with ${photos.length === 1 ? 'this photo' : `these ${photos.length || ''} photos`}<//>
-        <p class="t-small t-mute">Added photos after sending? Rebuild puts them into the PDF. The words stay as you sent them.</p>
-      </section>
-      <${HoursCard} office=${user.office} jobId=${jobId} crew=${jobData && jobData.crew} userId=${user.id} title="Your hours for this report" />
-      <section class="sumlist">
-        ${steps.map((s) => { const rows = s.fields.filter((f) => f.type !== 'photos').map((f) => [f, shown(f, values[f.key])]).filter(([, v]) => v); return rows.length ? html`<div key=${s.key}><h2 class="t-head" style="margin-bottom:8px">${s.title}</h2>
-          <div class="stack tight">${rows.map(([f, v]) => html`<div><span class="t-label">${f.label}</span><p class="prose">${v}</p></div>`)}</div></div>` : null; })}
-      </section>
-      <${Button} kind="quiet" block onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>
+  const job = jobData && jobData.job ? jobData.job : null;
+  return html`<${Page} title="Roof report" back="Report" onBack=${() => back(`/job/${jobId}/report`)}
+      foot=${pdf ? html`<a class="btn primary block big" href=${pdf} target="_blank" rel="noopener noreferrer">Open the roof report</a>` : null}>
+    <div class="rp-done">
+      ${fresh ? html`<div class="rp-donemark"><${Icon} name="check" size=${28} stroke=${3} /></div>` : null}
+      ${job ? html`<${JobLine} job=${job} vertical="makesafe">${jobTitle(job)}<//>` : null}
+      <h2 class="t-head">Roof report sent</h2>
+      <p>${fresh ? 'It is on SecureWorks letterhead and with the office now.' : `The office has it${draft && draft.submitted_at ? `, sent ${fmtTs(draft.submitted_at).toLowerCase()}` : ''}.`}</p>
     </div>
+    ${pdf ? null : html`<div class="block note-banner plain" style="margin-top:16px"><span>The PDF is being put together. It shows here and under Files on the job in a moment.</span></div>`}
+    <${Section} label="Photos on this job" right=${html`<span class="t-small t-num">${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}</span>`}>
+      <div class="block stack tight">
+        <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" max=${8} />
+        <${Button} kind="line" block busy=${busy} onClick=${rebuild}>Rebuild with ${photos.length === 1 ? 'this photo' : `these ${photos.length || ''} photos`}<//>
+        <p class="t-small">Added photos after sending? Rebuild puts them into the PDF. The words stay as you sent them.</p>
+      </div>
+    <//>
+    <${HoursCard} office=${user.office} jobId=${jobId} crew=${jobData && jobData.crew} userId=${user.id} title="Your hours for this report" />
+    ${steps.map((s) => { const rows = s.fields.filter((f) => f.type !== 'photos').map((f) => [f, shown(f, values[f.key])]).filter(([, v]) => v); return rows.length ? html`<${Section} key=${s.key} label=${s.title}>
+      <div class="block card rp-sum">${rows.map(([f, v]) => html`<div><span class="t-cap">${f.label}</span><p class="rp-para">${v}</p></div>`)}</div><//>` : null; })}
+    <div class="block" style="margin-top:24px"><${Button} kind="quiet" block onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//></div>
   <//>`;
 }

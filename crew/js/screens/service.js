@@ -2,16 +2,16 @@
 // for the kind of job, the weather and times, notes, photos and the customer's
 // signature. It saves as you go, on this phone and as a draft with the office,
 // and once sent it is read-only.
-import { html, useEffect, useMemo, useRef, useState } from '../lib/h.js';
+import { html, cx, useEffect, useMemo, useRef, useState } from '../lib/h.js';
 import { api } from '../lib/api.js';
 import { useQuery, useStore, local, invalidate, primeQuery } from '../lib/store.js';
 import { useJob, jobStub } from '../lib/data.js';
 import { go, back } from '../lib/router.js';
 import { fmtTs, fmtTime } from '../lib/dates.js';
-import { verticalOf, isReportJob, jobTitle, splitMedia, noPrices } from '../lib/model.js';
+import { verticalOf, isReportJob, jobTitle, jobAddress, splitMedia, noPrices } from '../lib/model.js';
 import { uploadPhoto, pickPhotos } from '../lib/upload.js';
 import { Icon } from '../ui/icons.js';
-import { Page, Tag, Button, Skel, Empty, LoadError, PhotoGrid, Field, Picks, TimeInput, toast, ask, buzz } from '../ui/kit.js';
+import { Page, Section, JobLine, Badge, Button, Skel, Empty, LoadError, PhotoGrid, Field, Picks, TimeInput, toast, ask, buzz } from '../ui/kit.js';
 import { plain, isRefusal, stash, SignaturePad, CheckRow } from '../ui/report-kit.js';
 
 const WEATHER = [['sunny', 'Sunny'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['hot', 'Hot'], ['windy', 'Windy']];
@@ -28,30 +28,29 @@ export function ServiceReport({ jobId }) {
   const vertical = job ? verticalOf(job, jobQ.data || {}) : 'other';
 
   if (job && isReportJob(vertical)) {
-    return html`<${Page} title="Service report" onBack=${toJob}><${Empty} title="This job uses the make safe report" action=${html`<${Button} small onClick=${() => go(`/job/${jobId}/report`, { replace: true })}>Open the report<//>`}>A service report is for fencing, patio and other building jobs.<//><//>`;
+    return html`<${Page} title="Service report" back="Job" onBack=${toJob}><${Empty} title="This job uses the make safe report" action=${html`<${Button} kind="line" small onClick=${() => go(`/job/${jobId}/report`, { replace: true })}>Open the report<//>`}>A service report is for fencing, patio and other building jobs.<//><//>`;
   }
-  if (q.loading || (!job && jobQ.loading)) return html`<${Page} title="Service report" onBack=${toJob}><div class="page-pad" style="display:grid;gap:14px"><${Skel} w="30%" h=${12} /><${Skel} w="70%" h=${30} /><${Skel} h=${52} r=${14} style="margin-top:10px" /><${Skel} h=${52} r=${14} /><${Skel} h=${52} r=${14} /><${Skel} h=${52} r=${14} /></div><//>`;
+  if (q.loading || (!job && jobQ.loading)) return html`<${Page} title="Service report" back="Job" onBack=${toJob}><div class="block" style="display:grid;gap:12px"><${Skel} w="40%" h=${14} /><${Skel} w="70%" h=${24} /><${Skel} h=${52} /><${Skel} h=${52} /><${Skel} h=${52} /><${Skel} h=${52} /></div><//>`;
   if (!q.data) {
     const refused = q.error && isRefusal(q.error);
-    return html`<${Page} title="Service report" onBack=${toJob}>${refused
+    return html`<${Page} title="Service report" back="Job" onBack=${toJob}>${refused
       ? html`<${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>${plain(q.error)}<//>`
       : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="the service report" />`}<//>`;
   }
   const report = q.data.report || null;
   const status = report ? String(report.status || '').toLowerCase() : '';
-  const head = html`<header class="jobhero">
-    <div class="ref"><${Tag} vertical=${vertical} />${job && job.job_number ? html`<span class="t-small t-num t-mute">${job.job_number}</span>` : null}</div>
-    <h1 class="t-title" style="font-size:30px">Service report</h1>
-    ${job ? html`<p class="t-small">${[jobTitle(job), job.client_name].filter(Boolean).join(' · ')}</p>` : null}
+  const sent = status === 'submitted' || status === 'approved';
+  const head = html`<header class="rp-head">
+    <div class="rp-headline">${job ? html`<${JobLine} job=${job} vertical=${vertical} />` : null}${sent ? html`<${Badge} kind="ok">${status === 'approved' ? 'Approved' : 'Sent'}<//>` : null}</div>
+    ${job ? html`<h2 class="t-head">${jobAddress(job) || jobTitle(job)}</h2><p>${job.client_name || ''}</p>` : null}
   </header>`;
-  return html`<${Page} title="Service report" onBack=${toJob}>${head}
-    ${status === 'submitted' || status === 'approved'
-      ? html`<${Sent} report=${report} user=${user} jobId=${jobId} />`
-      : html`<${Form} key=${jobId} jobId=${jobId} job=${job} report=${report} template=${Array.isArray(q.data.checklistTemplate) ? q.data.checklistTemplate : []} media=${jobQ.data && jobQ.data.media} user=${user} />`}
-  <//>`;
+  const frame = (body, foot) => html`<${Page} flush title="Service report" back="Job" onBack=${toJob} foot=${foot || null}>${head}<div class="rp-body rp-form">${body}</div><//>`;
+  return sent
+    ? html`<${Sent} report=${report} user=${user} jobId=${jobId} frame=${frame} />`
+    : html`<${Form} key=${jobId} jobId=${jobId} job=${job} report=${report} template=${Array.isArray(q.data.checklistTemplate) ? q.data.checklistTemplate : []} media=${jobQ.data && jobQ.data.media} user=${user} frame=${frame} />`;
 }
 
-function Form({ jobId, job, report, template, media, user }) {
+function Form({ jobId, job, report, template, media, user, frame }) {
   const key = 'svc:' + jobId;
   const sigKey = 'svc/' + jobId + '/sig';
   const init = useMemo(() => {
@@ -158,42 +157,35 @@ function Form({ jobId, job, report, template, media, user }) {
     setBusy(false);
   };
 
-  return html`
-    <div class="form rise" style="margin-top:20px">
-      <section>
-        <h2 class="t-head">Checks before you leave<small>Tick each one that is done.</small></h2>
-        ${template.length ? html`<div>${template.map((label) => html`<${CheckRow} key=${label} label=${noPrices(label, user.seesMoney)} checked=${Boolean(f.ticks[label])} onChange=${(v) => patch({ ticks: { ...f.ticks, [label]: v } })} />`)}</div>`
-          : html`<p class="t-small t-mute">No checklist is set for this kind of job. Use the notes below.</p>`}
-      </section>
-      <section>
-        <h2 class="t-head">The day</h2>
+  return frame(html`
+      <${Section} label="Checks before you leave">
+        ${template.length ? html`<div class="block card rp-rows">${template.map((label) => html`<${CheckRow} key=${label} label=${noPrices(label, user.seesMoney)} checked=${Boolean(f.ticks[label])} onChange=${(v) => patch({ ticks: { ...f.ticks, [label]: v } })} />`)}</div>
+          <p class="block t-small" style="margin-top:6px">Tick each one that is done.</p>`
+          : html`<p class="block t-small">No checklist is set for this kind of job. Use the notes below.</p>`}
+      <//>
+      <${Section} label="The day"><div class="block card pad stack">
         <${Field} label="Weather"><${Picks} value=${f.weather || null} options=${WEATHER} onChange=${(v) => patch({ weather: v === f.weather ? '' : v })} /><//>
-        <div class="timegrid"><${TimeInput} label="Started" value=${f.start} onInput=${(v) => patch({ start: v })} /><${TimeInput} label="Finished" value=${f.finish} onInput=${(v) => patch({ finish: v })} /></div>
-      </section>
-      <section>
-        <h2 class="t-head">Notes</h2>
-        <${Field} label="How the job finished up (optional)"><textarea class="input short" value=${f.notes} placeholder="Anything the office should know about the finished job" onInput=${(e) => patch({ notes: e.currentTarget.value })} /><//>
-        <${Field} label="Anything different from the plan, or any problems (optional)"><textarea class="input short" value=${f.variations} placeholder="e.g. Customer asked for the gate on the other side" onInput=${(e) => patch({ variations: e.currentTarget.value })} /><//>
-      </section>
-      <section>
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="t-head">Finished photos</h2><span class="t-num t-mute">${photos.length || ''}</span></div>
-        <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" />
-      </section>
-      <section>
-        <h2 class="t-head">Customer sign-off<small>Hand the phone to the customer to sign.</small></h2>
+        <div class="rp-times"><${TimeInput} label="Started" value=${f.start} onInput=${(v) => patch({ start: v })} /><${TimeInput} label="Finished" value=${f.finish} onInput=${(v) => patch({ finish: v })} /></div>
+      </div><//>
+      <${Section} label="Notes"><div class="block card pad stack">
+        <${Field} label="How the job finished up (optional)"><textarea class="input rp-short" value=${f.notes} placeholder="Anything the office should know about the finished job" onInput=${(e) => patch({ notes: e.currentTarget.value })} /><//>
+        <${Field} label="Anything different from the plan, or any problems (optional)"><textarea class="input rp-short" value=${f.variations} placeholder="e.g. Customer asked for the gate on the other side" onInput=${(e) => patch({ variations: e.currentTarget.value })} /><//>
+      </div><//>
+      <${Section} label="Finished photos" right=${photos.length ? html`<span class="t-small t-num">${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}</span>` : null}>
+        <div class="block"><${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" /></div>
+      <//>
+      <${Section} label="Customer sign-off"><div class="block card pad stack">
+        <p class="t-small">Hand the phone to the customer to sign.</p>
         <${Field} label="Customer's full name"><input class="input" autocomplete="off" autocapitalize="words" value=${f.name} onInput=${(e) => patch({ name: e.currentTarget.value })} /><//>
-        ${job && job.client_name && f.name.trim() !== job.client_name ? html`<div class="picks" style="margin-top:-6px"><button type="button" class="pick" onClick=${() => { patch({ name: job.client_name }); buzz(6); }}>${job.client_name}</button></div>` : null}
-        <${Field} label="Signature">${sigReady ? html`<${SignaturePad} initial=${sig} onChange=${onSign} />` : html`<${Skel} h=${190} r=${14} />`}<//>
-      </section>
-    </div>
-    <div class="dock">
-      ${need ? html`<p class="footnote" style="color:var(--hi)">${need}</p>` : null}
-      <${Button} block busy=${busy} disabled=${Boolean(need)} onClick=${send}>Send report<//>
-      <${Button} kind="quiet" block disabled=${busy} onClick=${() => { clearTimeout(ref.current.timer); pushDraft(true); }}>${saveState === 'saving' ? 'Saving' : saveState === 'server' ? 'Draft saved. Save again' : 'Save for later'}<//>
-    </div>`;
+        ${job && job.client_name && f.name.trim() !== job.client_name ? html`<div class="picks"><button type="button" class="pick" onClick=${() => { patch({ name: job.client_name }); buzz(6); }}>${job.client_name}</button></div>` : null}
+        <${Field} label="Signature">${sigReady ? html`<${SignaturePad} initial=${sig} onChange=${onSign} />` : html`<${Skel} h=${180} />`}<//>
+      </div><//>`,
+    html`${need ? html`<p class="rp-footnote warn">${need}</p>` : null}
+      <${Button} block class="big" busy=${busy} disabled=${Boolean(need)} onClick=${send}>Send report<//>
+      <${Button} kind="quiet" block disabled=${busy} onClick=${() => { clearTimeout(ref.current.timer); pushDraft(true); }}>${saveState === 'saving' ? 'Saving' : saveState === 'server' ? 'Draft saved. Save again' : 'Save for later'}<//>`);
 }
 
-function Sent({ report, user, jobId }) {
+function Sent({ report, user, jobId, frame }) {
   const approved = String(report.status).toLowerCase() === 'approved';
   const checklist = Array.isArray(report.checklist_json) ? report.checklist_json.filter((c) => c && c.label) : [];
   const text = (t) => noPrices(t, user.seesMoney);
@@ -206,17 +198,18 @@ function Sent({ report, user, jobId }) {
       toast('Link copied. Paste it into a text or email to the customer.', { kind: 'ok', ms: 4500 });
     } catch (err) { if (!err || err.name !== 'AbortError') toast('Could not share the link from this phone.', { kind: 'bad' }); }
   };
-  return html`<div class="block stack loose rise" style="margin-top:18px">
-    <div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">${approved ? 'Report approved by the office.' : 'Report sent to the office.'}</span>${report.submitted_at ? ` ${fmtTs(report.submitted_at)}.` : ''} It can no longer be changed here.</span></div>
-    ${report.share_token ? html`<${Button} kind="line" block icon="send" onClick=${share}>Share it with the customer<//>` : null}
-    <section class="sumlist">
-      ${checklist.length ? html`<div><span class="t-label">Checks</span>${checklist.map((c) => html`<p style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;margin-top:6px"><${Icon} name=${c.checked ? 'check' : 'close'} size=${18} stroke=${2.6} class=${c.checked ? 't-ok' : 't-mute'} /><span style=${c.checked ? '' : 'color:var(--ink-3)'}>${text(c.label)}</span></p>`)}</div>` : null}
-      ${report.weather || report.start_time || report.end_time ? html`<div><span class="t-label">The day</span><p>${[report.weather ? (WEATHER.find((w) => w[0] === report.weather) || [0, report.weather])[1] : '', report.start_time ? fmtTime(report.start_time) + (report.end_time ? ' to ' + fmtTime(report.end_time) : '') : ''].filter(Boolean).join(', ')}</p></div>` : null}
-      ${report.notes ? html`<div><span class="t-label">Notes</span><p class="prose">${text(report.notes)}</p></div>` : null}
-      ${report.variations ? html`<div><span class="t-label">Different from the plan</span><p class="prose">${text(report.variations)}</p></div>` : null}
-      <div><span class="t-label">Signed by</span><p class="t-strong">${report.signature_name || 'No name given'}</p>
-        ${sigSrc ? html`<img class="sigshown" src=${sigSrc} alt=${'Signature of ' + (report.signature_name || 'the customer')} style="margin-top:8px" />` : null}</div>
-    </section>
-    <${Button} kind="quiet" block onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>
-  </div>`;
+  return frame(html`
+    <div class="block note-banner ok"><span><span class="t-strong">${approved ? 'Report approved by the office.' : 'Report sent to the office.'}</span>${report.submitted_at ? ` ${fmtTs(report.submitted_at)}.` : ''} It can no longer be changed here.</span></div>
+    ${report.share_token ? html`<div class="block" style="margin-top:12px"><${Button} kind="line" block onClick=${share}>Share it with the customer<//></div>` : null}
+    <${Section} label="What was sent">
+      <div class="block card rp-sum">
+        ${checklist.length ? html`<div><span class="t-cap">Checks</span>${checklist.map((c) => html`<p class=${cx('rp-tickline', !c.checked && 'off')}><${Icon} name=${c.checked ? 'check' : 'close'} size=${18} stroke=${2.6} /><span>${text(c.label)}${c.checked ? '' : ' (not ticked)'}</span></p>`)}</div>` : null}
+        ${report.weather || report.start_time || report.end_time ? html`<div><span class="t-cap">The day</span><p>${[report.weather ? (WEATHER.find((w) => w[0] === report.weather) || [0, report.weather])[1] : '', report.start_time ? fmtTime(report.start_time) + (report.end_time ? ' to ' + fmtTime(report.end_time) : '') : ''].filter(Boolean).join(', ')}</p></div>` : null}
+        ${report.notes ? html`<div><span class="t-cap">Notes</span><p class="rp-para">${text(report.notes)}</p></div>` : null}
+        ${report.variations ? html`<div><span class="t-cap">Different from the plan</span><p class="rp-para">${text(report.variations)}</p></div>` : null}
+        <div><span class="t-cap">Signed by</span><p class="t-strong">${report.signature_name || 'No name given'}</p>
+          ${sigSrc ? html`<img class="rp-sigshown" src=${sigSrc} alt=${'Signature of ' + (report.signature_name || 'the customer')} />` : null}</div>
+      </div>
+    <//>
+    <div class="block" style="margin-top:24px"><${Button} kind="quiet" block onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//></div>`);
 }

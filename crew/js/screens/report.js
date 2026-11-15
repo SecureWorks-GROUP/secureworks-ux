@@ -9,13 +9,13 @@ import { api, ApiError } from '../lib/api.js';
 import { useStore, local, invalidate, mutateQuery } from '../lib/store.js';
 import { useJob, jobStub, noteBody } from '../lib/data.js';
 import { go, back } from '../lib/router.js';
-import { todayISO, fmtDay, fmtTime, fmtTs, fmtHours, hoursBetween, hmToMinutes, tsToDate, tsToHM } from '../lib/dates.js';
-import { verticalOf, isReportJob, jobTitle, splitMedia, noPrices } from '../lib/model.js';
+import { todayISO, fmtDay, fmtTime, fmtTs, hoursBetween, hmToMinutes, tsToDate, tsToHM } from '../lib/dates.js';
+import { verticalOf, isReportJob, jobTitle, jobAddress, splitMedia, noPrices } from '../lib/model.js';
 import { queueWrite } from '../lib/outbox.js';
 import { uploadPhoto, pickPhotos } from '../lib/upload.js';
-import { Icon } from '../ui/icons.js';
-import { Page, Tag, Chip, Button, Sheet, Skel, Empty, LoadError, PhotoGrid, Field, Picks, Toggle, IconButton, toast, openOverlay, ask, buzz } from '../ui/kit.js';
+import { Page, Section, JobLine, Badge, Button, Sheet, Skel, Empty, LoadError, PhotoGrid, Field, Picks, Toggle, IconButton, toast, openOverlay, ask, buzz } from '../ui/kit.js';
 import { plain, isRefusal, Counter, MultiPicks, DayPick, TimesBlock, HoursCard, roundHM, timesProblem } from '../ui/report-kit.js';
+import { fmtHrs as fmtHours } from './words.js';
 
 const MIN_PHOTOS = 5;
 // Values are what the office system stores; the second word is what the trade reads.
@@ -75,9 +75,9 @@ export function Report({ jobId }) {
   const job = (data && data.job) || jobStub(jobId);
   const toJob = () => back('/job/' + jobId);
 
-  if (!data && q.loading) return html`<${Page} title="Report" onBack=${toJob}><div class="page-pad" style="display:grid;gap:14px"><${Skel} w="30%" h=${12} /><${Skel} w="70%" h=${30} /><${Skel} w="90%" /><${Skel} h=${120} r=${14} style="margin-top:10px" /><${Skel} h=${180} r=${14} /></div><//>`;
+  if (!data && q.loading) return html`<${Page} title="Report" back="Job" onBack=${toJob}><div class="block" style="display:grid;gap:12px"><${Skel} w="40%" h=${14} /><${Skel} w="70%" h=${24} /><${Skel} h=${120} /><${Skel} h=${180} /></div><//>`;
   if (!data) {
-    return html`<${Page} title="Report" onBack=${toJob}>${q.locked
+    return html`<${Page} title="Report" back="Job" onBack=${toJob}>${q.locked
       ? html`<${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>The report opens once you are on the job.<//>`
       : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="this report" />`}<//>`;
   }
@@ -95,35 +95,33 @@ export function Report({ jobId }) {
   const status = report ? String(report.status || '').toLowerCase() : '';
   const sent = status === 'submitted' || status === 'approved';
 
-  const head = html`<header class="jobhero">
-    <div class="ref"><${Tag} vertical=${vertical} />${job.job_number ? html`<span class="t-small t-num t-mute">${job.job_number}</span>` : null}${visit > 1 ? html`<${Chip} kind="hi">Visit ${visit}<//>` : null}</div>
-    <h1 class="t-title" style="font-size:30px">${title}</h1>
-    <p class="t-small">${[jobTitle(job), ms.requesting_company_name || md.requesting_company_name, ms.external_ref || md.external_ref].filter(Boolean).join(' · ')}</p>
+  const head = html`<header class="rp-head">
+    <div class="rp-headline"><${JobLine} job=${job} vertical=${vertical} />${visit > 1 ? html`<${Badge} kind="warn">Visit ${visit}<//>` : null}${sent ? html`<${Badge} kind="ok">${status === 'approved' ? 'Approved' : 'Sent'}<//>` : null}</div>
+    <h2 class="t-head">${jobAddress(job) || jobTitle(job)}</h2>
+    <p>${[ms.requesting_company_name || md.requesting_company_name, ms.external_ref || md.external_ref].filter(Boolean).join(' · ')}</p>
   </header>`;
-  const wrap = (body) => html`<${Page} title=${title} onBack=${toJob}>${head}${body}<//>`;
+  /** One frame for every state: the bar, the job's band, the body, and the foot with the one strong button. */
+  const frame = (body, foot) => html`<${Page} flush title=${title} back="Job" onBack=${toJob} foot=${foot || null}>${head}<div class="rp-body rp-form">${body}</div><//>`;
 
   if (!isReportJob(vertical)) {
-    return wrap(html`<${Empty} title="This job has no report like this" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>`}>Reports here are for make safe and restoration jobs. Finish other jobs from the job page.<//>`);
+    return frame(html`<${Empty} title="This job has no report like this" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>`}>Reports here are for make safe and restoration jobs. Finish other jobs from the job page.<//>`);
   }
   if (data.access_tier === 'company_view') {
-    return wrap(html`<${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>The report opens once you are on the job.<//>`);
+    return frame(html`<${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>The report opens once you are on the job.<//>`);
   }
   if (String(job.status).toLowerCase() === 'cancelled') {
-    return wrap(html`<div class="block note-banner" style="margin-top:18px"><${Icon} name="info" size=${18} /><span><span class="t-strong">This job was cancelled.</span> There is no report to write.</span></div>
-      ${manager ? html`<div class="block"><${ManagerBox} jobId=${jobId} job=${job} user=${user} /></div>` : null}`);
+    return frame(html`<div class="block note-banner"><span><span class="t-strong">This job was cancelled.</span> There is no report to write.</span></div>
+      ${manager ? html`<${ManagerBox} jobId=${jobId} job=${job} user=${user} />` : null}`);
   }
 
-  const common = { jobId, job, data, ms, user, visit };
-  const managerBox = manager ? html`<div class="block"><${ManagerBox} jobId=${jobId} job=${job} user=${user} /></div>` : null;
-  const writing = handoff === 'physical' && !sent;
-  return wrap(html`
-    ${visit > 1 && ms.last_reattend_reason && !sent ? html`<div class="block note-banner plain" style="margin-top:14px"><${Icon} name="refresh" size=${18} /><span>You went back: ${noPrices(ms.last_reattend_reason, user.seesMoney)}. This report is for this visit only.</span></div>` : null}
-    ${q.error ? html`<div class="block note-banner" style="margin-top:14px">Showing the last saved copy. ${q.error.offline ? 'No signal.' : ''}</div>` : null}
-    ${handoff === 'physical'
-      ? (sent ? html`<${Submitted} ...${common} report=${report} />` : html`<${ReportForm} key=${visit} ...${common} report=${report} tail=${managerBox} />`)
-      : html`<${BuilderReport} ...${common} handoff=${handoff} family=${reportFamily} />`}
-    ${writing ? null : managerBox}
-  `);
+  const common = { jobId, job, data, ms, user, visit, frame };
+  const managerBox = manager ? html`<${ManagerBox} jobId=${jobId} job=${job} user=${user} />` : null;
+  const lead = html`
+    ${visit > 1 && ms.last_reattend_reason && !sent ? html`<div class="block note-banner plain" style="margin-bottom:16px"><span>You went back: ${noPrices(ms.last_reattend_reason, user.seesMoney)}. This report is for this visit only.</span></div>` : null}
+    ${q.error ? html`<div class="block note-banner" style="margin-bottom:16px"><span>Showing the last saved copy.${q.error.offline ? ' No signal.' : ''}</span></div>` : null}`;
+  if (handoff !== 'physical') return html`<${BuilderReport} ...${common} handoff=${handoff} family=${reportFamily} lead=${lead} tail=${managerBox} />`;
+  if (sent) return html`<${Submitted} ...${common} report=${report} lead=${lead} tail=${managerBox} />`;
+  return html`<${ReportForm} key=${visit} ...${common} report=${report} lead=${lead} tail=${managerBox} />`;
 }
 
 // -------------------------------------------------------------- the form ---
@@ -217,7 +215,7 @@ function visitPhotos(data, cycleId) {
   return splitMedia(counted).photos;
 }
 
-function ReportForm({ jobId, job, data, ms, user, visit, report, tail }) {
+function ReportForm({ jobId, job, data, ms, user, visit, report, frame, lead, tail }) {
   const cycleId = ms.attendance_cycle_id || '';
   const key = `msr:${jobId}:v${visit}`;
   const crewRows = (data.crew || []).filter((c) => String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer');
@@ -317,76 +315,70 @@ function ReportForm({ jobId, job, data, ms, user, visit, report, tail }) {
 
   const quick = QUICK[f.type] || [];
   const customMats = f.mats.map((m, i) => ({ ...m, i })).filter((m) => !MATERIALS.includes(m.name));
-  return html`
-    <div class="form rise" style="margin-top:20px">
-      <section id="sec-visit">
-        <h2 class="t-head">The visit</h2>
-        ${f.seeded === 'clock' ? html`<div class="note-banner plain"><${Icon} name="clock" size=${18} /><span>Times from your clock on ${fmtDay(f.date)}. Change them if they are not right.</span></div>` : null}
+  const body = html`${lead}
+      <${Section} label="The visit" class="rp-section"><div id="sec-visit" class="block card pad stack">
+        ${f.seeded === 'clock' ? html`<div class="note-banner plain"><span>Times from your clock on ${fmtDay(f.date)}. Change them if they are not right.</span></div>` : null}
         <${DayPick} label="Day you were there" value=${f.date} onChange=${(v) => patch({ date: v })} />
         <${TimesBlock} value=${f} onChange=${patch} outLabel="Hours each" />
         <${Field} label="How many of you on site" hint=${booked ? `${booked} booked that day.` : ''}>
           <${Counter} label="People on site" value=${f.crew} min=${1} max=${12} blank="Tap plus" onChange=${(v) => patch({ crew: v })} />
         <//>
-      </section>
+      </div><//>
 
-      <section id="sec-what">
-        <h2 class="t-head">What happened</h2>
+      <${Section} label="What happened" class="rp-section"><div id="sec-what" class="block card pad stack">
         <${Field} label="What kind of job"><${Picks} value=${f.type} options=${TYPES} onChange=${(v) => patch({ type: v })} /><//>
         ${f.type === 'Other' ? html`<${Field} label="What kind?"><input class="input" value=${f.typeOther} onInput=${(e) => patch({ typeOther: e.currentTarget.value })} /><//>` : null}
         <${Field} label="What caused it"><${Picks} value=${f.cause} options=${CAUSES} onChange=${(v) => patch({ cause: v })} /><//>
         ${f.cause === 'Other' ? html`<${Field} label="What was the cause?"><input class="input" value=${f.causeOther} onInput=${(e) => patch({ causeOther: e.currentTarget.value })} /><//>` : null}
-        <${Field} label="What was damaged"><textarea class="input short" value=${f.damage} placeholder="e.g. Tree through the rear fence, three panels down. Patio roof sheet lifted." onInput=${(e) => patch({ damage: e.currentTarget.value })} /><//>
-      </section>
+        <${Field} label="What was damaged"><textarea class="input rp-short" value=${f.damage} placeholder="e.g. Tree through the rear fence, three panels down. Patio roof sheet lifted." onInput=${(e) => patch({ damage: e.currentTarget.value })} /><//>
+      </div><//>
 
-      <section id="sec-work">
-        <h2 class="t-head">What you did</h2>
-        ${quick.length ? html`<div class="picks">${quick.map((line) => html`<button type="button" class="pick" disabled=${f.work.includes(line)} onClick=${() => { buzz(6); patch({ work: (f.work.trim() ? f.work.trim().replace(/[.]?$/, '. ') : '') + line + '.' }); }}><${Icon} name="plus" size=${14} stroke=${2.6} /> ${line}</button>`)}</div>` : null}
+      <${Section} label="What you did" class="rp-section"><div id="sec-work" class="block card pad stack">
+        ${quick.length ? html`<div class="picks">${quick.map((line) => html`<button type="button" class="pick" disabled=${f.work.includes(line)} onClick=${() => { buzz(6); patch({ work: (f.work.trim() ? f.work.trim().replace(/[.]?$/, '. ') : '') + line + '.' }); }}>${line}</button>`)}</div>` : null}
         <${Field} label="In your words" hint="A sentence or two. It goes into the report for the builder."><textarea class="input" value=${f.work} placeholder="What you did to make it safe" onInput=${(e) => patch({ work: e.currentTarget.value })} /><//>
-      </section>
+      </div><//>
 
-      <section id="sec-mats">
-        <h2 class="t-head">Materials used<small>Tap what you used, then say how many.</small></h2>
+      <${Section} label="Materials used" class="rp-section"><div id="sec-mats" class="block card pad stack">
+        <p class="t-small">Tap what you used, then say how many.</p>
         <div class="picks">
           ${MATERIALS.map((name) => html`<button type="button" class="pick" aria-pressed=${String(f.mats.some((m) => m.name === name))} onClick=${() => { buzz(6); toggleMat(name); }}>${name}</button>`)}
-          <button type="button" class="pick" onClick=${() => patch({ mats: [...f.mats, { name: '', qty: null, custom: true }], noMats: false })}><${Icon} name="plus" size=${14} stroke=${2.6} /> Something else</button>
+          <button type="button" class="pick" onClick=${() => patch({ mats: [...f.mats, { name: '', qty: null, custom: true }], noMats: false })}>Something else</button>
           <button type="button" class="pick" aria-pressed=${String(f.noMats)} onClick=${() => { buzz(6); patch(f.noMats ? { noMats: false } : { noMats: true, mats: [] }); }}>None used</button>
         </div>
         ${f.mats.length ? html`<div class="stack tight">
-          ${f.mats.map((m, i) => (MATERIALS.includes(m.name) ? html`<div class="matrow" key=${m.name}><b>${m.name}</b>
+          ${f.mats.map((m, i) => (MATERIALS.includes(m.name) ? html`<div class="rp-mat" key=${m.name}><b>${m.name}</b>
             <${Counter} label=${'How many ' + m.name} value=${m.qty} min=${1} max=${999} blank="How many?" onChange=${(v) => setMat(i, { qty: v })} />
             <${IconButton} name="close" label=${'Remove ' + m.name} size=${18} onClick=${() => patch({ mats: f.mats.filter((_, idx) => idx !== i) })} /></div>` : null))}
-          ${customMats.map((m) => html`<div class="matrow" key=${'c' + m.i}><input class="input" value=${m.name} placeholder="What was it?" aria-label="Material" onInput=${(e) => setMat(m.i, { name: e.currentTarget.value })} />
+          ${customMats.map((m) => html`<div class="rp-mat" key=${'c' + m.i}><input class="input" value=${m.name} placeholder="What was it?" aria-label="Material" onInput=${(e) => setMat(m.i, { name: e.currentTarget.value })} />
             <${Counter} label="How many" value=${m.qty} min=${1} max=${999} blank="How many?" onChange=${(v) => setMat(m.i, { qty: v })} />
             <${IconButton} name="close" label="Remove this material" size=${18} onClick=${() => patch({ mats: f.mats.filter((_, idx) => idx !== m.i) })} /></div>`)}
         </div>` : null}
-      </section>
+      </div><//>
 
-      <section id="sec-safe">
-        <h2 class="t-head">Anything still unsafe?<small>Leave it blank if the site is safe.</small></h2>
+      <${Section} label="Anything still unsafe?" class="rp-section"><div id="sec-safe" class="block card pad stack">
+        <p class="t-small">Leave it blank if the site is safe.</p>
         <${MultiPicks} value=${f.hazards} options=${HAZARDS} onChange=${(v) => patch({ hazards: v })} />
         <${Toggle} label="This job needs more work" hint="Tick it and the office will follow up." checked=${f.followUp} onChange=${(v) => patch({ followUp: v })} />
-        <${Field} label="Anything else the office should know (optional)"><textarea class="input short" value=${f.notes} placeholder="Access, what the customer said, what is needed next" onInput=${(e) => patch({ notes: e.currentTarget.value })} /><//>
-      </section>
+        <${Field} label="Anything else the office should know (optional)"><textarea class="input rp-short" value=${f.notes} placeholder="Access, what the customer said, what is needed next" onInput=${(e) => patch({ notes: e.currentTarget.value })} /><//>
+      </div><//>
 
-      <section id="sec-photos">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="t-head">Photos of this visit</h2><span class=${cx('t-num', photos.length >= MIN_PHOTOS ? 't-ok' : 't-mute')}>${photos.length} of ${MIN_PHOTOS}</span></div>
+      <${Section} label="Photos of this visit" class="rp-section" right=${html`<span class=${cx('t-small t-num', photos.length >= MIN_PHOTOS && 't-ok')}>${photos.length} of ${MIN_PHOTOS} photos</span>`}><div id="sec-photos" class="block stack tight">
         <${PhotoGrid} photos=${photos} pending=${pending} onAdd=${addPhotos} addLabel="Add photos" />
-        <p class="t-small t-mute">At least ${MIN_PHOTOS}: the damage, what you did, and the site as you left it.</p>
-      </section>
+        <p class="t-small">At least ${MIN_PHOTOS}: the damage, what you did, and the site as you left it.</p>
+      </div><//>
 
-      ${job.type === 'makesafe' || verticalOf(job, data) === 'makesafe' ? html`<section><${RoofRow} jobId=${jobId} status=${ms.roof_report_draft_status} offer /></section>` : null}
-    </div>
-    ${tail || null}
-    <div class="dock">
-      ${need.length ? html`<button type="button" class="need" onClick=${() => jump(need[0][0])}>Still needed: ${need.slice(0, 2).map((n) => n[1]).join(', ')}${need.length > 2 ? ` and ${need.length - 2} more` : ''}</button>`
-        : html`<p class="footnote">${isNaN(hours) ? '' : `${fmtHours(hours)} each, ${f.crew} on site, ${photos.length} photos`}</p>`}
-      <${Button} block busy=${busy} disabled=${need.length > 0} onClick=${send}>Send report<//>
-      ${saveState ? html`<p class="footnote" style="font-weight:520;color:var(--ink-3)">${saveState === 'saving' ? 'Saving your draft' : saveState === 'server' ? 'Draft saved. You can come back to it.' : 'Draft saved on this phone.'}</p>` : null}
-    </div>`;
+      ${job.type === 'makesafe' || verticalOf(job, data) === 'makesafe' ? html`<${Section} label="Roof report"><div class="block card"><${RoofRow} jobId=${jobId} status=${ms.roof_report_draft_status} offer /></div><//>` : null}
+      ${tail || null}`;
+  const foot = html`
+      ${need.length ? html`<button type="button" class="rp-need" onClick=${() => jump(need[0][0])}>Still needed: ${need.slice(0, 2).map((n) => n[1]).join(', ')}${need.length > 2 ? ` and ${need.length - 2} more` : ''}</button>`
+        : html`<p class="rp-footnote">${isNaN(hours) ? '' : `${fmtHours(hours)} each, ${f.crew} on site, ${photos.length} photos`}</p>`}
+      <${Button} block class="big" busy=${busy} disabled=${need.length > 0} onClick=${send}>Send report<//>
+      ${saveState ? html`<p class="rp-footnote">${saveState === 'saving' ? 'Saving your draft' : saveState === 'server' ? 'Draft saved. You can come back to it.' : 'Draft saved on this phone.'}</p>` : null}`;
+  return frame(body, foot);
 }
 
 // ------------------------------------------------------------- once sent ---
-function Submitted({ jobId, job, data, ms, user, visit, report }) {
+function Submitted({ jobId, job, data, ms, user, visit, report, frame, lead, tail }) {
   const [busy, setBusy] = useState(false);
   const f = useMemo(() => fromServer(report), [report]);
   const cl = (report.checklist_json && !Array.isArray(report.checklist_json) ? report.checklist_json : {}) || {};
@@ -411,34 +403,36 @@ function Submitted({ jobId, job, data, ms, user, visit, report }) {
     setBusy(false);
   };
 
-  return html`<div class="block stack loose rise" style="margin-top:18px">
-    <div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">${approved ? 'Report approved by the office.' : 'Report sent to the office.'}</span>${report.submitted_at ? ` ${fmtTs(report.submitted_at)}.` : ''}${ms.report_sent_at ? ' It has gone to the builder.' : ''}</span></div>
+  return frame(html`${lead}
+    <div class="block note-banner ok"><span><span class="t-strong">${approved ? 'Report approved by the office.' : 'Report sent to the office.'}</span>${report.submitted_at ? ` ${fmtTs(report.submitted_at)}.` : ''}${ms.report_sent_at ? ' It has gone to the builder.' : ''}</span></div>
 
-    <section class="sumlist">
-      <div><span class="t-label">The visit</span><p>${[f.date ? fmtDay(f.date) : '', f.start ? fmtTime(f.start) + (f.finish ? ' to ' + fmtTime(f.finish) : '') : ''].filter(Boolean).join(', ') || 'No time given'}</p>
-        <p class="t-small">${hrs ? `${fmtHours(hrs)} each` : ''}${cl.trade_count ? `${hrs ? ', ' : ''}${cl.trade_count} on site` : ''}</p></div>
-      ${f.type ? html`<div><span class="t-label">Kind of job</span><p>${f.type === 'Other' ? text(f.typeOther) : labelOf(TYPES, f.type)}${f.cause ? `. Cause: ${f.cause === 'Other' ? text(f.causeOther) : labelOf(CAUSES, f.cause).toLowerCase()}` : ''}</p></div>` : null}
-      ${f.damage ? html`<div><span class="t-label">What was damaged</span><p class="prose">${text(f.damage)}</p></div>` : null}
-      ${f.work ? html`<div><span class="t-label">What was done</span><p class="prose">${text(f.work)}</p></div>` : null}
-      ${mats.length ? html`<div><span class="t-label">Materials</span><ul>${mats.map((m) => html`<li>${text(m)}</li>`)}</ul></div>` : null}
-      ${f.hazards.length ? html`<div><span class="t-label">Still unsafe</span><p>${f.hazards.join(', ')}</p></div>` : null}
-      ${f.followUp ? html`<div><span class="t-label">More work needed</span><p>Yes. The office will follow up.</p></div>` : null}
-      ${f.notes ? html`<div><span class="t-label">Notes</span><p class="prose">${text(f.notes)}</p></div>` : null}
-    </section>
+    <${Section} label="What was sent">
+      <div class="block card rp-sum">
+        <div><span class="t-cap">The visit</span><p>${[f.date ? fmtDay(f.date) : '', f.start ? fmtTime(f.start) + (f.finish ? ' to ' + fmtTime(f.finish) : '') : ''].filter(Boolean).join(', ') || 'No time given'}</p>
+          <p class="t-small">${hrs ? `${fmtHours(hrs)} each` : ''}${cl.trade_count ? `${hrs ? ', ' : ''}${cl.trade_count} on site` : ''}</p></div>
+        ${f.type ? html`<div><span class="t-cap">Kind of job</span><p>${f.type === 'Other' ? text(f.typeOther) : labelOf(TYPES, f.type)}${f.cause ? `. Cause: ${f.cause === 'Other' ? text(f.causeOther) : labelOf(CAUSES, f.cause).toLowerCase()}` : ''}</p></div>` : null}
+        ${f.damage ? html`<div><span class="t-cap">What was damaged</span><p class="rp-para">${text(f.damage)}</p></div>` : null}
+        ${f.work ? html`<div><span class="t-cap">What was done</span><p class="rp-para">${text(f.work)}</p></div>` : null}
+        ${mats.length ? html`<div><span class="t-cap">Materials</span><ul>${mats.map((m) => html`<li>${text(m)}</li>`)}</ul></div>` : null}
+        ${f.hazards.length ? html`<div><span class="t-cap">Still unsafe</span><p>${f.hazards.join(', ')}</p></div>` : null}
+        ${f.followUp ? html`<div><span class="t-cap">More work needed</span><p>Yes. The office will follow up.</p></div>` : null}
+        ${f.notes ? html`<div><span class="t-cap">Notes</span><p class="rp-para">${text(f.notes)}</p></div>` : null}
+      </div>
+    <//>
 
-    <div class="stack tight">
-      ${canChange ? html`<${Button} kind="line" block icon="note" busy=${busy} onClick=${change}>Change the report<//>` : html`<p class="t-small t-mute">${approved ? 'The office has approved it, so it can no longer be changed here.' : 'The office has sent it to the builder, so it can no longer be changed here.'} Call the office if something is wrong.</p>`}
-      <${Button} kind="soft" block icon="refresh" onClick=${() => openReattend(jobId, job, visit)}>Went back again? Start a new visit<//>
+    <div class="block stack tight" style="margin-top:16px">
+      ${canChange ? html`<${Button} kind="line" block busy=${busy} onClick=${change}>Change the report<//>` : html`<p class="t-small">${approved ? 'The office has approved it, so it can no longer be changed here.' : 'The office has sent it to the builder, so it can no longer be changed here.'} Call the office if something is wrong.</p>`}
+      <${Button} kind="line" block onClick=${() => openReattend(jobId, job, visit)}>Went back again? Start a new visit<//>
     </div>
 
     <${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} seed=${f.start && f.finish ? { date: f.date, start: f.start, finish: f.finish, breakMin: f.breakMin, from: 'Times from your report' } : null} />
 
-    ${verticalOf(job, data) === 'makesafe' ? html`<${RoofRow} jobId=${jobId} status=${ms.roof_report_draft_status} offer />` : null}
+    ${verticalOf(job, data) === 'makesafe' ? html`<${Section} label="Roof report"><div class="block card"><${RoofRow} jobId=${jobId} status=${ms.roof_report_draft_status} offer /></div><//>` : null}
 
-    ${earlier.length ? html`<section><h2 class="t-head" style="margin-bottom:8px">Earlier visits</h2><div class="stack tight">${earlier.map((r) => { const c = (r.checklist_json && !Array.isArray(r.checklist_json) ? r.checklist_json : {}) || {}; return html`<div class="inset" key=${r.id}>
-      <span class="t-label">${r.cycle_number ? `Visit ${r.cycle_number}` : 'Earlier visit'}${r.submitted_at ? ` · sent ${fmtDay(tsToDate(r.submitted_at))}` : ''}</span>
-      <p class="prose" style="margin-top:4px">${text(c.work_done || r.notes || 'No details kept.')}</p></div>`; })}</div></section>` : null}
-  </div>`;
+    ${earlier.length ? html`<${Section} label="Earlier visits"><div class="block card rp-sum">${earlier.map((r) => { const c = (r.checklist_json && !Array.isArray(r.checklist_json) ? r.checklist_json : {}) || {}; return html`<div key=${r.id}>
+      <span class="t-cap">${r.cycle_number ? `Visit ${r.cycle_number}` : 'Earlier visit'}${r.submitted_at ? `, sent ${fmtDay(tsToDate(r.submitted_at))}` : ''}</span>
+      <p class="rp-para">${text(c.work_done || r.notes || 'No details kept.')}</p></div>`; })}</div><//>` : null}
+    ${tail || null}`);
 }
 
 function openReattend(jobId, job, visit) { openOverlay((close) => html`<${ReattendSheet} jobId=${jobId} job=${job} visit=${visit} onClose=${close} />`); }
@@ -465,10 +459,9 @@ function ReattendSheet({ jobId, job, visit, onClose }) {
 /** The way to our own roof report, on SecureWorks letterhead. */
 function RoofRow({ jobId, status, offer }) {
   const s = String(status || '').toLowerCase();
-  return html`<button type="button" class="linkrow" onClick=${() => go(`/job/${jobId}/roof`)}>
-    <span class="ico"><${Icon} name="file" size=${20} /></span>
-    <span style="min-width:0"><b>${s === 'submitted' ? 'Roof report sent' : s === 'draft' ? 'Carry on with the roof report' : offer ? 'Need a roof report too?' : 'Write the roof report here'}</b><span>${s === 'submitted' ? 'Open it, or rebuild it with new photos' : 'On SecureWorks letterhead, written here'}</span></span>
-    ${s === 'submitted' ? html`<${Icon} name="check" size=${20} class="t-ok" />` : html`<${Icon} name="right" size=${18} class="t-mute" />`}
+  return html`<button type="button" class="rp-link" onClick=${() => go(`/job/${jobId}/roof`)}>
+    <span style="min-width:0"><b>${s === 'submitted' ? 'Roof report sent' : s === 'draft' ? 'Carry on with the roof report' : offer ? 'Need a roof report too?' : 'Write the roof report here'}</b><span class="rp-sub">${s === 'submitted' ? 'Open it, or rebuild it with new photos' : 'On SecureWorks letterhead, written here'}</span></span>
+    <span class=${cx('rp-go', s === 'submitted' && 'ok')}>${s === 'submitted' ? 'Sent' : 'Open'}</span>
   </button>`;
 }
 
@@ -481,7 +474,7 @@ function portalIsDone(ms, jobId, visit) {
   const mark = local.get('builder-report-done:' + jobId);
   return mark && Number(mark.visit) === visit ? (mark.told ? 'told' : 'recorded') : '';
 }
-function BuilderReport({ jobId, job, data, ms, user, visit, handoff, family }) {
+function BuilderReport({ jobId, job, data, ms, user, visit, handoff, family, frame, lead, tail }) {
   const [busy, setBusy] = useState(false);
   const [, bump] = useState(0);
   const links = useMemo(() => portalLinks(ms, job.metadata, user.seesMoney), [data]);
@@ -531,41 +524,46 @@ function BuilderReport({ jobId, job, data, ms, user, visit, handoff, family }) {
     setBusy(false);
   };
 
+  const fromBuilder = links.main ? html`<${Section} label="From the builder"><div class="block card"><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></div><//>` : null;
+  const roofCard = html`<${Section} label="Roof report"><div class="block card"><${RoofRow} jobId=${jobId} status=${roofStatus} /></div><//>`;
+  const hoursCard = html`<${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />`;
+  const ask2 = (text, okWords) => () => tellOffice(text, okWords).catch((err) => toast(plain(err), { kind: 'bad' }));
+
   if (ours || roofStatus === 'submitted') {
-    return html`<div class="block stack loose rise" style="margin-top:18px">
-      ${roofStatus === 'submitted' ? html`<div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">Roof report sent.</span> The office has it.</span></div>`
-        : html`<p style="color:var(--ink-2)">This ${what} is written here in the app, on SecureWorks letterhead. It takes about ten minutes on site.</p>`}
-      <${RoofRow} jobId=${jobId} status=${roofStatus} />
-      ${roofStatus === 'submitted' ? html`<${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />` : null}
-      ${links.main ? html`<section><h2 class="t-head" style="margin-bottom:4px">From the builder</h2><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></section>` : null}
-    </div>`;
+    return frame(html`${lead}
+      ${roofStatus === 'submitted' ? html`<div class="block note-banner ok"><span><span class="t-strong">Roof report sent.</span> The office has it.</span></div>`
+        : html`<p class="block t-mute">This ${what} is written here in the app, on SecureWorks letterhead. It takes about ten minutes on site.</p>`}
+      ${roofCard}
+      ${roofStatus === 'submitted' ? hoursCard : null}
+      ${fromBuilder}${tail || null}`,
+    roofStatus === 'submitted' ? null : html`<${Button} block class="big" onClick=${() => go(`/job/${jobId}/roof`)}>${roofStatus === 'draft' ? 'Carry on with the roof report' : 'Write the roof report'}<//>`);
   }
   if (done) {
-    return html`<div class="block stack loose rise" style="margin-top:18px">
-      <div class="note-banner ok"><${Icon} name="check" size=${18} stroke=${2.6} /><span><span class="t-strong">${done === 'told' ? 'The office has been told it is done.' : 'Marked as done.'}</span> Nothing more to do on the ${what}.</span></div>
-      <${HoursCard} office=${user.office} jobId=${jobId} crew=${data.crew} userId=${user.id} title="Your hours for this report" />
-      ${links.main ? html`<section><h2 class="t-head" style="margin-bottom:4px">From the builder</h2><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></section>` : null}
-    </div>`;
+    return frame(html`${lead}
+      <div class="block note-banner ok"><span><span class="t-strong">${done === 'told' ? 'The office has been told it is done.' : 'Marked as done.'}</span> Nothing more to do on the ${what}.</span></div>
+      ${hoursCard}
+      ${fromBuilder}${tail || null}`);
   }
-  return html`<div class="block stack loose rise" style="margin-top:18px">
-    <p style="color:var(--ink-2)">${handoff === 'unknown'
+  const doneBtn = (kind) => html`<${Button} kind=${kind} block class=${kind === 'primary' ? 'big' : ''} busy=${busy} onClick=${markDone}>I have done the builder's report<//>`;
+  return frame(html`${lead}
+    <p class="block t-mute">${handoff === 'unknown'
       ? `The office has not said yet where this ${what} is written. Write it here, or call the office if the builder wants it on their own website.`
       : `This ${what} is filled in on the builder's website. Do it there, then come back and tell us it is done.`}</p>
-    ${links.main ? html`<div class="stack tight">
-      <a class="btn primary block" href=${links.main} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${20} />Open the builder's website</a>
-      <p class="t-small t-mute" style="text-align:center">${hostOf(links.main)}</p>
-      ${links.others.length ? html`<${LinkList} links=${links.others} />` : null}
-      <div class="note-banner plain"><${Icon} name="info" size=${18} /><span>If the page says the link has expired, the job is an older one and the app is not at fault. <button type="button" class="t-strong" style="text-decoration:underline" onClick=${() => tellOffice("The builder's link on this job has expired. Please ask the builder for a new one.", 'The office has been asked for a new link.').catch((err) => toast(plain(err), { kind: 'bad' }))}>Ask the office for a new link</button></span></div>
-    </div>` : handoff === 'unknown' ? null : html`<div class="note-banner"><${Icon} name="alert" size=${18} /><span>There is no link to the builder's website on this job. Use the link in the builder's work order or email, or <button type="button" class="t-strong" style="text-decoration:underline" onClick=${() => tellOffice("There is no link to the builder's website on this job. Please add it.", 'The office has been asked for the link.').catch((err) => toast(plain(err), { kind: 'bad' }))}>ask the office for it</button>.</span></div>`}
-    <div class="stack tight">
-      ${handoff === 'unknown' ? html`<${Button} block icon="file" onClick=${() => go(`/job/${jobId}/roof`)}>${roofStatus === 'draft' ? 'Carry on with the roof report' : 'Write the roof report here'}<//>`
-        : html`<${Button} kind=${links.main ? 'ink' : 'primary'} block icon="check" busy=${busy} onClick=${markDone}>I have done the builder's report<//>`}
-      ${handoff === 'unknown' || family === 'assessment_report_quote' ? null : html`<${RoofRow} jobId=${jobId} status=${roofStatus} />`}
-    </div>
-  </div>`;
+    ${links.main ? html`
+      <${Section} label="The builder's website"><div class="block card"><${LinkList} links=${[{ url: links.main, label: links.mainLabel || "The builder's website" }, ...links.others]} /></div>
+        <p class="block t-small" style="margin-top:6px">If the page says the link has expired, the job is an older one and the app is not at fault.</p>
+        <div class="block"><button type="button" class="rp-asklink" onClick=${ask2("The builder's link on this job has expired. Please ask the builder for a new one.", 'The office has been asked for a new link.')}>Ask the office for a new link</button></div>
+      <//>`
+      : handoff === 'unknown' ? null : html`<div class="block note-banner" style="margin-top:16px"><span>There is no link to the builder's website on this job. Use the link in the builder's work order or email, or ask the office for it.</span></div>
+        <div class="block"><button type="button" class="rp-asklink" onClick=${ask2("There is no link to the builder's website on this job. Please add it.", 'The office has been asked for the link.')}>Ask the office for the link</button></div>`}
+    ${handoff === 'unknown' || family === 'assessment_report_quote' ? null : roofCard}
+    ${tail || null}`,
+  handoff === 'unknown' ? html`<${Button} block class="big" onClick=${() => go(`/job/${jobId}/roof`)}>${roofStatus === 'draft' ? 'Carry on with the roof report' : 'Write the roof report here'}<//>`
+    : links.main ? html`<a class="btn primary block big" href=${links.main} target="_blank" rel="noopener noreferrer">Open the builder's website</a>${doneBtn('line')}`
+    : doneBtn('primary'));
 }
 function LinkList({ links }) {
-  return html`<div>${links.map((l) => html`<a class="linkrow" key=${l.url} href=${l.url} target="_blank" rel="noopener noreferrer"><span class="ico"><${Icon} name="external" size=${20} /></span><span style="min-width:0"><b>${l.label}</b><span>${hostOf(l.url)}</span></span><${Icon} name="right" size=${18} class="t-mute" /></a>`)}</div>`;
+  return html`${links.map((l) => html`<a class="rp-link" key=${l.url} href=${l.url} target="_blank" rel="noopener noreferrer"><span style="min-width:0"><b>${l.label}</b><span class="rp-sub">${hostOf(l.url)}</span></span><span class="rp-go">Open</span></a>`)}`;
 }
 
 // --------------------------------------------------------------- managers --
@@ -583,11 +581,10 @@ function ManagerBox({ jobId, job, user }) {
     } catch (err) { toast(plain(err), { kind: 'bad', ms: 7000 }); }
     setBusy(false);
   };
-  return html`<section class="managerbox">
-    <span class="t-label">Manager</span>
+  return html`<${Section} label="Manager"><div class="block">
     ${cancelled ? html`<${Button} kind="line" block busy=${busy} onClick=${reopen}>Reopen this job<//>`
       : html`<${Button} kind="danger" block onClick=${() => openOverlay((close) => html`<${CancelSheet} jobId=${jobId} job=${job} user=${user} onClose=${close} />`)}>Cancel this job<//>`}
-  </section>`;
+  </div><//>`;
 }
 function CancelSheet({ jobId, job, user, onClose }) {
   const [code, setCode] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
@@ -603,7 +600,7 @@ function CancelSheet({ jobId, job, user, onClose }) {
     } catch (err) { toast(plain(err), { kind: 'bad', ms: 7000 }); }
     setBusy(false);
   };
-  return html`<${Sheet} title="Cancel this job" sub=${[jobTitle(job), job.job_number].filter(Boolean).join(' · ')} onClose=${onClose}
+  return html`<${Sheet} title="Cancel this job" sub=${html`<${JobLine} job=${job}>${jobTitle(job)}<//>`} onClose=${onClose}
     foot=${(shut) => html`<${Button} kind="ink" block busy=${busy} disabled=${!code || note.trim().length < 3} onClick=${() => cancel(shut)}>Cancel the job<//>`}>
     <div class="stack">
       <${Field} label="Why?"><${Picks} value=${code} options=${CANCEL_REASONS} onChange=${setCode} /><//>

@@ -1,5 +1,5 @@
 // Demo answers for the pay screens. See demo/server.js (registerDemo).
-// Invoices with office changes, receipts, the crew work order from first hours
+// Invoices with office changes, receipts, the group work order from first hours
 // to invoiced share, work orders for the per-metre lead and crew lines to check.
 import { registerDemo } from './server.js';
 import { tile } from './db.js';
@@ -82,7 +82,7 @@ registerDemo((db, h) => {
   // What a trade who is not the assignee sees: the job's agreed work order, no money on it.
   const agreedCards = () => Object.entries(db.jobWorkOrders).filter(([jid]) => onJob(jid)).map(([jid, wo]) => { const j = db.job(jid); return { id: wo.id, wo_number: wo.wo_number, kind: 'job', job_id: jid, job_number: j.job_number, client_name: j.client_name, job_type: j.type, vertical: j.type, job_status: j.status, status: wo.status, site_address: j.site_address, site_suburb: j.site_suburb, scope_items: wo.scope_items.map((s) => ({ description: s.description, quantity: s.qty, unit: s.unit, hours: s.hours })), negative_charges: [], already_invoiced: false, invoice_block_reason: null, can_add_to_weekly_invoice: false, can_invoice: false, can_invoice_direct: false, direct_invoice_block_reason: null, direct_invoice_block_message: null }; });
 
-  // ------------------------------------------------------ crew work orders
+  // ------------------------------------------------------ group work orders
   const RATES = { 'u-sam': 55, 'u-henry': 60, 'u-israel': 58, 'u-jo': 48, 'u-tendo': 45 };
   const g0 = db.groups.find((g) => g.group_id === 'g-dunc');
   if (g0) Object.assign(g0, { _pot: 2400, _people: ['u-israel', me.id], _frozen: false, _submitted: null, _signoff: null, entries: [{ user_id: 'u-israel', work_date: addDays(today, -1), start_time: '07:00', finish_time: '15:00', break_minutes: 30, hours: 7.5 }] });
@@ -125,8 +125,8 @@ registerDemo((db, h) => {
       crew_status: g._frozen ? g._people.map((uid) => ({ name: person(uid).name, me: uid === me.id, state: uid === me.id ? (g._submitted ? 'submitted' : 'not_invoiced') : 'submitted' })) : [],
       release: { released: false, ready: false, signoff: g.client_signed, total: g._people.length, invoiced, approved: 0, hold: g._submitted ? ['The office checks every share before the crew is paid.'] : [] } };
   }
-  const groupOff = () => { if (db.flags.groupOff) fail(409, { ok: false, code: 'group_work_order_disabled', error: 'Crew work orders are not switched on.' }); };
-  const mustBeIn = (b) => { groupOff(); const g = groupFor(b); if (!g) fail(404, { ok: false, code: 'group_not_found', error: 'That crew work order could not be found.' }); if (!inCrew(g)) fail(403, { ok: false, code: 'group_not_participant', error: 'You are not part of this crew work order.' }); return g; };
+  const groupOff = () => { if (db.flags.groupOff) fail(409, { ok: false, code: 'group_work_order_disabled', error: 'Group work orders are not switched on.' }); };
+  const mustBeIn = (b) => { groupOff(); const g = groupFor(b); if (!g) fail(404, { ok: false, code: 'group_not_found', error: 'That group work order could not be found.' }); if (!inCrew(g)) fail(403, { ok: false, code: 'group_not_participant', error: 'You are not part of this group work order.' }); return g; };
   const hoursChanged = (g) => { if (g.client_signed) { g.client_signed = false; g._signoff = null; } };
 
   function invoiceShare(b) {
@@ -244,7 +244,7 @@ registerDemo((db, h) => {
       return { success: true };
     },
 
-    // ---- crew work orders
+    // ---- group work orders
     my_group_work_orders() {
       if (db.flags.groupOff) return { enabled: false, group_job_ids: [], groups: [], payable_routes: [] };
       const mineGroups = db.groups.filter(inCrew);
@@ -258,15 +258,15 @@ registerDemo((db, h) => {
       if (g && inCrew(g)) return shareOf(g);
       if (!j) fail(404, { ok: false, code: 'group_job_not_found', error: 'That job could not be found.' });
       const on = onJob(j.id);
-      if (g) return { enabled: true, job_id: j.id, group_id: g.group_id, participant: false, discovery: on ? { state: 'join', reason: 'not_participant', message: 'The crew work order for this job is open. Join it to add your hours.' } : { state: 'not_assigned', reason: 'not_assigned', message: 'You are not booked on this job. If you worked on it, add yourself to the job first.' } };
+      if (g) return { enabled: true, job_id: j.id, group_id: g.group_id, participant: false, discovery: on ? { state: 'join', reason: 'not_participant', message: 'The group work order for this job is open. Join it to add your hours.' } : { state: 'not_assigned', reason: 'not_assigned', message: 'You are not booked on this job. If you worked on it, add yourself to the job first.' } };
       if (j.type !== 'patio') return { enabled: true, job_id: j.id, group_id: null, participant: false, discovery: { state: 'hours', reason: 'not_group_job', message: 'This job is paid by the hour. Bill it on your weekly invoice.' } };
-      return { enabled: true, job_id: j.id, group_id: null, participant: false, discovery: on ? { state: 'create', reason: 'group_missing', message: 'This job is paid as a crew. Nobody has started the crew work order yet, so you can.' } : { state: 'not_assigned', reason: 'not_assigned', message: 'You are not booked on this job. If you worked on it, add yourself to the job first.' } };
+      return { enabled: true, job_id: j.id, group_id: null, participant: false, discovery: on ? { state: 'create', reason: 'group_missing', message: 'This job is paid as a group. Nobody has started the group work order yet, so you can.' } : { state: 'not_assigned', reason: 'not_assigned', message: 'You are not booked on this job. If you worked on it, add yourself to the job first.' } };
     },
     create_group_work_order(p, b) {
       groupOff();
       const j = db.job(b.job_id); if (!b.job_id) fail(400, { ok: false, code: 'group_job_required', error: 'Pick the job first.' }); if (!j) fail(404, { ok: false, code: 'group_job_not_found', error: 'That job could not be found.' });
-      if (!onJob(j.id)) fail(403, { ok: false, code: 'group_work_order_not_assigned', error: 'You need to be booked on this job to start its crew work order.' });
-      if (db.groups.some((g) => g.job_id === j.id)) fail(409, { ok: false, code: 'group_work_order_exists', error: 'This job already has a crew work order. Join it.' });
+      if (!onJob(j.id)) fail(403, { ok: false, code: 'group_work_order_not_assigned', error: 'You need to be booked on this job to start its group work order.' });
+      if (db.groups.some((g) => g.job_id === j.id)) fail(409, { ok: false, code: 'group_work_order_exists', error: 'This job already has a group work order. Join it.' });
       const people = [...new Set([me.id, ...db.assignments.filter((a) => a.job_id === j.id && a.status !== 'cancelled').map((a) => a.user_id)])];
       const g = { group_id: db.id('g'), ...jobRef(j), pay_basis: 'all_in_12_v2', client_signed: false, _pot: 1900, _people: people, _frozen: false, _submitted: null, _signoff: null, entries: [] };
       db.groups.push(g);
@@ -274,9 +274,9 @@ registerDemo((db, h) => {
     },
     join_group_work_order(p, b) {
       groupOff();
-      const g = groupFor(b); if (!g) fail(404, { ok: false, code: 'group_not_found', error: 'That crew work order could not be found.' });
+      const g = groupFor(b); if (!g) fail(404, { ok: false, code: 'group_not_found', error: 'That group work order could not be found.' });
       if (g._frozen) fail(409, { ok: false, code: 'group_split_frozen', error: 'The shares are already locked in for this job. Call the office.' });
-      if (!onJob(g.job_id)) fail(403, { ok: false, code: 'group_work_order_not_assigned', error: 'You need to be booked on this job to join its crew work order.' });
+      if (!onJob(g.job_id)) fail(403, { ok: false, code: 'group_work_order_not_assigned', error: 'You need to be booked on this job to join its group work order.' });
       if (!inCrew(g)) g._people.push(me.id);
       return { ok: true, group_id: g.group_id, job_id: g.job_id, status: 'open', client_signed: g.client_signed };
     },

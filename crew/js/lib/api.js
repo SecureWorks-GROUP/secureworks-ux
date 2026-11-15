@@ -20,7 +20,7 @@ export function setDemoHandler(fn) { demoHandler = fn; }
 // trade's id; the server allows only these reads and refuses every change.
 let previewId = null;
 const PREVIEW_READS = new Set(['trade_preview_context', 'trade_calendar', 'my_jobs', 'search_all_jobs', 'trade_job_detail', 'my_work_orders', 'my_job_work_order',
-  'group_work_order_my_share', 'my_group_work_orders', 'my_hours', 'my_money', 'my_trade_invoices', 'get_trade_invoice', 'get_running_invoice_draft', 'my_invoices', 'crew_charges_on_my_jobs']);
+  'group_work_order_my_share', 'my_group_work_orders', 'my_hours', 'my_money', 'my_trade_invoices', 'get_trade_invoice', 'get_running_invoice_draft', 'my_invoices', 'crew_charges_on_my_jobs', 'trade_invoice_job_modes']);
 export function setPreview(id) { previewId = id || null; }
 export function previewing() { return previewId; }
 function readOnly() { return new ApiError('Read only. You are viewing as a trade, so nothing can be changed or sent.', { status: 403, code: 'preview_read_only' }); }
@@ -84,7 +84,7 @@ async function send(base, action, params, body, token, signal) {
 async function call(base, action, params, body, opts = {}) {
   if (getState().demo && demoHandler) return demoHandler(base === GHL() ? 'ghl' : 'ops', action, params || {}, body || null);
   if (previewId && action !== 'get_profile') {
-    if (base !== OPS() || !PREVIEW_READS.has(action)) throw readOnly();
+    if (base !== OPS() || !PREVIEW_READS.has(action) || (body && action !== 'group_work_order_my_share')) throw readOnly();
     params = { ...(params || {}), preview_trade_user_id: previewId };
   }
   let token = await tokenSource();

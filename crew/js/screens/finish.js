@@ -1,5 +1,5 @@
-// Finishing a job (fencing, patio, decking and the rest; make safes use the
-// report instead). A short walk: clock off, finished photos, the neighbour's
+// Sign-off: finishing a job (fencing, patio, decking and the rest; make safes
+// use the report instead). A short walk: clock off, finished photos, the neighbour's
 // okay on a fence, the customer's sign-off and their say, the crew's own say
 // on how the job went, a tidy-up check, then send.
 // Everything is kept on the phone until it has landed, so a refresh or a
@@ -9,14 +9,15 @@ import { api } from '../lib/api.js';
 import { useStore, local, invalidate } from '../lib/store.js';
 import { useJob, jobStub, noteBody } from '../lib/data.js';
 import { go, back } from '../lib/router.js';
-import { todayISO, mondayOf, addDays, fmtHours, firstName } from '../lib/dates.js';
+import { todayISO, mondayOf, addDays, firstName } from '../lib/dates.js';
 import { verticalOf, isReportJob, jobTitle, jobIsClosed, VERTICAL_LABEL } from '../lib/model.js';
 import { queueWrite, sendPhoto } from '../lib/outbox.js';
 import { pickPhotos } from '../lib/upload.js';
 import { Icon } from '../ui/icons.js';
-import { Page, Button, Sheet, Slide, Skel, Empty, LoadError, Field, Toggle, toast, openOverlay, buzz } from '../ui/kit.js';
-import { plain, isRefusal, stash, keepPhoto, useSaved, BlobImg, SignaturePad, Stars, CheckRow, StepBar, StepHead } from '../ui/report-kit.js';
+import { Page, Section, JobLine, Button, Sheet, Skel, Empty, LoadError, Field, Toggle, toast, openOverlay, buzz } from '../ui/kit.js';
+import { plain, isRefusal, stash, keepPhoto, useSaved, BlobImg, SignaturePad, Stars, CheckRow, StepTop, StepHead } from '../ui/report-kit.js';
 import { openClockOff, useElapsed } from './clock.js';
+import { fmtHrs as fmtHours } from './words.js';
 
 const MIN_PHOTOS = 3;
 const MAX_PHOTOS = 12;
@@ -43,9 +44,9 @@ export function Finish({ jobId }) {
   const job = (data && data.job) || jobStub(jobId);
   const toJob = () => back('/job/' + jobId);
 
-  if (!data && q.loading) return html`<${Page} title="Finish job" onBack=${toJob}><div class="page-pad" style="display:grid;gap:14px"><${Skel} h=${4} r=${4} /><${Skel} w="60%" h=${30} style="margin-top:14px" /><${Skel} w="85%" /><${Skel} h=${220} r=${14} style="margin-top:8px" /></div><//>`;
+  if (!data && q.loading) return html`<${Page} title="Sign-off" back="Job" onBack=${toJob}><div class="block" style="display:grid;gap:12px"><${Skel} h=${3} /><${Skel} w="60%" h=${24} /><${Skel} w="85%" /><${Skel} h=${220} /></div><//>`;
   if (!data) {
-    return html`<${Page} title="Finish job" onBack=${toJob}>${q.locked
+    return html`<${Page} title="Sign-off" back="Job" onBack=${toJob}>${q.locked
       ? html`<${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>Only someone booked on a job can finish it.<//>`
       : html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="this job" />`}<//>`;
   }
@@ -53,14 +54,14 @@ export function Finish({ jobId }) {
   const saved = local.get('finish:' + jobId);
   const finishedHere = Boolean(saved && saved.result);
   if (isReportJob(vertical)) {
-    return html`<${Page} title="Finish job" onBack=${toJob}><${Empty} title="This job is finished with its report" action=${html`<${Button} small onClick=${() => go(`/job/${jobId}/report`, { replace: true })}>Open the report<//>`}>
+    return html`<${Page} title="Sign-off" back="Job" onBack=${toJob}><${Empty} title="This job is finished with its report" action=${html`<${Button} kind="line" small onClick=${() => go(`/job/${jobId}/report`, { replace: true })}>Open the report<//>`}>
       A ${VERTICAL_LABEL[vertical].toLowerCase()} job is closed off by sending its report, not from here.<//><//>`;
   }
   if (data.access_tier === 'company_view') {
-    return html`<${Page} title="Finish job" onBack=${toJob}><${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>Only someone booked on a job can finish it.<//><//>`;
+    return html`<${Page} title="Sign-off" back="Job" onBack=${toJob}><${Empty} title="Add yourself to this job first" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Open the job<//>`}>Only someone booked on a job can finish it.<//><//>`;
   }
   if (jobIsClosed(job.status) && !finishedHere) {
-    return html`<${Page} title="Finish job" onBack=${toJob}><${Empty} title="This job is already finished" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>`}>
+    return html`<${Page} title="Sign-off" back="Job" onBack=${toJob}><${Empty} title="This job is already finished" action=${html`<${Button} kind="line" small onClick=${() => go('/job/' + jobId, { replace: true })}>Back to the job<//>`}>
       Someone has already marked it finished. If something is missing, add a photo or a note on the job.<//><//>`;
   }
   return html`<${Flow} key=${jobId} jobId=${jobId} job=${job} data=${data} user=${user} />`;
@@ -117,7 +118,8 @@ function Flow({ jobId, job, data, user }) {
     set((c) => ({ ...c, nbrs: Array.from({ length: slots }, (_, i) => c.nbrs[i] || { label: names[i] || (slots > 1 ? `Neighbour ${i + 1}` : 'The neighbour'), key: null }) }));
   }, [needNbr, slots]);
 
-  const goStep = (name) => { set({ step: name }); const page = document.querySelector('.page'); if (page) page.scrollTop = 0; };
+  const toTop = () => { const page = document.querySelector('main.page'); if (page) page.scrollTop = 0; };
+  const goStep = (name) => { set({ step: name }); toTop(); };
   const next = () => goStep(steps[Math.min(steps.length - 1, index + 1)]);
   const prev = () => {
     if (run.active) return;
@@ -154,7 +156,7 @@ function Flow({ jobId, job, data, user }) {
   const removePhoto = (photo) => { stash.del(sk(photo.key)); set((c) => ({ ...c, photos: c.photos.filter((p) => p.key !== photo.key) })); setBlobs((b) => { const n = { ...b }; delete n[photo.key]; return n; }); };
   const openPhoto = (photo) => openOverlay((close) => html`<${Sheet} title=${photo.label} onClose=${close}
       foot=${(shut) => html`<${Button} block icon="camera" onClick=${() => { shut(); retake(photo); }}>Take it again<//><${Button} kind="quiet" block onClick=${() => { removePhoto(photo); shut(); }}>Remove this photo<//>`}>
-      <${BlobImg} blob=${blobs[photo.key]} alt=${photo.label} class="shot-large" /><//>`);
+      <${BlobImg} blob=${blobs[photo.key]} alt=${photo.label} class="rp-shot-large" /><//>`);
 
   // ---- neighbours ----
   const addEvidence = async (i) => {
@@ -259,176 +261,165 @@ function Flow({ jobId, job, data, user }) {
     running.current = false;
   };
 
-  if (s.result) return html`<${Done} result=${s.result} job=${job} user=${user} onLeave=${(path) => { clearSaved(); go(path, { replace: true }); }} />`;
-  if (!ready) return html`<${Page} title="Finish job"><div class="page-pad" style="display:grid;gap:14px"><${Skel} h=${4} r=${4} /><${Skel} w="60%" h=${30} style="margin-top:14px" /><${Skel} h=${220} r=${14} /></div><//>`;
+  if (s.result) return html`<${Done} result=${s.result} job=${job} vertical=${vertical} user=${user} onLeave=${(path) => { clearSaved(); go(path, { replace: true }); }} />`;
+  if (!ready) return html`<${Page} title="Sign-off" back="Job" onBack=${() => back('/job/' + jobId)}><div class="block" style="display:grid;gap:12px"><${Skel} h=${3} /><${Skel} w="60%" h=${24} /><${Skel} h=${220} /></div><//>`;
 
   const sending = run.active || run.error || Object.keys(s.sent).length > 0;
   const photoCount = s.photos.length;
   const nextPrompt = prompts.find((p) => !s.photos.some((x) => x.label === p));
   const place = jobTitle(job);
+  const top = (title, words, kicker) => html`<${StepTop} index=${index} total=${steps.length}>
+    <${StepHead} job=${kicker ? null : job} vertical=${vertical} kicker=${kicker || place} title=${title}>${words}<//><//>`;
+  const more = (label, onClick, extra = {}) => html`<${Button} block class="big" onClick=${onClick} ...${extra}>${label}<//>`;
+  let body = null; let foot = null;
 
-  return html`<${Page} class="steppage" title=${'Finish ' + jobTitle(job)} onBack=${prev}>
-    <${StepBar} index=${index} total=${steps.length} />
-
-    ${step === 'clock' ? html`<${ClockStep} place=${place} clock=${clock} onDone=${({ hours }) => { toast(hours ? `Clocked off. ${fmtHours(hours)} saved for your invoice.` : 'Clocked off.', { kind: 'ok' }); goStep('photos'); }} />` : null}
-
-    ${step === 'photos' ? html`<div class="rise">
-      <${StepHead} kicker=${place} title="Photos of the finished job">At least ${MIN_PHOTOS}. They go to the office and the customer's file.<//>
-      <div class="shots block">
+  if (step === 'clock') {
+    body = html`${top('Clock off first', 'You are still on the clock for this job. Clock off so your hours are right, then finish it.')}
+      <div class="rp-body"><${ClockStep} clock=${clock} /></div>`;
+    foot = more('Clock off', () => openClockOff({ onDone: ({ hours }) => { toast(hours ? `Clocked off. ${fmtHours(hours)} saved for your invoice.` : 'Clocked off.', { kind: 'ok' }); goStep('photos'); } }));
+  } else if (step === 'photos') {
+    body = html`${top('Photos of the finished job', `At least ${MIN_PHOTOS}. They go to the office and the customer's file.`)}
+      <div class="rp-body"><div class="rp-shots block">
         ${prompts.map((p) => { const ph = s.photos.find((x) => x.label === p); return ph
           ? html`<${Shot} key=${ph.key} photo=${ph} blob=${blobs[ph.key]} sent=${Boolean(s.sent[ph.key])} onOpen=${() => openPhoto(ph)} />`
-          : html`<button type="button" class="shot empty" key=${p} onClick=${() => addPhotos({ label: p })}><${Icon} name="camera" size=${28} /><span>${p}</span></button>`; })}
+          : html`<button type="button" class="rp-shot empty" key=${p} onClick=${() => addPhotos({ label: p })}><${Icon} name="camera" size=${24} /><span>${p}</span></button>`; })}
         ${s.photos.filter((x) => !prompts.includes(x.label)).map((ph) => html`<${Shot} key=${ph.key} photo=${ph} blob=${blobs[ph.key]} sent=${Boolean(s.sent[ph.key])} onOpen=${() => openPhoto(ph)} />`)}
-        ${!nextPrompt && photoCount < MAX_PHOTOS ? html`<button type="button" class="shot empty" onClick=${() => addPhotos({})}><${Icon} name="plus" size=${28} /><span>Another photo</span></button>` : null}
-      </div>
-      <div class="stepfoot">
-        <p class="footnote">${photoCount >= MIN_PHOTOS ? `${photoCount} photos taken` : photoCount ? `${photoCount} of ${MIN_PHOTOS} taken` : 'Tap a square, or use the button'}</p>
-        ${photoCount >= MIN_PHOTOS
-          ? html`<${Button} block onClick=${next}>Continue<//>`
-          : html`<${Button} block icon="camera" onClick=${() => addPhotos({ label: nextPrompt })}>Take: ${nextPrompt || 'another photo'}<//>`}
-        <${Button} kind="quiet" block onClick=${() => addPhotos({ library: true })}>Choose photos already on this phone<//>
-      </div>
-    </div>` : null}
-
-    ${step === 'neighbours' ? html`<div class="rise">
-      <${StepHead} kicker=${place} title="The neighbour's okay">A fence on a shared boundary needs the neighbour's okay on file. Add a photo or screenshot of it: a text, an email or a signed note.<//>
-      <div class="block stack">
-        ${s.waive ? null : s.nbrs.map((n, i) => html`<div class="evid" key=${i}>
-          ${n.key && blobs[n.key] ? html`<${BlobImg} blob=${blobs[n.key]} alt="" class="evid-pic" />` : html`<span class="evid-pic"><${Icon} name="image" size=${24} /></span>`}
-          <span class="grow"><b>${n.label}</b><span class="t-small">${n.key ? (s.sent[n.key] ? 'Sent' : 'Sign-off added') : 'Nothing added yet'}</span></span>
-          ${s.sent[n.key] ? html`<${Icon} name="check" size=${22} class="t-ok" />` : html`<${Button} kind=${n.key ? 'line' : 'primary'} small onClick=${() => addEvidence(i)}>${n.key ? 'Change' : 'Add'}<//>`}
-        </div>`)}
-        <${Toggle} label="I have no sign-off to show" hint="Say why, and the office will sort it out." checked=${s.waive} onChange=${(v) => set({ waive: v })} />
-        ${s.waive ? html`<${Field} label="Why is there no sign-off?" hint="The office reads this before the job is paid.">
-          <textarea class="input" value=${s.waiveReason} placeholder="e.g. Neighbour agreed on site but would not sign. The owner has it in an email." onInput=${(e) => set({ waiveReason: e.currentTarget.value })} /><//>` : null}
-      </div>
-      <div class="stepfoot"><${Button} block disabled=${!nbrOk} onClick=${next}>Continue<//></div>
-    </div>` : null}
-
-    ${step === 'customer' ? html`<div class="rise" key=${s.absent ? 'absent' : s.signing ? 'sign' : 'rate'}>
-      ${s.absent ? html`<${StepHead} kicker=${place} title="No customer sign-off">That is fine. The office is told the customer was not on site and follows up with them. Nothing is sent to the customer from here.<//>
-        <div class="block"><${Button} kind="line" block onClick=${() => set({ absent: false })}>The customer is here after all<//></div>`
-      : !s.signing ? html`<section class="handover">
-          <span class="t-label">Hand the phone to the customer</span>
-          <h1 class="t-display">How did we go?</h1>
-          <p>${job.client_name ? `Hi ${firstName(job.client_name)}. ` : ''}Your ${THING[vertical] || 'job'} is finished. Tap a star to tell us.</p>
+        ${!nextPrompt && photoCount < MAX_PHOTOS ? html`<button type="button" class="rp-shot empty" onClick=${() => addPhotos({})}><${Icon} name="plus" size=${24} /><span>Another photo</span></button>` : null}
+      </div></div>`;
+    foot = html`<p class="rp-footnote">${photoCount >= MIN_PHOTOS ? `${photoCount} photos taken` : photoCount ? `${photoCount} of ${MIN_PHOTOS} photos taken` : 'Tap a square, or use the button'}</p>
+      ${photoCount >= MIN_PHOTOS ? more('Continue', next) : more(`Take: ${nextPrompt || 'another photo'}`, () => addPhotos({ label: nextPrompt }))}
+      <${Button} kind="quiet" block onClick=${() => addPhotos({ library: true })}>Choose photos already on this phone<//>`;
+  } else if (step === 'neighbours') {
+    body = html`${top("The neighbour's okay", "A fence on a shared boundary needs the neighbour's okay on file. Add a photo or screenshot of it: a text, an email or a signed note.")}
+      <div class="rp-body">
+        ${s.waive ? null : html`<div class="block card">${s.nbrs.map((n, i) => html`<div class="rp-evid" key=${i}>
+          ${n.key && blobs[n.key] ? html`<${BlobImg} blob=${blobs[n.key]} alt="" class="rp-evid-pic" />` : html`<span class="rp-evid-pic"><${Icon} name="image" size=${22} /></span>`}
+          <span><b>${n.label}</b><span class="rp-sub">${n.key ? (s.sent[n.key] ? 'Sent' : 'Sign-off added') : 'Nothing added yet'}</span></span>
+          ${s.sent[n.key] ? html`<${Icon} name="check" size=${22} class="t-ok" />` : html`<${Button} kind="line" small onClick=${() => addEvidence(i)}>${n.key ? 'Change' : 'Add'}<//>`}
+        </div>`)}</div>`}
+        <div class="block stack" style="margin-top:12px">
+          <${Toggle} label="I have no sign-off to show" hint="Say why, and the office will sort it out." checked=${s.waive} onChange=${(v) => set({ waive: v })} />
+          ${s.waive ? html`<${Field} label="Why is there no sign-off?" hint="The office reads this before the job is paid.">
+            <textarea class="input" value=${s.waiveReason} placeholder="e.g. Neighbour agreed on site but would not sign. The owner has it in an email." onInput=${(e) => set({ waiveReason: e.currentTarget.value })} /><//>` : null}
+        </div>
+      </div>`;
+    foot = html`${nbrOk ? null : html`<p class="rp-footnote">${s.waive ? 'Say why there is no sign-off' : 'Add the sign-off, or tick that you have none'}</p>`}${more('Continue', next, { disabled: !nbrOk })}`;
+  } else if (step === 'customer') {
+    if (s.absent) {
+      body = html`${top('No customer sign-off', 'That is fine. The office is told the customer was not on site and follows up with them. Nothing is sent to the customer from here.')}
+        <div class="rp-body"><div class="block"><${Button} kind="line" block onClick=${() => set({ absent: false })}>The customer is here after all<//></div></div>`;
+      foot = more('Continue', next);
+    } else if (!s.signing) {
+      body = html`${top('How did we go?', `${job.client_name ? `Hi ${firstName(job.client_name)}. ` : ''}Your ${THING[vertical] || 'job'} is finished. Tap a star to tell us.`, 'Hand the phone to the customer')}
+        <div class="rp-body" key="rate"><div class="block card pad stack">
           <${Stars} big value=${s.rating} onChange=${(n) => set({ rating: n })} />
-        </section>
-        <div class="block" style="margin-top:20px">
-          <${Field} label="Anything you would like to tell us? (optional)"><textarea class="input" style="min-height:112px" value=${s.comment} placeholder="Good or bad, we read every one." onInput=${(e) => set({ comment: e.currentTarget.value })} /><//>
-        </div>`
-      : html`<${StepHead} kicker="For the customer" title=${s.rating >= 4 ? `Thank you${job.client_name ? ', ' + firstName(job.client_name) : ''}` : 'One last thing'}>Sign to say you have seen the finished work. Your name and signature go on the job file.<//>
-        <div class="block stack">
+          <${Field} label="Anything you would like to tell us? (optional)"><textarea class="input" value=${s.comment} placeholder="Good or bad, we read every one." onInput=${(e) => set({ comment: e.currentTarget.value })} /><//>
+        </div></div>`;
+      foot = html`${!s.rating ? html`<p class="rp-footnote">Tap a star</p>` : null}
+        ${more('Next: sign', () => { set({ signing: true }); toTop(); }, { disabled: !s.rating })}
+        <${Button} kind="quiet" block onClick=${() => set({ absent: true })}>The customer is not here<//>`;
+    } else {
+      body = html`${top(s.rating >= 4 ? `Thank you${job.client_name ? ', ' + firstName(job.client_name) : ''}` : 'One last thing', 'Sign to say you have seen the finished work. Your name and signature go on the job file.', 'For the customer')}
+        <div class="rp-body" key="sign"><div class="block card pad stack">
           <${Field} label="Your name"><input class="input" autocomplete="off" autocapitalize="words" value=${s.name} placeholder="Full name" onInput=${(e) => set({ name: e.currentTarget.value })} /><//>
-          ${job.client_name && s.name.trim() !== job.client_name ? html`<div class="picks" style="margin-top:-6px"><button type="button" class="pick" onClick=${() => { set({ name: job.client_name }); buzz(6); }}>${job.client_name}</button></div>` : null}
+          ${job.client_name && s.name.trim() !== job.client_name ? html`<div class="picks"><button type="button" class="pick" onClick=${() => { set({ name: job.client_name }); buzz(6); }}>${job.client_name}</button></div>` : null}
           <${Field} label="Your signature"><${SignaturePad} initial=${s.sig ? blobs[s.sig.key] : null} onChange=${onSign} /><//>
-        </div>`}
-      <div class="stepfoot">
-        ${s.absent ? html`<${Button} block onClick=${next}>Continue<//>`
-          : !s.signing ? html`${!s.rating ? html`<p class="footnote">Tap a star</p>` : null}
-            <${Button} block disabled=${!s.rating} onClick=${() => { set({ signing: true }); const page = document.querySelector('.page'); if (page) page.scrollTop = 0; }}>Next: sign<//>
-            <${Button} kind="quiet" block onClick=${() => set({ absent: true })}>The customer is not here<//>`
-          : html`${!customerOk ? html`<p class="footnote">${s.name.trim().length < 2 ? 'Add your name' : 'Sign in the box'}</p>` : null}
-            <${Button} block disabled=${!customerOk} onClick=${next}>Done, hand the phone back<//>`}
-      </div>
-    </div>` : null}
+        </div></div>`;
+      foot = html`${!customerOk ? html`<p class="rp-footnote">${s.name.trim().length < 2 ? 'Add your name' : 'Sign in the box'}</p>` : null}
+        ${more('Done, hand the phone back', next, { disabled: !customerOk })}`;
+    }
+  } else if (step === 'feedback') {
+    body = html`${top('How did this job go?', 'For the office only, so the next job runs better. The customer does not see it.')}
+      <div class="rp-body">
+        <div class="block card rp-rows" role="radiogroup" aria-label="How the job went">
+          ${OUTCOMES.map(([v, label, sub]) => html`<button type="button" class="check" role="radio" aria-checked=${String(s.outcome === v)} key=${v} onClick=${() => { buzz(6); set({ outcome: s.outcome === v ? null : v }); }}>
+            <span class="box"><${Icon} name="check" size=${18} stroke=${3} /></span><span><b>${label}</b><span class="sub">${sub}</span></span></button>`)}
+        </div>
+        <div class="block stack" style="margin-top:16px">
+          <${Field} label="What slowed you down? (optional)"><textarea class="input rp-short" value=${s.slowed} placeholder="e.g. Wrong materials, access, waiting on someone" onInput=${(e) => set({ slowed: e.currentTarget.value })} /><//>
+          <${Field} label="What should we do better next time? (optional)"><textarea class="input rp-short" value=${s.better} placeholder="e.g. The scope missed the retaining" onInput=${(e) => set({ better: e.currentTarget.value })} /><//>
+        </div>
+      </div>`;
+    foot = more(crewFeedbackText(s) ? 'Continue' : 'Skip this', next);
+  } else if (step === 'tidy') {
+    body = html`${top('Before you go', 'Tick each one once it is true.')}
+      <div class="rp-body"><div class="block card rp-rows">${ticks.map(([k, label, sub]) => html`<${CheckRow} key=${k} label=${label} sub=${sub} checked=${Boolean(s.ticks[k])} onChange=${(v) => set((c) => ({ ...c, ticks: { ...c.ticks, [k]: v } }))} />`)}</div></div>`;
+    foot = html`${tidyOk ? null : html`<p class="rp-footnote">Tick all ${ticks.length} to carry on</p>`}${more('Continue', next, { disabled: !tidyOk })}`;
+  } else {
+    const headline = run.error ? ['It stopped part-way', 'Nothing is lost. What did not send is still on this phone.']
+      : run.active ? ['Sending', 'Keep the app open until this finishes.']
+      : sending ? ['Not finished sending', 'Some of it has gone. Carry on to send the rest.']
+      : ['Ready to send', 'This marks the whole job finished, for everyone booked on it.'];
+    body = html`${top(headline[0], headline[1])}
+      <div class="rp-body">
+        <ul class="block card rp-send">
+          ${items.map((it) => { const state = s.sent[it.id] ? 'sent' : run.error && run.at === it.id ? 'failed' : run.active && run.at === it.id ? 'sending' : 'waiting';
+            return html`<li key=${it.id} class=${state}>
+              <span class="rp-box">${state === 'sent' ? html`<${Icon} name="check" size=${16} stroke=${3} />` : state === 'failed' ? html`<${Icon} name="close" size=${14} stroke=${3} />` : state === 'sending' ? html`<i class="spin" />` : null}</span>
+              <span class="rp-what">${it.label}</span>
+              <span class="rp-state">${state === 'sent' ? 'Sent' : state === 'failed' ? 'Not sent' : state === 'sending' ? 'Sending' : sending ? 'Waiting' : ''}</span>
+            </li>`; })}
+        </ul>
+        ${!sending ? html`<p class="block t-small" style="margin-top:12px">${s.absent ? 'The customer was not on site, so there is no sign-off. The office will follow up.' : `Signed by ${s.name.trim()}, ${s.rating} out of 5.`}${crewFeedbackText(s) ? ' Your notes on the job go to the office too.' : ''}</p>` : null}
+        ${run.error ? html`<div class="block note-banner bad" style="margin-top:12px"><span><span class="t-strong">${(items.find((i) => i.id === run.at) || {}).label || 'Sending'} did not go through.</span> ${plain(run.error)}</span></div>` : null}
+      </div>`;
+    foot = run.error ? html`${more('Try again', send)}<p class="rp-footnote">It carries on from where it stopped. Nothing is sent twice.</p>`
+      : run.active ? more('Sending', () => {}, { busy: true, disabled: true })
+      : sending ? more('Carry on sending', send)
+      : more('Finish the job', send);
+  }
 
-    ${step === 'feedback' ? html`<div class="rise">
-      <${StepHead} kicker=${place} title="How did this job go?">For the office only, so the next job runs better. The customer does not see it.<//>
-      <div class="block choices" role="radiogroup" aria-label="How the job went">
-        ${OUTCOMES.map(([v, label, sub]) => html`<button type="button" class="choice" role="radio" aria-checked=${String(s.outcome === v)} key=${v} onClick=${() => { buzz(6); set({ outcome: s.outcome === v ? null : v }); }}>
-          <span class="ring" /><span><b>${label}</b><span>${sub}</span></span></button>`)}
-      </div>
-      <div class="block stack" style="margin-top:18px">
-        <${Field} label="What slowed you down? (optional)"><textarea class="input short" value=${s.slowed} placeholder="e.g. Wrong materials, access, waiting on someone" onInput=${(e) => set({ slowed: e.currentTarget.value })} /><//>
-        <${Field} label="What should we do better next time? (optional)"><textarea class="input short" value=${s.better} placeholder="e.g. The scope missed the retaining" onInput=${(e) => set({ better: e.currentTarget.value })} /><//>
-      </div>
-      <div class="stepfoot">${crewFeedbackText(s)
-        ? html`<${Button} block onClick=${next}>Continue<//>`
-        : html`<${Button} kind="line" block onClick=${next}>Skip this<//>`}</div>
-    </div>` : null}
-
-    ${step === 'tidy' ? html`<div class="rise">
-      <${StepHead} kicker=${place} title="Before you go">Tick each one once it is true.<//>
-      <div class="block">${ticks.map(([k, label, sub]) => html`<${CheckRow} key=${k} label=${label} sub=${sub} checked=${Boolean(s.ticks[k])} onChange=${(v) => set((c) => ({ ...c, ticks: { ...c.ticks, [k]: v } }))} />`)}</div>
-      <div class="stepfoot"><${Button} block disabled=${!tidyOk} onClick=${next}>Continue<//></div>
-    </div>` : null}
-
-    ${step === 'send' ? html`<div class="rise">
-      ${run.error ? html`<${StepHead} kicker=${place} title="It stopped part-way">Nothing is lost. What did not send is still on this phone.<//>`
-        : run.active ? html`<${StepHead} kicker=${place} title="Sending">Keep the app open until this finishes.<//>`
-        : sending ? html`<${StepHead} kicker=${place} title="Not finished sending">Some of it has gone. Carry on to send the rest.<//>`
-        : html`<${StepHead} kicker=${place} title="Ready to send">This marks the whole job finished, for everyone booked on it.<//>`}
-      <ul class="sendlist block">
-        ${items.map((it) => { const state = s.sent[it.id] ? 'sent' : run.error && run.at === it.id ? 'failed' : run.active && run.at === it.id ? 'sending' : 'waiting';
-          return html`<li key=${it.id} class=${state}>
-            <span class="dot">${state === 'sent' ? html`<${Icon} name="check" size=${15} stroke=${3} />` : state === 'failed' ? html`<${Icon} name="close" size=${14} stroke=${3} />` : state === 'sending' ? html`<i class="spin" />` : null}</span>
-            <span class="what">${it.label}</span>
-            <span class="t-small">${state === 'sent' ? 'Sent' : state === 'failed' ? 'Not sent' : state === 'sending' ? 'Sending' : sending ? 'Waiting' : ''}</span>
-          </li>`; })}
-      </ul>
-      ${!sending ? html`<p class="block t-small" style="margin-top:14px">${s.absent ? 'The customer was not on site, so there is no sign-off. The office will follow up.' : `Signed by ${s.name.trim()}, ${s.rating} out of 5.`}${crewFeedbackText(s) ? ' Your notes on the job go to the office too.' : ''}</p>` : null}
-      ${run.error ? html`<div class="block note-banner bad" style="margin-top:16px"><${Icon} name="alert" size=${18} /><span><span class="t-strong">${(items.find((i) => i.id === run.at) || {}).label || 'Sending'} did not go through.</span> ${plain(run.error)}</span></div>` : null}
-      <div class="stepfoot">
-        ${run.error ? html`<${Button} block icon="refresh" onClick=${send}>Try again<//><p class="footnote">It carries on from where it stopped. Nothing is sent twice.</p>`
-          : run.active ? html`<${Button} block busy disabled>Sending<//>`
-          : sending ? html`<${Button} block onClick=${send}>Carry on sending<//>`
-          : html`<${Slide} label="Slide to finish the job" icon="check" onConfirm=${send} />`}
-      </div>
-    </div>` : null}
-  <//>`;
+  return html`<${Page} flush title="Sign-off" back=${index > 0 && steps[index - 1] !== 'clock' ? 'Back' : 'Job'} onBack=${prev} foot=${foot}>${body}<//>`;
 }
 
 function Shot({ photo, blob, sent, onOpen }) {
-  return html`<button type="button" class=${cx('shot', sent && 'sent')} disabled=${sent} onClick=${onOpen}>
+  return html`<button type="button" class=${cx('rp-shot', sent && 'sent')} disabled=${sent} onClick=${onOpen}>
     ${blob ? html`<${BlobImg} blob=${blob} alt=${photo.label} />` : null}
-    <span class="cap">${photo.label}</span>
-    <span class="tick"><${Icon} name="check" size=${14} stroke=${3} /></span>
+    <span class="rp-cap">${photo.label}</span>
+    <span class="rp-tick"><${Icon} name="check" size=${14} stroke=${3} /></span>
   </button>`;
 }
 
-function ClockStep({ clock, place, onDone }) {
+function ClockStep({ clock }) {
   const t = useElapsed(clock && clock.since, clock ? clock.breakMin : 0);
-  return html`<div class="rise">
-    <${StepHead} kicker=${place} title="Clock off first">You are still on the clock for this job. Clock off so your hours are right, then finish it.<//>
-    <div class="block hoursout" style="margin-top:4px"><span class="t-label" style="color:var(--hi);display:flex;gap:8px;align-items:center"><i class="pulse" />On the clock</span><b>${t.h}:${t.m}</b></div>
-    <div class="stepfoot"><${Button} block icon="clock" onClick=${() => openClockOff({ onDone })}>Clock off<//></div>
-  </div>`;
+  return html`<div class="block rp-out"><span class="t-cap">On site, on the clock</span><b>${t.h}:${t.m}</b></div>`;
 }
 
-function Done({ result, job, user, onLeave }) {
+function Done({ result, job, vertical, user, onLeave }) {
   const queue = result.queue || {};
   const wos = (Array.isArray(queue.work_orders) ? queue.work_orders : []).filter((w) => w && w.priced !== false);
   const thisWeek = mondayOf(todayISO());
-  let line = null; let week = thisWeek; let cta = "See this week's invoice";
+  let line = null; let week = thisWeek; let cta = "Open this week's timesheet";
   if (queue.lane === 'weekly_work_order' && wos.length) {
     week = wos[0].week_end ? addDays(String(wos[0].week_end).slice(0, 10), -6) : thisWeek;
     line = wos.length === 1 ? `Work order ${wos[0].wo_number || ''} is finished and ready for your invoice.`.replace('  ', ' ') : `${wos.length} work orders are finished and ready for your invoice.`;
   } else if (queue.lane === 'hours' || queue.lane === 'weekly_work_order') {
-    if (queue.hours_logged != null && Number(queue.hours_logged) > 0) line = `Your hours are on this week's invoice. ${fmtHours(Number(queue.hours_logged))} saved for this job.`;
-    else { line = 'No hours are saved for this job yet. Add your times on this week\'s invoice.'; cta = 'Add my times'; }
+    if (queue.hours_logged != null && Number(queue.hours_logged) > 0) line = `Your hours are on this week's timesheet. ${fmtHours(Number(queue.hours_logged))} saved for this job.`;
+    else { line = 'No hours are saved for this job yet. Add your times on this week\'s timesheet.'; cta = 'Add my times'; }
   }
   const n = Number(result.photos) || 0;
   const photos = n ? `${n} ${n === 1 ? 'photo' : 'photos'}` : 'your photos';
   const sentLine = result.signed ? `Sent to the office with ${photos} and the customer's signature.` : `Sent to the office with ${photos}.`;
-  return html`<main class="page enter-push page-pad" style="display:grid;align-content:start;gap:20px;padding-top:calc(var(--safe-t) + 44px)">
-    <div class="done-mark"><${Icon} name="check" size=${44} stroke=${3} /></div>
-    <div><h1 class="t-display">Job finished</h1>
-      <p style="margin-top:10px;color:var(--ink-2)">${result.already ? `${jobTitle(job)} was already marked finished. Your photos are on it.` : `Good work, ${firstName(user.name)}. ${jobTitle(job)} is done.`}</p></div>
-    <section class="inset nextlist">
-      <span class="t-label">The sign-off</span>
-      <p><${Icon} name="image" size=${18} /><span>${sentLine}</span></p>
-      ${result.absent ? html`<p><${Icon} name="phone" size=${18} /><span>Customer not on site. The office will follow up with them.</span></p>`
-        : result.signer ? html`<p><${Icon} name="pen" size=${18} /><span>Signed by ${result.signer}${result.rating ? `, ${result.rating} out of 5` : ''}.${result.rating >= 4 ? ' A happy customer.' : ''}</span></p>` : null}
-      ${result.neighbour ? html`<p><${Icon} name="users" size=${18} /><span>${result.neighbour === 'waived' ? 'No neighbour sign-off. The office has your reason.' : 'The neighbour\'s okay is on file.'}</span></p>` : null}
-      ${result.feedback ? html`<p><${Icon} name="note" size=${18} /><span>Your notes on how it went are with the office. Thanks for telling us.</span></p>` : null}
-      ${line ? html`<p><${Icon} name="pay" size=${18} /><span>${line}</span></p>` : null}
-    </section>
-    <div class="stack tight">
-      ${line ? html`<${Button} block onClick=${() => onLeave('/pay/week/' + week)}>${cta}<//>` : null}
-      <${Button} kind=${line ? 'quiet' : 'primary'} block onClick=${() => onLeave('/today')}>Back to today<//>
+  return html`<${Page} title="Sign-off" back="Today" onBack=${() => onLeave('/today')}
+      foot=${html`${line ? html`<${Button} block class="big" onClick=${() => onLeave('/pay/week/' + week)}>${cta}<//>` : null}
+        <${Button} kind=${line ? 'quiet' : 'primary'} block class=${line ? '' : 'big'} onClick=${() => onLeave('/today')}>Back to Today<//>`}>
+    <div class="rp-done">
+      <div class="rp-donemark"><${Icon} name="check" size=${28} stroke=${3} /></div>
+      <${JobLine} job=${job} vertical=${vertical} />
+      <h2 class="t-head">Job finished</h2>
+      <p>${result.already ? `${jobTitle(job)} was already marked finished. Your photos are on it.` : `Good work, ${firstName(user.name)}. ${jobTitle(job)} is done.`}</p>
     </div>
-  </main>`;
+    <${Section} label="The sign-off">
+      <div class="block card rp-lines">
+        <p>${sentLine}</p>
+        ${result.absent ? html`<p>Customer not on site. The office will follow up with them.</p>`
+          : result.signer ? html`<p>Signed by ${result.signer}${result.rating ? `, ${result.rating} out of 5` : ''}.${result.rating >= 4 ? ' A happy customer.' : ''}</p>` : null}
+        ${result.neighbour ? html`<p>${result.neighbour === 'waived' ? 'No neighbour sign-off. The office has your reason.' : 'The neighbour\'s okay is on file.'}</p>` : null}
+        ${result.feedback ? html`<p>Your notes on how it went are with the office. Thanks for telling us.</p>` : null}
+        ${line ? html`<p>${line}</p>` : null}
+      </div>
+    <//>
+  <//>`;
 }
 
 const THING = { fencing: 'fence', patio: 'patio', decking: 'deck', repair: 'repair' };

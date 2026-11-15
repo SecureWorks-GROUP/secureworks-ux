@@ -1,46 +1,85 @@
-// Job board for managers. Make safe comes from the server's own board, with the
-// columns exactly as it sends them. Every other job type a manager looks after
-// is built from everyone's bookings: waiting for a crew first, then the week.
-import { html, cx, useMemo, useState } from '../lib/h.js';
+// Job board for managers: the Jobs tab with Board chosen. Stage tiles with
+// counts across the top, then the chosen stage's jobs as rows, each with
+// Allocate where this manager may book its crew.
+// Make safe comes from the server's own board, with the stages exactly as it
+// sends them. Every other job type a manager looks after is built from
+// everyone's bookings: waiting for a crew first, then the chosen week.
+import { html, useEffect, useMemo, useState } from '../lib/h.js';
 import { api, ApiError } from '../lib/api.js';
-import { useQuery, useStore } from '../lib/store.js';
+import { useQuery, useStore, local } from '../lib/store.js';
 import { rememberJobStub } from '../lib/data.js';
 import { manages } from '../lib/auth.js';
 import { go } from '../lib/router.js';
-import { todayISO, addDays, mondayOf, fmtDow, fmtTime, fmtWeek, fmtRelDay, firstName, tsToDate } from '../lib/dates.js';
+import { todayISO, addDays, mondayOf, fmtTime, fmtWeek, fmtRelDay, firstName, tsToDate } from '../lib/dates.js';
 import { jobTitle, jobAddress, VERTICAL_LABEL } from '../lib/model.js';
 import { useTeam, boardsFor } from '../lib/roster.js';
-import { Icon } from '../ui/icons.js';
-import { Page, Tag, Chip, Button, IconButton, Seg, Avatars, Skel, Empty, LoadError, toast, buzz } from '../ui/kit.js';
+import { Page, JobLine, Badge, Button, IconButton, Seg, Skel, Empty, LoadError, toast, buzz } from '../ui/kit.js';
+import { JobSearch, ListBoardSwitch, RowsSkel, foldText as fold, daysShort } from './jobs.js';
 
 const PAGE = 8;
 const book = (job, vertical) => import('./allocate.js').then((m) => m.openAllocate(job, vertical)).catch(() => toast('Could not open that. Check your signal.', { kind: 'bad' }));
 const openJob = (job) => { rememberJobStub(job); go('/job/' + job.id); };
-const fold = (s) => String(s || '').toLowerCase().replace(/[\s-]+/g, '');
+const names = (people) => (people.length === 1 ? people[0] : people.length === 2 ? people.map(firstName).join(' and ') : `${firstName(people[0])} and ${people.length - 1} more`);
 
 export function Board({ vertical }) {
   const user = useStore((s) => s.user);
   const boards = boardsFor(user);
   const [q, setQ] = useState('');
   const current = boards.includes(vertical) ? vertical : boards[0];
+  useEffect(() => { if (current) local.set('jobs:board', current); }, [current]);
 
   if (!boards.length) {
-    return html`<${Page} title="Job board"><${Empty} title="This is for managers" action=${html`<${Button} kind="line" small icon="jobs" onClick=${() => go('/jobs', { tab: true })}>Back to jobs<//>`}>
-      The job board is where managers book crew onto jobs. You can find any job from Jobs.
+    return html`<${Page} title="Board" back="Jobs" onBack=${() => go('/jobs', { replace: true })}><${Empty} title="This is for managers" action=${html`<${Button} kind="line" small onClick=${() => go('/jobs', { replace: true })}>Back to Jobs<//>`}>
+      The board is where managers book crew onto jobs. You can find any job from Jobs.
     <//><//>`;
   }
-  return html`<${Page} title="Job board">
-    <header class="page-pad" style="padding-top:2px">${boards.length === 1 ? html`<span class="t-label">${VERTICAL_LABEL[current] || 'Jobs'}</span>` : null}<h1 class="t-display" style=${boards.length === 1 ? 'margin-top:4px' : ''}>Job board</h1></header>
-    <div class="page-pad stack tight" style="margin-top:14px">
-      ${boards.length > 1 ? html`<${Seg} value=${current} options=${boards.map((v) => [v, VERTICAL_LABEL[v] || 'Jobs'])} onChange=${(v) => go('/board/' + v, { replace: true })} />` : null}
-      <div class="search">
-        <${Icon} name="jobs" size=${20} />
-        <input class="input" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck=${false} placeholder="Suburb, name or job number" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} aria-label="Filter the board" />
-        ${q ? html`<span class="clear"><${IconButton} name="close" label="Clear" size=${18} onClick=${() => setQ('')} /></span>` : null}
-      </div>
+  return html`<${Page} root flush title="Jobs" right=${html`<span>Manager view</span>`}>
+    <div class="jb-top">
+      <${JobSearch} value=${q} onInput=${setQ} label="Search the board" />
+      <${ListBoardSwitch} user=${user} value="board" />
+      ${boards.length > 1 ? html`<${Seg} value=${current} options=${boards.map((v) => [v, VERTICAL_LABEL[v] || 'Jobs'])} onChange=${(v) => go('/jobs/board/' + v, { replace: true })} />` : null}
     </div>
     ${current === 'makesafe' ? html`<${MakesafeBoard} key="makesafe" q=${q} />` : html`<${WeekBoard} key=${current} vertical=${current} user=${user} q=${q} />`}
   <//>`;
+}
+
+// ---------------------------------------------------------------- shared ----
+/** The tiles: one a stage, its count on top. The chosen one is slate. */
+function Stages({ stages, value, onChange }) {
+  return html`<div class="jb-stages" role="group" aria-label="Stage">
+    ${stages.map((s) => html`<button type="button" class="jb-stage" key=${s.key} aria-pressed=${String(s.key === value)} aria-label=${`${s.name}, ${s.count}`} onClick=${() => { if (s.key !== value) { buzz(6); onChange(s.key); } }}>
+      <b>${s.count}</b><span>${s.name}</span></button>`)}
+  </div>`;
+}
+/** One job on the board. Tapping the words opens the job; Allocate books its crew. */
+function BoardRow({ job, vertical, kind, detail, sub, badge, warn, onAllocate }) {
+  return html`<div class="jb-brow jb-row">
+    <button type="button" class="jb-open" onClick=${() => openJob(job)}>
+      <${JobLine} job=${job} vertical=${vertical}>${kind || null}<//>
+      <span class="jb-line1">${jobAddress(job) || jobTitle(job)}</span>
+      <span class="jb-line2">${detail}</span>
+      ${sub ? html`<span class="jb-line2">${sub}</span>` : null}
+      ${warn ? html`<span class="jb-warn">${warn}</span>` : null}
+    </button>
+    <span class="jb-side">
+      ${badge || null}
+      ${onAllocate ? html`<${Button} kind="line" small onClick=${onAllocate}>Allocate<//>` : null}
+    </span>
+  </div>`;
+}
+function StageList({ rows, render, empty }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, PAGE);
+  if (!rows.length) return html`<div class="jb-blist"><p class="jb-none">${empty}</p></div>`;
+  return html`<div class="jb-blist">${shown.map(render)}</div>
+    ${rows.length > PAGE ? html`<div class="jb-foot"><${Button} kind="line" small onClick=${() => setAll(!all)}>${all ? 'Show fewer' : `Show ${rows.length - PAGE} more`}<//></div>` : null}`;
+}
+function BoardSkeleton() {
+  return html`<div class="jb-stages" aria-hidden="true">${[0, 1, 2, 3].map(() => html`<${Skel} h=${60} />`)}</div><${RowsSkel} n=${4} />`;
+}
+function BoardFoot({ words, refreshing, onRefresh }) {
+  return html`<div class="jb-foot"><span>${words}</span>
+    <${Button} kind="line" small busy=${refreshing} onClick=${() => { buzz(6); onRefresh(); }}>Refresh<//></div>`;
 }
 
 // ------------------------------------------------------------ make safe ----
@@ -50,13 +89,13 @@ function suburbOf(address) {
   const last = (parts[parts.length - 1] || '').replace(/\b(WA|Western Australia|Australia)\b/gi, '').replace(/\b\d{4}\b/g, '').trim();
   return last || (parts.length > 1 ? parts[parts.length - 2] : '') || parts[0] || '';
 }
-/** Check the answer is the board we know, then keep only what a card shows. */
+/** Check the answer is the board we know, then keep only what a row shows. */
 function readBoard(res) {
   const wrong = () => new ApiError('The board came back in a shape this app does not know. Try again, and tell the office if it keeps happening.', { status: 0 });
   if (!res || res.projection !== 'trade' || !/^makesafe-board\.v1(\.|$)/.test(String(res.contract_version || ''))) throw wrong();
   if (!res.parity || res.parity.ok !== true || !res.columns || typeof res.columns !== 'object') throw wrong();
-  const names = [...KNOWN.filter((k) => k in res.columns), ...Object.keys(res.columns).filter((k) => !KNOWN.includes(k))];
-  const columns = names.map((name) => {
+  const colNames = [...KNOWN.filter((k) => k in res.columns), ...Object.keys(res.columns).filter((k) => !KNOWN.includes(k))];
+  const columns = colNames.map((name) => {
     if (!Array.isArray(res.columns[name])) throw wrong();
     return { name, cards: res.columns[name].filter((r) => r && r.id).map((r) => {
       const c = r.contact || {}; const b = r.builder || {}; const rep = r.report || {}; const age = r.age || {}; const lin = r.lineage || {};
@@ -78,6 +117,7 @@ function readBoard(res) {
 
 function MakesafeBoard({ q }) {
   const board = useQuery('board:makesafe', () => api('makesafe_board', { projection: 'trade' }, null, { keepSession: true }).then(readBoard), { ttl: 90000 });
+  const [stage, setStage] = useState('');
   const term = fold(q);
   const columns = useMemo(() => {
     if (!board.data) return [];
@@ -95,16 +135,15 @@ function MakesafeBoard({ q }) {
   const total = board.data.columns.reduce((n, c) => n + c.cards.length, 0);
   const found = columns.reduce((n, c) => n + c.cards.length, 0);
   if (!total) return html`<${Empty} title="No make safe jobs yet">${seesAll ? 'New make safes show here as soon as they come in.' : 'Make safes you are booked on show here.'}<//>`;
+  const cur = columns.find((c) => c.name === stage) || columns.find((c) => c.cards.length) || columns[0];
 
-  return html`<div style="margin-top:14px">
-    ${unmapped ? html`<div class="block note-banner" style="margin-bottom:12px"><${Icon} name="alert" size=${18} /><span>${unmapped === 1 ? 'One job came through without a clear stage.' : `${unmapped} jobs came through without a clear stage.`} Let the office know.</span></div>` : null}
-    ${term && !found ? html`<${Empty} title="Nothing on the board matches">Nothing matches "${q.trim()}". Check the spelling, or look it up in Jobs.<//>` : html`<div class="board" role="list" aria-label="Make safe board">
-      ${columns.map((col) => html`<${Column} key=${col.name} name=${col.name} hot=${col.name === 'New'} count=${col.cards.length} cards=${col.cards} empty=${term ? 'No match here' : 'Nothing here'}
-        render=${(k) => html`<${MakesafeCard} key=${k.id} card=${k} canBook=${canBook && (k.column === 'New' || k.column === 'Allocated')} />`} />`)}
-    </div>`}
-    <p class="t-small t-mute block boardfoot">${canBook ? 'Swipe sideways for the other columns. The stage of each job is set by the office system.' : 'You can look at these jobs. The office books the crew.'}
-      <button type="button" onClick=${() => { buzz(6); board.refetch(); }}>${board.refreshing ? 'Checking' : 'Refresh'}</button></p>
-  </div>`;
+  return html`
+    ${unmapped ? html`<div class="note-banner jr-banner" style="margin-top:12px"><span>${unmapped === 1 ? 'One job came through without a clear stage.' : `${unmapped} jobs came through without a clear stage.`} Let the office know.</span></div>` : null}
+    <${Stages} stages=${columns.map((c) => ({ key: c.name, name: c.name, count: c.cards.length }))} value=${cur.name} onChange=${setStage} />
+    ${term && !found ? html`<${Empty} title="Nothing on the board matches">Nothing matches "${q.trim()}". Check the spelling, or look it up in the list.<//>`
+      : html`<${StageList} key=${cur.name} rows=${cur.cards} empty=${term ? 'No match in this stage.' : 'Nothing in this stage.'}
+        render=${(k) => html`<${MakesafeRow} key=${k.id} card=${k} canBook=${canBook && (k.column === 'New' || k.column === 'Allocated')} />`} />`}
+    <${BoardFoot} words=${canBook ? 'The stage of each job is set by the office system.' : 'You can look at these jobs. The office books the crew.'} refreshing=${board.refreshing} onRefresh=${board.refetch} />`;
 }
 
 function ageWords(card) {
@@ -114,26 +153,18 @@ function ageWords(card) {
   const d = card.ageDays != null ? card.ageDays : Math.floor(card.ageHours / 24);
   return d === 1 ? '1 day ago' : `${d} days ago`;
 }
-function MakesafeCard({ card, canBook }) {
+function MakesafeRow({ card, canBook }) {
   const job = { id: card.id, type: 'makesafe', job_number: card.number, site_suburb: card.suburb, site_address: card.address.split(',')[0] || '', client_name: card.client };
   const first = card.crew[0];
-  const names = [...new Set(card.crew.map((p) => p.name))];
+  const people = [...new Set(card.crew.map((p) => p.name))];
   const isNew = card.column === 'New';
-  return html`<div class="card jt-makesafe" role="listitem">
-    <button type="button" class="cardmain" onClick=${() => openJob(job)}>
-      <span class="cardtop"><b>${card.suburb || card.client || card.number || 'Make safe'}</b>
-        ${isNew && card.ageHours != null ? html`<${Chip} kind=${card.ageHours >= 24 ? 'hi' : ''}>${ageWords(card)}<//>` : null}</span>
-      <span class="cardsub">${[card.address.split(',')[0], card.client].filter(Boolean).join(' · ')}</span>
-      <span class="cardmeta"><${Tag} vertical="makesafe">${card.family || 'Make safe'}<//>${card.number ? html`<span class="t-small t-mute t-num">${card.number}</span>` : null}</span>
-      ${card.builder || card.ref ? html`<span class="cardsub">${[card.builder, card.ref].filter(Boolean).join(' · ')}</span>` : null}
-      ${names.length ? html`<span class="cardwho"><${Avatars} people=${names.map((n) => ({ name: n }))} max=${3} />
-          <span>${names.length === 1 ? names[0] : names.length === 2 ? names.map(firstName).join(' and ') : `${firstName(names[0])} and ${names.length - 1} more`}${first && first.date ? html`<small>${fmtRelDay(first.date)}${first.start ? ' at ' + fmtTime(first.start) : ''}</small>` : null}</span></span>`
-        : card.column === 'New' || card.column === 'Allocated' ? html`<span class="cardwho none"><${Icon} name="users" size=${16} />Nobody booked yet</span>` : null}
-      ${card.reportAt ? html`<span><${Chip} kind="ok" icon="check">Report in ${fmtRelDay(tsToDate(card.reportAt)).toLowerCase()}${card.photos ? ` · ${card.photos} ${card.photos === 1 ? 'photo' : 'photos'}` : ''}<//></span>` : null}
-      ${card.warning ? html`<span class="cardsub t-hi">The office system could not place this job. It may be in the wrong column.</span>` : null}
-    </button>
-    ${canBook ? html`<${Button} kind=${isNew && !names.length ? 'primary' : 'soft'} small block icon="users" onClick=${() => book(job, 'makesafe')}>${names.length ? 'Change crew' : 'Book crew'}<//>` : null}
-  </div>`;
+  const open = card.column === 'New' || card.column === 'Allocated';
+  const who = people.length ? `${names(people)}${first && first.date ? `, ${fmtRelDay(first.date).toLowerCase()}${first.start ? ' at ' + fmtTime(first.start) : ''}` : ''}` : open ? 'Nobody booked yet' : '';
+  const report = card.reportAt ? `Report in ${fmtRelDay(tsToDate(card.reportAt)).toLowerCase()}${card.photos ? `, ${card.photos} ${card.photos === 1 ? 'photo' : 'photos'}` : ''}` : '';
+  return html`<${BoardRow} job=${job} vertical="makesafe" kind=${card.family || 'Make safe'} detail=${[report || who, card.client].filter(Boolean).join(' · ')} sub=${[card.builder, card.ref].filter(Boolean).join(' ')}
+    badge=${isNew && card.ageHours != null ? html`<${Badge} kind=${card.ageHours >= 24 ? 'warn' : ''}>${ageWords(card)}<//>` : null}
+    warn=${card.warning ? 'The office system could not place this job. It may be in the wrong stage.' : ''}
+    onAllocate=${canBook ? () => book(job, 'makesafe') : null} />`;
 }
 
 // ------------------------------------------- every other managed job type ----
@@ -150,12 +181,14 @@ function columnOf(status, jobStatus) {
   if (status === 'cancelled') return 'cancelled';
   return 'attention';
 }
-const COLS = [['ready', 'Ready'], ['scheduled', 'Scheduled'], ['onsite', 'On site'], ['done', 'Done'], ['attention', 'Attention'], ['cancelled', 'Cancelled']];
+const COLS = [['ready', 'To schedule'], ['scheduled', 'Scheduled'], ['onsite', 'In progress'], ['done', 'Complete'], ['attention', 'To check'], ['cancelled', 'Cancelled']];
+const EMPTY_WORDS = { ready: 'Every job has a crew.', scheduled: 'Nothing booked this week.', onsite: 'Nobody on site right now.', done: 'Nothing finished yet this week.', attention: 'Nothing to check.', cancelled: 'Nothing cancelled this week.' };
 
 function WeekBoard({ vertical, user, q }) {
   const team = useTeam(user);
   const today = todayISO();
   const [monday, setMonday] = useState(mondayOf(today));
+  const [stage, setStage] = useState('ready');
   const sunday = addDays(monday, 6);
   const canBook = manages(user, vertical);
   const label = (VERTICAL_LABEL[vertical] || 'job').toLowerCase();
@@ -170,7 +203,7 @@ function WeekBoard({ vertical, user, q }) {
     // No day yet: jobs waiting for a crew, and bookings with no date.
     for (const o of team.data.open.filter((x) => x.vertical === vertical)) out.ready.push(card(o.job, [], { waiting: true }));
     group(rows.filter((b) => !b.date)).forEach((list) => out.ready.push(card(list[0].job, list, { noDay: true })));
-    // This week: one card per job, placed by its most telling booking.
+    // The chosen week: one row per job, placed by its most telling booking.
     group(rows.filter((b) => b.date >= monday && b.date <= sunday)).forEach((list) => {
       const top = [...list].sort((a, b) => (RANK[b.status] || 1) - (RANK[a.status] || 1))[0];
       out[columnOf(top.status, top.job.status)].push(card(top.job, list, {}));
@@ -186,59 +219,29 @@ function WeekBoard({ vertical, user, q }) {
   const found = Object.values(cols).reduce((n, l) => n + l.length, 0);
   const shownCols = COLS.filter(([key]) => !['attention', 'cancelled'].includes(key) || cols[key].length);
   const thisWeek = monday === mondayOf(today);
+  const cur = shownCols.some(([key]) => key === stage) ? stage : 'ready';
+  const weekWord = thisWeek ? 'This week' : monday === addDays(mondayOf(today), 7) ? 'Next week' : monday === addDays(mondayOf(today), -7) ? 'Last week' : 'Week';
 
-  return html`<div style="margin-top:6px">
-    <div class="weeknav" style="margin-top:8px">
-      <span class="t-label">${thisWeek ? 'This week' : monday === addDays(mondayOf(today), 7) ? 'Next week' : monday === addDays(mondayOf(today), -7) ? 'Last week' : 'Week'} · ${fmtWeek(monday)}</span>
-      <span style="display:flex;align-items:center">
+  return html`
+    <${Stages} stages=${shownCols.map(([key, name]) => ({ key, name, count: cols[key].length }))} value=${cur} onChange=${setStage} />
+    <div class="jb-week">
+      <span class="t-cap">${weekWord}, ${fmtWeek(monday)}</span>
+      <span class="jb-weekbtns">
         ${!thisWeek ? html`<${Button} kind="quiet" small onClick=${() => setMonday(mondayOf(today))}>This week<//>` : null}
         <${IconButton} name="back" label="Earlier week" size=${20} onClick=${() => setMonday(addDays(monday, -7))} />
         <${IconButton} name="right" label="Later week" size=${20} onClick=${() => setMonday(addDays(monday, 7))} />
       </span>
     </div>
     ${!any ? html`<${Empty} title=${`No ${label} jobs to show`}>Jobs show here once they are ready for a crew or somebody is booked on them.<//>`
-      : term && !found ? html`<${Empty} title="Nothing on the board matches">Nothing matches "${q.trim()}" this week. Try another week, or look it up in Jobs.<//>`
-      : html`<div class="board" role="list" aria-label=${`${label} board`}>
-        ${shownCols.map(([key, name]) => html`<${Column} key=${key} name=${name} hot=${key === 'ready'} count=${cols[key].length} cards=${cols[key]}
-          empty=${key === 'ready' ? 'Every job has a crew' : key === 'scheduled' ? 'Nothing booked this week' : key === 'onsite' ? 'Nobody on site right now' : 'Nothing yet this week'}
-          render=${(k) => html`<${WeekCard} key=${k.id + key} card=${k} vertical=${vertical} today=${today} canBook=${canBook && (key === 'ready' || key === 'scheduled' || key === 'onsite')} hot=${key === 'ready' && k.waiting} />`} />`)}
-      </div>`}
-    <p class="t-small t-mute block boardfoot">Ready is every ${label} job still waiting for a crew or a day. The other columns are the week above.
-      <button type="button" onClick=${() => { buzz(6); team.refetch(); }}>${team.refreshing ? 'Checking' : 'Refresh'}</button></p>
-  </div>`;
+      : term && !found ? html`<${Empty} title="Nothing on the board matches">Nothing matches "${q.trim()}" this week. Try another week, or look it up in the list.<//>`
+      : html`<${StageList} key=${cur} rows=${cols[cur]} empty=${term ? 'No match in this stage.' : EMPTY_WORDS[cur]}
+        render=${(k) => html`<${WeekRow} key=${k.id + cur} card=${k} vertical=${vertical} today=${today} canBook=${canBook && (cur === 'ready' || cur === 'scheduled' || cur === 'onsite')} />`} />`}
+    <${BoardFoot} words=${`To schedule is every ${label} job still waiting for a crew or a day. The other stages are the week above.`} refreshing=${team.refreshing} onRefresh=${team.refetch} />`;
 }
 
-function WeekCard({ card, vertical, today, canBook, hot }) {
+function WeekRow({ card, vertical, today, canBook }) {
   const job = card.job;
-  const title = jobTitle(job);
-  const addr = jobAddress(job);
-  return html`<div class=${cx('card', 'jt-' + vertical)} role="listitem">
-    <button type="button" class="cardmain" onClick=${() => openJob(job)}>
-      <span class="cardtop"><b>${title}</b></span>
-      <span class="cardsub">${[addr !== title ? addr.replace(new RegExp(',\\s*' + title + '$'), '') : '', job.client_name].filter(Boolean).join(' · ')}</span>
-      <span class="cardmeta"><${Tag} vertical=${vertical} />${job.job_number ? html`<span class="t-small t-mute t-num">${job.job_number}</span>` : null}</span>
-      ${card.days.length ? html`<span class="carddays">${card.days.map((d) => html`<i class=${cx(d === today && 'today')}>${d === today ? 'Today' : fmtDow(d)}</i>`)}</span>` : card.noDay ? html`<span class="cardsub">Booked, but no day set</span>` : null}
-      ${card.people.length ? html`<span class="cardwho"><${Avatars} people=${card.people.map((n) => ({ name: n }))} max=${3} />
-          <span>${card.people.length === 1 ? card.people[0] : card.people.length === 2 ? card.people.map(firstName).join(' and ') : `${firstName(card.people[0])} and ${card.people.length - 1} more`}</span></span>`
-        : html`<span class="cardwho none"><${Icon} name="users" size=${16} />Nobody booked yet</span>`}
-    </button>
-    ${canBook ? html`<${Button} kind=${hot ? 'primary' : 'soft'} small block icon="users" onClick=${() => book(job, vertical)}>${card.people.length ? 'Change crew' : 'Book crew'}<//>` : null}
-  </div>`;
+  const days = card.days.length ? (card.days.includes(today) ? 'Today' + (card.days.length > 1 ? ', ' + daysShort(card.days.filter((d) => d !== today)) : '') : daysShort(card.days)) : card.noDay ? 'Booked, no day set' : '';
+  const who = card.people.length ? names(card.people) : 'Nobody booked yet';
+  return html`<${BoardRow} job=${job} vertical=${vertical} detail=${[days, who, job.client_name].filter(Boolean).join(' · ')} onAllocate=${canBook ? () => book(job, vertical) : null} />`;
 }
-
-// ---------------------------------------------------------------- shared ----
-function Column({ name, count, cards, render, empty, hot }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? cards : cards.slice(0, PAGE);
-  return html`<section class=${cx('col', hot && count > 0 && 'hot')} aria-label=${`${name}, ${count}`}>
-    <span class="t-label"><span>${name}</span><span class="t-num">${count}</span></span>
-    ${shown.map(render)}
-    ${!cards.length ? html`<p class="colnone">${empty}</p>` : null}
-    ${cards.length > PAGE ? html`<${Button} kind="quiet" small block onClick=${() => setAll(!all)}>${all ? 'Show fewer' : `Show ${cards.length - PAGE} more`}<//>` : null}
-  </section>`;
-}
-function BoardSkeleton() {
-  return html`<div class="board" style="margin-top:14px" aria-hidden="true">${[0, 1].map(() => html`<div class="col"><span class="t-label"><${Skel} w=${90} h=${12} /></span>
-    ${[0, 1, 2].map(() => html`<div class="card"><${Skel} w="60%" h=${20} /><${Skel} w="85%" h=${13} /><${Skel} w="45%" h=${13} /></div>`)}</div>`)}</div>`;
-}
-

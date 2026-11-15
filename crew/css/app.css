@@ -133,6 +133,9 @@ img, video { max-width: 100%; display: block; }
 .appbar.root .accent { width: 40px; height: 3px; background: var(--orange); display: block; }
 .appbar.root .bar-right { display: grid; justify-items: end; gap: 6px; padding: 0; min-height: 0; }
 .appbar.root .bar-right a, .appbar.root .bar-right button { color: var(--on-slate); text-decoration: underline; text-underline-offset: 3px; min-height: 28px; }
+/* the link keeps its small box in the bar; this widens what a finger can hit to 44 px */
+.appbar.root .bar-right a, .appbar.root .bar-right button { position: relative; }
+.appbar.root .bar-right a::after, .appbar.root .bar-right button::after { content: ''; position: absolute; inset: -8px -10px; }
 .mark { display: block; }
 .iconbtn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--r); color: var(--slate); flex: none; }
 .iconbtn:active { background: var(--press); }
@@ -295,7 +298,7 @@ textarea.input { min-height: 96px; resize: none; font-weight: 500; }
 .search .clear { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 /* one joined box of cells; the chosen cell is slate */
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
-.seg button { height: 44px; border: 1px solid var(--edge); background: var(--card); font-weight: 700; font-size: 15px; color: var(--slate); margin-left: -1px; }
+.seg button { height: 44px; border: 1px solid var(--edge); background: var(--card); font-weight: 700; font-size: 15px; color: var(--slate); margin-left: -1px; text-align: center; }
 .seg button:first-child { margin-left: 0; border-radius: var(--r) 0 0 var(--r); }
 .seg button:last-child { border-radius: 0 var(--r) var(--r) 0; }
 .seg button[aria-pressed='true'] { background: var(--slate); border-color: var(--slate); color: #FFFFFF; position: relative; z-index: 1; }
@@ -458,10 +461,10 @@ textarea.input { min-height: 96px; resize: none; font-weight: 500; }
 video.clip-video { width: 100%; background: black; aspect-ratio: 16 / 9; }
 .daygroup { margin-top: 16px; }
 .daygroup > .t-label { display: flex; justify-content: space-between; padding: 0 calc(var(--gut) + 4px); margin-bottom: 6px; }
-.line:not(.btn) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px var(--gut); width: 100%; text-align: left; position: relative; align-items: center; background: var(--card); }
-.line:not(.btn):active { background: var(--frost); }
-.line:not(.btn) + .line:not(.btn) { border-top: 1px solid var(--mist); }
-.line:not(.btn) b { font-weight: 700; font-size: 15px; line-height: 20px; display: block; }
+.line:not(.btn):not(.badge) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px var(--gut); width: 100%; text-align: left; position: relative; align-items: center; background: var(--card); }
+.line:not(.btn):not(.badge):active { background: var(--frost); }
+.line:not(.btn):not(.badge) + .line:not(.btn):not(.badge) { border-top: 1px solid var(--mist); }
+.line:not(.btn):not(.badge) b { font-weight: 700; font-size: 15px; line-height: 20px; display: block; }
 .line .how { color: var(--mid); font-size: 13px; line-height: 18px; display: block; }
 .line .amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; text-align: right; }
 .line .amt small { display: block; font-size: 12px; font-weight: 500; color: var(--mid); }

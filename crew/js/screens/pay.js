@@ -94,14 +94,14 @@ export function Pay() {
           <span class="main"><b>Timesheet</b><span class="sub t-num">${hours.loading && !sheet ? 'Loading' : hours.error && !sheet ? 'Could not load this week' : sheetWords}</span></span>
           <${StatusBadge} status=${sheetStatus} />
         </button>
-        <button type="button" class="pay-step" onClick=${() => (thisInv ? go('/pay/invoice/' + thisInv.id) : go('/pay/week/' + monday + '/invoice'))}>
+        <button type="button" class="pay-step" onClick=${() => (thisInv ? go('/pay/invoice/' + thisInv.id) : go('/pay/week/' + monday + '/invoice?from=pay'))}>
           <span class=${'pay-stepno ' + (thisInv ? 'done' : ready ? 'now' : '')}>2</span>
           <span class="main"><b>Invoice</b><span class="sub t-num">${thisInv ? thisInv.invoice_number || 'Sent' : 'Made from your timesheet'}</span></span>
           ${thisInv ? html`<${InvoiceBadge} inv=${thisInv} />` : html`<${StatusBadge} status=${thisBack ? 'sent_back' : 'not_sent'} />`}
         </button>
       </div>
       ${thisInv ? html`<${Button} kind="line" block onClick=${() => go('/pay/invoice/' + thisInv.id)}>View invoice<//>`
-        : html`<${Button} block class="pay-go" onClick=${() => go(ready && !thisBack ? '/pay/week/' + monday + '/invoice' : '/pay/week/' + monday)}>${thisBack ? 'Fix and send again' : ready ? 'Review invoice' : 'Open timesheet'}<//>`}
+        : html`<${Button} block class="pay-go" onClick=${() => go(ready && !thisBack ? '/pay/week/' + monday + '/invoice?from=pay' : '/pay/week/' + monday)}>${thisBack ? 'Fix and send again' : ready ? 'Review invoice' : 'Open timesheet'}<//>`}
     </div>
 
     ${lastOwing || lastBack ? html`<button type="button" class=${'block note-banner pay-notice ' + (lastBack ? 'bad' : '')} onClick=${() => go('/pay/week/' + lastMonday)}>

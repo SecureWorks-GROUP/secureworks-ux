@@ -4,7 +4,7 @@
 import { html, useEffect, useRef, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { local, invalidate } from '../lib/store.js';
-import { go, back } from '../lib/router.js';
+import { go, back, useRoute } from '../lib/router.js';
 import { fmtWeek, fmtDow, fmtDom, fmtDate, addDays, hoursBetween, tsToDate } from '../lib/dates.js';
 import { lineHours, lineAmount, lineProblem, buildSubmit, invoiceForWeek, helpersTotal, UNKNOWN_MODE_WORDS } from '../lib/invoice.js';
 import { bookMyself } from '../lib/data.js';
@@ -19,6 +19,7 @@ const EXPENSE_STATE = { pending_extraction: 'being read', pending: 'with the off
 
 export function Review({ monday: mondayParam }) {
   const w = useWeek(mondayParam);
+  const route = useRoute();
   const { user, monday, hours, data, live, sentBack, lines, groups, gstOn, deduction, est, ctx, problems, draft, setDraft } = w;
   const expenses = useExpenses();
   const [sending, setSending] = useState(false);
@@ -101,7 +102,7 @@ export function Review({ monday: mondayParam }) {
       tone=${problem ? 'todo' : ''} note=${problem || ''} amount=${problem || amt == null ? '' : cash(amt)} onClick=${() => w.edit(l)} />`;
   };
 
-  return html`<${Page} title="Invoice" back="Timesheet" onBack=${() => back('/pay/week/' + monday)} right=${html`<${StatusBadge} status=${sentBack ? 'sent_back' : 'draft'} />`} flush
+  return html`<${Page} title="Invoice" back="Timesheet" onBack=${() => (route.query && route.query.from === 'pay' ? go('/pay/week/' + monday, { replace: true }) : back('/pay/week/' + monday))} right=${html`<${StatusBadge} status=${sentBack ? 'sent_back' : 'draft'} />`} flush
     foot=${html`${w.foreign ? html`<p class="t-small">This week has lines from the Trade App that cannot be sent from here.</p>`
         : problems.length ? html`<p class="t-small">${problems.length === 1 ? `${problems[0].title}: ${lineProblem(problems[0], ctx).toLowerCase()}` : `${problems.length} lines still need something`}</p>` : null}
       <${Button} block class="big" busy=${sending} disabled=${!est.count || problems.length > 0 || w.foreign > 0} onClick=${send}>Send invoice<//>`}>

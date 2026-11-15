@@ -15,18 +15,6 @@ function watchErrors(page) {
   return errors;
 }
 
-/** Drag the slide-to-confirm knob across. */
-async function slide(page) {
-  const track = page.locator('.slide').first();
-  await track.waitFor();
-  const box = await track.boundingBox();
-  await page.mouse.move(box.x + 30, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
-  await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2, { steps: 6 });
-  await page.mouse.up();
-}
-
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true };
 
-module.exports = { crewUrl, watchErrors, slide, PHONE, NOW };
+module.exports = { crewUrl, watchErrors, PHONE, NOW };

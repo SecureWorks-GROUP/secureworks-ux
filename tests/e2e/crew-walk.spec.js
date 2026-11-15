@@ -1,21 +1,22 @@
-// SecureWorks Crew: every screen, as each kind of person, at iPhone sizes.
+// SecureWorks Crew: every screen, as each kind of person, at 360, 390 and 430 wide.
 // Each page must load with no script error and nothing wider than the screen.
 const { test, expect } = require('@playwright/test');
 const { crewUrl } = require('../helpers/crew');
 
-const IPHONE = { viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true };
-const SMALL = { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true };
-const COMMON = ['#/today', '#/jobs', '#/pay', '#/me', '#/me/details', '#/me/availability'];
+const IPHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
+const SMALL = { viewport: { width: 360, height: 640 }, hasTouch: true, isMobile: true };
+const LARGE = { viewport: { width: 430, height: 932 }, hasTouch: true, isMobile: true };
+const COMMON = ['#/today', '#/schedule', '#/schedule/month', '#/schedule/availability', '#/jobs', '#/pay', '#/profile', '#/profile/details'];
 const WORK = [
-  '#/job/j-joon', '#/job/j-joon?tab=photos', '#/job/j-joon?tab=notes', '#/job/j-joon?tab=files', '#/job/j-joon?tab=crew', '#/job/j-kinr',
-  '#/pay/week/2026-11-09', '#/pay/invoice/inv-last', '#/pay/money', '#/pay/receipt', '#/pay/receipts', '#/pay/group/j-dunc',
+  '#/job/j-joon', '#/job/j-joon?tab=scope', '#/job/j-joon?tab=photos', '#/job/j-joon?tab=notes', '#/job/j-joon?tab=files', '#/job/j-kinr',
+  '#/pay/week/2026-11-09', '#/pay/week/2026-11-09/invoice', '#/pay/invoices', '#/pay/invoice/inv-last', '#/pay/receipt', '#/pay/receipts', '#/pay/group/j-dunc',
   '#/job/j-joon/finish', '#/job/j-morl/report', '#/job/j-hill/report', '#/job/j-hill/roof', '#/job/j-wemb/service'
 ];
 const PEOPLE = {
   crew: [...COMMON, ...WORK],
-  lead: [...COMMON, ...WORK, '#/team', '#/board', '#/pay/work-orders', '#/pay/charges'],
-  office: [...COMMON, '#/team', '#/board', '#/job/j-hill', '#/job/j-joon'],
-  new: [...COMMON, '#/pay/week/2026-11-09', '#/pay/money', '#/pay/receipts', '#/job/j-joon']
+  lead: [...COMMON, ...WORK, '#/schedule/everyone', '#/jobs/board', '#/pay/work-orders', '#/pay/charges'],
+  office: [...COMMON, '#/schedule/everyone', '#/jobs/board', '#/job/j-hill', '#/job/j-joon'],
+  new: [...COMMON, '#/pay/week/2026-11-09', '#/pay/invoices', '#/pay/receipts', '#/job/j-joon']
 };
 
 async function walk(page, persona, routes) {
@@ -52,13 +53,16 @@ test.describe('standard iPhone', () => {
   }
 });
 
-test.describe('small iPhone', () => {
-  test.use(SMALL);
-  test('every screen fits for a crew member', async ({ page }) => {
-    test.setTimeout(150_000);
-    await walk(page, 'crew', PEOPLE.crew);
+for (const [name, size] of [['narrow phone, 360 wide', SMALL], ['large iPhone, 430 wide', LARGE]]) {
+  test.describe(name, () => {
+    test.use(size);
+    test('every screen fits for a crew member and a manager', async ({ page }) => {
+      test.setTimeout(240_000);
+      await walk(page, 'crew', PEOPLE.crew);
+      await walk(page, 'lead', ['#/schedule/everyone', '#/jobs/board', '#/pay/work-orders']);
+    });
   });
-});
+}
 
 test.describe('before the server switches are on', () => {
   test.use(IPHONE);
@@ -70,7 +74,8 @@ test.describe('before the server switches are on', () => {
     await expect(page.getByText('No job found')).toBeVisible();
     // Their own jobs still open fully.
     await page.getByLabel('Search every job').fill('joondalup');
-    await page.getByRole('button', { name: /Joondalup/ }).click();
+    await page.locator('.item', { hasText: 'Joondalup' }).first().click();
+    await page.getByRole('tab', { name: 'Scope' }).click();
     await expect(page.getByText('Strip old fence, rear and left')).toBeVisible();
     expect(errors).toEqual([]);
   });

@@ -100,6 +100,7 @@ img, video { max-width: 100%; display: block; }
 .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link { color: var(--ember); font-weight: 700; }
 .link:active { color: var(--ember-press); }
+.link.tap { min-height: 44px; display: inline-flex; align-items: center; }
 
 /* ---------- shell ---------- */
 #app { height: 100%; }

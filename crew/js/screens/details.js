@@ -7,7 +7,7 @@ import { decorate, refreshProfile } from '../lib/auth.js';
 import { back } from '../lib/router.js';
 import { todayISO, mondayOf, fmtMoney } from '../lib/dates.js';
 import { Icon } from '../ui/icons.js';
-import { Page, Button, Field, Toggle, toast, ask, buzz } from '../ui/kit.js';
+import { Page, Button, Field, Toggle, KV, toast, ask, buzz } from '../ui/kit.js';
 import { useHours } from './pay.js';
 
 const digits = (v) => String(v || '').replace(/\D/g, '');
@@ -98,17 +98,16 @@ export function Details() {
   };
   const leave = async () => {
     if (dirty && !(await ask({ title: 'Leave without saving?', body: 'The changes you made here have not been saved.', yes: 'Leave', no: 'Keep editing', danger: true }))) return;
-    back('/me');
+    back('/profile');
   };
 
   const h = hours.data;
   const rate = h && h.rate_resolved !== false && Number(h.rate) > 0 ? Number(h.rate) : 0;
 
-  return html`<${Page} title="Your details" onBack=${leave}>
-    <header class="page-pad" style="padding-top:2px"><h1 class="t-display">Your details</h1>
-      <p class="t-small" style="margin-top:8px;max-width:36ch">${missing.length ? `Still to add: ${missing.join(', ')}. Without them your pay can be held up.` : 'These go on your invoices. Keep them up to date.'}</p></header>
+  return html`<${Page} title="Your details" back="Profile" onBack=${leave} foot=${dirty ? html`<${Button} block class="big" busy=${busy} onClick=${save}>Save details<//>` : null}>
+    <p class="block t-small" style="max-width:40ch">${missing.length ? `Still to add: ${missing.join(', ')}. Without them your pay can be held up.` : 'These go on your invoices. Keep them up to date.'}</p>
 
-    <form class="form" style="margin-top:22px" onSubmit=${(e) => { e.preventDefault(); save(); }} novalidate>
+    <form class="form" style="margin-top:8px" onSubmit=${(e) => { e.preventDefault(); save(); }} novalidate>
       <${Group} title="You" why="So the office knows who you are and how to reach you." />
       <${Field} label="Full name" error=${show('fullName')}><input class="input" type="text" autocomplete="name" autocapitalize="words" value=${form.fullName} onInput=${(e) => set('fullName')(e.currentTarget.value)} /><//>
       <${Field} label="Mobile" error=${show('phone')}><input class="input" type="tel" inputmode="tel" autocomplete="tel" value=${form.phone} onInput=${(e) => set('phone')(e.currentTarget.value)} placeholder="04xx xxx xxx" /><//>
@@ -117,9 +116,9 @@ export function Details() {
       <${Group} title="Your business" why="So your invoices are valid and the tax is right." />
       <${Field} label="ABN" error=${show('abn')} hint=${abnOdd ? null : '11 numbers. Spaces are added for you.'}>
         <input class="input num" type="text" inputmode="numeric" autocomplete="off" value=${form.abn} onInput=${(e) => set('abn')(formatAbn(e.currentTarget.value))} placeholder="00 000 000 000" /><//>
-      ${abnOdd && !show('abn') ? html`<p class="fieldwarn"><${Icon} name="alert" size=${16} />Check this ABN. The numbers do not add up the way a real one does. You can still save it.</p>` : null}
+      ${abnOdd && !show('abn') ? html`<p class="note-banner"><${Icon} name="alert" size=${16} />Check this ABN. The numbers do not add up the way a real one does. You can still save it.</p>` : null}
       <${Field} label="Licence number (if you have one)"><input class="input" type="text" autocomplete="off" autocapitalize="characters" value=${form.licence} onInput=${(e) => set('licence')(e.currentTarget.value)} /><//>
-      <div class="inset"><${Toggle} label="Registered for GST" hint="Only switch this on if your ABN is registered for GST. Your invoices then add GST unless you turn it off on the invoice." checked=${form.gstRegistered} onChange=${set('gstRegistered')} /></div>
+      <div class="card" style="padding:0 14px"><${Toggle} label="Registered for GST" hint="Only tick this if your ABN is registered for GST. Your invoices then add GST unless you turn it off on the invoice." checked=${form.gstRegistered} onChange=${set('gstRegistered')} /></div>
 
       <${Group} title="Your bank" why="So the bookkeeper can pay you." />
       <div class="formgrid">
@@ -129,18 +128,14 @@ export function Details() {
       <${Field} label="Account name"><input class="input" type="text" autocomplete="off" autocapitalize="words" value=${form.accountName} onInput=${(e) => set('accountName')(e.currentTarget.value)} placeholder="The name on the account" /><//>
 
       <${Group} title="Your rate" why="Your rate is set with the office." />
-      <div class="inset ratebox">
-        ${user.perMetre ? html`<span class="t-head">Paid by work order</span><span class="t-small">Each job has an agreed amount. You see it on the job's work order.</span>`
-          : hours.loading ? html`<span class="t-small t-mute">Checking your rate</span>`
-          : rate ? html`<span class="money lg">${fmtMoney(rate)}<small> an hour</small></span><span class="t-small">To change it, talk to the office.</span>`
-          : hours.error && !h ? html`<span class="t-small">Could not check your rate just now. It shows on your weekly invoice.</span>`
-          : html`<span class="t-head">No rate set yet</span><span class="t-small">Ask the office to set your hourly rate before you send an invoice.</span>`}
+      <div class="card">
+        ${user.perMetre ? html`<${KV} k="Pay basis" v="Work order, agreed for each job" />`
+          : hours.loading ? html`<${KV} k="Hourly rate" v="Checking" />`
+          : rate ? html`<${KV} k="Hourly rate" v=${fmtMoney(rate, { cents: true })} />`
+          : hours.error && !h ? html`<${KV} k="Hourly rate" v="Shown on your weekly invoice" />`
+          : html`<${KV} k="Hourly rate" v="Not set yet, ask the office" />`}
       </div>
     </form>
-
-    ${dirty ? html`<div class="dock savedock">
-      <${Button} block busy=${busy} onClick=${save}>Save details<//>
-    </div>` : null}
   <//>`;
 }
 

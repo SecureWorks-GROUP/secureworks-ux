@@ -35,4 +35,3 @@
 .formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .logo { display: block; width: auto; }
-.need { min-height: 44px; }

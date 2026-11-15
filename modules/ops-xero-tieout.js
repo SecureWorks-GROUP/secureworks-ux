@@ -197,8 +197,8 @@
     return {
       status: status,
       sorted: status === 'read' || status === 'partial',
-      transactions: Core.num(sp.transactions) || 0,
-      withLines: Core.num(sp.with_line_detail) || 0,
+      transactions: Core.num(sp.transactions),
+      withLines: Core.num(sp.with_line_detail),
       amountUnknown: Core.num(sp.amount_unknown_count) || 0,
       total: Core.num(sp.total_ex),
       direct: Core.num(direct.ex),
@@ -228,22 +228,32 @@
 
   // One month of customer invoices against Job Profit.
   Core.revenueMonth = function (rv) {
-    rv = rv || {};
+    var known = !!rv && typeof rv === 'object';
+    rv = known ? rv : {};
     var over = rv.over_counted || {};
     var nc = rv.not_counted || {};
     return {
-      invoices: Core.num(rv.invoices) || 0,
+      known: known,
+      invoices: Core.num(rv.invoices),
       amountUnknown: Core.num(rv.amount_unknown_count) || 0,
       total: Core.num(rv.total_ex),
       onJob: Core.num(rv.on_job_ex),
       holding: Core.num(rv.holding_job_ex),
       notOnJob: Core.num(rv.not_on_job_ex),
-      notOnJobInvoices: Core.num(rv.not_on_job_invoices) || 0,
+      notOnJobInvoices: Core.num(rv.not_on_job_invoices),
       share: Core.num(rv.not_on_job_share),
       over: { invoices: Core.num(over.invoices) || 0, ex: Core.num(over.ex) },
       drafts: { invoices: Core.num(nc.draft_or_submitted_invoices) || 0, ex: Core.num(nc.draft_or_submitted_ex) },
       addsUp: bool3(rv.parts_add_up)
     };
+  };
+
+  // True only when the server's own figures say every invoice dollar sits on
+  // a real job: nothing off a job, nothing on the holding job, no invoice
+  // whose amount is unknown. Anything unknown is not a yes.
+  Core.revenueAllOnJob = function (rv) {
+    return !!rv && rv.known === true && rv.notOnJob === 0 && rv.notOnJobInvoices === 0
+      && rv.holding === 0 && rv.amountUnknown === 0;
   };
 
   // The second read as the page uses it. present: the server sent the key.
@@ -417,7 +427,7 @@
       money(six.revenueTotal) + ' invoiced in the last 6 months, ex GST. ' + money(six.revenueNotOnJob) + ' not on a job.');
     if (six.spendMonthsRead > 0) {
       h += card('', 'Card and bank spend', money(six.spendTotal),
-        money(six.spendDirect) + ' on direct cost accounts, on no job yet. ' + esc(six.spendMonthsRead) + ' of the last 6 months read.');
+        money(six.spendDirect) + ' on direct cost accounts, on no job yet. ' + esc(six.spendMonthsRead) + ' of the last 6 months read, in full or in part.');
     } else {
       h += card('', 'Card and bank spend', '<span class="jp-unk">Not read yet</span>', 'The lines are not copied from Xero yet, so this is unknown, not $0.');
     }
@@ -434,14 +444,15 @@
         (sp.transactions > 0 ? plural(sp.transactions, 'payment', 'payments') + (sp.total != null ? ', ' + esc(Core.money(sp.total)) : '') + ' in the bank copy. ' : '')
         + 'The lines are not read yet, so nothing is sorted and this is unknown, not $0.');
     } else {
-      h += li('Spent, ex GST', money(sp.total), plural(sp.transactions, 'payment', 'payments') + ' reconciled in Xero, each line sorted by the account it was coded to.');
+      h += li('Spent, ex GST', money(sp.total), (sp.transactions != null ? plural(sp.transactions, 'payment', 'payments') : 'Payments') + ' reconciled in Xero, '
+        + (sp.status === 'partial' ? 'sorted by account where the lines could be read. Some of this month is not sorted.' : 'each line sorted by the account it was coded to.'));
       h += li('Direct cost accounts', money(sp.direct), 'Materials, hire and outside labour paid straight from the bank or card. On no job yet: Job Profit does not read card spend.');
       h += li('Overhead accounts', money(sp.overhead), '');
       h += li('Not a cost', money(sp.notACost), 'Loan repayments, tax, wages payable, drawings and assets.');
       if (sp.income) h += li('Coded to an income account', money(sp.income), 'Money out against a sales account. Worth a look.');
       if (sp.unknownAccount || sp.unknownLines > 0) h += li('Account not in our copy of the chart', money(sp.unknownAccount), plural(sp.unknownLines, 'line', 'lines') + ' we cannot sort.');
       if (sp.paidAhead || sp.paidAheadLines > 0) h += li('Paid ahead to suppliers', money(sp.paidAhead), 'Prepayments and overpayments. The cost usually arrives again on a supplier bill, so it is not counted as a cost here.');
-      if (sp.noDetail) h += li('Lines not read yet', money(sp.noDetail), esc(sp.transactions - sp.withLines) + ' of ' + plural(sp.transactions, 'payment', 'payments') + '. Unknown account, not $0.');
+      if (sp.noDetail) h += li('Lines not read yet', money(sp.noDetail), (sp.transactions != null && sp.withLines != null ? esc(sp.transactions - sp.withLines) + ' of ' + plural(sp.transactions, 'payment', 'payments') + '. ' : '') + 'Unknown account, not $0.');
       if (sp.amountUnknown > 0) h += li('Payments with no amount in the copy', esc(sp.amountUnknown), 'Their dollars are unknown, not $0.');
       if (sp.unreadLines > 0) h += li('Lines with no amount we can read', esc(sp.unreadLines), 'Their dollars are in no part above. Unknown, not $0.');
       if (sp.differPayments > 0) h += li('Payments whose lines do not match their total', esc(sp.differPayments), 'Each is out by more than 5 cents' + (sp.differ != null ? ', ' + esc(Core.money(sp.differ)) + ' in all once they are netted' : '') + '.');
@@ -456,10 +467,13 @@
 
   function revenueBlockHtml(rv) {
     var h = '<div><h4>Customer invoices</h4><ul class="xt-list" data-xt-revenue>';
-    h += li('Invoiced, ex GST', money(rv.total), plural(rv.invoices, 'invoice', 'invoices') + ' approved or paid in Xero.');
+    if (!rv.known) {
+      return h + li('Customer invoices', '<span class="jp-unk">Not read</span>', 'The server sent no invoice figures for this month, so this is unknown, not $0.') + '</ul></div>';
+    }
+    h += li('Invoiced, ex GST', money(rv.total), (rv.invoices != null ? plural(rv.invoices, 'invoice', 'invoices') : 'Invoices') + ' approved or paid in Xero.');
     h += li('On a job', money(rv.onJob), 'What Job Profit counts as invoiced on a real job.');
     if (rv.holding) h += li('On the holding job', money(rv.holding), 'Linked to the holding job, so it is on no real job.');
-    h += li('Not on a job', money(rv.notOnJob), rv.notOnJobInvoices > 0 ? plural(rv.notOnJobInvoices, 'invoice', 'invoices') + ' with dollars Job Profit does not count on any job.' : 'Every invoice dollar is on a job.');
+    h += li('Not on a job', money(rv.notOnJob), rv.notOnJobInvoices > 0 ? plural(rv.notOnJobInvoices, 'invoice', 'invoices') + ' with dollars Job Profit does not count on any job.' : (Core.revenueAllOnJob(rv) ? 'Every invoice dollar is on a job.' : ''));
     if (rv.over.invoices > 0) h += li('Counted above the invoice', money(rv.over.ex), plural(rv.over.invoices, 'invoice', 'invoices') + ' where the job lines add to more than the invoice. Shown, never netted.');
     if (rv.drafts.invoices > 0) h += li('Draft or submitted invoices', money(rv.drafts.ex), plural(rv.drafts.invoices, 'invoice', 'invoices') + ' not yet approved in Xero, so not counted.');
     if (rv.amountUnknown > 0) h += li('Invoices with no amount in the copy', esc(rv.amountUnknown), 'Their dollars are unknown, not $0.');

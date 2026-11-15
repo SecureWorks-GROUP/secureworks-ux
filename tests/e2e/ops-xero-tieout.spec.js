@@ -175,7 +175,7 @@ test('with the second read, a month shows card and bank spend by account and cus
   await expect(head2).toContainText('93.15%');
   await expect(head2).toContainText('$12,400.00 invoiced in the last 6 months, ex GST. $850.00 not on a job.');
   await expect(head2).toContainText('$575.26');
-  await expect(head2).toContainText('$130.00 on direct cost accounts, on no job yet. 1 of the last 6 months read.');
+  await expect(head2).toContainText('$130.00 on direct cost accounts, on no job yet. 1 of the last 6 months read, in full or in part.');
   // The bills headline and rows are untouched by it.
   await expect(page.locator('[data-xt-headline]')).toContainText('$9,996.74');
   const cells = await page.locator('[data-xt-month="2034-03"] td').allInnerTexts();
@@ -192,6 +192,9 @@ test('with the second read, a month shows card and bank spend by account and cus
   ]);
   await expect(spend).toContainText('$575.26');
   await expect(spend).toContainText('7 payments reconciled in Xero');
+  // March is only partly sorted, so the page does not say every line is sorted.
+  await expect(spend).toContainText('sorted by account where the lines could be read. Some of this month is not sorted.');
+  await expect(spend).not.toContainText('each line sorted');
   await expect(spend).toContainText('$130.00');
   await expect(spend).toContainText('On no job yet: Job Profit does not read card spend.');
   await expect(spend).toContainText('$70.00');
@@ -277,6 +280,40 @@ test('money paid ahead, payments whose lines do not match and unread lines each 
   await expect(spend).toContainText('Each is out by more than 5 cents, $25.00 in all once they are netted.');
   await expect(spend).toContainText('Do not rely on this month.');
   expect(await page.evaluate(() => window.__xtPosts.length)).toBe(0);
+});
+
+test('"every invoice dollar is on a job" is said only when it is true, and a month with no invoice figures is unknown', async ({ page }) => {
+  const data = answerWithSpendRevenue();
+  const months = data.spend_revenue.answer.months;
+  const mar = months.find((m) => m.month === '2034-03');
+  const feb = months.find((m) => m.month === '2034-02');
+  const jan = months.find((m) => m.month === '2034-01');
+  // March: dollars on the holding job, none counted off a job. A fully read month says every line is sorted.
+  Object.assign(mar.revenue, { on_job_ex: 2100, holding_job_ex: 300, not_on_job_ex: 0, not_on_job_invoices: 0 });
+  Object.assign(mar.spend, { status: 'read' });
+  // February: an invoice whose amount the copy does not hold.
+  Object.assign(feb.revenue, { amount_unknown_count: 1 });
+  // January: the server sent no invoice figures at all.
+  delete jan.revenue;
+  await open(page, { data });
+  await page.locator('[data-xt-month="2034-03"]').click();
+  const marRev = page.locator('[data-xt-detail="2034-03"] [data-xt-revenue]');
+  await expect(marRev).toContainText('On the holding job');
+  await expect(marRev).toContainText('Not on a job');
+  await expect(marRev).not.toContainText('Every invoice dollar is on a job.');
+  await expect(page.locator('[data-xt-detail="2034-03"] [data-xt-spend]')).toContainText('each line sorted by the account it was coded to.');
+  await page.locator('[data-xt-month="2034-02"]').click();
+  const febRev = page.locator('[data-xt-detail="2034-02"] [data-xt-revenue]');
+  await expect(febRev).toContainText('Invoices with no amount in the copy');
+  await expect(febRev).not.toContainText('Every invoice dollar is on a job.');
+  await page.locator('[data-xt-month="2034-01"]').click();
+  const janRev = page.locator('[data-xt-detail="2034-01"] [data-xt-revenue]');
+  await expect(janRev.locator('li')).toHaveCount(1);
+  await expect(janRev).toContainText('Not read');
+  await expect(janRev).toContainText('The server sent no invoice figures for this month, so this is unknown, not $0.');
+  await expect(janRev).not.toContainText('0 invoices');
+  await expect(janRev).not.toContainText('$0.00');
+  await expect(janRev).not.toContainText('Every invoice dollar is on a job.');
 });
 
 test('with no month of card spend read, the six-month card says Not read yet', async ({ page }) => {

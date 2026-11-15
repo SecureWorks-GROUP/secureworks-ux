@@ -216,6 +216,27 @@ test('customer invoices carry the server figures as they came', () => {
   assert.equal(Core.revenueMonth({}).addsUp, null);
 });
 
+test('every invoice dollar is on a job only when the server figures say so', () => {
+  const all = { invoices: 3, total_ex: 900, on_job_ex: 900, holding_job_ex: 0, not_on_job_ex: 0, not_on_job_invoices: 0, amount_unknown_count: 0 };
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth(all)), true);
+  // Dollars on the holding job are on no real job, though the off-job count is 0.
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth({ ...all, on_job_ex: 600, holding_job_ex: 300 })), false);
+  // An invoice whose amount is unknown is not a yes.
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth({ ...all, amount_unknown_count: 1 })), false);
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth({ ...all, not_on_job_ex: 50, not_on_job_invoices: 1 })), false);
+  // Figures the server did not send are unknown, never a yes and never a count of 0.
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth({ ...all, holding_job_ex: null })), false);
+  assert.equal(Core.revenueAllOnJob(Core.revenueMonth({})), false);
+  const none = Core.revenueMonth(undefined);
+  assert.equal(none.known, false);
+  assert.equal(none.invoices, null);
+  assert.equal(none.notOnJobInvoices, null);
+  assert.equal(Core.revenueAllOnJob(none), false);
+  assert.equal(Core.revenueMonth({}).known, true);
+  assert.equal(Core.spendMonth({ status: 'read', total_ex: 10 }).transactions, null);
+  assert.equal(Core.spendMonth({ status: 'read', total_ex: 10 }).withLines, null);
+});
+
 test('the second six-month line is the server line, and spend with no month read is unknown', () => {
   const six = Core.spendRevenue(answerWithSpendRevenue()).six;
   assert.equal(six.revenueTotal, 12400);

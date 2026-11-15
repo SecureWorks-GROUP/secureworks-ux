@@ -25,7 +25,7 @@ no sign-in (`?demo=crew`, `?demo=lead`, `?demo=office`, `?demo=new`).
 The accepted Scope Engine design (scope-engine-v2,
 `project/history/design-accepted-20261110.md`): slate and orange, Plus Jakarta
 Sans, a warm canvas under white cards, square corners, 3 px on anything tapped.
-Light only. The approved screens are in `design/mockups-v3/`.
+Light only.
 
 - Text is 28, 18, 15, 13 or 12 px; a typed value is 16; a total is 22.
   Weights 500, 700, 800.
@@ -54,8 +54,11 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
     `invalidate(prefix)`, `local` (namespaced localStorage).
   - `auth.js` sign-in and the decorated user (`office`, `manager`, `managed`,
     `seesMoney`, `perMetre`, `details`, `label`).
-  - `dates.js` everything is Perth time. `model.js` turns server rows into
-    bookings and labels. `invoice.js` is the weekly invoice as plain data.
+  - `dates.js` everything is Perth time, and the one wording for a time
+    ("7:00 am") and for hours ("8.0 h"). `model.js` turns server rows into
+    bookings and labels. `invoice.js` is the weekly invoice as plain data: the
+    lines, how each job is billed (read from the server, never guessed) and the
+    converters to and from the server's saved weekly draft.
   - `outbox.js` writes that wait for signal (notes, problems, clock, photos).
     Money never queues.
   - `router.js` hash routes, `go(path)`, `back(fallback)`.
@@ -67,6 +70,16 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
 - `js/lib/roster.js` shared reads for the manager screens (everyone's
   bookings, people, days off), keeping only the fields those screens draw.
 - `js/screens/` one file per screen. `main.js` maps routes to screens.
+  - Today and Schedule: `today.js`, `clock.js` (clock on, clock off sheet, the
+    on-site bar), `bookings.js` (booking status, confirm, cannot make it),
+    `schedule.js` (week, month, Everyone), `booking.js`, `availability.js`,
+    `allocate.js`.
+  - Jobs: `jobs.js`, `job.js`, `board.js`, `finish.js` (sign-off), `report.js`,
+    `roof.js`, `service.js`.
+  - Pay: `pay.js`, `timesheet.js`, `review.js` (the invoice before sending),
+    `invoices.js`, `invoice.js` (a sent invoice), `receipt.js`, `group.js`,
+    `workorders.js`, `charges.js`.
+  - `profile.js`, `details.js`, `login.js`.
 - `js/demo/` the in-browser demo server. Each screen group adds its answers in
   its own `extra-*.js` through `registerDemo`.
 - `sw.js` offline shell, scoped to `/secureworks-ux/crew/` only.
@@ -81,6 +94,18 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
 - Prices never reach a trade who is not office: free text goes through
   `noPrices`, and no priced document is linked.
 - Notes are always sent `visibility: 'internal_only'`.
+- The app never guesses how a job is billed. It reads `invoice_mode` from
+  `my_hours` or `trade_invoice_job_modes`; a job with no known mode asks the
+  office and stays off the invoice. Commission is offered only where the
+  server says so. An agreed work order amount is shown, never typed.
+- The week's draft is the server's saved weekly draft
+  (`get_running_invoice_draft`, `save_running_invoice_draft`) in the shape the
+  Trade App writes, so either app can pick up the other's. The phone copy is
+  only a fallback for no signal.
+- Expenses are their own records and never part of the invoice total.
+- The owner can view the app as a trade, read only (`preview_trade_user_id`,
+  the same server feature the Trade App uses). Nothing is saved to the phone
+  or queued in that view.
 - This app has its own storage keys (`crew:` prefix) and its own outbox. It
   never reads or writes the old app's queues.
 - Do not put the word `trade` in a file name or path here: the old app's

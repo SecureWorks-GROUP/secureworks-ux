@@ -820,6 +820,19 @@ Keep the module free of long dashes and emojis. Guards: `npm run test:debt-works
 (in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
 This is the only debt screen: the old Clear Debt screens (Financials > Clear Debt) were removed in stage 6.
 
+## Tie to Xero (`modules/ops-xero-tieout.js`)
+
+Financials > Job profit has a third chip, Tie to Xero (`jpSetMode('tieout')`, host `#jpTieout`,
+search `// <xero-tieout>`). It reads ops-api `xero_tieout` once per open (months 6, 12 or 24) and
+writes nothing: by month, every supplier bill dollar in our copy of Xero as on a job, trade-app
+labour, overhead or not placed yet, with the reasons and whether the month adds up. Every figure
+is the server's (secureworks-backend `xero_tieout_monthly`); the page sorts no bill and adds no
+bucket. A part the server has not read (card spend, credit notes) reads "Not read yet", never
+$0.00, and a failed read or an answer without its months never draws an empty table. Rules live
+in the pure `XeroTieoutCore` between `// <xero-tieout-core>` sentinels. Same viewers as Job
+profit. Guards: `npm run test:xero-tieout` (in `test:e2e`, fails on a long dash or emoji) and
+`tests/e2e/ops-xero-tieout.spec.js`.
+
 ## Matching: the Context reconciliation list (`modules/ops-recon.js`)
 
 On by default since TP-11 (the tab, `data-recon-nav`, is headed Needs a person): after sign in

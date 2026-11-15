@@ -1379,6 +1379,33 @@ Gotchas:
   in the first place. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
   `tests/e2e/ops-schedule-lane-overlap.spec.js`.
 
+## SecureWorks Crew: the new trades' app (`crew/`)
+
+A from-scratch trades' app that runs beside `trade.html` (Marnin, 13 Nov 2026):
+same sign-in, same ops-api actions, so a trade can use either on the same day.
+`trade.html` stays the live app until the owner moves the crews over; do not
+retire, redirect or edit it from here. Conventions, file map, the look and the
+rules that must hold: `crew/README.md`; the decisions and how to reverse them:
+`crew/DECISIONS.md`. Five tabs (Today, Schedule, Jobs, Pay, Profile) in the
+accepted Scope Engine look, light only. No build step (plain ES modules,
+vendored Preact). It has its own storage keys (`crew:`), its own outbox and its
+own service worker scoped to `crew/`; it never reads or writes the old app's
+queues. Never put `trade` in a path or file name under `crew/`: `sw-trade.js`
+caches any path that contains it. Money follows the contract in
+secureworks-projects `job-profit/trade-app/contract.md`: the server owns every
+figure (anything computed in the app is labelled an estimate), an invoice is
+never sent twice, the app never guesses how a job is billed (`invoice_mode`
+from the server; unknown asks the office), expenses stay outside the invoice
+total, and the week's draft is the server's saved weekly draft in the shape
+`trade.html` writes, so either app picks up the other's. `?demo` runs it on
+made-up data with no network (`crew/js/demo/`), and that is what
+`tests/e2e/crew-*.spec.js` drive (every screen at 360, 390 and 430 wide).
+Three behaviours depend on ops-api switches that ship off (secureworks-backend
+`docs/trade-open-access-v1.md`): opening a job you are not on, booking yourself
+ahead, and typing your rate; with a switch off the app falls back in words,
+never with an error. `pr-check.yml` runs `tidy` on every changed `.html`, so
+keep only real pages under `crew/` (design canvases with custom elements fail it).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

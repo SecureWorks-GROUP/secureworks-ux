@@ -381,6 +381,8 @@ textarea.input { min-height: 96px; resize: none; font-weight: 500; }
 /* ---------- strips under the stage ---------- */
 .strip { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 12px; font-size: 12px; line-height: 16px; font-weight: 700; background: var(--frost); color: var(--slate); border-top: 1px solid var(--mist); }
 .strip.bad { background: var(--bad-bg); color: var(--bad-text); }
+.strip.preview { background: var(--warn-bg); color: var(--warn-text); justify-content: space-between; padding: 0 8px 0 16px; }
+.strip.preview button { min-height: 44px; padding: 0 8px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 
 /* ---------- tabs inside a record ---------- */
 .tabs { display: flex; gap: 0; padding: 0 8px; overflow-x: auto; scrollbar-width: none; background: var(--card); border-bottom: 1px solid var(--mist); }

@@ -6,7 +6,7 @@
 //   localStorage so the app opens with no signal.
 import { useEffect, useRef, useState } from './h.js';
 
-let state = { user: null, ready: false, online: typeof navigator === 'undefined' ? true : navigator.onLine, clock: null, outbox: 0, demo: false };
+let state = { user: null, ready: false, online: typeof navigator === 'undefined' ? true : navigator.onLine, clock: null, outbox: 0, demo: false, preview: null };
 const subs = new Set();
 
 export function getState() { return state; }
@@ -83,7 +83,7 @@ function run(key, e, persist) {
   const p = Promise.resolve().then(() => e.fetcher()).then((data) => {
     if (e.promise !== p) return;
     e.data = data; e.error = null; e.ts = Date.now(); e.promise = null;
-    if (e.persist || persist) local.set(uidKey(key), { ts: e.ts, data });
+    if ((e.persist || persist) && !state.preview) local.set(uidKey(key), { ts: e.ts, data });
     emit(e);
   }).catch((err) => {
     if (e.promise !== p) return;
@@ -110,7 +110,7 @@ export function useQuery(key, fetcher, { ttl = 45000, persist = false, enabled =
     if (!e) return undefined;
     const fn = () => tick((n) => n + 1);
     e.listeners.add(fn);
-    if (e.data === undefined && persist) {
+    if (e.data === undefined && persist && !state.preview) {
       const saved = local.get(uidKey(key));
       if (saved && saved.data !== undefined) { e.data = saved.data; e.ts = 0; fn(); }
     }

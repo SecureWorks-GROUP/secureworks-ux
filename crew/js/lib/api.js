@@ -15,6 +15,16 @@ let demoHandler = null;
 export function configureApi({ getToken, authLost }) { tokenSource = getToken; onAuthLost = authLost; }
 export function setDemoHandler(fn) { demoHandler = fn; }
 
+// Owner's read-only "view as a trade" (same server feature the Trade App uses,
+// secureworks-backend docs/trade-owner-preview.md). Every read carries the
+// trade's id; the server allows only these reads and refuses every change.
+let previewId = null;
+const PREVIEW_READS = new Set(['trade_preview_context', 'trade_calendar', 'my_jobs', 'search_all_jobs', 'trade_job_detail', 'my_work_orders', 'my_job_work_order',
+  'group_work_order_my_share', 'my_group_work_orders', 'my_hours', 'my_money', 'my_trade_invoices', 'get_trade_invoice', 'get_running_invoice_draft', 'my_invoices', 'crew_charges_on_my_jobs']);
+export function setPreview(id) { previewId = id || null; }
+export function previewing() { return previewId; }
+function readOnly() { return new ApiError('Read only. You are viewing as a trade, so nothing can be changed or sent.', { status: 403, code: 'preview_read_only' }); }
+
 export class ApiError extends Error {
   constructor(message, { status = 0, code = '', body = null, offline = false } = {}) {
     super(message);
@@ -73,6 +83,10 @@ async function send(base, action, params, body, token, signal) {
 
 async function call(base, action, params, body, opts = {}) {
   if (getState().demo && demoHandler) return demoHandler(base === GHL() ? 'ghl' : 'ops', action, params || {}, body || null);
+  if (previewId && action !== 'get_profile') {
+    if (base !== OPS() || !PREVIEW_READS.has(action)) throw readOnly();
+    params = { ...(params || {}), preview_trade_user_id: previewId };
+  }
   let token = await tokenSource();
   if (!token) throw new ApiError('Sign in required', { status: 401, code: 'auth_expired' });
   const attempt = async (tok) => {
@@ -101,6 +115,7 @@ export function ghl(action, params, body, opts) { return call(GHL(), action, par
 /** Fetch text (the price-free quote page) with the signed-in token. */
 export async function apiText(action, params) {
   if (getState().demo && demoHandler) return demoHandler('ops-text', action, params || {}, null);
+  if (previewId) throw readOnly();
   const token = await tokenSource();
   const res = await fetch(buildUrl(OPS(), action, params), { headers: { Authorization: 'Bearer ' + token } });
   if (!res.ok) throw new ApiError('Could not open that document', { status: res.status });
@@ -109,6 +124,7 @@ export async function apiText(action, params) {
 
 /** Upload a blob to the signed storage URL from get_upload_url. */
 export async function putFile(uploadUrl, token, blob, contentType) {
+  if (previewId) throw readOnly();
   if (getState().demo) { (window.__demoUploads = window.__demoUploads || {})[uploadUrl] = URL.createObjectURL(blob); return true; }
   let res;
   try {

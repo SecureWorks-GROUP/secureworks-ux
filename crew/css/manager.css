@@ -59,9 +59,6 @@ button.teamjob:active { transform: scale(0.96); background: var(--paper-3); }
 .board .col { display: grid; gap: 8px; align-content: start; }
 .board .col > .t-label { padding-bottom: 2px; }
 .board .col.hot > .t-label { color: var(--hi); }
-.board .card + .card { margin-top: 0; }
-div.card { gap: 10px; padding: 6px; }
-div.card:active { transform: none; }
 .cardmain { display: grid; gap: 6px; text-align: left; padding: 8px 9px 6px; border-radius: 10px; width: 100%; min-width: 0; }
 .cardmain:active { background: var(--paper-2); }
 .cardtop { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -146,8 +143,6 @@ div.card:active { transform: none; }
 .offlead.unavailable b { color: var(--bad); }
 .offlead.leave b { color: var(--warn); }
 
-/* the shared segmented control inherits left-aligned text inside sheets */
-.seg button { text-align: center; }
 .weekdays .pick { text-align: center; }
 .savedock { animation: rise 320ms var(--ease) both; }
 

@@ -55,7 +55,7 @@ export async function sendPhoto({ jobId, blob, name, type, phase, label, poId })
 /** Try to send everything waiting. Stops at the first no-signal failure. */
 export async function flushOutbox() {
   if (flushing) return;
-  if (!getState().user || !navigator.onLine) return;
+  if (!getState().user || !navigator.onLine || getState().preview) return;
   flushing = true;
   let sent = 0; const dropped = [];
   try {

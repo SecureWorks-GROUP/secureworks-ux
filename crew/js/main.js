@@ -1,7 +1,7 @@
 // SecureWorks Crew: app shell. Signs in, picks the screen, draws the tabs.
 import { html, render, useEffect, useState, cx } from './lib/h.js';
 import { getState, setState, useStore, local, invalidate } from './lib/store.js';
-import { initAuth, decorate } from './lib/auth.js';
+import { initAuth, decorate, exitPreview } from './lib/auth.js';
 import { setDemoHandler } from './lib/api.js';
 import { useRoute, go, ROOTS } from './lib/router.js';
 import { startOutbox, flushOutbox } from './lib/outbox.js';
@@ -113,8 +113,11 @@ function App() {
   const user = useStore((s) => s.user);
   const online = useStore((s) => s.online);
   const demo = useStore((s) => s.demo);
+  const preview = useStore((s) => s.preview);
+  const previewError = useStore((s) => s.previewError);
   const route = useRoute();
-  useEffect(() => { if (user) { restoreClock(); setTimeout(flushOutbox, 3000); } }, [user && user.id]);
+  useEffect(() => { if (user && !getState().preview) { restoreClock(); setTimeout(flushOutbox, 3000); } }, [user && user.id]);
+  useEffect(() => { if (previewError) toast('Could not open that trade\'s view: ' + previewError, { kind: 'bad', ms: 6000 }); }, [previewError]);
   // Coming back to the app after a while: quietly check for changes.
   useEffect(() => {
     let away = 0;
@@ -132,6 +135,7 @@ function App() {
     <div>
       ${!online ? html`<div class="strip"><${Icon} name="cloudoff" size=${15} />No signal. You can keep working.</div>` : null}
       ${demo ? html`<div class="strip">Demo with made-up jobs. Nothing here is real.</div>` : null}
+      ${preview ? html`<div class="strip preview" role="status"><span>Viewing as ${preview.name}. Read only.</span><button type="button" onClick=${exitPreview}>Exit</button></div>` : null}
       ${focus || (TAB_OF[route.parts[0]] || 'today') === 'today' ? null : html`<${ClockBar} />`}
     </div>
     ${focus ? html`<span />` : html`<${Nav} route=${route} />`}
@@ -158,7 +162,7 @@ async function boot() {
     window.__crewDemoSignIn = () => setState({ user: decorate(demo.demoProfile(persona)) });
   }
   const jobId = params.get('jobId');
-  if (jobId && /^[0-9a-f-]{36}$/i.test(jobId)) history.replaceState({ d: 0 }, '', location.pathname + (params.has('demo') ? '?demo=' + params.get('demo') : '') + '#/job/' + jobId);
+  if (jobId && /^[0-9a-f-]{36}$/i.test(jobId)) { params.delete('jobId'); const rest = params.toString(); history.replaceState({ d: 0 }, '', location.pathname + (rest ? '?' + rest : '') + '#/job/' + jobId); }
   await initAuth();
   startOutbox();
   window.addEventListener('crew:outbox-flushed', (e) => {

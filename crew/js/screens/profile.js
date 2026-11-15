@@ -1,7 +1,7 @@
 // Profile: who is signed in, their details, and the app's own settings.
 import { html, useEffect, useState } from '../lib/h.js';
 import { useStore, local, getState } from '../lib/store.js';
-import { signOut, changePassword } from '../lib/auth.js';
+import { signOut, changePassword, previewChoices, startPreview, exitPreview } from '../lib/auth.js';
 import { go } from '../lib/router.js';
 import { outboxItems, onOutbox, flushOutbox } from '../lib/outbox.js';
 import { fmtTs, fmtMoney, todayISO, mondayOf } from '../lib/dates.js';
@@ -18,6 +18,11 @@ export function Profile() {
   useEffect(() => { const fn = () => setCanInstall(true); window.addEventListener('crew:installable', fn); return () => window.removeEventListener('crew:installable', fn); }, []);
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const hours = useHours(mondayOf(todayISO()));
+  const preview = useStore((s) => s.preview);
+  // The owner can look at the app as any trade, read only (server checks who may).
+  const [trades, setTrades] = useState([]);
+  const [viewAs, setViewAs] = useState('');
+  useEffect(() => { if (user.role === 'admin' || user.role === 'owner') previewChoices().then(setTrades); }, [user.id]);
   const d = user.details || {};
   const abn = user.abn || d.abn;
   const account = String(d.accountNo || '').replace(/\D/g, '');
@@ -78,6 +83,19 @@ export function Profile() {
         ${cfg.officePhone ? html`<${KV} nav k="The office" v="Call" onClick=${() => { location.href = 'tel:' + cfg.officePhone; }} />` : null}
       </div>
     <//>
+
+    ${preview ? html`<${Section} label="Read-only view">
+      <div class="block card"><${KV} nav k=${`Viewing as ${preview.name}`} v="Exit" onClick=${exitPreview} /></div>
+    <//>` : trades.length ? html`<${Section} label="View as a trade">
+      <div class="block stack tight">
+        <select class="input" aria-label="Choose a trade" value=${viewAs} onChange=${(e) => setViewAs(e.currentTarget.value)}>
+          <option value="">Choose a trade</option>
+          ${trades.map((t) => html`<option value=${t.id}>${t.name || 'Unnamed trade'}</option>`)}
+        </select>
+        <${Button} kind="line" block disabled=${!viewAs} onClick=${() => startPreview(viewAs)}>See the app as them<//>
+        <p class="t-small">Their real jobs, schedule and pay. Read only: nothing can be changed or sent.</p>
+      </div>
+    <//>` : null}
 
     <${Section} label="Account">
       <div class="block card">

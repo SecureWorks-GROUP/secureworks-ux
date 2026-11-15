@@ -2,7 +2,7 @@
 // session as the current Trade App, so a trade signed in there is signed in
 // here (and signing out of one signs out of both).
 import { getState, setState, local, clearQueries } from './store.js';
-import { configureApi, ghl } from './api.js';
+import { configureApi, ghl, api, setPreview } from './api.js';
 
 let sb = null;
 let session = null;
@@ -36,11 +36,13 @@ async function loadProfile(authUser) {
   if (profileFor === authUser.id && getState().user) return;
   profileFor = authUser.id;
   const saved = local.get('profile');
-  if (saved && saved.id === authUser.id && !getState().user) setState({ user: decorate(saved), ready: true });
+  const wantPreview = previewParam();
+  if (saved && saved.id === authUser.id && !getState().user && !wantPreview) setState({ user: decorate(saved), ready: true });
   try {
     const res = await ghl('get_profile', null, { userId: authUser.id, email: authUser.email || '' });
     if (res && res.profile) {
       local.set('profile', res.profile);
+      if (wantPreview && (await enterPreview(res.profile, wantPreview))) return;
       setState({ user: decorate(res.profile), ready: true });
       return;
     }
@@ -49,6 +51,31 @@ async function loadProfile(authUser) {
     setState({ user: decorate({ id: authUser.id, email: authUser.email, name: (authUser.email || '').split('@')[0] }), ready: true });
   }
 }
+
+// ---------- owner's read-only "view as a trade" ----------
+function previewParam() { try { return new URLSearchParams(location.search).get('preview_trade_user_id') || ''; } catch { return ''; } }
+/** Swap in the chosen trade's profile, read only. False when the server says no. */
+async function enterPreview(owner, tradeId) {
+  setPreview(tradeId);
+  try {
+    const res = await api('trade_preview_context', { user_id: tradeId });
+    if (!res || res.read_only !== true || !res.profile) throw new Error('Preview is not available.');
+    clearQueries();
+    setState({ user: decorate(res.profile), preview: { id: tradeId, name: res.profile.name || res.profile.full_name || 'a trade', owner: owner.name || owner.email || '' }, clock: null, ready: true });
+    return true;
+  } catch (err) {
+    setPreview(null);
+    setState({ previewError: (err && err.message) || 'Preview is not available.' });
+    return false;
+  }
+}
+/** The trades the signed-in owner may view as. Empty for everyone else. */
+export async function previewChoices() {
+  if (getState().demo || getState().preview) return [];
+  try { const res = await api('trade_preview_context'); return res && res.can_preview === true ? res.trades || [] : []; } catch { return []; }
+}
+export function startPreview(id) { const u = new URL(location.href); u.searchParams.set('preview_trade_user_id', id); u.hash = '#/today'; location.assign(u.href); }
+export function exitPreview() { const u = new URL(location.href); u.searchParams.delete('preview_trade_user_id'); u.hash = '#/profile'; location.assign(u.href); }
 
 /** Add the handful of derived answers every screen asks. */
 export function decorate(p) {

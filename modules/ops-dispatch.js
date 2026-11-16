@@ -1639,7 +1639,11 @@
     if (kind === 'reject') return 'Sent back to the Unmatched supplier emails tray.';
     if (kind === 'hide') return 'Hidden from the tray. The email stays in admin@.';
     if (kind === 'dismiss') return 'Dismissed. No date was saved.';
-    if (kind === 'assign') return 'Put on ' + (text(resp && resp.job_number) || 'the job') + '.';
+    if (kind === 'assign') {
+      // Item 16 part 1: Put on job also saves the email's files to the job.
+      var files = global.OpsDispatchTrayFiles && typeof global.OpsDispatchTrayFiles.doneWords === 'function' ? global.OpsDispatchTrayFiles.doneWords(resp) : '';
+      return 'Put on ' + (text(resp && resp.job_number) || 'the job') + '.' + files;
+    }
     var o = resp && resp.order;
     var d = o && parseDay(o.confirmed_delivery_date);
     return 'Delivery date saved' + (o && text(o.supplier_name) ? ': ' + text(o.supplier_name) : '') + (d ? ', ' + dayText(d) : '') + '.';
@@ -4779,6 +4783,13 @@
     return out;
   }
 
+  // Item 16 part 1: the email's files ("PDF: name, size, Open"), drawn by
+  // modules/dispatch-tray-files.js. Nothing when that file is not loaded or
+  // the ops-api sends no files.
+  function trayFilesHtml(m) {
+    return global.OpsDispatchTrayFiles && typeof global.OpsDispatchTrayFiles.html === 'function' ? global.OpsDispatchTrayFiles.html(m) : '';
+  }
+
   function trayItemHtml(t, m) {
     var busy = t.busy[m.id];
     var off = busy ? ' disabled' : '';
@@ -4788,6 +4799,7 @@
     if (text(m.from_email)) h += '<p class="dpc-rep-why">' + esc(text(m.from_email)) + '</p>';
     if (text(m.subject)) h += '<p class="dpc-rep-subj">' + esc(text(m.subject)) + '</p>';
     if (text(m.snippet)) h += '<p class="dpc-rep-snip">' + esc(text(m.snippet)) + '</p>';
+    h += trayFilesHtml(m);
     if (text(m.delivery_label)) h += '<p class="dpc-rep-why">Delivery date in the email: ' + esc(text(m.delivery_label)) + '</p>';
     if (guess) {
       h += '<div class="dpc-rep-ask"><span class="dpc-grow">Best guess: ' + esc(text(m.job_number) || 'a job') + (text(m.match_reason) ? '. ' + esc(text(m.match_reason)) + '.' : '.') + '</span>' +

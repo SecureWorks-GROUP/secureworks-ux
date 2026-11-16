@@ -4763,6 +4763,8 @@
 <script>
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
+  // Dispatch's tray files (item 16 part 1). Harmless under v1: every rule is scoped to .dpc-tf.
+  {t:'css', u:'modules/dispatch-tray-files.css?v=1'},
   {t:'css', u:'modules/ops-sales-booking.css?v=3'},
   // <dispatch-version>
   window.__swDispatchVersion === 'v1' ? {t:'css', u:'modules/ops-dispatch-v1.css?v=1'} : {t:'css', u:'modules/ops-dispatch.css?v=11'},
@@ -6500,6 +6502,8 @@ __swOpsStampAssets([
   {t:'js', u:'modules/dispatch-supplier-picker.js?v=1'},
   // Dispatch's Book install under the Install row, item 4 (only v2 uses it).
   {t:'js', u:'modules/dispatch-book-install.js?v=1'},
+  // Dispatch's tray files (item 16 part 1): the files on an Unmatched supplier email.
+  {t:'js', u:'modules/dispatch-tray-files.js?v=1'},
   // <dispatch-version>
   window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=17'}
 ]);

@@ -1886,6 +1886,16 @@
       padding: 2px 7px; border-radius: 10px; white-space: nowrap;
       color: #7A4A12; background: #FEF3E7; border: 1px solid #F5C889;
     }
+    /* Restoration phase: where the quote is at (see <makesafe-restoration-phase>). */
+    .ms-card-v2 .ms-resto {
+      display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+      font-size: 9px; font-weight: 800; padding: 3px 7px; border-radius: 6px;
+      color: #1E4E5C; background: #EAF3F6; border: 1px solid #C9DEE5;
+    }
+    .ms-card-v2 .ms-resto .ms-resto-ref { font-weight: 600; opacity: 0.8; }
+    .ms-card-v2 .ms-resto.wait { color: #7A4A12; background: #FEF3E7; border-color: #F5C889; }
+    .ms-card-v2 .ms-resto.done { color: #14532D; background: #ECFDF3; border-color: #BBE5C8; }
+    .ms-card-v2 .ms-resto.stop { color: #991B1B; background: #FEF2F2; border-color: #FECACA; }
     .kanban-col-header .ms-col-note {
       display: block; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
       text-transform: none; color: #7A4A12; margin-top: 2px;
@@ -4755,7 +4765,7 @@ __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
   {t:'css', u:'modules/ops-sales-booking.css?v=3'},
   // <dispatch-version>
-  window.__swDispatchVersion === 'v1' ? {t:'css', u:'modules/ops-dispatch-v1.css?v=1'} : {t:'css', u:'modules/ops-dispatch.css?v=8'}
+  window.__swDispatchVersion === 'v1' ? {t:'css', u:'modules/ops-dispatch-v1.css?v=1'} : {t:'css', u:'modules/ops-dispatch.css?v=10'}
 ]);
 </script>
 </head>
@@ -4998,6 +5008,7 @@ __swOpsStampAssets([
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
         <button class="pipeline-tab" onclick="setPipelineTab('patio')" data-pipeline="patio">Patio</button>
         <button class="pipeline-tab" onclick="setPipelineTab('repairs')" data-pipeline="repairs">Repairs</button>
+        <button class="pipeline-tab" onclick="setPipelineTab('restoration')" data-pipeline="restoration">Restoration</button>
         <button class="pipeline-tab" onclick="setPipelineTab('decking')" data-pipeline="decking">Decking</button>
         <button class="pipeline-tab" onclick="setPipelineTab('makesafes')" data-pipeline="makesafes">Make Safes</button>
         <button class="pipeline-tab" onclick="setPipelineTab('misc')" data-pipeline="misc">Misc</button>
@@ -5124,11 +5135,47 @@ __swOpsStampAssets([
 
       <!-- Work Orders -->
       <div id="subWorkorders" class="sub-view">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div class="section-heading">Work Orders</div>
+        <!-- Every job work order, listed like Quotes and Invoices
+             (modules/ops-work-orders-list.js, // <work-orders-list-core>). Read only;
+             a row opens the job's work order, Set amount goes to the fill queue below. -->
+        <div class="stat-grid" id="woJobStats" style="grid-template-columns: repeat(5, 1fr);"></div>
+        <div class="filter-bar wol-bar">
+          <button class="filter-chip active" onclick="WorkOrdersList.setFilter('all')" data-wo-filter="all">All</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('needs_amount')" data-wo-filter="needs_amount">Needs an amount</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('draft')" data-wo-filter="draft">Draft</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('approved')" data-wo-filter="approved">Approved</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('billed_in_full')" data-wo-filter="billed_in_full">Billed in full</button>
+          <button class="filter-chip" onclick="WorkOrdersList.setFilter('over')" data-wo-filter="over">Over</button>
+          <select class="form-input" id="woTypeFilter" onchange="WorkOrdersList.setType(this.value)" aria-label="Job type" style="width:auto;min-width:130px;font-size:12px;padding:4px 8px;"><option value="all">All types</option></select>
+          <input type="text" class="filter-search" id="woSearch" placeholder="Search WO#, job#, client, suburb..." oninput="WorkOrdersList.setSearch(this.value)" style="width:220px;">
         </div>
+        <div class="wol-note" id="woJobNote"></div>
+        <div class="data-table-wrap">
+          <table class="data-table" id="woJobTable">
+            <thead>
+              <tr>
+                <th onclick="sortTable('woJobTable',0,'string')">WO #</th>
+                <th onclick="sortTable('woJobTable',1,'string')">Job #</th>
+                <th onclick="sortTable('woJobTable',2,'string')">Customer</th>
+                <th onclick="sortTable('woJobTable',3,'string')">Suburb</th>
+                <th onclick="sortTable('woJobTable',4,'string')">Type</th>
+                <th onclick="sortTable('woJobTable',5,'string')">Status</th>
+                <th onclick="sortTable('woJobTable',6,'number')" title="Labour the office agreed, ex GST">Agreed</th>
+                <th onclick="sortTable('woJobTable',7,'number')" title="Approved customer variations added for the trades">Variations</th>
+                <th onclick="sortTable('woJobTable',8,'number')" title="Billed on the job by every trade, except commission">Billed</th>
+                <th onclick="sortTable('woJobTable',9,'number')">Left</th>
+                <th onclick="sortTable('woJobTable',10,'date')">Approved / opened</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="woJobTableBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:20px;"></div>
         <div id="officeWoFill" data-office-wo-fill-host></div>
-        <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders open on each job page. Old crew work orders stay listed here, read-only, until they are retired.</div>
+        <details class="wol-fold" id="woOldCrewFold">
+          <summary>Old crew work orders</summary>
+        <div id="woListNote" data-wo-list-note style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;">Job work orders are listed above. Old crew work orders stay listed here, read-only, until they are retired.</div>
         <div class="data-table-wrap">
           <table class="data-table" id="woTable">
             <thead>
@@ -5137,6 +5184,7 @@ __swOpsStampAssets([
             <tbody id="woTableBody"></tbody>
           </table>
         </div>
+        </details>
       </div>
 
       <!-- Bill Reconciliation: moved here from the retired Materials tab so finance
@@ -5196,6 +5244,7 @@ __swOpsStampAssets([
         <div class="jp-bar">
           <button class="filter-chip active" data-jp-mode="jobs" onclick="jpSetMode('jobs')">Jobs</button>
           <button class="filter-chip" data-jp-mode="company" onclick="jpSetMode('company')">Company</button>
+          <button class="filter-chip" data-jp-mode="tieout" onclick="jpSetMode('tieout')" title="Every supplier bill dollar in Xero by month: on a job, overhead, or not placed yet">Tie to Xero</button>
           <select class="form-input" id="jpType" onchange="loadJobProfit()" title="Work type">
             <option value="">All work types</option>
             <option value="fencing">Fencing</option>
@@ -5218,7 +5267,7 @@ __swOpsStampAssets([
           <input type="date" class="form-input" id="jpTo" onchange="loadJobProfit()" title="To date" style="width:130px;">
           <div style="flex:1;"></div>
           <input type="text" class="filter-search" id="jpJobNumber" placeholder="Open job # (e.g. SWF-26041)" style="width:190px;" onkeydown="if(event.key==='Enter')jpOpenByNumber()">
-          <button class="btn btn-secondary btn-sm" onclick="jpOpenByNumber()">Open</button>
+          <button class="btn btn-secondary btn-sm" data-jp-open-number onclick="jpOpenByNumber()">Open</button>
           <button class="btn btn-secondary btn-sm" onclick="jpOpenBillsToPlace()" title="Bills waiting for a person: place them in Financials > Bill Reconciliation, then Reread profit here">Bills to place</button>
           <button class="btn btn-secondary btn-sm" onclick="loadJobProfit()" title="Re-read the profit engine (after placing bills)">&#8635; Reread profit</button>
         </div>
@@ -5248,6 +5297,8 @@ __swOpsStampAssets([
           <div class="jp-more" id="jpMore"></div>
         </div>
         <div id="jpCompany" style="display:none;"></div>
+        <!-- Tie to Xero (modules/ops-xero-tieout.js): read only, ops-api xero_tieout. Search // <xero-tieout> -->
+        <div id="jpTieout" style="display:none;"></div>
       </div>
     </div>
 
@@ -6438,13 +6489,13 @@ __swOpsStampAssets([
   // The Materials panel's label layout (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-materials-layout.js?v=1'},
   // Dispatch's Needs you now bar: what each job needs (pure functions; only v2 uses it).
-  {t:'js', u:'modules/dispatch-needs-you.js?v=1'},
+  {t:'js', u:'modules/dispatch-needs-you.js?v=3'},
   // Dispatch's Make email: a line or a photo makes an email (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-make-email.js?v=1'},
   // Dispatch's Add supplier search rows, Tweak 4 (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-supplier-picker.js?v=1'},
   // <dispatch-version>
-  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=12'}
+  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=15'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
@@ -6460,8 +6511,21 @@ __swOpsStampAssets([
   {t:'js', u:'shared/client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
-  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'}
+  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'},
+  {t:'js', u:'modules/ops-work-orders-list.js?v=1'}
 ]);
+</script>
+<!-- Tie to Xero (Financials > Job profit > Tie to Xero): read only (modules/ops-xero-tieout.js, // <xero-tieout>). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-xero-tieout.js?v=1'}]);
+</script>
+<!-- Restoration plan, quote and builder's answer on a make-safe job page: read only (modules/ops-restoration.js). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-restoration.js?v=1'}]);
+</script>
+<!-- Restoration board: the Restoration pipeline tab (modules/ops-restoration-board.js, // <restoration-board>). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-restoration-board.js?v=1'}]);
 </script>
 <!-- Paid close-out tags (live) and Get Review ladder (docs/job-closeout-screens.md): the ladder is off unless ?closeout=preview or localStorage sw_closeout_preview = '1'. -->
 <script>
@@ -13202,6 +13266,8 @@ async function loadJobs(opts) {
   opts = opts || {};
   if (opts.background && (makesafeReviewOverlayIsOpen() || jobDetailIsOpen())) return;
   updateJobsDate();
+  // Restoration has its own board read (restoration_board); see <restoration-board>.
+  if (_pipelineTab === 'restoration') return loadRestorationBoard(opts);
   try {
     var data;
     if (_pipelineTab === 'makesafes') {
@@ -13350,6 +13416,12 @@ async function loadMakesafeBoardPackChips() {
 }
 
 function searchJobs(q) {
+  // Restoration board: client-side filter over the board already read.
+  if (_pipelineTab === 'restoration') {
+    _jobSearch = q || '';
+    if (_pipelineData) renderJobs(_pipelineData);
+    return;
+  }
   // Make-safe kanban: instant client-side filter, no server round-trip
   if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
     _makesafeBoardSearch = (q || '').toLowerCase().trim();
@@ -13501,6 +13573,11 @@ function renderJobs(data) {
   if (container) {
     container.style.overflow = '';
     container.classList.toggle('jobs-body-makesafes', _pipelineTab === 'makesafes' && _jobView === 'kanban');
+  }
+  // The Restoration board is one kanban in both views; it never paints another tab's payload.
+  if (_pipelineTab === 'restoration') {
+    if (data && data._restoration && window.RestorationBoard) RestorationBoard.render(data._restoration);
+    return;
   }
   if (_jobView === 'kanban') {
     if (_pipelineTab === 'fencing') {
@@ -13991,6 +14068,24 @@ function renderRepairKanban(container, columns) {
   container.innerHTML = html;
   setupKanbanHorizontalScroll();
 }
+
+// <restoration-board>
+// Restoration board (secureworks-backend docs/restoration-board-v1.md): its own
+// seven-column board, read from ops-api restoration_board and moved only through
+// restoration_set_stage. The rules and the painting live in
+// modules/ops-restoration-board.js (RestorationBoardCore / RestorationBoard);
+// this block only routes the Jobs tab to it. Same light .kanban-col chrome as
+// Repairs, no dark Sales drawer. Restoration jobs leave the make-safe board on
+// the server; nothing here filters the make-safe board.
+function loadRestorationBoard(opts) {
+  var container = document.getElementById('jobsBody');
+  if (!window.RestorationBoard) {
+    if (container) container.innerHTML = '<div style="padding:20px;color:#9A3412;">The Restoration board did not load. Refresh the page to try again.</div>';
+    return Promise.resolve();
+  }
+  return RestorationBoard.load(opts);
+}
+// </restoration-board>
 
 function renderMakesafeKanban(container, columns) {
   var STAGE_LABELS = {
@@ -15739,6 +15834,11 @@ function mapCanonicalMakesafeRow(row, enrich, opts) {
   j.ses_family = row.ses_family || null;
   j.ses_family_label = row.ses_family_label || null;
   j.ses_recipe_state = row.ses_recipe_state || null;
+  // Restoration cards only: where the quote is at (price-free, from the
+  // server's one restoration reader). See <makesafe-restoration-phase>.
+  j.restoration = (row.restoration && typeof row.restoration === 'object')
+    ? row.restoration
+    : null;
 
   // The card's canonical stage is also the ONLY stage the job detail may show
   // for it. Remember it by job id so opening the card cannot re-derive a
@@ -16684,6 +16784,60 @@ function makesafeCardHasReviewAffordance(j, status, packCompleteness) {
 // numbers (refined dual-ref block), intake/client, a muted age/KPI pill, a red
 // past-SLA banner when breached, the 2A crew chip, the doc-icon row, and
 // Allocate/Reassign. All behaviour (drag, click-in, allocate/reassign) kept.
+// <makesafe-restoration-phase>
+// A restoration card (family Restoration) carries `restoration` on the
+// canonical makesafe_board row: mode, phase, phase_label and next_step, worked
+// out on the server by the same rules as the restoration_plan read. The card
+// only words it: the phase is never re-derived here, and the column still
+// comes from canonical_stage alone. Price-free: nothing here shows money.
+var MAKESAFE_RESTORATION_CHIP = {
+  awaiting_approval: { label: 'Quote sent \u00b7 waiting on builder approval', tone: 'wait' },
+  quote_drafted: { label: 'Quote drafted \u00b7 not sent yet', tone: '' },
+  approved_works: { label: 'Quote approved \u00b7 do the works', tone: 'done' },
+  declined: { label: 'Quote declined', tone: 'stop' }
+};
+function makesafeRestorationChip(restoration) {
+  if (!restoration || typeof restoration !== 'object') return null;
+  var nextStep = String(restoration.next_step || '').trim();
+  if (restoration.readable === false) {
+    return {
+      label: 'Restoration plan needs a look',
+      title: nextStep || 'The stored restoration plan could not be read.',
+      tone: 'stop',
+      detail: ''
+    };
+  }
+  var phase = String(restoration.phase || '').trim();
+  if (!phase) return null;
+  var known = MAKESAFE_RESTORATION_CHIP[phase] || {};
+  var label = known.label || String(restoration.phase_label || '').trim();
+  if (!label) return null;
+  var detail = '';
+  var quoteNumber = String(restoration.quote_number || '').trim();
+  if (quoteNumber && phase !== 'assess' && phase !== 'attend_and_charge') {
+    detail = quoteNumber;
+    if (phase === 'awaiting_approval' && restoration.quote_sent_at) {
+      var sentAt = new Date(restoration.quote_sent_at);
+      if (!isNaN(sentAt.getTime())) {
+        detail += ' sent ' + sentAt.toLocaleDateString('en-AU', {
+          timeZone: 'Australia/Perth', day: 'numeric', month: 'short'
+        });
+      }
+    }
+  }
+  return { label: label, title: nextStep, tone: known.tone || '', detail: detail };
+}
+function renderMakesafeRestorationChip(j) {
+  var chip = makesafeRestorationChip(j && j.restoration);
+  if (!chip) return '';
+  return '<div class="ms-resto' + (chip.tone ? ' ' + chip.tone : '') + '"'
+    + ' data-restoration-phase="' + escapeAttr(String((j.restoration && j.restoration.phase) || 'unreadable')) + '"'
+    + (chip.title ? ' title="' + escapeAttr(chip.title) + '"' : '') + '>'
+    + '<span class="ms-resto-lbl">' + escapeHtml(chip.label) + '</span>'
+    + (chip.detail ? '<span class="ms-resto-ref">' + escapeHtml(chip.detail) + '</span>' : '')
+    + '</div>';
+}
+
 function renderMakesafeCard(j, status) {
   var builder = getMakesafeBuilder(j);
   var suburb = j.site_suburb || j.suburb || '';
@@ -16818,6 +16972,8 @@ function renderMakesafeCard(j, status) {
   var tradeStage = makesafeTradeStageLabel(j, status);
   if (tradeStage) html += '<span><b>Trade</b> ' + escapeHtml(tradeStage) + '</span>';
   html += '</div>';
+  // Restoration: where the quote is at. See <makesafe-restoration-phase>.
+  if (status !== 'cancelled') html += renderMakesafeRestorationChip(j);
 
   // loud red past-SLA banner on breach
   if (sla.breached) {
@@ -18854,9 +19010,9 @@ async function kanbanDrop(e) {
     var kc0 = document.querySelector('#jobsBody .kanban-container');
     _kanbanSavedScroll = kc0 ? kc0.scrollLeft : 0;
     if (_pipelineData) renderJobs(_pipelineData);
-    showToast('Council decision required before moving this patio job.', 'warning', [
-      { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-      { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+    showToast('Does this patio job need council approval?', 'warning', [
+      { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+      { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
     ]);
     return;
   }
@@ -19554,6 +19710,7 @@ function packetJobWorkOrder(data) {
 }
 
 async function loadWOs() {
+  if (window.WorkOrdersList) WorkOrdersList.load();
   if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {
@@ -19793,7 +19950,7 @@ function jpToggleTradeLines(btn, key) {
   btn.textContent = (open ? 'Hide ' : 'Show ') + btn.getAttribute('data-jp-lines-label');
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
-var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null };
+var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, typeAvg: {}, open: null, close: {} };
 
 // Owner, admins and office staff. Marnin, 3 Nov 2026 (call B): "yes office staff can see job profit in
 // ops dash or thorugh agents asking". Client-side gate by the signed-in login's role from list_users;
@@ -19963,10 +20120,17 @@ function _jpFilters() {
 }
 
 function jpSetMode(mode) {
-  _jp.mode = mode === 'company' ? 'company' : 'jobs';
+  _jp.mode = mode === 'company' ? 'company' : (mode === 'tieout' ? 'tieout' : 'jobs');
   document.querySelectorAll('[data-jp-mode]').forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-jp-mode') === _jp.mode); });
   document.getElementById('jpJobs').style.display = _jp.mode === 'jobs' ? '' : 'none';
   document.getElementById('jpCompany').style.display = _jp.mode === 'company' ? '' : 'none';
+  // <xero-tieout> The Tie to Xero view has no job filters: the bar hides them and the basis line while it shows.
+  var tie = document.getElementById('jpTieout');
+  if (tie) tie.style.display = _jp.mode === 'tieout' ? '' : 'none';
+  var bar = document.querySelector('#subJobprofit .jp-bar');
+  if (bar) bar.setAttribute('data-jp-mode-now', _jp.mode);
+  var basis = document.querySelector('#subJobprofit .jp-basis');
+  if (basis) basis.style.display = _jp.mode === 'tieout' ? 'none' : '';
   loadJobProfit();
 }
 
@@ -19976,6 +20140,8 @@ function _jpRefused() {
   if (body) body.innerHTML = '<tr><td colspan="10">' + msg + '</td></tr>';
   var co = document.getElementById('jpCompany');
   if (co) co.innerHTML = msg;
+  var tie = document.getElementById('jpTieout');
+  if (tie) tie.innerHTML = msg;
   var more = document.getElementById('jpMore');
   if (more) more.innerHTML = '';
 }
@@ -19987,6 +20153,13 @@ function loadJobProfit() {
   _jp.typeAvg = {};
   if (_jp.open) openJobProfitDetail(_jp.open[0], _jp.open[1], true);
   if (_jp.mode === 'company') return loadJobProfitRollup();
+  // <xero-tieout> modules/ops-xero-tieout.js draws it; a missing module says so, never an empty view.
+  if (_jp.mode === 'tieout') {
+    if (window.XeroTieout && typeof XeroTieout.load === 'function') return XeroTieout.load();
+    var tie = document.getElementById('jpTieout');
+    if (tie) tie.innerHTML = '<div class="jp-note err">The Tie to Xero view did not load. Refresh the page.</div>';
+    return;
+  }
   return _jpLoadPage(true);
 }
 
@@ -19997,7 +20170,7 @@ async function _jpLoadPage(reset) {
   if (!body) return;
   var seq = ++_jp.listSeq;
   if (reset) {
-    _jp.rows = []; _jp.offset = 0; _jp.more = false;
+    _jp.rows = []; _jp.offset = 0; _jp.more = false; _jp.close = {};
     body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--sw-text-sec);">Loading...</td></tr>';
   }
   if (more) more.innerHTML = '<span class="jp-sub">Loading...</span>';
@@ -20006,6 +20179,16 @@ async function _jpLoadPage(reset) {
     var data = await opsFetch('job_profit_list', params);
     if (seq !== _jp.listSeq) return;
     var rows = Array.isArray(data && data.jobs) ? data.jobs : [];
+    // Cost close by job for this page (// <job-profit-cost-close>). A page whose read failed, or a job
+    // it did not answer, is kept as not known; a page without the field keeps nothing.
+    if (data && Object.prototype.hasOwnProperty.call(data, 'cost_close')) {
+      var cc = data.cost_close;
+      var byJob = cc && cc.ok === true && cc.by_job && typeof cc.by_job === 'object' ? cc.by_job : null;
+      rows.forEach(function(r) {
+        if (!r || !r.job_id) return;
+        _jp.close[r.job_id] = byJob && Object.prototype.hasOwnProperty.call(byJob, r.job_id) ? byJob[r.job_id] : null;
+      });
+    }
     _jp.rows = _jp.rows.concat(rows);
     _jp.offset += rows.length;
     // The server says whether another page follows; it returns no row count.
@@ -20143,7 +20326,7 @@ function _jpRenderList() {
         + '<td class="num">' + _jpMoney(j.collected_ex) + '</td>'
         + '<td class="num">' + _jpProfit(_jpProfitOf(j), _jpCostUnknown(j)) + '</td>'
         + '<td class="num">' + _jpPct(_jpMarginOf(j), _jpCostUnknown(j)) + '</td>'
-        + '<td>' + _jpConfidence(j) + '</td>'
+        + '<td>' + _jpConfidence(j) + _jpCostCloseTag(_jp.close && Object.prototype.hasOwnProperty.call(_jp.close, j.job_id) ? _jp.close[j.job_id] : undefined) + '</td>'
         + '</tr>';
     }).join('');
   }
@@ -20362,6 +20545,99 @@ function _jpLineEvidence(data) {
   if (le.read_at) h += '<div class="jp-sub" style="margin-top:4px;">Read ' + _jpEsc(String(le.read_at).slice(0, 16).replace('T', ' ')) + ' UTC &middot; rule ' + _jpEsc(le.rule || '') + '</div>';
   return h;
 }
+// <job-profit-cost-close>
+// Cost close (backend job_profit `cost_close`, rule cost-close-v1): whether a
+// job's cost is final and, if not, what it is waiting on. The server works the
+// state out on every read; this only words it. A read that failed, or a job
+// the server gave no answer for, is Not known, never Final and never Open. An
+// answer without the field at all (an older server) draws nothing. It says the
+// cost is complete; it does not say the job was invoiced or that every line is
+// verified. Display only.
+var JP_CC_STATES = ['final', 'settling', 'waiting', 'open', 'not_applicable'];
+var JP_CC_BASIS = {
+  work_done: 'the work was recorded as done', first_invoice: 'its first invoice was raised',
+  repair_stage: 'its repair stage reached Complete', status: 'its status moved to finished',
+  did_not_go_ahead: 'it did not go ahead'
+};
+var JP_CC_WAIT = {
+  no_cost_date: 'No cost on this job carries a date',
+  no_finish_day: 'No finish day is on record for this job',
+  work_done_no_labour_overdue: 'Work done and no labour linked after 14 days',
+  po_no_bill_overdue: 'An order has no bill after 30 days',
+  ordered_not_billed: 'Ordered and not billed yet',
+  ordered_not_billed_over_30_days: 'Ordered and not billed after 30 days',
+  invoice_emailed_bill_not_placed: 'A supplier invoice was emailed and its bill is not placed',
+  materials_below_quote: 'Materials linked are well below the quote',
+  variation_not_costed: 'A variation has no cost',
+  employer_super_unknown: 'Employer super is not known',
+  dispatch_order_not_billed: 'A supplier order sent from Dispatch has no bill yet',
+  work_order_not_billed: 'A work order agrees more labour than has been billed',
+  variation_cost_not_in: 'A variation was agreed and its cost is not in yet',
+  draft_bill_on_job: 'A bill for this job is still a draft in Xero'
+};
+function _jpCcWaitText(code) { return JP_CC_WAIT[code] || _jpFlagText(code); }
+function _jpCcState(c) {
+  if (!c || typeof c !== 'object' || c.ok !== true) return null;
+  var st = String(c.cost_state || '');
+  if (JP_CC_STATES.indexOf(st) === -1) return null;
+  // Final only with the server's own yes and its day.
+  if ((st === 'final') !== (c.cost_final === true) || (st === 'final' && !c.final_on)) return null;
+  return st;
+}
+// The list tag. c: the job's cost_close answer; undefined when the read had no cost_close at all.
+function _jpCostCloseTag(c) {
+  if (c === undefined) return '';
+  var st = _jpCcState(c);
+  if (!st) return '<span class="jp-tag mute" data-jp-cc="unknown">Cost state not known</span>';
+  if (st === 'final') return '<span class="jp-tag ok" data-jp-cc="final" title="No cost has landed for ' + _jpEsc(c.quiet_days) + ' days since it finished">Cost final</span>';
+  if (st === 'settling') return '<span class="jp-tag inf" data-jp-cc="settling" title="Finished with nothing outstanding; final if no cost lands">Cost settling</span>';
+  if (st === 'waiting') {
+    var w = Array.isArray(c.waiting_on) ? c.waiting_on : [];
+    return '<span class="jp-tag bad" data-jp-cc="waiting" title="' + _jpEsc(w.map(_jpCcWaitText).join('; ')) + '">Cost not final</span>';
+  }
+  return '';
+}
+function _jpCostClose(data) {
+  if (!data || !Object.prototype.hasOwnProperty.call(data, 'cost_close')) return '';
+  var c = data.cost_close;
+  var st = _jpCcState(c);
+  var h = '<div class="jp-sec">Is the cost final?</div>';
+  if (!st) {
+    var why = c && typeof c === 'object' && c.ok === false && c.reason ? _jpPlainText(c.reason) : 'The cost state could not be read';
+    return h + '<div class="jp-note" data-jp-cost-close="unknown"><span class="jp-tag mute">Not known</span> ' + _jpEsc(why)
+      + '. So this job\'s cost is not known to be final.</div>';
+  }
+  var days = _jpNum(c.quiet_days);
+  var daysText = days == null ? 'the quiet period' : days + ' days';
+  var finished = c.finished_on ? 'Finished ' + _jpDate(c.finished_on) + (JP_CC_BASIS[c.finished_basis] ? ' (' + JP_CC_BASIS[c.finished_basis] + ')' : '') + '.'
+    : (JP_CC_BASIS[c.finished_basis] ? 'Finished: ' + JP_CC_BASIS[c.finished_basis] + '.' : '');
+  var last = c.last_cost_on ? ' Newest cost ' + _jpDate(c.last_cost_on) + '.' : '';
+  var body;
+  if (st === 'final') {
+    body = '<span class="jp-tag ok">Final</span> No cost reason is open and no cost has landed for ' + _jpEsc(daysText) + '. Final since ' + _jpDate(c.final_on) + '.'
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + ' A cost that lands later reopens it.'
+      + (c.all_costs_paid === true ? ' Every cost is paid in Xero.' : c.all_costs_paid === false ? ' Not every cost is verified paid in Xero.' : '') + '</div>';
+  } else if (st === 'settling') {
+    body = '<span class="jp-tag inf">Settling</span> Finished with no cost reason open. It becomes final'
+      + (c.final_on ? ' on ' + _jpDate(c.final_on) : ' after ' + _jpEsc(daysText)) + ' if no cost lands before then.'
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + '</div>';
+  } else if (st === 'waiting') {
+    var w = Array.isArray(c.waiting_on) ? c.waiting_on.filter(function(x) { return !!x; }) : [];
+    body = '<span class="jp-tag bad">Not final</span> Finished, but the cost is not complete yet.'
+      + (w.length ? '<ul class="jp-sub" data-jp-cc-waiting style="margin:4px 0 0 18px;">' + w.map(function(x) { return '<li>' + _jpEsc(_jpCcWaitText(x)) + '</li>'; }).join('') + '</ul>'
+        : '<div class="jp-sub" style="margin-top:4px;">The server named no reason.</div>')
+      + '<div class="jp-sub" style="margin-top:4px;">' + finished + last + '</div>';
+  } else if (st === 'open') {
+    body = '<span class="jp-tag mute">Open</span> The work is not finished, or the job was sent back to work, so costs are still expected.'
+      + (last ? '<div class="jp-sub" style="margin-top:4px;">' + last.trim() + '</div>' : '');
+  } else {
+    body = '<span class="jp-tag mute">Does not apply</span> A holding job, or a job that did not go ahead and holds no cost.';
+  }
+  return h + '<div class="jp-note" data-jp-cost-close="' + st + '">' + body
+    + '<div class="jp-sub" style="margin-top:4px;">Says the cost is complete, not that the job was invoiced or that every line is verified.'
+    + (c.as_of ? ' As at ' + _jpDate(c.as_of) + '.' : '') + (c.rule ? ' Rule ' + _jpEsc(c.rule) + '.' : '') + '</div></div>';
+}
+// </job-profit-cost-close>
 // Won and still in delivery: profit is not due yet.
 function _jpInDelivery(j) {
   return JP_STATUS_SETS.won.split(',').indexOf(String(j.status || '')) !== -1 && JP_STATUS_SETS.finished.split(',').indexOf(String(j.status || '')) === -1;
@@ -20416,6 +20692,7 @@ function _jpRenderDetail(data) {
     + _jpCard('Margin', _jpPct(_jpMarginOf(j), _jpCostUnknown(j)), j.work_type ? '<span id="jpTypeAvg">Loading ' + _jpEsc(j.work_type) + ' average...</span>' : '')
     + '</div>';
 
+  h += _jpCostClose(data);
   h += _jpLineEvidence(data);
 
   // Expected vs actual by lane
@@ -24237,9 +24514,9 @@ function confirmStepChange(jobId, targetStatus, targetIdx, currentIdx) {
     var kc1 = document.querySelector('#jobsBody .kanban-container');
     _kanbanSavedScroll = kc1 ? kc1.scrollLeft : 0;
     if (_pipelineData) renderJobs(_pipelineData);
-    showToast('Council decision required before moving this patio job.', 'warning', [
-      { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-      { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+    showToast('Does this patio job need council approval?', 'warning', [
+      { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+      { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
     ]);
     return;
   }
@@ -25139,6 +25416,8 @@ function renderMakesafeOpsDetail(data) {
   html += '</div>';
   html += '</div>';
 
+  // Restoration plan, quote and the builder's answer (modules/ops-restoration.js). Empty unless the job's family is Restoration.
+  html += '<div data-restoration-plan></div>';
   html += '<div data-job-wo-overview></div>';
   html += '<div data-office-group-wo></div>';
 
@@ -25350,6 +25629,7 @@ function renderOverviewView(data) {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
     if (window.JobWorkOrderOps) JobWorkOrderOps.paintOverview(data);
     if (window.GroupWorkOrderOffice) GroupWorkOrderOffice.paint(data);
+    if (window.RestorationOps) RestorationOps.paint(data);
     return;
   }
   // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below
@@ -28589,14 +28869,22 @@ function getNextStatuses(current, jobType) {
     return ft[current] || [];
   }
   if (jobType === 'patio') {
+    // <patio-ladder-order-materials>
     // Patio can wait on its deposit like fencing (Captain 2026-10-26), then
-    // carries on through approvals / processing as before.
+    // approvals, then Order Materials, as the stage-gate engine's patio graph
+    // says (modules/ops-stage-gate-engine.js PATIO_TRANSITIONS). Never Processing:
+    // it is a legacy umbrella status the Dispatch board does not list, so a patio
+    // moved there never reached Dispatch (patio walk step 8, 12 Nov 2026). A job
+    // already at Processing may still go to Order Materials (or start, as before).
     var pt = {
       'quoted': ['accepted', 'cancelled'],
-      'accepted': ['awaiting_deposit', 'approvals', 'processing'],
-      'awaiting_deposit': ['approvals', 'processing'],
-      'approvals': ['processing'],
-      'processing': ['in_progress'],
+      'accepted': ['awaiting_deposit', 'approvals', 'order_materials'],
+      'awaiting_deposit': ['approvals', 'order_materials'],
+      'approvals': ['order_materials'],
+      'order_materials': ['awaiting_supplier'],
+      'awaiting_supplier': ['order_confirmed'],
+      'order_confirmed': ['scheduled'],
+      'processing': ['order_materials', 'in_progress'],
       'scheduled': ['in_progress', 'cancelled'],
       'in_progress': ['complete', 'cancelled'],
       'complete': ['invoiced'],
@@ -28815,9 +29103,9 @@ async function changeJobStatus(jobId, status) {
       var kc2 = document.querySelector('#jobsBody .kanban-container');
       _kanbanSavedScroll = kc2 ? kc2.scrollLeft : 0;
       if (_pipelineData) renderJobs(_pipelineData);
-      showToast('Council decision required before moving this patio job.', 'warning', [
-        { label: 'Council Yes', primary: true, onclick: "setCouncilRequired('" + jobId + "',true)" },
-        { label: 'Council No', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
+      showToast('Does this patio job need council approval?', 'warning', [
+        { label: 'Needs council', primary: false, onclick: "setCouncilRequired('" + jobId + "',true)" },
+        { label: 'No council', primary: false, onclick: "setCouncilRequired('" + jobId + "',false)" }
       ]);
       return;
     }

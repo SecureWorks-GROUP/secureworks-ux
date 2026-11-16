@@ -123,7 +123,7 @@ test('shows the 12/6/6 super split and submits the saved GST choice', async ({ a
   expect(attach.body.xero_bill_id).toBe('xero-e2e-super-gst');
 });
 
-test('installer Hours cards can add lump-sum amounts as a peer to hours', async ({ appPage: page, feedRequests }) => {
+test('installer Hours cards can take an amount off the hours', async ({ appPage: page, feedRequests }) => {
   await signIn(page, PERSONAS.installer);
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
@@ -132,12 +132,12 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
   await enterDayWorked(page);
   await expect(card.locator('[data-cardhours]')).toHaveText('8 hrs');
-  await expect(card.getByRole('button', { name: '+ Add amount' })).toBeVisible();
+  await expect(card.getByRole('button', { name: '+ Take an amount off' })).toBeVisible();
   await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
   await expect(page.locator('#btnAddInvLump')).toBeVisible();
-  await expect(page.locator('#btnAddInvLump')).toHaveText('+ Add amount');
+  await expect(page.locator('#btnAddInvLump')).toHaveText('+ Take an amount off');
 
-  await card.getByRole('button', { name: '+ Add amount' }).click();
+  await card.getByRole('button', { name: '+ Take an amount off' }).click();
   await card.locator('[data-cardlumpdesc]').fill('Materials');
   await card.locator('[data-cardlumpamt]').fill('25');
   await card.locator('[data-cardlumpamt]').press('Tab');

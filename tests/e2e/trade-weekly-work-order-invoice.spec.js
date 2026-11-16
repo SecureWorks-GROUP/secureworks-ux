@@ -129,7 +129,7 @@ test.describe('weekly invoice response guards', () => {
     await expect(page.locator('[data-financial-hub]')).toBeVisible();
     await page.getByRole('button', { name: 'My Work Orders' }).click();
     const priorCard = page.locator('[data-work-order-card]').filter({ hasText: 'WO-HENRY-PRIOR' });
-    await priorCard.getByRole('button', { name: 'Add to Weekly Invoice' }).click();
+    await priorCard.getByRole('button', { name: 'Open in Work Order Invoice' }).click();
 
     await expect(page.getByRole('heading', { name: 'Work Order Invoice' })).toBeVisible();
     await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
@@ -345,5 +345,34 @@ test.describe('mobile weekly invoice', () => {
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeVisible();
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(horizontalOverflow).toBe(false);
+  });
+});
+
+// The Work Order Invoice sends the trade's real GST choice (Marnin, 11 Nov
+// 2026). It used to send gst_on: false whatever the trade's profile said.
+test.describe('GST on the Work Order Invoice', () => {
+  test('shows the GST choice and sends what the trade picked', async ({ appPage: page, feedRequests }) => {
+    await openWeeklyInvoice(page);
+    const gst = page.locator('[data-weekly-invoice-gst]').getByRole('switch', { name: 'Add GST to this invoice' });
+    await expect(gst).toHaveAttribute('aria-checked', 'false');
+    await gst.click();
+    await expect(page.locator('[data-weekly-invoice-gst]').getByRole('switch', { name: 'Add GST to this invoice' })).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await expect.poll(() => feedRequests.filter((entry) => entry.method === 'POST' && entry.action === 'save_trade_invoice_draft').length).toBe(1);
+    const save = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'save_trade_invoice_draft');
+    expect(save.body.gst_on).toBe(true);
+  });
+
+  test.describe('a GST registered trade', () => {
+    test.use({ myHoursPatch: { top: { gst_on: true } } });
+
+    test('starts with GST on, from the same profile the Weekly Invoice reads', async ({ appPage: page, feedRequests }) => {
+      await openWeeklyInvoice(page);
+      await expect(page.locator('[data-weekly-invoice-gst]').getByRole('switch', { name: 'Add GST to this invoice' })).toHaveAttribute('aria-checked', 'true');
+      await page.getByRole('button', { name: 'Save & calculate' }).click();
+      await expect.poll(() => feedRequests.filter((entry) => entry.method === 'POST' && entry.action === 'save_trade_invoice_draft').length).toBe(1);
+      const save = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'save_trade_invoice_draft');
+      expect(save.body.gst_on).toBe(true);
+    });
   });
 });

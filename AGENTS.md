@@ -350,6 +350,62 @@ make-safe board (it stays server-driven). Guard:
 `tests/e2e/ops-repairs-board.spec.js`; evidence in
 `docs/evidence/insurance-repairs-board-2026-08-13/`.
 
+## Ops Restoration board (`modules/ops-restoration-board.js`)
+
+A pipeline tab (`Restoration`, next to Repairs) for restoration work, which the
+server takes off the make-safe board (secureworks-backend
+`docs/restoration-board-v1.md`). Seven fixed light columns (New, Booked, Report
+due, Quote with builder, Works in progress, Invoiced, Closed) in the same
+`.kanban-col` chrome as Repairs, no dark Sales drawer. It reads ops-api
+`restoration_board` once per open and moves a card only through
+`restoration_set_stage` from the card's `moves` (a refused move is disabled with
+its `needs` words; Closed with `needs` asks for a `no_charge_reason`), then
+repaints from the card returned. It derives no stage; a failed read says so and
+never draws an empty board; a refusal shows the back end's words, never a code.
+Rules live in the pure `RestorationBoardCore` between `// <restoration-board-core>`
+sentinels; ops.html only routes the tab (`// <restoration-board>`, `loadJobs`,
+`renderJobs`, `searchJobs`). Office only (invoice amounts). Guard:
+`tests/e2e/ops-restoration-board.spec.js`.
+
+## Restoration panel on a make-safe job (`modules/ops-restoration.js`)
+
+Restoration work is a make-safe board card whose family is Restoration, run one
+of two ways: do and charge, or assess and quote (secureworks-backend
+`docs/restoration-workflow-v1.md`). `renderMakesafeOpsDetail` leaves a
+`[data-restoration-plan]` host and `RestorationOps.paint(data)` fills it from
+ONE ops-api `restoration_plan` read per job open: the mode, the phase, the next
+step, the builder's authority limit beside the invoice proposal, the current
+quote with who sent or decided it, and a link to the quote PDF. It is read
+only (it never posts), office only (the quote is priced), paints nothing for a
+job that is not restoration, and nothing while the back end answers "Unknown
+action"; any other failed read says so in words. Every rule is in the pure
+`RestorationOpsCore` between `// <ops-restoration-core>` sentinels. Recording a
+quote, that it was sent, or the builder's answer is done from the terminal
+tools today, not this screen. Guards: `npm run test:ops-restoration` (in
+`test:e2e`) and `tests/e2e/ops-restoration-panel.spec.js`.
+The board card shows the same phase as a chip (`// <makesafe-restoration-phase>`)
+from the price-free `restoration` block on the canonical `makesafe_board` row
+(a sent quote reads "Quote sent · waiting on builder approval"); it never
+re-derives the phase or moves the card. Guard:
+`tests/e2e/ops-makesafe-restoration-phase.spec.js`.
+
+## Add job photos page (`job-photos.html`)
+
+One job's photo upload from a link (`job-photos.html?jobId=<job uuid>`), for a
+trade who is filing a make-safe or restoration report through an AI and not
+the Trade app (secureworks-jarvis `sw_submit_makesafe_report`, which hands out
+this link). It is the Trade app's own upload and nothing else: the same
+sign-in (the shared Supabase session; its own small sign-in form when there is
+none), the same three calls (`get_upload_url`, the storage PUT,
+`confirm_upload` with phase `completion`) and the same picture size (longest
+side 1600, `compressImage` in `trade.html`; change the two together). It reads
+`trade_job_detail` once to name the job and count the photos on this visit,
+accepts only a job UUID, files no report and sends nothing; ops-api's own
+access check decides who may add photos. Rules live in the pure
+`JobPhotosCore` between `// <job-photos-core>` sentinels
+(`modules/job-photos.js`). Guards: `npm run test:job-photos` (in `test:e2e`)
+and `tests/e2e/job-photos-page.spec.js`.
+
 ## Ops make-safe board (`ops.html`)
 
 The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1.2`,
@@ -764,6 +820,45 @@ Keep the module free of long dashes and emojis. Guards: `npm run test:debt-works
 (in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
 This is the only debt screen: the old Clear Debt screens (Financials > Clear Debt) were removed in stage 6.
 
+## Tie to Xero (`modules/ops-xero-tieout.js`)
+
+Financials > Job profit has a third chip, Tie to Xero (`jpSetMode('tieout')`, host `#jpTieout`,
+search `// <xero-tieout>`). It reads ops-api `xero_tieout` once per open (months 6, 12 or 24) and
+writes nothing: by month, every supplier bill dollar in our copy of Xero as on a job, trade-app
+labour, overhead or not placed yet, with the reasons and whether the month adds up. Every figure
+is the server's (secureworks-backend `xero_tieout_monthly`); the page sorts no bill and adds no
+bucket. A part the server has not read (card spend, credit notes) reads "Not read yet", never
+$0.00, and a failed read or an answer without its months never draws an empty table. The same
+answer may carry a second read, `spend_revenue` (`xero_spend_revenue_monthly`): card and bank
+spend by Xero account and customer invoices against Job Profit, drawn beside the bills and never
+added to them. A month whose card lines are not read says "Not read yet"; without the second
+read, or when it failed (said in words), the page is the bills page. Rules live
+in the pure `XeroTieoutCore` between `// <xero-tieout-core>` sentinels. Same viewers as Job
+profit. Guards: `npm run test:xero-tieout` (in `test:e2e`, fails on a long dash or emoji) and
+`tests/e2e/ops-xero-tieout.spec.js`.
+
+## Financials > Work Orders: every job work order (`modules/ops-work-orders-list.js`)
+
+Listed like Quotes and Invoices (Marnin, 16 Nov 2026). One ops-api
+`list_work_orders?kind=job` read per open; each approved row's `cap` (allowed,
+billed by every trade, left, billed in full, over) is the server's, the same
+rule the invoice doors refuse by, and the page works none out. A cap not read
+is "Not read", never $0.00; a failed read never draws an empty list. Read
+only: a row opens `JobWorkOrderOps.openForJob`, a draft's Set amount / Approve
+scrolls to its row in the office fill queue below (`ops-office-wo-queue.js`,
+flag `job_work_order_office_fill_v1`), which owns those writes. Old crew work
+orders sit folded under it. Rules in `WorkOrdersListCore`
+(`// <work-orders-list-core>`). Guard: `tests/e2e/ops-work-orders-list.spec.js`.
+
+## Job profit: is the cost final (`ops.html`)
+
+Financials > Job profit words the server's `cost_close` answer (ops-api `job_profit` and
+`job_profit_list`, rule in secureworks-backend `docs/job-profit-read-contract.md`): a tag on each
+list row and the "Is the cost final?" section on a job. The page decides nothing: a failed read or a
+job the server did not answer is Not known, never Final and never Open, and an answer without the
+field draws nothing. Search `// <job-profit-cost-close>`. Guard:
+`tests/e2e/ops-job-profit-cost-close.spec.js`.
+
 ## Matching: the Context reconciliation list (`modules/ops-recon.js`)
 
 On by default since TP-11 (the tab, `data-recon-nav`, is headed Needs a person): after sign in
@@ -934,9 +1029,9 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
-A running draft for that same week is off unless `my_hours.running_invoice_draft`
-is true (`users.trade_details.runningInvoiceDraft`). `?invdraft=1` shows Save on
-one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
+A running draft for that same week shows when `my_hours.running_invoice_draft`
+is true; ops-api sends true unless `users.trade_details.runningInvoiceDraft`
+is false. `?invdraft=1` shows Save on one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
 and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
 GST, super and the weekly deduction are still worked out only on submit.
 Search `modules/trade-invoice-running-draft.js`. Guards:
@@ -1002,7 +1097,10 @@ row. ops-api recomputes the hours and refuses a time line without the fields
 own Extras row. The date worked cannot be after today (Perth), or more than a year
 before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
 onto a line: no default date or start, no device memory, no prefill from the
-schedule or clock on and off. A card, an Extras row and the job-view row open
+schedule or the clock alone. The one prefill is the trade's own saved times
+(`logged_time_entry` on `my_hours`: confirmed at clock off, which asks about a
+break, or saved on the job view), filled once into an empty card and shown for
+the trade to check (`// <clock-off-times>`, `// <invoice-saved-times>`). Otherwise a card, an Extras row and the job-view row open
 blank; a card shows hours on record only as a reminder. The job-view row
 records times against the job and never promises the week or the invoice.
 Lines that are not time carry none of the fields. Search
@@ -1016,6 +1114,40 @@ a spec that enters times on the fixture week's jobs needs
 Guards: `scripts/test-trade-time-entry.js`,
 `tests/e2e/trade-invoice-time-entry.spec.js`,
 `tests/e2e/ops-trade-invoice-times.spec.js`.
+
+## Trade adds themselves to a job from the invoice (`trade.html`)
+
+Being on a job (allocated, or accepted with "I'm on it") is what lets a trade
+invoice it (Marnin, 11 Nov 2026). Picking a job in the invoice's "+ Add job"
+is unchanged; when ops-api refuses the invoice with `extra_job_not_allowed`
+(403, nothing saved), the app asks to add the trade to each refused job for
+the day worked (`self_allocate_for_invoice`, which books only the caller,
+never texts) and then opens the one-invoice confirm again. Never book the
+trade at pick time: the app cannot see an invoice-any-job grant, and those
+trades' searched-in cards move between days and weeks. Search
+`// <invoice-self-allocate>`; contract in `trade-app.md` → "Pay tab: adding
+yourself to a job you invoice". Guard:
+`tests/e2e/trade-invoice-self-allocate-clock-off.spec.js`.
+
+## Trade invoice: the job decides how it is billed (`trade.html`)
+
+Marnin, 11 Nov 2026. A Weekly Invoice card starts in ops-api's `invoice_mode`
+for the job (`my_hours` rows; `trade_invoice_job_modes` for a searched-in job):
+hourly shows no work-order or commission choice, a work order keeps a small
+"Bill by hours instead", a group work order goes to the group, and Commission
+shows only where `can_claim_commission` is true. Never restate the rule in the
+app; with no mode (older ops-api, `invoice_mode_unavailable`, a failed read)
+the old Hours / Work Order / Commission toggle stays exactly as it was. A
+trade's own switch (`mode_picked`) is never undone. "+ Take an amount off" only
+deducts: an hours card still owes its times. A work-order job whose row
+carries `work_order_agreed_ex` (Marnin, 12 Nov 2026: an approved job work
+order) bills that amount read only, re-pinned from the server before every
+paint and submit and never kept from a saved draft; only without that field
+does an approved job work order still force hours (`tradeJobWoRetiresTypedBox`).
+ops-api's `work_order_amount_not_agreed` refusal is shown in words, never
+queued. The estimate takes no super on commission. Search `// <invoice-job-mode>`;
+contract in `trade-app.md` → "Pay tab: the job decides how it is billed".
+Guard: `tests/e2e/trade-invoice-job-mode.spec.js`.
 
 ## Trade weekly deduction: server figures only (`trade.html`, `ops.html`)
 
@@ -1267,6 +1399,33 @@ Gotchas:
   serialisation lands the previous day, which is what minted these inverted spans
   in the first place. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
   `tests/e2e/ops-schedule-lane-overlap.spec.js`.
+
+## SecureWorks Crew: the new trades' app (`crew/`)
+
+A from-scratch trades' app that runs beside `trade.html` (Marnin, 13 Nov 2026):
+same sign-in, same ops-api actions, so a trade can use either on the same day.
+`trade.html` stays the live app until the owner moves the crews over; do not
+retire, redirect or edit it from here. Conventions, file map, the look and the
+rules that must hold: `crew/README.md`; the decisions and how to reverse them:
+`crew/DECISIONS.md`. Five tabs (Today, Schedule, Jobs, Pay, Profile) in the
+accepted Scope Engine look, light only. No build step (plain ES modules,
+vendored Preact). It has its own storage keys (`crew:`), its own outbox and its
+own service worker scoped to `crew/`; it never reads or writes the old app's
+queues. Never put `trade` in a path or file name under `crew/`: `sw-trade.js`
+caches any path that contains it. Money follows the contract in
+secureworks-projects `job-profit/trade-app/contract.md`: the server owns every
+figure (anything computed in the app is labelled an estimate), an invoice is
+never sent twice, the app never guesses how a job is billed (`invoice_mode`
+from the server; unknown asks the office), expenses stay outside the invoice
+total, and the week's draft is the server's saved weekly draft in the shape
+`trade.html` writes, so either app picks up the other's. `?demo` runs it on
+made-up data with no network (`crew/js/demo/`), and that is what
+`tests/e2e/crew-*.spec.js` drive (every screen at 360, 390 and 430 wide).
+Three behaviours depend on ops-api switches that ship off (secureworks-backend
+`docs/trade-open-access-v1.md`): opening a job you are not on, booking yourself
+ahead, and typing your rate; with a switch off the app falls back in words,
+never with an error. `pr-check.yml` runs `tidy` on every changed `.html`, so
+keep only real pages under `crew/` (design canvases with custom elements fail it).
 
 ## Maintaining this file
 

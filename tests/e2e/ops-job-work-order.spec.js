@@ -1256,7 +1256,7 @@ test.describe('Review fixes: money, make-safe door, gate, work order list', () =
         { id: 'wo-job', wo_number: 'WO-JOB', kind: 'job', status: 'draft' },
       ]);
     });
-    await expect(page.locator('#woListNote')).toContainText('Job work orders open on each job page');
+    await expect(page.locator('#woListNote')).toContainText('Job work orders are listed above');
     await expect(page.locator('#woListNote')).toContainText('Old crew work orders stay listed here, read-only');
     const old = page.locator('#woTable [data-office-wo="wo-old"]');
     await expect(old).toContainText('Old crew work order (retiring)');

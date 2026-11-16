@@ -85,7 +85,7 @@
     };
   }
 
-  function enginePatio(scope, out) {
+  function enginePatio(scope, out, jobId) {
     var d = obj(scope.draft) || {};
     var site = obj(d.site) || {};
     var de = obj(d.design) || {};
@@ -115,9 +115,13 @@
     add('Design', 'Roof', SHAPES[shape] || cap(shape.replace(/-/g, ' ')));
     add('Design', 'Fixing', FIXINGS[str(de.fixing)] || cap(de.fixing));
     add('Design', 'Size', size);
-    add('Design', 'Height under beam', mm(de.frontHeightMm));
     if (known(de.pitchDeg) != null) add('Design', 'Pitch', known(de.pitchDeg) + '°');
-    if (known(de.posts) != null) add('Design', 'Posts', known(de.posts) + (pr.post ? ', ' + productWords(pr.post) : ''));
+    // Posts and heights are never read from the draft. draft.design.posts is the tool's starting count (3), which the
+    // Scope Engine replaces from the beam span tables while postsAuto is set, and draft.design.frontHeightMm (2,600 by
+    // default) is replaced by the house heights for a fascia or riser fix (scope-engine-v2 patio/scoper/src/compose.ts
+    // Design.posts, postsAuto, frontHeightMm). The record keeps no sealed figure for either, so the card shows none and
+    // links the sealed crew scope of works, which prints them as sealed.
+    out.inputs.push({ group: 'Design', label: 'Posts and heights', value: 'On the sealed crew scope of works', href: ENGINE_PATIO_URL + (jobId ? '?jobId=' + encodeURIComponent(jobId) : '') });
     add('Design', 'Roof sheet', productWords(pr.covering));
     if (/^gable|^hip/.test(shape)) add('Design', 'Gable infill', productWords(pr.infill));
     add('Design', 'Frame colour', colourWords(co.frame));
@@ -239,7 +243,7 @@
       kind: kindOf(scope), tool: null, trade: str(job.type) || null, family: null, supported: true,
       revision: null, inputs: [], notes: [], lines: [], documents: [], toolUrl: null
     };
-    if (out.kind === 'engine-patio') enginePatio(scope, out);
+    if (out.kind === 'engine-patio') enginePatio(scope, out, str(job.id));
     else if (out.kind === 'fence') fence(scope, out);
     else if (out.kind === 'old-patio') oldPatio(scope, out);
     if (!out.toolUrl) out.toolUrl = toolUrlFor(job);
@@ -322,8 +326,9 @@
     if (!inputs.length) return '';
     var h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px;">';
     inputs.forEach(function (f) {
-      h += '<div style="background:var(--sw-light);padding:6px 9px;min-width:0;"><div style="font-size:10px;color:var(--sw-text-sec);">' + esc(f.label) +
-        '</div><div style="font-size:12px;font-weight:600;color:var(--sw-dark);overflow-wrap:anywhere;">' + esc(f.value) + '</div></div>';
+      var value = f.href ? '<a href="' + esc(f.href) + '" target="_blank" rel="noopener" style="color:var(--sw-dark);">' + esc(f.value) + ' &#8599;</a>' : esc(f.value);
+      h += '<div style="background:var(--sw-light);padding:6px 9px;min-width:0;"' + (f.href ? ' data-scope-fact-link' : '') + '><div style="font-size:10px;color:var(--sw-text-sec);">' + esc(f.label) +
+        '</div><div style="font-size:12px;font-weight:600;color:var(--sw-dark);overflow-wrap:anywhere;">' + value + '</div></div>';
     });
     return h + '</div>';
   }

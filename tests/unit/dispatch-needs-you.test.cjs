@@ -47,6 +47,66 @@ test('To order: a supplier box whose order is not sent yet', () => {
   assert.deepEqual(reasons(job('j', [order('PO', { source: 'dispatch_order', order_sent: false, material_stage: 'order_materials' })])), []);
 });
 
+test('To order: every job at Order Materials counts, boxes or not', () => {
+  const at = (orders, board) => job('j', orders, { board: { stage_key: 'order_materials', track: 'pipeline', ...board } });
+  // No supplier box set up yet (the 8 patio jobs on 12 Nov 2026).
+  assert.deepEqual(reasons(at([])), ['order: Set up order']);
+  // An unsent box already says which supplier: no second tag.
+  assert.deepEqual(reasons(at([order('Metroll', { order_sent: false, sent_at: null, material_stage: 'order_materials' })])), ['order: Order Metroll']);
+  // Every box sent, the job still at the stage.
+  assert.deepEqual(reasons(at([order('Metroll', { material_stage: 'order_confirmed' })])), ['order: Still at Order materials']);
+  // A purchase order alone is not a box: the order is still to set up.
+  assert.deepEqual(reasons(at([order('PO', { source: 'dispatch_order', order_sent: true, material_stage: 'order_confirmed' })])), ['order: Set up order']);
+  // Repairs: their Materials stage is the ordering stage.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'materials', track: 'repairs' } })), ['order: Set up order']);
+  // Later stages with nothing unsent: not to order.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'awaiting_supplier', track: 'pipeline' } })), []);
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'scheduled', track: 'repairs' } })), []);
+  // Archived: never.
+  assert.deepEqual(reasons(job('j', [], { board: { stage_key: 'order_materials', view: 'archive' } })), []);
+  // The chip counts each job once.
+  const s = N.summarise([at([]), job('k', [], { board: { stage_key: 'order_materials' } })], ctx(), 0);
+  assert.equal(s.counts.order, 2);
+});
+
+test('Order drafted: a box with its email saved and not sent is out of To order (Shaun, 13 Nov 2026)', () => {
+  const unsent = (name, extra = {}) => order(name, { order_sent: false, sent_at: null, material_stage: 'order_materials', flag: 'not_sent', order_drafted: false, ...extra });
+  // Kevin Beaver SWP-261641 on 13 Nov: both boxes drafted, the job at Order
+  // Materials. Order drafted alone: no To order tag from the stage.
+  const kevin = job('kevin', [unsent('Panelmakers', { order_drafted: true }), unsent('CMI', { order_drafted: true })],
+    { board: { stage_key: 'order_materials', track: 'pipeline' } });
+  assert.deepEqual(reasons(kevin), ['drafted: Send Panelmakers order', 'drafted: Send CMI order']);
+  // Angus Roxburgh SWP-261178: CMI and Bondor sent, Ampelite drafted.
+  const angus = job('angus', [order('CMI', { order_drafted: false }), order('Bondor', { order_drafted: false }), unsent('Ampelite', { order_drafted: true })],
+    { board: { stage_key: 'scheduled', track: 'pipeline' } });
+  assert.deepEqual(reasons(angus), ['drafted: Send Ampelite order']);
+  // One box drafted, one with nothing written: one tag under each chip.
+  const both = job('both', [unsent('Metroll'), unsent('Stratco', { order_drafted: true })]);
+  assert.deepEqual(reasons(both), ['order: Order Metroll', 'drafted: Send Stratco order']);
+  // A sent box with a new draft (an extra order) is drafted too.
+  assert.deepEqual(reasons(job('x', [order('Stratco', { order_drafted: true })])), ['drafted: Send Stratco order']);
+  // At Order Materials with every box sent and nothing drafted: still To order.
+  assert.deepEqual(reasons(job('y', [order('Stratco', { order_drafted: false })], { board: { stage_key: 'order_materials' } })), ['order: Still at Order materials']);
+  // A purchase order is never drafted here.
+  assert.deepEqual(reasons(job('z', [order('PO', { source: 'dispatch_order', order_drafted: true })])), []);
+  // The chips: each job once per chip.
+  const s = N.summarise([kevin, angus, both], ctx(), 0);
+  assert.equal(s.counts.order, 1);
+  assert.equal(s.counts.drafted, 3);
+  assert.deepEqual(s.ids.drafted, ['kevin', 'angus', 'both']);
+  assert.equal(s.shown.drafted, true);
+  // The chip sits right after To order.
+  assert.deepEqual(N.KINDS.slice(0, 3).map((k) => k.label), ['To order', 'Order drafted', 'To pay']);
+});
+
+test('Order drafted: a server without order_drafted hides the chip, and its drafts stay under To order', () => {
+  const s = N.summarise([job('a', [order('Metroll', { order_sent: false, sent_at: null, material_stage: 'order_materials' })])], ctx(), 0);
+  assert.equal(s.shown.drafted, false);
+  assert.equal(s.counts.order, 1);
+  // No boxes at all: nothing to say it is missing, so the chip shows (at 0).
+  assert.equal(N.summarise([job('b', [])], ctx(), 0).shown.drafted, true);
+});
+
 test('To pay: payment.to_pay, and the same rule for a server without it', () => {
   assert.deepEqual(reasons(job('j', [order('CMI', { material_stage: 'awaiting_payment', payment: { state: 'unpaid', to_pay: true } })])), ['pay: Pay CMI']);
   assert.deepEqual(reasons(job('j', [order('CMI', { material_stage: 'awaiting_payment', payment: { state: 'unpaid', to_pay: false } })])), []);
@@ -112,7 +172,7 @@ test('summarise counts jobs per chip, the jobs needing anything, and the tab tot
     job('c', [order('C1')]),
   ];
   const s = N.summarise(jobs, ctx(), 4);
-  assert.deepEqual(s.counts, { order: 1, pay: 2, replied: 0, follow: 0, risk: 0, emails: 4 });
+  assert.deepEqual(s.counts, { order: 1, drafted: 0, pay: 2, replied: 0, follow: 0, risk: 0, emails: 4 });
   assert.deepEqual(s.ids.pay, ['a', 'b']);
   assert.equal(s.jobs, 2);
   assert.equal(s.total, 6);

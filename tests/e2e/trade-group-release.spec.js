@@ -130,9 +130,10 @@ test('the group shows once with its one hours form; the job card links to it', a
   await expect(jobCard).toHaveCount(1);
   await expect(jobCard.locator('[data-group-hours-form], [data-group-crew-row], [data-group-sign-open]')).toHaveCount(0);
   await expect(jobCard).toContainText('Paid through its group work order. Add your hours there, under Group work orders above.');
-  await expect(jobCard.locator('[data-group-mode] [aria-pressed="true"]')).toHaveText('Group work order');
-  await expect(jobCard.getByRole('button', { name: 'Hours', exact: true })).toBeDisabled();
-  await expect(jobCard.getByRole('button', { name: 'Commission', exact: true })).toBeDisabled();
+  // Paid from the pool: the card says so, with no Hours or Commission choice.
+  await expect(jobCard.locator('[data-group-mode]')).toHaveText('Paid through the group work order');
+  await expect(jobCard.getByRole('button', { name: 'Hours', exact: true })).toHaveCount(0);
+  await expect(jobCard.getByRole('button', { name: 'Commission', exact: true })).toHaveCount(0);
   await jobCard.scrollIntoViewIfNeeded();
   await jobCard.getByRole('button', { name: 'Go to the group work order', exact: true }).click();
   await expect(card.locator('.gw-title')).toBeInViewport();

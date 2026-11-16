@@ -227,9 +227,9 @@ assert.strictEqual(travelLine.work_order_id, undefined)
 // The same travel figures on an hours card still owe a date, start and finish.
 out = build([card({ travel_amount: 30, start_time: '', finish_time: '', break_minutes: 0 })], WEEK)
 assert.match(out.error, /SWF-26001: add the date, start time and finish time you worked/)
-// A card that only carries an amount bills no time and owes no times.
+// An amount on an hours card is only taken off (Marnin, 11 Nov 2026): a card
+// that carries only an amount still owes its date, start and finish.
 out = build([card({ start_time: '', finish_time: '', break_minutes: 0, wo_lump_lines: [{ description: 'Tip fees', amount: 40 }] })], WEEK)
-assert(!out.error, out.error)
-assert.strictEqual(out.manualAssignments.length, 0)
+assert.match(out.error, /SWF-26001: add the date, start time and finish time you worked\.$/)
 
 console.log('trade time entry: rules and payload shape OK')

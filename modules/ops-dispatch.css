@@ -795,6 +795,7 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc-v2-draft { border-color: #C9D6DD; }
 .dpc-v2-draft .dpc-suphead { background: #FBF8F5; }
 .dpc-v2-isblocked { border-color: #E9C98A; }
+.dpc-v2-rmask { margin: 10px 12px 0; }
 .dpc-v2-blocked { margin: 10px 12px 0; padding: 9px 12px; border-radius: 8px; background: #FDF3E1; color: #7A4D00; font-size: 13px; }
 .dpc-v2-main { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--steel-2); cursor: pointer; white-space: nowrap; }
 .dpc-v2-main small { font-weight: 400; color: var(--mute); }
@@ -898,8 +899,9 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 
 /* Needs you now (Tweak 3): the bar under the Dispatch header, its chips, the
    tags on each job card, and the count on the Dispatch tab. Colours by kind:
-   To order and To pay orange (on us), Supplier replied blue, Follow up amber,
-   Date at risk red, Emails to sort purple. */
+   To order and To pay orange (on us), Order drafted teal (on us, only the
+   send left), Supplier replied blue, Follow up amber, Date at risk red,
+   Emails to sort purple. */
 .dpc-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 14px; background: #fff; border: 1px solid #e3e8eb; border-left: 4px solid #A83C16; border-radius: 8px; }
 .dpc-needs-title { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--ink); margin-right: 6px; }
 .dpc-needs-note { font-size: 12.5px; color: var(--mute); }
@@ -910,6 +912,7 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc .dpc-needs-chip.dpc-needs-zero { --nc: #9fb0ba; cursor: default; }
 .dpc .dpc-needs-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .dpc .dpc-need-order, .dpc .dpc-need-pay { --nc: #A83C16; }
+.dpc .dpc-need-drafted { --nc: #1f6f5c; }
 .dpc .dpc-need-replied { --nc: #2c5d86; }
 .dpc .dpc-need-follow { --nc: #9A6200; }
 .dpc .dpc-need-risk { --nc: #b3261e; }

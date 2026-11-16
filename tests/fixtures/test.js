@@ -67,12 +67,20 @@ const test = base.extend({
   // so on my_hours (trade_rate_editable). Off, the stub stands in for today's
   // ops-api, which bills its own rate whatever the browser posts.
   tradeRateEditable: [false, { option: true }],
+  // How each job is billed (Marnin, 11 Nov 2026), as ops-api answers it.
+  // myHoursPatch: { top: {...}, assignments: { <assignment id>: {...} } } is
+  // merged into my_hours (invoice_mode, can_claim_commission,
+  // invoice_mode_unavailable). invoiceJobModes: { <job id>: {...} } answers
+  // trade_invoice_job_modes; null leaves that action unregistered (404), as
+  // an older ops-api would.
+  myHoursPatch: [null, { option: true }],
+  invoiceJobModes: [null, { option: true }],
   feedRequests: async ({}, use) => {
     const requests = [];
     await use(requests);
   },
 
-  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay, tradeRateEditable }, use) => {
+  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay, tradeRateEditable, myHoursPatch, invoiceJobModes }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
     if (appWeekDay != null) {
@@ -143,6 +151,18 @@ const test = base.extend({
       { id: 'e2e-admin-job-claim-makesafe', job_number: 'SWMS-261290', type: 'makesafe', status: 'complete', client_name: 'Claim Ref Client', site_suburb: 'Morley', external_ref: 'MLB-40398' }
     ];
     const withTradeRateCapability = (hours) => (tradeRateEditable ? { ...hours, trade_rate_editable: true } : hours);
+    const patchHours = (hours) => {
+      if (!myHoursPatch || !hours || typeof hours !== 'object' || Number.isInteger(hours.status)) return hours;
+      const byId = myHoursPatch.assignments || {};
+      return {
+        ...hours,
+        ...(myHoursPatch.top || {}),
+        assignments: (hours.assignments || []).map((a) => (byId[a.id] ? { ...a, ...byId[a.id] } : a))
+      };
+    };
+    const withInvoiceModes = (handler) => (typeof handler === 'function'
+      ? async (ctx) => patchHours(await handler(ctx))
+      : patchHours(handler));
     const labourExplainerHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -913,7 +933,8 @@ const test = base.extend({
       'trade-invoice-week-collision-legacy': ['generate_trade_invoice'],
       'trade-invoice-total-drift': [],
       'trade-invoice-stale-week': [],
-      'trade-invoice-multi-week': ['generate_trade_invoice'],
+      'trade-invoice-multi-week': ['generate_trade_invoice', 'self_allocate_for_invoice'],
+      'trade-invoice-saved-times': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
@@ -953,6 +974,18 @@ const test = base.extend({
           const events = [repairFamilyEvent, plainRepairEvent].filter((event) =>
             event.scheduled_date >= from && event.scheduled_date <= to);
           return { events, orgEvents: [] };
+        },
+        // A trade adds themselves to a job from the invoice (ops-api
+        // self_allocate_for_invoice): only ever the caller, one day.
+        self_allocate_for_invoice: async ({ request }) => {
+          const body = request.postDataJSON() || {};
+          const job = multiWeekJobs.find((entry) => entry.id === body.job_id);
+          if (!job) return { status: 404, body: { ok: false, code: 'self_allocate_job_not_found', error: 'We could not find that job in your company.' } };
+          return {
+            ok: true,
+            mode: 'created',
+            assignment: { id: 'self-' + body.job_id + '-' + body.work_date, job_id: body.job_id, scheduled_date: body.work_date, status: 'confirmed' }
+          };
         },
         search_all_jobs: ({ url }) => {
           if (feedScenario === 'trade-invoice-multi-week') {
@@ -1192,7 +1225,24 @@ const test = base.extend({
         crew_charges_on_my_jobs: { charges: [] },
         my_job_work_order: { work_order: null, reason: 'no_approved_work_order' },
         my_group_work_orders: { enabled: true, groups: [], group_job_ids: [] },
-        my_hours: feedScenario === 'trade-invoice-running-draft'
+        ...(invoiceJobModes ? {
+          trade_invoice_job_modes: ({ url }) => ({
+            jobs: (url.searchParams.get('job_ids') || '').split(',').filter((id) => invoiceJobModes[id])
+              .map((id) => ({ job_id: id, ...invoiceJobModes[id] }))
+          })
+        } : {}),
+        my_hours: withInvoiceModes(feedScenario === 'trade-invoice-saved-times'
+          // Times the trade saved on the job card at clock off, as ops-api
+          // returns them (logged_time_entry, loggedTimeEntryForCard).
+          ? {
+            ...labourExplainerHours,
+            assignments: labourExplainerHours.assignments.map((a, i) => (i === 0 ? {
+              ...a,
+              hours_worked: 7.5,
+              logged_time_entry: { work_date: a.scheduled_date, start_time: '07:00:00', finish_time: '15:00:00', break_minutes: 30, hours: 7.5 }
+            } : a))
+          }
+          : feedScenario === 'trade-invoice-running-draft'
           ? { ...labourExplainerHours, running_invoice_draft: true }
           : deductionDraftScenario
           ? ({ url }) => deductionDraftHours(url.searchParams.get('week_ending'))
@@ -1325,7 +1375,7 @@ const test = base.extend({
               assignments: [],
               total_hours: 0,
               already_submitted: false
-            }),
+            })),
         my_trade_invoices: feedScenario === 'trade-invoice-multi-week'
           ? () => ({
             invoices: Object.entries(multiWeekLive).map(([monday, inv]) => ({

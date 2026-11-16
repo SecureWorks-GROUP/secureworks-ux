@@ -33,7 +33,10 @@ test('engine patio: scope inputs in words, in the design and site groups', () =>
   assert.equal(v('Roof'), 'Gable, end to the yard');
   assert.equal(v('Fixing'), 'On risers over the gutter');
   assert.equal(v('Size'), '7,200 x 4,500 mm (32.4 m²)');
-  assert.equal(v('Posts'), '3, 100x100 SHS');
+  // Posts and heights are not taken from the draft (its starting count and default height); the card links the sealed page.
+  assert.equal(v('Posts'), undefined);
+  assert.equal(v('Height under beam'), undefined);
+  assert.equal(v('Posts and heights'), 'On the sealed crew scope of works');
   assert.equal(v('Roof sheet'), 'Trimdek');
   assert.equal(v('Frame colour'), 'Monument');
   assert.equal(v('Heights'), '6 of 8 measured');

@@ -139,6 +139,8 @@ function fakeV2(seed = {}) {
           material_stage: stageOut(j, sid),
         };
       }),
+      unboxed_sent_emails: j.emails.filter((m) => m.status === 'sent' && !j.boxes.includes(m.supplier_id))
+        .map((m) => ({ supplier_id: m.supplier_id, supplier_name: m.supplier_name, email: emailOut(m) })),
     };
   };
   const bodyOf = (j, sid, lines, date, fulfilment, photos = 0) => {
@@ -254,11 +256,22 @@ function fakeV2(seed = {}) {
       j.boxes.push(b.supplier_id);
       return { success: true, supplier: Object.assign(out, { position: j.boxes.length }) };
     },
+    // The X (Shaun, 12 Nov 2026): the box goes with its lines, photos and held
+    // email; a sent email is kept. Refused only while an email is sending.
     dispatch_v2_remove_supplier: (url, b) => {
+      const f = forced('dispatch_v2_remove_supplier');
+      if (f) return f;
       const j = job(b.job_id);
-      if (j.lines.some((l) => l.supplier_id === b.supplier_id) || j.photos.some((p) => p.supplier_id === b.supplier_id)) return no(409, 'supplier_has_lines');
+      if (!j.boxes.includes(b.supplier_id)) return { success: true, unchanged: true };
+      const mine = (x) => x.supplier_id === b.supplier_id;
+      if (j.emails.some((m) => mine(m) && ['sending', 'send_unknown'].includes(m.status))) return no(409, 'supplier_email_sending');
+      const held = j.emails.filter((m) => mine(m) && m.status === 'draft');
+      held.forEach((m) => { m.status = 'discarded'; });
+      const lines = j.lines.filter(mine).length;
+      j.lines = j.lines.filter((l) => !mine(l));
+      j.photos = j.photos.filter((p) => !mine(p));
       j.boxes = j.boxes.filter((x) => x !== b.supplier_id);
-      return { success: true };
+      return { success: true, removed: { lines, held_emails_discarded: held.length } };
     },
     // The stage press: refused when the screen's stamp is not the box's.
     dispatch_v2_set_material_stage: (url, b) => {
@@ -649,13 +662,53 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
     await expect(plain.locator('[data-dpc-v2="send"], [data-dpc-v2="test"]')).toHaveCount(0);
   });
 
-  test('a box with nothing in it can be taken off; a box with a line has no cross', async ({ page }) => {
+  test('every box has a cross; it asks first, Cancel keeps the box, Remove takes it off with its lines', async ({ page }) => {
     const fake = fakeV2(SPLIT());
     const { mat, writes } = await boot(page, fake);
-    await expect(boxOf(mat, 'Acacia Steel').locator('[data-dpc-v2="remove-sup"]')).toHaveCount(0);
-    await boxOf(mat, 'Banksia Roofing').locator('[data-dpc-v2="remove-sup"]').click();
+    const banksia = boxOf(mat, 'Banksia Roofing');
+    await banksia.locator('[data-dpc-v2="remove-sup"]').click();
+    await expect(banksia.locator('.dpc-v2-rmask')).toContainText('Remove Banksia Roofing? Nothing is sent to Banksia Roofing.');
+    await banksia.locator('[data-dpc-v2="remove-sup-no"]').click();
+    await expect(banksia.locator('.dpc-v2-rmask')).toHaveCount(0);
+    expect(writes()).toEqual([]);
+    await banksia.locator('[data-dpc-v2="remove-sup"]').click();
+    await banksia.locator('[data-dpc-v2="remove-sup-yes"]').click();
     await expect(boxOf(mat, 'Banksia Roofing')).toHaveCount(0);
-    expect(writes().map((c) => [c.action, c.body.supplier_id])).toEqual([['dispatch_v2_remove_supplier', SID(2)]]);
+    // A box with a line has its cross too, and says what goes with it.
+    const acacia = boxOf(mat, 'Acacia Steel');
+    await acacia.locator('[data-dpc-v2="remove-sup"]').click();
+    await expect(acacia.locator('.dpc-v2-rmask')).toContainText('Remove Acacia Steel Pty Ltd and its 1 line? Nothing is sent to Acacia Steel Pty Ltd.');
+    await acacia.locator('[data-dpc-v2="remove-sup-yes"]').click();
+    await expect(boxOf(mat, 'Acacia Steel')).toHaveCount(0);
+    await expect(mat.locator('.dpc-mat-notice')).toHaveText('Acacia Steel Pty Ltd was taken off this job. Nothing was sent to them.');
+    await expect(mat.locator(`[data-dpc-v2-row="${LID(1)}"]`)).toHaveCount(0);
+    expect(writes().map((c) => [c.action, c.body.supplier_id])).toEqual([
+      ['dispatch_v2_remove_supplier', SID(2)],
+      ['dispatch_v2_remove_supplier', SID(1)],
+    ]);
+  });
+
+  test('taking off a box with a sent order keeps the sent email in Emails', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    fake.jobs['job-f1'].emails.push({
+      id: EID(90), job_id: 'job-f1', supplier_id: SID(1), supplier_name: SUPPLIERS[SID(1)].name, from: ADMIN, test: null,
+      status: 'sent', sent: { sent_at: '2026-10-28T01:00:00.000Z', sent_by_email: 'shaun@example.test', from: ADMIN, to: ['orders@acacia.example'], cc: [] },
+      to: ['orders@acacia.example'], cc: [], subject: 'Material Order Ref SWF-920001', body_text: 'Hi Team', edited: false,
+      delivery_date: '2026-11-04', fulfilment: 'delivery', line_count: 1, line_ids: [LID(1)], photo_ids: [], empty_detail_lines: [], last_error: null,
+      updated_at: '2026-10-28T01:00:00.000Z',
+    });
+    const { mat } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    await acacia.locator('[data-dpc-v2="remove-sup"]').click();
+    await expect(acacia.locator('.dpc-v2-rmask')).toContainText("The order already sent stays in this job's Emails.");
+    await acacia.locator('[data-dpc-v2="remove-sup-yes"]').click();
+    await expect(boxOf(mat, 'Acacia Steel')).toHaveCount(0);
+    const item = page.locator('.dpc-mail-item', { hasText: 'Material Order Ref SWF-920001' });
+    if (!(await item.count())) await page.locator('[data-dpc-mail-toggle]').click();
+    await expect(item).toHaveCount(1);
+    await item.click();
+    await expect(page.locator('.dpc-mail-view')).toContainText('Acacia Steel Pty Ltd was taken off this job in Materials. This sent email is kept.');
+    await expect(page.locator('.dpc-mail-view [data-dpc-mail-goto]')).toHaveCount(0);
   });
 
   test('a line is dragged into a box, between boxes and back to the Draft list, one move each; Move to does the same on a phone; a refused move goes back', async ({ page }) => {

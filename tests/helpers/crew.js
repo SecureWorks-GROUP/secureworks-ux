@@ -1,0 +1,20 @@
+// Helpers for the SecureWorks Crew specs. The app runs on its own in-browser
+// demo server (?demo), so these specs make no network calls at all.
+const NOW = '2026-11-13T09:00:00+08:00'; // a Friday, so the demo week has past days in it
+
+function crewUrl(hash = '#/today', persona = 'crew') {
+  // The hash may carry its own query (#/job/x?tab=notes); that is fine after the page query.
+  return `/crew/?demo=${persona}&now=${encodeURIComponent(NOW)}${hash}`;
+}
+
+/** Fail the test on any console error or uncaught page error. */
+function watchErrors(page) {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e && e.message)));
+  return errors;
+}
+
+const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true };
+
+module.exports = { crewUrl, watchErrors, PHONE, NOW };

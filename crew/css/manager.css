@@ -1,0 +1,92 @@
+/* SecureWorks Crew: the manager view of Schedule (Everyone), the allocate
+   sheet and the availability screen. Tokens and shared components are in
+   app.css; every class here is this group's own. */
+
+/* ---------- everyone: people by days ---------- */
+.typepicks { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; }
+.typepicks .pick { min-height: 44px; padding: 0 4px; font-size: 13px; line-height: 18px; text-align: center; }
+.everyone { padding-top: 10px; }
+.whogrid { display: grid; gap: 3px; padding: 0 8px; }
+.whogrid .wh { height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 16px; font-weight: 800; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.whogrid .wh.today { color: var(--ember); }
+.whogrid .wh { gap: 4px; }
+.whogrid.seven .wh { flex-direction: column; gap: 0; height: 34px; }
+.wcell { flex-direction: column; }
+.wcell small { font-size: 12px; line-height: 14px; font-weight: 700; }
+.wname, .wcell { height: 44px; border-radius: var(--r); display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; border: 1.5px solid transparent; min-width: 0; }
+.wname { justify-content: flex-start; padding: 0 6px; background: var(--card); border-color: var(--mist); font-size: 13px; line-height: 18px; font-weight: 700; color: var(--slate); text-align: left; }
+.wname:active { background: var(--frost); }
+.wcell { font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; background: var(--frost); color: var(--slate); }
+.wcell:active { background: var(--press); }
+.wcell.conf { background: var(--ok-bg); color: var(--ok-text); }
+.wcell.tent { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-text); }
+.wcell.onsite { background: var(--slate); color: #FFFFFF; }
+.wcell.free { background: var(--card); border: 1.5px dashed var(--edge); }
+.wcell.off { background: var(--mist); }
+.wcell.none { background: transparent; }
+.wlegend { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 10px 16px 0; font-size: 12px; line-height: 16px; font-weight: 700; color: var(--mid); }
+.wlegend span { display: inline-flex; align-items: center; gap: 5px; }
+.wlegend i { width: 12px; height: 12px; border-radius: var(--r); background: var(--frost); border: 1.5px solid transparent; }
+.wlegend i.conf { background: var(--ok-bg); }
+.wlegend i.tent { background: var(--warn-bg); border-color: var(--warn-text); }
+.wlegend i.onsite { background: var(--slate); }
+.wlegend i.free { background: var(--card); border: 1.5px dashed var(--edge); }
+.wlegend i.off { background: var(--mist); }
+.wnote { padding: 8px 20px 0; }
+.tosched { grid-template-columns: minmax(0, 1fr) auto; }
+.tosched > .main { text-align: left; min-height: 44px; align-content: center; }
+.tosched > .main:active { background: var(--frost); }
+.pstatus { display: grid; gap: 2px; }
+.pstatus b { font-size: 15px; line-height: 20px; font-weight: 700; }
+
+/* ---------- allocate sheet ---------- */
+.alloc .seg button { text-align: center; }
+.aljob { display: grid; gap: 2px; padding: 12px 14px; }
+.aljob .t-head { overflow-wrap: anywhere; }
+.altick { width: 22px; height: 22px; border: 1.5px solid var(--edge); border-radius: var(--r); background: var(--card); display: grid; place-items: center; color: transparent; flex: none; }
+.altick.on { background: var(--slate); border-color: var(--slate); color: #FFFFFF; }
+.alcrew-head { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 4px 6px 4px 14px; }
+.alcrew-head .grow { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.alcrew-head b { font-size: 15px; line-height: 20px; font-weight: 700; }
+.alnote { padding: 8px 14px 10px; border-top: 1px solid var(--mist); }
+.aldays-h { display: flex; justify-content: space-between; align-items: center; }
+.aldays-h > span { display: flex; }
+.aldays-h .iconbtn:disabled, .avnav .iconbtn:disabled { color: var(--mist); }
+
+/* ---------- availability ---------- */
+.avsum { display: grid; gap: 4px; margin-bottom: 0; }
+.strip14 { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; margin-top: 8px; }
+.strip14 span { display: grid; gap: 4px; justify-items: stretch; }
+.strip14 small { text-align: center; font-size: 12px; line-height: 14px; font-weight: 700; color: var(--mid); }
+.strip14 .today small { color: var(--ember); }
+.strip14 i { height: 8px; background: var(--card); border: 1.5px solid var(--edge); }
+.strip14 .booked i { background: var(--slate); border-color: var(--slate); }
+.strip14 .unavailable i, .strip14 .leave i { background: var(--mist); border-color: var(--mist); }
+.avcal { padding: 0 8px 10px; }
+.avnav { display: flex; align-items: center; justify-content: space-between; min-height: 48px; }
+.avhead { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); font-size: 12px; line-height: 16px; font-weight: 700; color: var(--mid); text-align: center; padding-bottom: 4px; }
+.avgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.aday { height: 46px; border-radius: var(--r); border: 2px solid transparent; background: var(--card); display: grid; justify-items: center; align-content: center; gap: 2px; position: relative; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.aday:active:not(:disabled) { background: var(--press); }
+.aday .num { width: 26px; height: 26px; border-radius: var(--r); display: grid; place-items: center; font-size: 15px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.aday .mark { width: 18px; height: 5px; border-radius: var(--r); display: block; }
+.aday.booked .mark { background: var(--slate); }
+.aday.offday { background: var(--mist); }
+.aday.leave { background: var(--card); border-color: var(--slate); border-style: dashed; border-width: 1.5px; }
+.aday.today .num { background: var(--ember); color: #FFFFFF; }
+.aday:disabled { color: var(--mid); background: none; }
+.aday:disabled .num { font-weight: 500; }
+.aday.changed::after { content: ''; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; background: var(--slate); }
+.avlegend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 8px 0; font-size: 12px; line-height: 16px; font-weight: 700; color: var(--mid); }
+.avlegend span { display: inline-flex; align-items: center; gap: 6px; }
+.avlegend i { width: 12px; height: 12px; border-radius: var(--r); border: 1.5px solid transparent; }
+.avlegend i.booked { width: 14px; height: 5px; background: var(--slate); }
+.avlegend i.offday { background: var(--mist); }
+.avlegend i.leave { background: var(--card); border: 1.5px dashed var(--slate); }
+.avlegend i.changed { width: 7px; height: 7px; background: var(--slate); border-radius: 0; }
+.avhint { margin-top: 8px; padding: 0 4px; }
+.avreason .v { text-align: left; }
+.weekpicks { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.weekpicks .pick { padding: 0; min-height: 48px; font-size: 13px; text-align: center; }
+
+/* ---------- details (Profile group's screen still reads these two) ---------- */

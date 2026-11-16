@@ -67,7 +67,7 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
   await page.getByRole('button', { name: 'My Work Orders' }).click();
   await expect(page.getByRole('heading', { name: 'My Work Orders' })).toBeVisible();
   await expect(page.locator('[data-work-order-card]')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Add to Weekly Invoice' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open in Work Order Invoice' })).toBeVisible();
 
   const hubReads = feedRequests.filter((entry) => entry.method === 'GET' && entry.action === 'my_work_orders');
   expect(hubReads.length).toBeGreaterThan(0);

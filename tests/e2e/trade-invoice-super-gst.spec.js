@@ -123,7 +123,7 @@ test('shows the 12/6/6 super split and submits the saved GST choice', async ({ a
   expect(attach.body.xero_bill_id).toBe('xero-e2e-super-gst');
 });
 
-test('installer Hours cards can add lump-sum amounts as a peer to hours', async ({ appPage: page, feedRequests }) => {
+test('installer Hours cards can take an amount off the hours', async ({ appPage: page, feedRequests }) => {
   await signIn(page, PERSONAS.installer);
   await page.locator('[data-view="hours"]').click();
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();

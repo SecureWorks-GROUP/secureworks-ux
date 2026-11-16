@@ -4592,7 +4592,7 @@
     h += '<div class="dpc-field"><span>CC</span><span class="dpc-field-val">' + esc(cc.join(', ') || 'None') + '</span></div>';
     h += '<div class="dpc-field"><span>Subject</span><span class="dpc-field-val">' + esc(text(m.subject) || 'No subject') + '</span></div>';
     var facts = [v2Count(m.line_count, 'line', 'lines')];
-    if (m.photo_ids.length) facts.push(v2Count(m.photo_ids.length, 'photo', 'photos'));
+    if (m.photo_ids.length) facts.push(v2AttachWords(it.box && it.box.photos, m.photo_ids));
     var day = parseDay(m.delivery_date);
     if (day) facts.push((m.fulfilment === 'pickup' ? 'pickup' : 'delivery') + ' asked for ' + dayText(day));
     h += '<p class="dpc-mail-msg">' + esc(facts.join(', ') + '.') + '</p>';
@@ -4865,7 +4865,10 @@
   var V2_PHOTO_LIMIT = 3000000; // Outlook's limit per attachment; the server checks the real bytes
   var V2_PHOTO_AIM = 2700000; // the screen shrinks a photo to under this first
   var V2_PHOTO_SIDE = 2000; // longest side, in pixels, after shrinking
-  var V2_EMAIL_PHOTOS = 3; // the most photos one email carries
+  var V2_EMAIL_PHOTOS = 10; // the most photos and files one email carries (3 before 16 Nov 2026)
+  // Photos AND files on a box (Shaun, 16 Nov 2026): the rules are in
+  // modules/dispatch-order-files.js, loaded before this file.
+  function v2OF() { return global.OpsDispatchOrderFiles; }
   var V2_FIND_MS = 250;
   var V2_DETAIL_WORDS = { date: 'Date', address: 'Address', contact: 'Contact' };
   var V2_USED_FOR = { fencing: 'Fencing', patio: 'Patio', 'fencing+patio': 'Fencing and patio', any: 'Any job' };
@@ -4894,7 +4897,9 @@
   function v2PhotoFrom(p) {
     return {
       id: String(p.id), supplier_id: p.supplier_id == null ? null : String(p.supplier_id), file_name: text(p.file_name) || 'Photo',
-      size_bytes: Number(p.size_bytes) || 0, added_at: p.added_at || null
+      size_bytes: Number(p.size_bytes) || 0, added_at: p.added_at || null,
+      // A row can hold a file (16 Nov 2026): kind 'photo' or 'file', and a tag (PDF, Excel, CSV, Word).
+      content_type: text(p.content_type), kind: p.kind === 'file' || p.kind === 'photo' ? p.kind : '', file_label: text(p.file_label)
     };
   }
 
@@ -5170,6 +5175,13 @@
     return (mb > 0 && mb < 0.1 ? '0.1' : mb.toFixed(1)) + ' MB';
   }
   function v2Count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  // "1 photo", "2 files", "1 photo and 2 files" for the ids an email names,
+  // looked up in the box's photos and files (an id not there counts as a photo).
+  function v2AttachWords(photos, ids) {
+    var byId = {};
+    (Array.isArray(photos) ? photos : []).forEach(function (p) { if (p) byId[p.id] = p; });
+    return v2OF().attachWords(ids.map(function (id) { return byId[id] || { id: id }; }));
+  }
 
   // ── reads ──
 
@@ -5228,8 +5240,9 @@
     if (code === 'date_mode_changed') return { changed: true, text: 'This order\'s date choice was changed somewhere else. Showing the latest.' };
     if (V2_CHANGED.indexOf(code) >= 0) return { changed: true, text: 'This changed somewhere else. Showing the latest.' };
     if (code === 'too_many_lines') return { text: 'A job can hold 500 lines at most.' };
-    if (code === 'too_many_photos') return { text: 'A job can hold 20 photos at most. Delete one first.' };
-    if (code === 'photo_on_email') return { text: 'That photo is on an order email. Take it off the email, or discard the email, first.' };
+    if (code === 'too_many_photos') return { text: 'A job can hold 40 photos and files at most. Delete one first.' };
+    if (code === 'photo_on_email') return { text: 'That photo or file is on an order email. Take it off the email, or discard the email, first.' };
+    if (code === 'attachments_too_large') return { text: 'These photos and files come to more than 20 MB. One order email can carry at most 20 MB. Take some off and send them on a second email.' };
     if (code === 'supplier_has_lines') return { text: 'Move this box\'s lines and photos out first, then take the supplier off.' };
     if (code === 'supplier_has_emails') return { text: 'This supplier has an email on this job, so the box stays.' };
     if (code === 'supplier_inactive') return { text: 'That supplier contact is no longer active in Xero, so it cannot be added.' };
@@ -5500,7 +5513,7 @@
     var lines = b.lines.length + e.local.filter(function (l) { return l.supplier_id === sid; }).length;
     var parts = [];
     if (lines) parts.push(v2Count(lines, 'line', 'lines'));
-    if (b.photos.length) parts.push(v2Count(b.photos.length, 'photo', 'photos'));
+    if (b.photos.length) parts.push(v2OF().attachWords(b.photos));
     if (b.open && !b.open.sent) parts.push('the held order email');
     var ask = 'Remove ' + b.name + (parts.length ? ' and its ' + v2JoinAnd(parts) : '') + '? Nothing is sent to ' + b.name + '.';
     if (b.sent.length) ask += ' The order already sent stays in this job\'s Emails.';
@@ -5908,43 +5921,88 @@
     });
   }
 
-  var V2_PHOTO_WORDS = {
-    photo_type_not_allowed: 'Dispatch can only send JPEG, PNG or WebP photos, and this file is another kind (an iPhone HEIC photo or a PDF, for example). ' +
-      'Take a screenshot of it and add that, or on the iPhone set Camera, Formats to Most Compatible.'
-  };
+  // For an iPhone HEIC photo the browser could not open. HEIC is still not
+  // taken (16 Nov 2026); the server refuses it by name.
+  var V2_HEIC_TIP = ' For an iPhone HEIC photo, take a screenshot of it and add that, or on the iPhone set Camera, Formats to Most Compatible.';
 
-  function v2UploadPhoto(jobId, sid, file) {
+  // Why one picked or dropped file was not added, starting with its name.
+  function v2UploadRefusal(file, err) {
+    var OF = v2OF();
+    var name = text(file && file.name) || 'This file';
+    var code = err && err.code;
+    var photo = OF.pickedKind(file && file.name, file && file.type) === 'photo';
+    var size = err && err.body && Number(err.body.size_bytes);
+    if (code === 'photo_too_large' || code === 'file_too_large') {
+      if (photo) return name + ' is too big to send' + (size ? ' (' + v2Mb(size) + ')' : '') + '. Outlook takes 3 MB at most. Take a smaller photo, or a screenshot of it, and add that.';
+      return name + ' is ' + (size ? OF.mb(size) : 'over 3 MB') + '. Each photo or file must be under 3 MB to go with an Outlook email. Shrink it, or send that one from Outlook.';
+    }
+    if (code === 'photo_type_not_allowed' || code === 'file_type_not_allowed') {
+      return name + ' cannot be attached. ' + OF.ALLOWED_WORDS + (photo ? V2_HEIC_TIP : '');
+    }
+    var w = v2Words(err, 'It was not added.') || { text: 'It was not added.' };
+    return name + ': ' + w.text;
+  }
+
+  // One file up: a photo shrunk to a JPEG first, a file as it is. Resolves
+  // { name, ok, text, changed }; never rejects.
+  function v2UploadOne(jobId, sid, file) {
     var e = v2Entry(jobId);
-    var key = 'photo:' + v2KeyAttr(sid);
-    if (!e || e.status !== 'ok' || !file || e.busy[key]) return;
-    e.busy[key] = true;
-    delete e.msg[key];
-    paintV2();
-    var base = text(file.name).replace(/\.[^.]+$/, '') || 'photo';
-    v2Shrink(file).then(function (jpeg) {
-      return jpeg ? { name: base + '.jpg', data: jpeg } : v2RawFile(file).then(function (raw) { return { name: text(file.name) || 'photo', data: raw }; });
+    var OF = v2OF();
+    var name = text(file && file.name) || 'photo';
+    var early = OF.precheck(file);
+    if (early) return Promise.resolve({ name: name, ok: false, text: early.text });
+    var asPhoto = OF.pickedKind(file.name, file.type) === 'photo';
+    var base = name.replace(/\.[^.]+$/, '') || 'photo';
+    return (asPhoto ? v2Shrink(file) : Promise.resolve(null)).then(function (jpeg) {
+      return jpeg ? { name: base + '.jpg', data: jpeg } : v2RawFile(file).then(function (raw) { return { name: name, data: raw }; });
     }).then(function (p) {
       return global.opsPost('dispatch_v2_upload_photo', { job_id: jobId, supplier_id: sid, file_name: p.name, data_base64: p.data });
     }).then(v2Ok).then(function (resp) {
-      delete e.busy[key];
       if (!isObj(resp.photo) || !resp.photo.id) throw new Error('Unexpected answer');
       var ph = v2PhotoFrom(resp.photo);
       var list = v2PhotosOf(e, ph.supplier_id);
       if (list && !list.some(function (x) { return x.id === ph.id; })) list.push(ph);
-      e.msg[key] = { text: 'Photo added: ' + ph.file_name + ', ' + v2Mb(ph.size_bytes) + '.' };
-      paintV2If(jobId);
+      var said = OF.isFile(ph) ? 'File added: ' + ph.file_name + ' (' + OF.label(ph) + '), ' + v2Mb(ph.size_bytes) + '.'
+        : 'Photo added: ' + ph.file_name + ', ' + v2Mb(ph.size_bytes) + '.';
+      return { name: ph.file_name, ok: true, text: said };
     }).catch(function (err) {
-      delete e.busy[key];
-      var code = err && err.code;
-      if (code === 'photo_too_large') {
-        var size = err.body && Number(err.body.size_bytes);
-        e.msg[key] = { bad: true, text: 'This photo is too big to send' + (size ? ' (' + v2Mb(size) + ')' : '') + '. Outlook takes 3 MB at most. Take a smaller photo, or a screenshot of it, and add that.' };
+      var w = v2Words(err, null);
+      return { name: name, ok: false, text: v2UploadRefusal(file, err), changed: !!(w && w.changed) };
+    });
+  }
+
+  // Photos and files picked or dropped on one box go up one at a time, in
+  // the order given, and the box then says which went and which did not (by
+  // name). A second pick while one is going is not taken.
+  function v2UploadFiles(jobId, sid, files) {
+    var e = v2Entry(jobId);
+    var key = 'photo:' + v2KeyAttr(sid);
+    var all = Array.prototype.slice.call(files || []).filter(Boolean);
+    if (!e || e.status !== 'ok' || !all.length || e.busy[key]) return;
+    var results = [];
+    delete e.msg[key];
+    var step = function (i) {
+      if (i >= all.length) {
+        delete e.busy[key];
+        e.msg[key] = v2OF().batchMessage(results);
+        var changed = results.filter(function (r) { return r.changed; })[0];
+        if (changed) { v2Changed409(jobId, changed.text); return; }
         paintV2If(jobId);
         return;
       }
-      if (V2_PHOTO_WORDS[code]) { e.msg[key] = { bad: true, text: V2_PHOTO_WORDS[code] }; paintV2If(jobId); return; }
-      v2Fail(jobId, key, err, 'The photo was not added.');
-    });
+      var f = all[i];
+      e.busy[key] = { at: i + 1, of: all.length, name: text(f.name) || 'photo', photo: v2OF().pickedKind(f.name, f.type) === 'photo' };
+      paintV2If(jobId);
+      v2UploadOne(jobId, sid, f).then(function (r) { results.push(r); step(i + 1); });
+    };
+    step(0);
+  }
+
+  // The busy line while files go up.
+  function v2UploadingText(busy) {
+    if (!busy || typeof busy !== 'object') return 'Shrinking and adding the photo...';
+    if (busy.of > 1) return 'Adding ' + busy.at + ' of ' + busy.of + ': ' + busy.name + '...';
+    return busy.photo ? 'Shrinking and adding the photo...' : 'Adding ' + busy.name + '...';
   }
 
   function v2MovePhoto(jobId, photoId, sid) {
@@ -5999,10 +6057,13 @@
       var url = safeUrl(resp && resp.url);
       if (!url) throw new Error('No link');
       paintV2If(jobId);
-      if (typeof global.openOpsLightbox === 'function') global.openOpsLightbox(url); else global.open(url, '_blank', 'noopener');
+      var row = v2Photo(e, photoId);
+      var file = row && v2OF().isFile(row);
+      if (!file && typeof global.openOpsLightbox === 'function') global.openOpsLightbox(url); else global.open(url, '_blank', 'noopener');
     }).catch(function () {
       delete e.busy[key];
-      e.msg[key] = { bad: true, text: 'Could not open the photo.', retry: true };
+      var row = v2Photo(e, photoId);
+      e.msg[key] = { bad: true, text: row && v2OF().isFile(row) ? 'Could not open the file.' : 'Could not open the photo.', retry: true };
       paintV2If(jobId);
     });
   }
@@ -6436,11 +6497,14 @@
         var key = 'ph:' + p.id;
         var busy = e.busy[key];
         var onMail = lockedIds[p.id];
-        h += '<div class="dpc-v2-photo"><button type="button" class="dpc-textbtn dpc-v2-photoname" data-dpc-v2="photo-view" data-dpc-v2-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>' +
+        var isFile = v2OF().isFile(p);
+        var what = isFile ? 'file' : 'photo';
+        h += '<div class="dpc-v2-photo' + (isFile ? ' dpc-v2-isfile' : '') + '">' + (isFile ? '<span class="dpc-v2-kind">' + esc(v2OF().label(p)) + '</span>' : '') +
+          '<button type="button" class="dpc-textbtn dpc-v2-photoname" data-dpc-v2="photo-view" data-dpc-v2-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>' +
           esc(p.file_name) + ' <small>' + esc(v2Mb(p.size_bytes)) + (busy === 'view' ? ', opening...' : '') + '</small></button>';
         if (!onMail) {
-          h += '<select class="dpc-v2-move" data-dpc-v2-pmove="' + esc(p.id) + '" aria-label="Move photo to"' + (busy ? ' disabled' : '') + '>' + v2MoveOptions(e, sid) + '</select>';
-          h += '<button type="button" class="dpc-x" data-dpc-v2="photo-del" data-dpc-v2-id="' + esc(p.id) + '" aria-label="Delete photo ' + esc(p.file_name) + '"' + (busy ? ' disabled' : '') + '>&times;</button>';
+          h += '<select class="dpc-v2-move" data-dpc-v2-pmove="' + esc(p.id) + '" aria-label="Move ' + what + ' to"' + (busy ? ' disabled' : '') + '>' + v2MoveOptions(e, sid) + '</select>';
+          h += '<button type="button" class="dpc-x" data-dpc-v2="photo-del" data-dpc-v2-id="' + esc(p.id) + '" aria-label="Delete ' + what + ' ' + esc(p.file_name) + '"' + (busy ? ' disabled' : '') + '>&times;</button>';
         } else {
           h += '<small class="dpc-muted">' + esc(onMail) + '</small>';
         }
@@ -6450,7 +6514,7 @@
       h += '</div>';
     }
     var pkey = 'photo:' + k;
-    if (e.busy[pkey]) h += '<div class="dpc-card-msg" role="status">Shrinking and adding the photo...</div>';
+    if (e.busy[pkey]) h += '<div class="dpc-card-msg" role="status">' + esc(v2UploadingText(e.busy[pkey])) + '</div>';
     h += v2MsgHtml(e.msg[pkey]);
     return h;
   }
@@ -6466,9 +6530,11 @@
 
   function v2FootHtml(e, sid, extra) {
     var k = esc(v2KeyAttr(sid));
-    var h = '<div class="dpc-card-foot"><button type="button" class="dpc-addline" data-dpc-v2="addline" data-dpc-v2-sid="' + k + '">+ Add line</button>';
-    h += '<button type="button" class="dpc-addline" data-dpc-v2="photo-add" data-dpc-v2-sid="' + k + '"' + (e.busy['photo:' + v2KeyAttr(sid)] ? ' disabled' : '') + '>+ Add photo</button>';
-    h += '<input type="file" accept="image/*" hidden data-dpc-v2-file="' + k + '" aria-label="Add photo">';
+    // A drop area (desktop): photos or files dropped anywhere on the box go up (16 Nov 2026).
+    var h = '<div class="dpc-v2-drop" data-dpc-v2-drop="' + k + '">Drop photos or files here</div>';
+    h += '<div class="dpc-card-foot"><button type="button" class="dpc-addline" data-dpc-v2="addline" data-dpc-v2-sid="' + k + '">+ Add line</button>';
+    h += '<button type="button" class="dpc-addline" data-dpc-v2="photo-add" data-dpc-v2-sid="' + k + '"' + (e.busy['photo:' + v2KeyAttr(sid)] ? ' disabled' : '') + '>+ Add photo or file</button>';
+    h += '<input type="file" multiple accept="' + esc(v2OF().ACCEPT) + '" hidden data-dpc-v2-file="' + k + '" aria-label="Add photos or files">';
     return h + (extra || '') + '</div>';
   }
 
@@ -6562,7 +6628,7 @@
       if (b.blocked) h += '<p class="dpc-v2-hint">Make email and Send now are off: this supplier has no approved order email.</p>';
       else if (ms.photoOnly) h += '<p class="dpc-v2-hint dpc-v2-photoonly">' + esc(ms.hint) + (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
       else if (!n) h += '<p class="dpc-v2-hint">' + esc(ms.hint) + '</p>';
-      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order' + (ms.photos ? ', with ' + esc(v2Count(Math.min(ms.photos, V2_EMAIL_PHOTOS), 'photo', 'photos')) + ' attached' : '') +
+      else h += '<p class="dpc-v2-hint">' + esc(v2Count(n, 'line', 'lines')) + ' to order' + (ms.photos ? ', with ' + esc(v2OF().attachWords(v2OF().pickForEmail(global.OpsDispatchMakeEmail.unsentPhotos(b)))) + ' attached' : '') +
         '. The email is held for you to check; nothing is sent until you press Send now and confirm.' + (asap ? ' Its Date line will say ASAP.' : '') + '</p>';
       // The order already sent keeps the date choice it went out with: say
       // so when the next email's choice is different.
@@ -6611,7 +6677,7 @@
       (d.teamCc.question ? ' <strong>Open question:</strong> ' + esc(d.teamCc.question) : '') + '</p>';
     h += '<div class="dpc-field"><label for="dpcV2Sub' + id + '">Subject</label><input id="dpcV2Sub' + id + '" type="text" maxlength="250" data-dpc-v2-mf="subject" data-dpc-v2-mid="' + id + '" value="' + f('subject') + '"></div>';
     h += '<textarea class="dpc-textarea dpc-v2-body" maxlength="20000" data-dpc-v2-mf="body" data-dpc-v2-mid="' + id + '" aria-label="Email body">' + f('body') + '</textarea>';
-    // Photos: the box's photos, three at most on one email.
+    // Photos and files: ten at most on one email, 20 MB at most together (16 Nov 2026).
     var typedPh = e.mailTyped[m.id] && e.mailTyped[m.id].photo_ids;
     var chosen = typedPh || m.photo_ids;
     if (b.photos.length) {
@@ -6619,11 +6685,12 @@
       b.photos.forEach(function (p) {
         var on = chosen.indexOf(p.id) >= 0;
         h += '<label><input type="checkbox" data-dpc-v2-attach="' + esc(p.id) + '" data-dpc-v2-mid="' + id + '"' + (on ? ' checked' : '') +
-          (!on && chosen.length >= V2_EMAIL_PHOTOS ? ' disabled' : '') + '> ' + esc(p.file_name) + ' <small>' + esc(v2Mb(p.size_bytes)) + '</small></label>';
+          (!on && !v2OF().canTick(chosen, b.photos, p.id) ? ' disabled' : '') + '> ' + (v2OF().isFile(p) ? '<span class="dpc-v2-kind">' + esc(v2OF().label(p)) + '</span> ' : '') +
+          esc(p.file_name) + ' <small>' + esc(v2Mb(p.size_bytes)) + '</small></label>';
       });
       h += '</div>';
     } else {
-      h += '<p class="dpc-v2-hint">No photo attached. Add one to this box to attach it.</p>';
+      h += '<p class="dpc-v2-hint">No photo or file attached. Add one to this box to attach it.</p>';
     }
     // A photo-only email with every photo taken off has nothing to order.
     if (global.OpsDispatchMakeEmail.heldEmailIsEmpty(m.line_count, chosen)) h += '<p class="dpc-v2-warn" role="note">This email has no lines and no photo. Tick a photo, or discard it.</p>';
@@ -6658,7 +6725,7 @@
       var cc = v2Arr(s.cc).length ? v2Arr(s.cc) : m.cc;
       h += '<details class="dpc-v2-sentitem"><summary><strong>' + esc(m.subject) + '</strong> <small>' + esc(stampText(s.sent_at)) + (text(s.sent_by_email) ? ' by ' + esc(s.sent_by_email) : '') + '</small></summary>';
       h += '<p class="dpc-v2-hint">From ' + esc(text(s.from) || m.from) + ' to ' + esc(to.join(', ')) + (cc.length ? ', CC ' + esc(cc.join(', ')) : '') + '. ' +
-        esc(v2Count(m.line_count, 'line', 'lines')) + (m.photo_ids.length ? ', ' + esc(v2Count(m.photo_ids.length, 'photo', 'photos')) : '') + '.</p>';
+        esc(v2Count(m.line_count, 'line', 'lines')) + (m.photo_ids.length ? ', ' + esc(v2AttachWords(b.photos, m.photo_ids)) : '') + '.</p>';
       h += '<pre class="dpc-v2-pre">' + esc(m.body) + '</pre></details>';
     });
     return h + '</div>';
@@ -6755,7 +6822,7 @@
     h += '<span>To</span><span>' + esc(test ? V2_FROM : m.to.join(', ')) + '</span>';
     h += '<span>CC</span><span>' + esc(test ? 'None' : (m.cc.join(', ') || 'None')) + '</span>';
     h += '<span>Subject</span><span>' + esc((test ? 'TEST ONLY: ' : '') + m.subject) + '</span>';
-    h += '<span>Lines</span><span>' + esc(v2Count(m.line_count, 'line', 'lines') + ', ' + (photos ? v2Count(photos, 'photo', 'photos') : 'no photo')) + '</span>';
+    h += '<span>Lines</span><span>' + esc(v2Count(m.line_count, 'line', 'lines') + ', ' + (photos ? v2AttachWords(b.photos, m.photo_ids) : 'no photo')) + '</span>';
     h += '</div>';
     if (test) h += '<p class="dpc-v2-hint">Only admin@ gets this copy, marked TEST ONLY. ' + esc(sup) + ' gets nothing. Check it in admin@, then come back and press Send now.</p>';
     if (again) h += '<p class="dpc-v2-warn">Only send again if the email is not in admin@ Sent Items. If it did go, ' + esc(sup) + ' gets it twice.</p>';
@@ -6882,10 +6949,10 @@
     // Delivery or pickup: kept on the screen until Make email; nothing is sent.
     if (t.hasAttribute('data-dpc-v2-fulfil')) { e.fulfil[t.getAttribute('data-dpc-v2-fulfil')] = t.value === 'pickup' ? 'pickup' : 'delivery'; paintV2(); return true; }
     if (t.hasAttribute('data-dpc-v2-file')) {
-      var file = t.files && t.files[0];
+      var picked = Array.prototype.slice.call(t.files || []);
       var where = v2Key(t.getAttribute('data-dpc-v2-file'));
       t.value = '';
-      if (file) v2UploadPhoto(jobId, where, file);
+      if (picked.length) v2UploadFiles(jobId, where, picked);
       return true;
     }
     if (t.hasAttribute('data-dpc-v2-attach')) {
@@ -6976,7 +7043,25 @@
     var z = ev.target && ev.target.closest ? ev.target.closest('[data-dpc-v2-box]') : null;
     return z && root() && root().contains(z) ? z : null;
   }
+  function v2Highlight(z) {
+    var r = root();
+    if (!r) return;
+    Array.prototype.forEach.call(r.querySelectorAll('.dpc-v2-over'), function (x) { if (x !== z) x.classList.remove('dpc-v2-over'); });
+    if (z) z.classList.add('dpc-v2-over');
+  }
+  // A file from the computer over the screen (16 Nov 2026). Over a box it
+  // lights up the box; anywhere else on Dispatch the drop is refused, so a
+  // PDF let go in the wrong place never opens over the screen.
+  function onV2FileDragOver(ev) {
+    var z = v2DropZone(ev);
+    ev.preventDefault();
+    try { ev.dataTransfer.dropEffect = z ? 'copy' : 'none'; } catch (x) { /* an old browser */ }
+    var r = root();
+    if (r) r.classList.add('dpc-v2-filedrag');
+    v2Highlight(z);
+  }
   function onV2DragOver(ev) {
+    if (!state.v2m.drag && global.OpsDispatchOrderFiles && v2OF().isFileDrag(ev.dataTransfer)) { onV2FileDragOver(ev); return; }
     if (!state.v2m.drag) return;
     var z = v2DropZone(ev);
     if (!z) return;
@@ -6989,16 +7074,30 @@
   function onV2Drop(ev) {
     var id = state.v2m.drag;
     var z = v2DropZone(ev);
+    if (!id && global.OpsDispatchOrderFiles && v2OF().isFileDrag(ev.dataTransfer)) {
+      ev.preventDefault();
+      v2DragEnd();
+      var files = ev.dataTransfer && ev.dataTransfer.files;
+      if (z && files && files.length) v2UploadFiles(state.jobId, v2Key(z.getAttribute('data-dpc-v2-box')), files);
+      return;
+    }
     if (!id || !z) return;
     ev.preventDefault();
     v2DragEnd();
     v2MoveLine(state.jobId, id, v2Key(z.getAttribute('data-dpc-v2-box')));
+  }
+  // A file dragged off Dispatch again: the boxes go back to how they were.
+  function onV2DragLeave(ev) {
+    if (state.v2m.drag) return;
+    var r = root();
+    if (r && (!ev.relatedTarget || !r.contains(ev.relatedTarget))) v2DragEnd();
   }
   function v2DragEnd() {
     state.v2m.drag = null;
     var r = root();
     if (!r) return;
     r.classList.remove('dpc-v2-dragging');
+    r.classList.remove('dpc-v2-filedrag');
     Array.prototype.forEach.call(r.querySelectorAll('.dpc-v2-over'), function (x) { x.classList.remove('dpc-v2-over'); });
   }
 
@@ -7454,6 +7553,7 @@
       r.addEventListener('dragstart', onV2DragStart);
       r.addEventListener('dragover', onV2DragOver);
       r.addEventListener('drop', onV2Drop);
+      r.addEventListener('dragleave', onV2DragLeave);
       r.addEventListener('dragend', v2DragEnd);
       wired = true;
     }

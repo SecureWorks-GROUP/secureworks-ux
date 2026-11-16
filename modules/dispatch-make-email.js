@@ -10,7 +10,8 @@
  *   1. Lines that count: not In stock, not already sent, and with words in
  *      them (an empty, untyped row is not a line).
  *   2. Photos that count: the box's photos that have not gone out on a sent
- *      email. The server attaches only these (three at most), so a photo is
+ *      email. The server attaches only these (ten at most, 20 MB at most
+ *      together, photos and files alike, from 16 Nov 2026), so a photo is
  *      never sent to the supplier twice.
  *   3. No line and at least one photo is a photo-only email. Its Materials
  *      Needed part says "Please see attached for materials needed." and the

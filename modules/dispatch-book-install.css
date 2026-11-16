@@ -1,0 +1,32 @@
+/* Dispatch v2: Book install under the Install row
+   (modules/dispatch-book-install.js). Scoped under .dpc like
+   modules/ops-dispatch.css, and using its tokens. Desktop only. */
+.dpc-bi { border-top: 1px solid var(--galv); padding: 10px 12px 12px; }
+.dpc-bi-sub { display: block; font: 500 11px var(--mono); color: var(--mute); }
+.dpc-bi-line { font-size: 13.5px; }
+.dpc-bi-line strong { font-weight: 600; }
+.dpc-bi-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.dpc .dpc-bi-acts button { font-size: 13px; padding: 6px 14px; }
+.dpc .dpc-bi-red { color: #A33; border-color: #E3B5B5; }
+.dpc .dpc-bi-red:hover:not(:disabled) { border-color: #A33; }
+.dpc-bi-chip { display: inline-block; margin-left: 4px; border-radius: 100px; padding: 2px 10px; font-size: 11.5px; font-weight: 700; vertical-align: 1px; }
+.dpc-bi-chip-t { background: #FDF3E1; color: #9A6200; }
+.dpc-bi-chip-c { background: #E6F3EA; color: #2F7D4F; }
+.dpc-bi-msg { margin-top: 8px; font-size: 13px; color: var(--mute); }
+.dpc-bi-err { color: var(--signal-deep); }
+.dpc-bi-ask { margin-top: 8px; font-size: 13px; }
+.dpc-bi-form { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.dpc-bi-head { display: flex; justify-content: space-between; gap: 8px; background: var(--galv-2); padding: 8px 12px; font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--mute); }
+.dpc-bi-form > .dpc-bi-fld, .dpc-bi-form > .dpc-bi-acts, .dpc-bi-form > .dpc-bi-msg { margin-left: 12px; margin-right: 12px; }
+.dpc-bi-form > .dpc-bi-acts { margin-bottom: 12px; }
+.dpc-bi-fld { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 4px 10px; margin-top: 8px; font-size: 13px; }
+.dpc-bi-fld > small { grid-column: 2; font-size: 12px; color: var(--mute); }
+.dpc-bi-fld input[type="date"], .dpc-bi-fld input[type="number"], .dpc-bi-fld select { justify-self: start; }
+.dpc-bi-fld input, .dpc-bi-fld select { border: 1px solid #C9D3D9; border-radius: 7px; padding: 5px 10px; background: #fff; font: 13px var(--body); color: var(--ink); }
+.dpc-bi-fld input[type="number"] { width: 80px; }
+.dpc-bi-fld input[type="text"] { width: 100%; }
+.dpc-bi-helpers { display: flex; flex-wrap: wrap; gap: 6px; }
+.dpc-bi-helper { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--galv-2); font-size: 12.5px; cursor: pointer; user-select: none; }
+.dpc-bi-helper.on { border-color: var(--steel-2); background: #fff; }
+.dpc-bi-move { margin-top: 8px; }
+.dpc-bi-move > small { display: block; margin-top: 4px; font-size: 12px; color: var(--mute); }

@@ -52,7 +52,7 @@ test.describe('Dispatch v2: Needs you now', () => {
     const { root } = await boot(page, fake, { api: twoJobs(fake, { emails: 3 }) });
     const bar = root.locator('[data-dpc-region="needs"]');
     await expect(bar.locator('.dpc-needs-title')).toHaveText('Needs you now');
-    await expect(bar.locator('.dpc-needs-chip')).toHaveText(['To order 1', 'To pay 1', 'Supplier replied 0', 'Follow up 0', 'Date at risk 0', 'Emails to sort 3']);
+    await expect(bar.locator('.dpc-needs-chip')).toHaveText(['To order 1', 'Order drafted 0', 'To pay 1', 'Supplier replied 0', 'Follow up 0', 'Date at risk 0', 'Emails to sort 3']);
     await expect(chip(root, 'Supplier replied')).toBeDisabled();
     // The job with orders on us: one tag per reason, in chip order.
     await expect(card(root, 'SWR-930001').locator('.dpc-need')).toHaveText(['Order Metroll', 'Pay Lysaght', 'Pay Twinside Retaining']);
@@ -81,6 +81,22 @@ test.describe('Dispatch v2: Needs you now', () => {
     await chip(root, 'To order').click();
     await expect(root.locator('.dpc-job')).toHaveCount(1);
     await expect(card(root, 'SWR-930002')).toBeVisible();
+  });
+
+  test('a box with its order email drafted shows under Order drafted, not To order (13 Nov 2026)', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true, fresh: true });
+    fake.boxes.find((b) => b.name === 'Metroll').drafted = true;
+    const { root } = await boot(page, fake, { api: twoJobs(fake) });
+    await expect(card(root, 'SWR-930001').locator('.dpc-need-drafted')).toHaveText('Send Metroll order');
+    await expect(card(root, 'SWR-930001').locator('.dpc-need-order')).toHaveCount(0);
+    await expect(chip(root, 'Order drafted')).toHaveText('Order drafted 1');
+    await expect(chip(root, 'To order')).toHaveText('To order 0');
+    // The chip sits right after To order.
+    await expect(root.locator('.dpc-needs-chip').nth(1)).toHaveText('Order drafted 1');
+    await chip(root, 'Order drafted').click();
+    await expect(root.locator('.dpc-job')).toHaveCount(1);
+    await expect(card(root, 'SWR-930001')).toBeVisible();
+    if (process.env.DPC_SHOT) await page.screenshot({ path: process.env.DPC_SHOT + '-order-drafted.png' });
   });
 
   test('a chip keeps only its jobs; pressed again, every job shows', async ({ page }) => {

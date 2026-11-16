@@ -16,10 +16,15 @@
  *     at Quote received under Supplier replied.
  *   - Emails to sort: the Unmatched supplier emails tray's own count.
  *
- * The six kinds, in the order the bar shows them:
- *   order   To order          a supplier box whose order is not sent yet, and
- *                             every job at the Order Materials stage (repairs:
- *                             Materials), boxes or not (Shaun's Go, 12 Nov 2026)
+ * The seven kinds, in the order the bar shows them:
+ *   order   To order          a supplier box whose order is not sent yet and
+ *                             has no email written, and every job at the
+ *                             Order Materials stage (repairs: Materials) with
+ *                             nothing drafted (Shaun's Go, 12 Nov 2026)
+ *   drafted Order drafted     a supplier box with its order email saved as a
+ *                             draft and not sent: only the send is left
+ *                             (order_drafted on the board; Shaun's Go,
+ *                             13 Nov 2026). It moves the box out of To order.
  *   pay     To pay            a pay-first box at Awaiting payment (payment.to_pay)
  *   replied Supplier replied  a box at Quote received to check, or a matched
  *                             reply with a date suggestion to Accept
@@ -52,6 +57,7 @@
   // The chips, in order. jobs: false for a kind that counts emails, not jobs.
   var KINDS = [
     { key: 'order', label: 'To order', jobs: true },
+    { key: 'drafted', label: 'Order drafted', jobs: true },
     { key: 'pay', label: 'To pay', jobs: true },
     { key: 'replied', label: 'Supplier replied', jobs: true },
     { key: 'follow', label: 'Follow up', jobs: true },
@@ -141,7 +147,11 @@
       var stage = text(o.material_stage);
       if (stage === 'delivered') return;
       var name = nameOf(o);
-      if (o.source === 'supplier_box' && o.order_sent === false) add('order', 'Order ' + name);
+      // A box whose email is written and saved is Order drafted, not To
+      // order (Shaun, 13 Nov 2026): only the send is left. A sent box with a
+      // new draft (an extra order) is drafted too.
+      if (o.source === 'supplier_box' && o.order_drafted === true) add('drafted', 'Send ' + name + ' order');
+      else if (o.source === 'supplier_box' && o.order_sent === false) add('order', 'Order ' + name);
       if (toPay(o)) add('pay', 'Pay ' + name);
       if (stage === 'quote_received') add('replied', 'Check ' + name + ' quote');
       // Still at Sent to supplier: no reply has moved it on.
@@ -160,10 +170,12 @@
     // Materials with no supplier box set up, so the box rule above never saw
     // them. One with an unsent box already carries "Order <supplier>"; one
     // with no box at all needs its order set up; one whose boxes are all sent
-    // is still at the stage and waits to be moved on.
+    // is still at the stage and waits to be moved on. One with an email
+    // drafted is under Order drafted alone (Shaun, 13 Nov 2026): its order is
+    // written, so it is not To order as well.
     var stageKey = text(b.stage_key);
     var atOrderStage = stageKey === 'order_materials' || (stageKey === 'materials' && b.track === 'repairs');
-    if (atOrderStage && !out.some(function (r) { return r.kind === 'order'; })) {
+    if (atOrderStage && !out.some(function (r) { return r.kind === 'order' || r.kind === 'drafted'; })) {
       var boxes = orders.filter(function (o) { return o.source === 'supplier_box'; });
       add('order', boxes.length ? 'Still at Order materials' : 'Set up order');
     }
@@ -180,19 +192,26 @@
 
   // Whether the board carries what a chip needs. A kind with nothing to go
   // on is hidden rather than shown as a false 0:
+  //   drafted needs each box's order_drafted (an older server leaves it out,
+  //     and its drafts simply stay under To order),
   //   follow needs each order's sent_at (an older server leaves it out),
   //   emails needs the tray's count (null when the tray was not read or failed).
   function available(jobs, emails) {
-    var anyOrder = false, anySentAt = false;
+    var anyOrder = false, anySentAt = false, anyBox = false, anyDrafted = false;
+    var has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
     jobs.forEach(function (j) {
       var a = j && isObj(j.board) && isObj(j.board.arrival) && Array.isArray(j.board.arrival.orders) ? j.board.arrival.orders : [];
       a.forEach(function (o) {
         if (!isObj(o)) return;
         anyOrder = true;
-        if (Object.prototype.hasOwnProperty.call(o, 'sent_at')) anySentAt = true;
+        if (has(o, 'sent_at')) anySentAt = true;
+        if (o.source === 'supplier_box') {
+          anyBox = true;
+          if (has(o, 'order_drafted')) anyDrafted = true;
+        }
       });
     });
-    return { order: true, pay: true, replied: true, follow: !anyOrder || anySentAt, risk: true, emails: typeof emails === 'number' && isFinite(emails) };
+    return { order: true, drafted: !anyBox || anyDrafted, pay: true, replied: true, follow: !anyOrder || anySentAt, risk: true, emails: typeof emails === 'number' && isFinite(emails) };
   }
 
   // The whole bar. jobs: [{ id, board, suggestions }]; emails: the tray's

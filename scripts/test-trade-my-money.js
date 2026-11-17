@@ -178,7 +178,6 @@ function extractFunction(name) {
   return html.slice(start, next === -1 ? html.length : next);
 }
 
-
 context.esc = function (s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];

@@ -10,12 +10,12 @@ import { Page, Button, Badge, SkelRows, Empty, LoadError, toast, ask } from '../
 import { PayRows, PayGroup, PayLine, InvoiceBadge, superNote, whenWords, weekWords, cash, hrs, num } from '../ui/paybits.js';
 
 const LINE_KIND = {
-  travel: 'Travel', materials: 'Materials', equipment: 'Equipment', commission: 'Commission', 'work order': 'Work order', work_order: 'Work order',
+  reimbursement: 'Reimbursement (receipt)', travel: 'Travel', materials: 'Materials', equipment: 'Equipment', commission: 'Commission', 'work order': 'Work order', work_order: 'Work order',
   'group share': 'Your share', group_share: 'Your share', crew_work_order_deduction: 'Crew paid separately', labour_deduction: 'Crew labour paid separately',
   'final payout deduction': 'Adjustment', final_payout_deduction: 'Adjustment', deduction: 'Adjustment', lump_sum: 'Adjustment', adjustment: 'Adjustment', other: 'Other'
 };
 // The pay type each line sits under, in the order they are listed.
-const GROUPS = [['hourly', 'Hourly'], ['work_order', 'Work order'], ['group', 'Group work order'], ['commission', 'Commission'], ['other', 'Other items'], ['off', 'Adjustment']];
+const GROUPS = [['hourly', 'Hourly'], ['work_order', 'Work order'], ['group', 'Group work order'], ['commission', 'Commission'], ['reimbursement', 'Reimbursements'], ['other', 'Other items'], ['off', 'Adjustment']];
 const typeOf = (l) => String(l.line_type || 'labour').toLowerCase();
 const isLabour = (l) => typeOf(l) === 'labour';
 function groupOf(l) {
@@ -24,6 +24,7 @@ function groupOf(l) {
   if (/group.?share/.test(t) || l.group_share_id) return 'group';
   if (t === 'work order' || t === 'work_order') return 'work_order';
   if (t === 'commission') return 'commission';
+  if (t === 'reimbursement') return 'reimbursement';
   if (/deduction|lump/.test(t)) return 'off';
   return 'other';
 }
@@ -139,6 +140,6 @@ function LineItem({ line: l }) {
   const detail = [day ? `${fmtDow(day)} ${fmtDom(day)}` : '', sameStart ? '' : kind.toLowerCase(), priced].filter(Boolean).join(' · ');
   const notes = [labour ? whenWords(l) : '', desc, l.external_ref || '', review && l.office_review_note ? 'Office: ' + l.office_review_note : ''].filter(Boolean);
   const badge = review === 'checking' ? html`<${Badge} kind="warn">Office is checking this line<//>` : review === 'no' ? html`<${Badge} kind="bad">Not accepted by the office<//>` : leadAsked ? html`<${Badge} kind="warn">The job lead asked about this line<//>` : null;
-  return html`<${PayLine} title=${l.site_suburb || l.client_name || l.job_number || kind || 'Line'} number=${l.job_number} detail=${detail}
+  return html`<${PayLine} title=${typeOf(l) === 'reimbursement' ? kind : l.site_suburb || l.client_name || l.job_number || kind || 'Line'} number=${l.job_number} detail=${detail}
     note=${notes.length ? notes.join(' · ') : ''} badge=${badge ? html`<span class="pay-linebadge">${badge}</span>` : null} amount=${num(l.line_total_ex) != null ? cash(l.line_total_ex) : ''} />`;
 }

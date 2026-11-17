@@ -24589,8 +24589,24 @@
     e.returnValue = '';
   });
 
+  // <crew-receipt-marker>
+  function _isCrewReceiptMarker(row) {
+    return !!(row && row._source === 'crew_app' && row.crew_line && row.crew_line.kind === 'reimbursement' && row.crew_line.receiptId);
+  }
+  function _hasCrewReceiptMarkers() { return _invRows.some(_isCrewReceiptMarker); }
+  function _crewReceiptMarkerHtml() {
+    return '<div class="note-banner" data-crew-receipt-marker><b>Reimbursement (receipt)</b><p>This week has a receipt added in SecureWorks Crew. Its amount is checked there. Open Crew to review and send this week with the receipt.</p><a href="crew/#/pay/week/' + encodeURIComponent(_hoursWeekStart || '') + '/invoice">Open SecureWorks Crew</a></div>';
+  }
+  function _crewReceiptSubmitBlocked() {
+    if (!_hasCrewReceiptMarkers()) return false;
+    toast('This week has a receipt added in SecureWorks Crew. Open Crew to review and send it with the receipt.', true);
+    return true;
+  }
+  // </crew-receipt-marker>
+
   function _syncRowsFromDOM() {
     _invRows.forEach(function(row, i) {
+      if (_isCrewReceiptMarker(row)) return;
       // Only misc rows have a date input — weekly rows get date from day group
       if (row._misc) {
         var d = document.getElementById('ir_date_' + i);
@@ -28149,6 +28165,7 @@
 
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
+    if (_crewReceiptSubmitBlocked()) return;
     var ctx = _invoiceApiContext();
     if (!invoiceGroupsReady()) { toast('Wait a moment while your group jobs are checked, then submit.', true); return; }
     if (_jobCentricSubmitBlockedByHydrate()) {
@@ -28568,9 +28585,11 @@
 
     // Index rows by date, separate misc rows (always computed — extras path
     // stays live in BOTH job-centric and legacy modes).
+    if (_hasCrewReceiptMarkers()) html += _crewReceiptMarkerHtml();
     var dayRowMap = {};
     var miscRows = [];
     _invRows.forEach(function(row, i) {
+      if (_isCrewReceiptMarker(row)) return;
       row._idx = i;
       if (row._misc) { miscRows.push(row); return; }
       var dk = row.date || '';
@@ -28643,7 +28662,10 @@
     html += '<span id="invTotal" hidden>$' + builderGross.toFixed(2) + '</span>';
 
     // ── Action buttons ──
-    if (_jobCentricActive) {
+    if (_hasCrewReceiptMarkers()) {
+      html += _runningInvoiceActionsHtml();
+      html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled>Submit this week in SecureWorks Crew</button>';
+    } else if (_jobCentricActive) {
       // Job-centric: submit via manual_assignments (server resolves the rate).
       // Extras still ride along through submitJobCentricInvoice.
       var jcHasCards = invoiceGroupItems().length > 0 || _jobCards.some(function(c) { return c.included && !invoiceGroupJob(c); });
@@ -28787,6 +28809,7 @@
   };
 
   window.saveDraftInvoice = function() {
+    if (_crewReceiptSubmitBlocked()) return;
     _syncRowsFromDOM();
     if (_draftSaveUnresolved && !_draftInvoiceId) {
       toast('Last draft save is still being confirmed. Do not save again — check Invoice history.');
@@ -28846,6 +28869,7 @@
   };
 
   window.submitInvoiceFromBuilder = function() {
+    if (_crewReceiptSubmitBlocked()) return;
     // Guard: if any pre-confirm prep throws, the button stays enabled (no spinner shown yet).
     var ctx = _invoiceApiContext();
     var isExpense, validRows, manualRows, errors, t;

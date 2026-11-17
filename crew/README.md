@@ -102,7 +102,13 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
   (`get_running_invoice_draft`, `save_running_invoice_draft`) in the shape the
   Trade App writes, so either app can pick up the other's. The phone copy is
   only a fallback for no signal.
-- Expenses are their own records and never part of the invoice total.
+- Expenses are their own records. When `trade_reimbursement_line_v1` is on,
+  the server marks claimable receipts in `list_expenses`. The week reuses the
+  Expenses cache and review uses its existing Expenses read, with no extra read
+  on open. Add a receipt fetches the picker on demand. Invoice review can add
+  one as a reimbursement line, priced from a fresh receipt read, with no super
+  or GST added. With no metadata the choice stays hidden. Saved drafts keep
+  receipt ids; they never supply the amount or eligibility.
 - The owner can view the app as a trade, read only (`preview_trade_user_id`,
   the same server feature the Trade App uses). Nothing is saved to the phone
   or queued in that view.

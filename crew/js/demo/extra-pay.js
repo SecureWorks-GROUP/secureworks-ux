@@ -201,7 +201,15 @@ registerDemo((db, h) => {
     list_expenses(p) {
       let rows = db.expenses.filter((e) => (!p.job_id || e.job_id === p.job_id) && (!p.status || e.status === p.status));
       rows = rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, Number(p.limit) || 50);
-      return { expenses: rows.map((e) => ({ ...e, jobs: jobsJoin(e.job_id) })) };
+      return { expenses: rows.map((e) => {
+        if (!db.flags.reimbursements) return { ...e, jobs: jobsJoin(e.job_id) };
+        const reason = e.submitted_by !== me.id ? 'reimbursement_not_yours'
+          : !['personal_card', 'cash'].includes(e.payment_method) ? 'reimbursement_not_personal_spend'
+          : e.no_receipt_reason || !(e.receipt_storage_path || e.receipt_photo_url) ? 'reimbursement_receipt_required'
+          : e.status === 'rejected' ? 'reimbursement_rejected'
+          : e.xero_bill_id || db.invoices.some((i) => (i.lines || []).some((l) => l.expense_receipt_id === e.id)) ? 'reimbursement_already_claimed' : null;
+        return { ...e, jobs: jobsJoin(e.job_id), reimbursement: { claimable: !reason, reason } };
+      }) };
     },
 
     // ---- work orders

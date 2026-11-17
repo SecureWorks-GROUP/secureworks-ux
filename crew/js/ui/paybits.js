@@ -69,7 +69,7 @@ export function sheetRows(lines, groups, { monday, rateEditable }) {
   const today = todayISO(); const sunday = addDays(monday, 6);
   const rows = []; let ahead = 0;
   for (const l of lines) {
-    if (l.kind === 'other' || l.kind === 'deduction') continue;
+    if (l.kind === 'other' || l.kind === 'deduction' || l.kind === 'reimbursement') continue;
     const head = { title: l.title, jobNumber: l.jobNumber, line: l, open: 'line' };
     if (l.kind === 'hours' || l.kind === 'unknown') {
       if (l.ahead) { ahead += 1; continue; }

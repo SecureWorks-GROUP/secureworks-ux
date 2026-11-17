@@ -2,7 +2,8 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
 
-test.use({ browserName: 'webkit', headless: true });
+// Local screen proof uses WebKit. The existing GitHub runner installs Chromium only.
+test.use({ browserName: process.env.CI ? 'chromium' : 'webkit', headless: true });
 const root = path.resolve(__dirname, '../..');
 const fields = ['tax_set_aside_percent', 'reimbursement_account_code', 'repayment_account_code', 'not_job_work_account_code'];
 const empty = { inclusive_super_from: null, approvers_set: false, can_edit: true,
@@ -45,7 +46,9 @@ test('four missing settings, read-only director lines and tab count at desktop, 
   for (const width of [1280, 820, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await testInfo.attach(`ZZTEST-pay-settings-${width}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+    const picture = testInfo.outputPath(`ZZTEST-pay-settings-${width}.png`);
+    await page.screenshot({ path: picture, fullPage: true });
+    await testInfo.attach(`ZZTEST-pay-settings-${width}`, { path: picture, contentType: 'image/png' });
   }
 });
 

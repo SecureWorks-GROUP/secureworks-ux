@@ -35,8 +35,9 @@ check('ZZTEST preview follows the server basis, including commission and cent ro
 ].every(([basis, gross, commission, superAmount, withheld, company, payable]) => {
   previewContext._hoursData = { super_rate: 0.12, money: { super_basis: basis } };
   const money = previewContext._invoicePreviewMoney(gross, commission);
-  return money.super_amount === superAmount && money.worker_withhold === withheld
-    && money.company_contribution === company && money.amount_payable === payable;
+  return [money, M.resolveSuperSplit(money)].every(split =>
+    split.super_amount === superAmount && split.worker_withhold === withheld
+    && split.company_contribution === company && split.amount_payable === payable);
 }));
 
 check('money formats thousands and cents', M.money(2420.6) === '$2,420.60' && M.money(0) === '$0.00' && M.money(-15) === '-$15.00' && M.money('nope') === '$0.00');

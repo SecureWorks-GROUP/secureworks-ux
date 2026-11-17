@@ -34,6 +34,7 @@ const STORED = {
 };
 
 async function signIn(page, digestReply) {
+  await page.route('https://**/*', route => route.abort());
   await installSupabaseAuthStub(page, {
     users: { [OPERATOR.email]: OPERATOR },
     profileEndpoint: `${SUPABASE_ORIGIN}/functions/v1/ghl-proxy`,
@@ -121,7 +122,7 @@ test('one request at a time: overlapping loads send one read', async ({ page }) 
 
 test('a failed read keeps the last digest on screen and waits 5 minutes', async ({ page }) => {
   let fail = false;
-  const calls = await signIn(page, () => (fail ? { status: 500, body: { error: 'down' } } : { body: STORED }));
+  const calls = await signIn(page, () => (fail ? { status: 504, body: { error: 'down' } } : { body: STORED }));
   await page.evaluate(() => loadAiAlerts());
   await expect(page.locator('#aiRedAlerts')).toContainText('Stand-in red alert');
 
@@ -148,6 +149,7 @@ test('a failed read keeps the last digest on screen and waits 5 minutes', async 
 // ── CEO page: the same stored read, guard and built line ─────────────────
 
 async function openCeo(page, digestReply) {
+  await page.route('https://**/*', route => route.abort());
   // No sign-in: the page's own functions are called with a stand-in header,
   // so no whitelisted address appears in the test.
   await installSupabaseAuthStub(page, { users: {}, profileEndpoint: `${SUPABASE_ORIGIN}/functions/v1/ghl-proxy` });
@@ -178,10 +180,14 @@ test('CEO page: the stored digest shows its Perth built day', async ({ page }) =
   expect(calls.every((c) => c.method === 'GET' && new URL(c.url).searchParams.get('action') === null)).toBe(true);
 });
 
-test('CEO page: before the first build the panel stays hidden', async ({ page }) => {
+test('CEO page: not built yet hides an earlier digest', async ({ page }) => {
+  let notBuilt = false;
   await openCeo(page, () => ({
-    body: { alerts: [], summary_text: '', stored: true, digest_date: null, not_built_yet: true },
+    body: notBuilt ? { alerts: [], summary_text: '', stored: true, digest_date: null, not_built_yet: true } : STORED,
   }));
+  await page.evaluate(() => loadCeoAlerts());
+  await expect(page.locator('#ceoRedAlerts')).toContainText('Stand-in red alert');
+  notBuilt = true;
   await page.evaluate(() => loadCeoAlerts());
   expect(await page.evaluate(() => document.getElementById('ceoAlertsPanel').style.display)).toBe('none');
 });

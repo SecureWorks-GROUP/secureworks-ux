@@ -279,6 +279,7 @@ async function runLoad({ detailActive, background }) {
   const context = {
     console,
     document: {
+      visibilityState: 'visible',
       getElementById(id) {
         if (id === 'jobDetailView') return detail;
         return null;
@@ -299,7 +300,10 @@ async function runLoad({ detailActive, background }) {
     loadMakesafeBoardPackChips() { calls.chips += 1; },
     failMakesafeArchiveLoadIfPending() {},
     showToast() {},
-    opsFetch() { throw new Error('unexpected non-MakeSafe fetch'); },
+    opsFetch(action) {
+      assert.equal(action, 'pipeline_stamp');
+      return Promise.resolve({ stamp: null });
+    },
     setTimeout,
   };
   vm.createContext(context);
@@ -319,6 +323,7 @@ async function runInFlightLoad() {
   const context = {
     console,
     document: {
+      visibilityState: 'visible',
       getElementById(id) {
         if (id === 'jobDetailView') return detail;
         return null;

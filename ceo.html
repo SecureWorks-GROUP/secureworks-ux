@@ -1020,7 +1020,10 @@ async function loadCeoAlerts() {
     var resp = await fetch(digestUrl, { headers: await ceoAuthHeaders() });
     if (!resp.ok) return; // keep whatever is on screen
     var digest = await resp.json();
-    if (digest.not_built_yet) return; // nothing built yet: nothing to show
+    if (digest.not_built_yet) {
+      document.getElementById('ceoAlertsPanel').style.display = 'none';
+      return;
+    }
     var alerts = digest.alerts || [];
     var narrative = digest.ai_narrative || digest.summary_text || '';
     var panel = document.getElementById('ceoAlertsPanel');

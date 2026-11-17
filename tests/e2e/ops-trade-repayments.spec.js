@@ -34,7 +34,13 @@ async function open(page, options = {}) {
         return { repayments: structuredClone(ZZTEST.rows) };
       }
       if (action === 'trade_pay_settings') return { can_edit: ZZTEST.canEdit !== false };
-      if (action === 'list_users') return { users: [{ id: 'ZZTEST-crew-1', name: 'ZZTEST Crew', role: 'installer' }] };
+      if (action === 'list_users') return { users: ZZTEST.users || [
+        { id: 'ZZTEST-crew-1', name: 'ZZTEST Crew', role: 'installer' },
+        { id: 'ZZTEST-lead-1', name: 'ZZTEST Lead', role: 'lead_installer' },
+        { id: 'ZZTEST-office-1', name: 'ZZTEST Office', role: 'admin' },
+        { id: 'ZZTEST-sales-1', name: 'ZZTEST Sales', role: 'sales' },
+        { id: 'ZZTEST-norole-1', name: 'ZZTEST No role' }
+      ] };
       throw new Error('Unexpected read ' + action);
     };
     window.opsPost = async (action, body) => {
@@ -143,4 +149,17 @@ test('trade gets no panel or repayment read; non-approver gets a read-only table
   await expect(page.locator('[data-repayment-row]')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Set a repayment', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+});
+
+test('trade picker lists trades only, and says so when there are none', async ({ page }) => {
+  await open(page);
+  await page.getByRole('button', { name: 'Set a repayment', exact: true }).click();
+  const picker = page.getByLabel('Trade', { exact: true });
+  await expect(picker.locator('option')).toHaveText(['Choose a trade', 'ZZTEST Crew', 'ZZTEST Lead']);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.evaluate(() => { ZZTEST.users = [{ id: 'ZZTEST-office-1', name: 'ZZTEST Office', role: 'ops_manager' }]; });
+  await page.getByRole('button', { name: 'Set a repayment', exact: true }).click();
+  await expect(page.getByText('No trades on file to set a repayment for.', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-repayments] form')).toHaveCount(0);
+  expect(await page.evaluate(() => ZZTEST.writes)).toEqual([]);
 });

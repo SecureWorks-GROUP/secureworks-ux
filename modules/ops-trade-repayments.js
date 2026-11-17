@@ -20,6 +20,9 @@
   function date(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.split('-').reverse().join('/') : 'Not read';
   }
+  // Only trades can owe a repayment, so office and sales users never appear in the picker.
+  var TRADE_ROLES = { installer: 1, lead_installer: 1, crew: 1, trade: 1, subcontractor: 1 };
+  function isTrade(user) { return !!(user && TRADE_ROLES[String(user.role || '').toLowerCase()]); }
   function stopped(row) { return row.active === false || !!row.stopped_at; }
   function draw() {
     if (!section) return;
@@ -86,8 +89,13 @@
       var answer = await window.opsFetch('list_users');
       if (request !== sequence || !editable()) return;
       if (!answer || !Array.isArray(answer.users)) throw new Error('Trades could not be read. Try again.');
+      var trades = answer.users.filter(isTrade);
+      if (!trades.length) {
+        editor.innerHTML = '<p role="status">No trades on file to set a repayment for.</p><div class="trp-actions"><button type="button" data-cancel>Close</button></div>';
+        return;
+      }
       editor.innerHTML = '<form data-set-form><h4>Set a repayment</h4><div class="trp-fields"><div><label for="trp-trade">Trade</label><select id="trp-trade" name="user_id" required><option value="">Choose a trade</option>' +
-        answer.users.map(function (u) {
+        trades.map(function (u) {
           return '<option value="' + esc(u.id) + '">' + esc(u.name || 'Trade') + '</option>';
         }).join('') + '</select></div>' + field('What for', 'label', 'type="text" maxlength="60"') +
         field('Amount each week', 'amount', 'type="number" min="0.01" step="0.01" inputmode="decimal"') +

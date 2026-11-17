@@ -21,6 +21,25 @@ assert(M, 'MyMoneyCore exported');
 let passed = 0;
 function check(name, cond) { assert(cond, name); passed += 1; }
 
+const previewContext = {
+  MyMoneyCore: M, _invGst: false,
+  isPerMetreUser: () => false, _invoiceDeductionWeek: () => null
+};
+vm.createContext(previewContext);
+vm.runInContext(extractFunction('_invoiceSuperRate') + '\n' + extractFunction('_invoicePreviewMoney'), previewContext);
+check('ZZTEST preview follows the server basis, including commission and cent rounding', [
+  ['inclusive_12_112_v1', 1120, 0, 120, 120, 0, 1000],
+  [null, 1120, 0, 134.4, 67.2, 67.2, 1052.8],
+  ['inclusive_12_112_v1', 1120, 1120, 120, 120, 0, 1000],
+  ['inclusive_12_112_v1', 0.14, 0, 0.02, 0.02, 0, 0.12]
+].every(([basis, gross, commission, superAmount, withheld, company, payable]) => {
+  previewContext._hoursData = { super_rate: 0.12, money: { super_basis: basis } };
+  const money = previewContext._invoicePreviewMoney(gross, commission);
+  return [money, M.resolveSuperSplit(money)].every(split =>
+    split.super_amount === superAmount && split.worker_withhold === withheld
+    && split.company_contribution === company && split.amount_payable === payable);
+}));
+
 check('money formats thousands and cents', M.money(2420.6) === '$2,420.60' && M.money(0) === '$0.00' && M.money(-15) === '-$15.00' && M.money('nope') === '$0.00');
 check('dateShort is day Mon year', M.dateShort('2026-08-10') === '10 Aug 2026' && M.dateShort('') === '');
 

@@ -22908,7 +22908,7 @@
       // super on commission): never the old full carve-out.
       var fullCarve = oldNet != null && halfCash != null && !sameMoney(oldNet, halfCash)
         && !(fund != null && sameMoney(fund, 0));
-      var legacy = fullCarve && (
+      var legacy = source.super_basis !== 'inclusive_12_112_v1' && fullCarve && (
         (backendCash != null && sameMoney(backendCash, oldNet)) ||
         (backendWorker != null && fund != null && sameMoney(backendWorker, fund))
       );
@@ -23411,6 +23411,13 @@
     if (rate == null) return null;
     var superBase = Math.max(0, Math.round((gross - commission) * 100) / 100);
     var split = MyMoneyCore.resolveSuperSplit({ gross_earned: superBase, super_rate: rate });
+    // <inclusive-super>
+    var inclusive = _hoursData && _hoursData.money && _hoursData.money.super_basis === 'inclusive_12_112_v1';
+    if (inclusive) {
+      var superAmount = Math.floor((Math.round(gross * 100) * 6 + 28) / 56) / 100;
+      split = { super_amount: superAmount, worker_withhold: superAmount, company_contribution: 0, amount_payable: Math.round((gross - superAmount) * 100) / 100 };
+    }
+    // </inclusive-super>
     var preview = {
       complete: true,
       estimated: true,
@@ -23424,7 +23431,8 @@
         : split.amount_payable,
       gst_on: _invGst
     };
-    if (commission > 0) preview.commission_no_super = commission;
+    if (inclusive) preview.super_basis = 'inclusive_12_112_v1';
+    if (commission > 0 && !inclusive) preview.commission_no_super = commission;
     var weekDeduction = _invoiceDeductionWeek();
     if (weekDeduction) preview.deduction_week = weekDeduction;
     return preview;
@@ -23628,6 +23636,7 @@
   function _invoiceMoneySummaryHtml(money, opts) {
     opts = opts || {};
     money = money || {};
+    var inclusive = money.super_basis === 'inclusive_12_112_v1';
     var split = MyMoneyCore.resolveSuperSplit(money);
     var worker = split.worker_withhold;
     var company = split.company_contribution;
@@ -23653,9 +23662,9 @@
     // 2026-09-10 (Alyx): "Net pay" read as the app changing his amounts. Say
     // where the money goes in plain words; the job amounts are never touched.
     // 2026-09-18: fund still gets the full rate; only half comes off the trade.
-    html += '<div class="inv-money-row"><span>Super (' + _invoiceRateLabel(money.super_rate) + ') paid into your super fund</span><span>' + _invoiceMoney(money.super_amount) + '</span></div>';
-    html += '<div class="inv-money-row"><span>Your share of super (' + _invoiceRateLabel(workerRate) + ')</span><span>−' + _invoiceMoney(worker) + '</span></div>';
-    html += '<div class="inv-money-row"><span>Company covers the other ' + _invoiceRateLabel(workerRate) + '</span><span>' + _invoiceMoney(company) + '</span></div>';
+    html += '<div class="inv-money-row"><span>Super (' + (inclusive ? '12/112' : _invoiceRateLabel(money.super_rate)) + ') paid into your super fund</span><span>' + _invoiceMoney(money.super_amount) + '</span></div>';
+    html += '<div class="inv-money-row"><span>' + (inclusive ? 'Super included in what you earned' : 'Your share of super (' + _invoiceRateLabel(workerRate) + ')') + '</span><span>−' + _invoiceMoney(worker) + '</span></div>';
+    html += '<div class="inv-money-row"><span>' + (inclusive ? 'Company contribution' : 'Company covers the other ' + _invoiceRateLabel(workerRate)) + '</span><span>' + _invoiceMoney(company) + '</span></div>';
     // "You get paid" is only ever the last figure. On an invoice with a
     // deduction that is the server's trade_payable, further down.
     if (deduction || comesOff || xeroLines.length) {
@@ -23701,8 +23710,8 @@
     } else if (comesOff) {
       html += '<div class="inv-money-note" data-invoice-deduction-note>' + esc(MyMoneyCore.deductionLabel(weekDeduction)) + ' comes off what you are paid for this week, after super and GST. It is applied when you submit. SecureWorks confirms the amount you are paid then.</div>';
     }
-    html += '<div class="inv-money-note">Your job amounts are not changed. Only half the super comes out of what you earned; the company covers the other half. The full ' + _invoiceRateLabel(money.super_rate) + ' still goes into your super fund each week.</div>';
-    if (money.commission_no_super > 0) html += '<div class="inv-money-note" data-invoice-commission-no-super>No super is taken on commission (' + _invoiceMoney(money.commission_no_super) + ').</div>';
+    html += '<div class="inv-money-note">' + (inclusive ? 'Your job amounts are not changed. Super is included in what you earned. It is paid to your super fund; the rest is paid to you.' : 'Your job amounts are not changed. Only half the super comes out of what you earned; the company covers the other half. The full ' + _invoiceRateLabel(money.super_rate) + ' still goes into your super fund each week.') + '</div>';
+    if (!inclusive && money.commission_no_super > 0) html += '<div class="inv-money-note" data-invoice-commission-no-super>No super is taken on commission (' + _invoiceMoney(money.commission_no_super) + ').</div>';
     if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
     html += '</div>';
     return html;

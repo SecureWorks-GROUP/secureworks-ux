@@ -23411,6 +23411,12 @@
     if (rate == null) return null;
     var superBase = Math.max(0, Math.round((gross - commission) * 100) / 100);
     var split = MyMoneyCore.resolveSuperSplit({ gross_earned: superBase, super_rate: rate });
+    // <inclusive-super>
+    if (_hoursData && _hoursData.money && _hoursData.money.super_basis === 'inclusive_12_112_v1') {
+      var superAmount = Math.floor((Math.round(gross * 100) * 6 + 28) / 56) / 100;
+      split = { super_amount: superAmount, worker_withhold: superAmount, company_contribution: 0, amount_payable: Math.round((gross - superAmount) * 100) / 100 };
+    }
+    // </inclusive-super>
     var preview = {
       complete: true,
       estimated: true,

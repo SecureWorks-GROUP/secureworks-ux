@@ -75,3 +75,52 @@ test('a failed or null stamp never suppresses the board read', async ({ page }) 
   await page.evaluate(async () => { stampFails = false; nextStamp = null; await loadJobs({ background: true }); await loadJobs({ background: true }); });
   expect(await counts(page)).toEqual({ board: 4, stamp: 4 });
 });
+
+for (const tab of ['fencing', 'makesafes']) {
+  test(`a person load checks the stamp before the ${tab} board and detects an in-flight change`, async ({ page }) => {
+    await openBoard(page);
+    await page.evaluate(tab => {
+      _pipelineTab = tab;
+      // Exercise the real loader, keeping the board data and paint offline.
+      renderJobs = () => {};
+      loadMakesafeBoardIntakeDrafts = loadMakesafeBoardStory =
+        loadMakesafeBoardReviewAffordances = loadMakesafeBoardPackChips = () => {};
+      window.readOrder = [];
+      window.opsFetch = async action => {
+        readOrder.push(action);
+        if (action === 'pipeline_stamp') {
+          stampReads++;
+          await new Promise(resolve => { window.finishStamp = resolve; });
+          return { stamp: nextStamp };
+        }
+        if (action === 'pipeline') return readBoard();
+        throw new Error('Unexpected read: ' + action);
+      };
+      window.readBoard = async () => {
+        boardReads++;
+        // The board snapshot precedes a change committed while it is in flight.
+        nextStamp = 'revision-2';
+        return { columns: {} };
+      };
+      fetchMakesafeBoardData = () => { readOrder.push('makesafe_board'); return readBoard(); };
+      window.personLoad = loadJobs();
+    }, tab);
+    expect(await counts(page)).toEqual({ board: 0, stamp: 1 });
+    await page.evaluate(async () => { finishStamp(); await personLoad; });
+    expect(await page.evaluate(() => readOrder)).toEqual(['pipeline_stamp', tab === 'makesafes' ? 'makesafe_board' : 'pipeline']);
+    expect(await page.evaluate(() => _pipelineStamp)).toBe('revision-1');
+    await page.evaluate(() => { window.refreshLoad = loadJobs({ background: true }); });
+    await page.evaluate(async () => { finishStamp(); await refreshLoad; });
+    expect(await counts(page)).toEqual({ board: 2, stamp: 2 });
+    expect(await page.evaluate(() => _pipelineStamp)).toBe('revision-2');
+  });
+}
+
+test('a failed person stamp clears the cached stamp so the next refresh reads the board', async ({ page }) => {
+  await openBoard(page);
+  await page.evaluate(() => loadJobs());
+  await page.evaluate(async () => { stampFails = true; await loadJobs(); });
+  expect(await page.evaluate(() => _pipelineStamp)).toBeNull();
+  await page.evaluate(async () => { stampFails = false; await loadJobs({ background: true }); });
+  expect(await counts(page)).toEqual({ board: 3, stamp: 3 });
+});

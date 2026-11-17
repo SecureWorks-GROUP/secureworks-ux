@@ -6525,7 +6525,8 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'},
-  {t:'js', u:'modules/ops-work-orders-list.js?v=1'}
+  {t:'js', u:'modules/ops-work-orders-list.js?v=1'},
+  {t:'js', u:'modules/ops-trade-repayments.js?v=1'}
 ]);
 </script>
 <!-- Tie to Xero (Financials > Job profit > Tie to Xero): read only (modules/ops-xero-tieout.js, // <xero-tieout>). -->
@@ -21322,6 +21323,7 @@ function swTradeBillStatus(inv) {
 var _tradeBillsLoadSeq = 0;
 async function loadTradeBills() {
   var seq = ++_tradeBillsLoadSeq;
+  var repayments = window.TradeRepayments && TradeRepayments.mount(document.getElementById('subTradebills'));
   try {
     var data = await opsFetch('list_trade_invoices');
     if (seq !== _tradeBillsLoadSeq) return;
@@ -21333,6 +21335,7 @@ async function loadTradeBills() {
     console.error('loadTradeBills error:', e);
     renderTradeBillLoadError(e);
   }
+  await repayments;
 }
 
 // A failed load clears the table: an old list must never look current.

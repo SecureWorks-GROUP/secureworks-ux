@@ -1289,6 +1289,7 @@
     loadArrival(row);
     loadReplies(row);
     loadOld(row);
+    if (global.OpsDispatchBookInstall && !isMakesafe(row)) global.OpsDispatchBookInstall.load(row.id);
   }
 
   // The one write this module makes.
@@ -4362,7 +4363,27 @@
       h += '<p class="dpc-deliv-sub">Also booked: ' + esc(v1.also_days.map(function (v) { return dayText(parseDay(v)); }).filter(Boolean).join(', ')) + '.</p>';
     }
     if (v1 && v1.calendar_confirmed) h += '<p class="dpc-deliv-sub">The calendar shows this booking as confirmed.</p>';
+    h += bookInstallHtml(row);
     return h + '</div></div>';
+  }
+
+  // Book install, Confirm, Move and Remove under the install row
+  // (modules/dispatch-book-install.js, item 4). Not drawn when that file did
+  // not load. The earliest install day comes from the job's Arrival line.
+  function bookInstallHtml(row) {
+    var bi = global.OpsDispatchBookInstall;
+    if (!bi || !row || isMakesafe(row)) return '';
+    var arr = arrivalFor(row).arrival;
+    var early = arr && isObj(arr.earliest_install) ? text(arr.earliest_install.day) : '';
+    return bi.html(row, {
+      earliest: early || null,
+      repaint: function () { if (state.row && state.row.id === row.id) paintSched(); },
+      refresh: function (jobId) {
+        loadBase();
+        if (state.row && state.row.id === jobId) loadArrival(state.row);
+      },
+      currentJobId: function () { return state.jobId; },
+    });
   }
 
   // The one way into the live calendar, at the foot of the section. Not drawn

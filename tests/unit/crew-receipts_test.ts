@@ -71,3 +71,35 @@ Deno.test('switch-off invoice payload and old-basis arithmetic stay unchanged', 
   const m = estimate(normal, { gstOn: true, basis: null });
   equal([m.gross, m.superHeld, m.gst, m.pay], [560, 33.6, 56, 582.4]);
 });
+
+const oldApp = Deno.readTextFileSync(new URL('../../trade.html', import.meta.url));
+const markerCode = oldApp.split('// <crew-receipt-marker>')[1].split('// </crew-receipt-marker>')[0];
+const marker = () => ({ _source: 'crew_app', crew_line: { key: 'receipt:receipt-1', kind: 'reimbursement', receiptId: 'receipt-1' } });
+Deno.test('old app names receipt markers and links the same week to Crew without an amount input', () => {
+  const f = new Function('_invRows', '_hoursWeekStart', markerCode + '; return { has: _hasCrewReceiptMarkers(), html: _crewReceiptMarkerHtml() };');
+  const out = f([marker()], '2026-11-09');
+  equal(out.has, true);
+  equal(out.html.includes('Reimbursement (receipt)'), true);
+  equal(out.html.includes('crew/#/pay/week/2026-11-09/invoice'), true);
+  equal(out.html.includes('<input'), false);
+  equal(f([{ description: 'ordinary' }], '').has, false);
+});
+Deno.test('old app preserves the id-only receipt marker when syncing the draft', () => {
+  const rows = [marker()];
+  const before = JSON.stringify(rows);
+  const code = oldApp.slice(oldApp.indexOf('  function _syncRowsFromDOM() {'), oldApp.indexOf('  function _calcInvTotals() {'));
+  const f = new Function('_invRows', 'document', markerCode + code + '; _syncRowsFromDOM();');
+  f(rows, { getElementById: () => null });
+  equal(JSON.stringify(rows), before);
+});
+Deno.test('old app refuses both submit paths and legacy draft conversion instead of dropping the receipt', () => {
+  for (const name of ['submitJobCentricInvoice', 'submitInvoiceFromBuilder', 'saveDraftInvoice']) {
+    const start = oldApp.indexOf('  window.' + name + ' = function() {');
+    const end = oldApp.indexOf('\n  };', start) + 5;
+    const notices: string[] = [];
+    const f = new Function('_invRows', 'toast', 'window', markerCode + oldApp.slice(start, end) + '; window.' + name + '();');
+    f([marker()], (text: string) => notices.push(text), {});
+    equal(notices.length, 1);
+    equal(notices[0].includes('Open Crew'), true);
+  }
+});

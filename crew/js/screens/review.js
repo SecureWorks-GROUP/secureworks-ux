@@ -19,10 +19,10 @@ const dayWords = (d) => (d ? `${fmtDow(d)} ${fmtDom(d)}` : '');
 const EXPENSE_STATE = { pending_extraction: 'being read', pending: 'with the office', approved: 'approved', queried: 'the office has a question', rejected: 'not accepted', pushed_to_xero: 'approved' };
 
 export function Review({ monday: mondayParam }) {
-  const w = useWeek(mondayParam);
+  const expenses = useExpenses();
+  const w = useWeek(mondayParam, expenses);
   const route = useRoute();
   const { user, monday, hours, data, live, sentBack, lines, groups, gstOn, deduction, est, ctx, problems, draft, setDraft } = w;
-  const expenses = useExpenses();
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
   const done = useRef(false);
@@ -38,8 +38,8 @@ export function Review({ monday: mondayParam }) {
       try {
         const fresh = await api('list_expenses', { limit: 100 });
         const changed = selected.some((l) => { const next = refreshReceiptLine(l, fresh.expenses, user.id); return next.receiptProblem || ['amount', 'description', 'date', 'status', 'jobNumber'].some((k) => next[k] !== l[k]); });
-        if (changed) { await w.receipts.refetch(); toast('A receipt changed at the office. Check it again before sending.', { kind: 'bad', ms: 7000 }); return; }
-      } catch { await w.receipts.refetch(); toast('Your receipts could not be checked. Nothing was sent. Try again when you have signal.', { kind: 'bad', ms: 7000 }); return; }
+        if (changed) { await expenses.refetch(); toast('A receipt changed at the office. Check it again before sending.', { kind: 'bad', ms: 7000 }); return; }
+      } catch { await expenses.refetch(); toast('Your receipts could not be checked. Nothing was sent. Try again when you have signal.', { kind: 'bad', ms: 7000 }); return; }
     }
     const left = est.ahead + est.unknown;
     const ok = await ask({ title: `Send your invoice for ${fmtWeek(monday)}?`, body: `About ${cash(est.pay)} to you. You can send one invoice a week, and you cannot change it after it is sent, so check it is all there.${est.ahead ? ` ${est.ahead === 1 ? 'One job later this week is' : est.ahead + ' jobs later this week are'} not on it. If you work ${est.ahead === 1 ? 'it' : 'them'}, send after that instead, or add ${est.ahead === 1 ? 'it' : 'them'} to next week.` : ''}${est.unknown ? ` ${plural(est.unknown, 'job')} ${est.unknown === 1 ? 'is' : 'are'} left off until the office says how ${est.unknown === 1 ? 'it is' : 'they are'} billed.` : ''}`, yes: left ? 'Send it without them' : 'Send invoice' });

@@ -1,7 +1,7 @@
 // Made-up receipt week for the narrow UI check and offline WebKit picture.
-async function setupReceiptWeek(page, { enabled = true } = {}) {
+async function setupReceiptWeek(page, { enabled = true, review = true } = {}) {
   await page.waitForFunction(() => Boolean(window.__crewDemo) && Boolean(document.querySelector('.appbar')));
-  await page.evaluate(async ({ enabled }) => {
+  await page.evaluate(async ({ enabled, review }) => {
     const { db, ops } = window.__crewDemo;
     db.flags.reimbursements = enabled;
     db.me.name = 'Crew member';
@@ -23,11 +23,19 @@ async function setupReceiptWeek(page, { enabled = true } = {}) {
       status: 'pending', payment_method: 'personal_card', receipt_storage_path: 'demo-receipt', job_id: j.id, created_at: '2026-11-09T01:00:00Z' },
     { id: 'receipt-no-photo', submitted_by: db.me.id, vendor_name: 'No photo', receipt_date: '2026-11-09', total_amount: 12,
       status: 'pending', payment_method: 'personal_card', job_id: j.id, created_at: '2026-11-09T01:00:00Z' }];
+    // Another person's receipt must never be offered, even to an office demo.
+    db.expenses.push({ ...db.expenses[0], id: 'receipt-other', submitted_by: 'other-crew', vendor_name: 'Other crew receipt' });
+    db.receiptListReads = 0;
+    const list = ops.list_expenses;
+    ops.list_expenses = (p) => { db.receiptListReads++; return list(p); };
     const generate = ops.generate_trade_invoice;
     ops.generate_trade_invoice = (p, b) => { db.receiptSubmitBody = b; return generate(p, b); };
     // Let the profile update finish before the hash router changes screens.
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    location.hash = '#/pay/week/2026-11-09/invoice';
-  }, { enabled });
+    location.hash = '#/pay/week/2026-11-09' + (review ? '/invoice' : '');
+  }, { enabled, review });
+  // Wait for review's existing Expenses read to finish, not just its shell.
+  if (review) await page.getByText('Supplier', { exact: true }).waitFor();
+  else await page.getByRole('button', { name: 'Review invoice', exact: true }).waitFor();
 }
 module.exports = { setupReceiptWeek };

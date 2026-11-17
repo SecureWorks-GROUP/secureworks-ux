@@ -5,7 +5,7 @@
 // current Trade App uses) and on this phone for when there is no signal.
 import { html, cx, useCallback, useEffect, useMemo, useRef, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
-import { useQuery, useStore, local } from '../lib/store.js';
+import { useQuery, useStore, local, peekQuery, primeQuery } from '../lib/store.js';
 import { go, back } from '../lib/router.js';
 import { todayISO, mondayOf, addDays, fmtDay, fmtMoney, hoursBetween, fmtDow, fmtDom } from '../lib/dates.js';
 import { verticalOf, jobTitle } from '../lib/model.js';
@@ -28,7 +28,7 @@ const draftOff = (err) => { const code = (err && ((err.body && err.body.code) ||
  * them, and the saved weekly draft kept in step. Shared by the timesheet and
  * the invoice made from it.
  */
-export function useWeek(mondayParam) {
+export function useWeek(mondayParam, expenses) {
   const user = useStore((s) => s.user);
   const thisMonday = mondayOf(todayISO());
   const monday = mondayParam && /^\d{4}-\d{2}-\d{2}$/.test(mondayParam) ? mondayOf(mondayParam) : thisMonday;
@@ -44,8 +44,10 @@ export function useWeek(mondayParam) {
   const live = invoiceForWeek(list, monday);
   const sentBack = sentBackForWeek(list, monday);
   const data = hours.data;
-  const receipts = useQuery('reimbursements:' + user.id, () => api('list_expenses', { limit: 100 }), { ttl: 0 });
-  const receiptRows = !receipts.error && !receipts.loading && !receipts.refreshing && data?.money?.super_basis === 'inclusive_12_112_v1' ? receipts.data?.expenses : null;
+  // The review already reads Expenses. The week only peeks at that cache;
+  // opening either screen must add no request with reimbursements off.
+  const cachedExpenses = expenses ? (!expenses.error && !expenses.loading && !expenses.refreshing ? expenses.data : null) : peekQuery('expenses');
+  const receiptRows = data?.money?.super_basis === 'inclusive_12_112_v1' ? cachedExpenses?.expenses : null;
   const reimbursementsOn = receiptsEnabled(receiptRows);
   const rateEditable = Boolean(data && data.trade_rate_editable === true);
   const serverOn = Boolean(data && data.running_invoice_draft === true);
@@ -151,6 +153,13 @@ export function useWeek(mondayParam) {
       openOverlay((close) => html`<${Sheet} title="Reimbursement (receipt)" onClose=${close} foot=${(shut) => html`<${Button} kind="line" block onClick=${() => { setDraft((d) => ({ ...d, added: d.added.filter((a) => a.key !== line.key) })); shut(); }}>Remove from this invoice<//>`}>
         <p>${line.description || 'Receipt'}</p><p>${line.receiptProblem || cash(line.amount)}</p>
         <p class="t-small">The amount comes from the receipt. Check it under Expenses if it needs changing.</p>
+        <${Button} kind="line" block onClick=${async () => {
+          try {
+            const fresh = await api('list_expenses', { limit: 100 });
+            primeQuery('expenses', fresh, { persist: true });
+            setDraftState({ ...draftRef.current }); close();
+          } catch (err) { toast(friendly(err) + ' Try again when you have signal, or remove this receipt.', { kind: 'bad' }); }
+        }}>Check receipt again<//>
       <//>`); return;
     }
     if (line.unknown) { openOverlay((close) => html`<${UnknownSheet} line=${line} onClose=${close} onRemove=${line.added ? () => setDraft((d) => ({ ...d, added: d.added.filter((a) => a.key !== line.key) })) : null} />`); return; }
@@ -169,7 +178,7 @@ export function useWeek(mondayParam) {
     local.del('week:' + monday);
     if (id && latest.current.serverOn) api('delete_trade_invoice', null, { invoice_id: id }).catch(() => {});
   };
-  return { user, monday, thisMonday, hours, data, receipts, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: save, sent, syncWords, foreign: draft.foreign || 0 };
+  return { user, monday, thisMonday, hours, data, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: save, sent, syncWords, foreign: draft.foreign || 0 };
 }
 
 export function Timesheet({ monday: mondayParam }) {
@@ -387,7 +396,7 @@ function AddOtherSheet({ monday, lines, addLine, onClose, reimbursementsOn = fal
     shut();
   };
   return html`<${Sheet} title="Add another item" sub="Travel or another amount agreed with the office." onClose=${onClose} foot=${(shut) => html`<${Button} block disabled=${!ok} onClick=${() => add(shut)}>Add to this invoice<//>`}>
-    ${reimbursementsOn ? html`<${Button} kind="line" block onClick=${() => setReceiptMode(true)}>Reimbursement (receipt)<//>` : null}
+    ${reimbursementsOn ? html`<${Button} kind="line" block onClick=${() => setReceiptMode(true)}>Add a receipt<//>` : null}
     ${!jobs.length ? html`<${Empty} title="Add the job first">An extra amount has to go against a job. Add the job to the timesheet, then add the extra.<//>` : html`<div class="stack">
       <${Field} label="What is it?"><${Picks} value=${type} options=${[['Travel', 'Travel'], ['Materials', 'Materials'], ['Equipment', 'Equipment'], ['Other', 'Other']]} onChange=${setType} /><//>
       <${Field} label="Which job?"><div class="picks">${jobs.map((j) => html`<button type="button" class="pick" aria-pressed=${String(jobId === j.jobId)} onClick=${() => setJobId(j.jobId)}>${j.title}</button>`)}</div><//>
@@ -407,6 +416,7 @@ function ReceiptPicker({ lines, addLine, userId, onClose }) {
   const pick = async (row) => {
     try {
       const fresh = await api('list_expenses', { limit: 100 });
+      primeQuery('expenses', fresh, { persist: true });
       const receipt = (fresh.expenses || []).find((r) => r.id === row.id && r.submitted_by === userId);
       const problem = receiptProblem(receipt);
       if (problem) { toast(problem, { kind: 'bad' }); q.refetch(); return; }

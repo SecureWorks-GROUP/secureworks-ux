@@ -176,9 +176,10 @@ test('ZZTEST receipt is selected without an amount box and sent as an id outside
   await setupReceiptWeek(page);
   await expect(page.getByText('Paid to you', { exact: true }).locator('..')).toContainText('$500.00');
   await page.getByRole('button', { name: 'Add another item' }).click();
-  await page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true }).click();
+  await page.getByRole('button', { name: 'Add a receipt', exact: true }).click();
   const picker = page.getByRole('dialog', { name: 'Reimbursement (receipt)' });
   await expect(picker.locator('input')).toHaveCount(0);
+  await expect(picker.getByText('Other crew receipt')).toHaveCount(0);
   await expect(picker.getByRole('button', { name: /No photo/ })).toBeDisabled();
   await picker.getByRole('button', { name: /Supplier/ }).click();
   await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toContainText('$80.00');
@@ -195,21 +196,29 @@ test('ZZTEST receipt is selected without an amount box and sent as an id outside
   await expect(page.getByText(/With the office: this receipt is waiting for approval/)).toBeVisible();
   const body = await page.evaluate(() => window.__crewDemo.db.receiptSubmitBody);
   expect(body.extra_items).toEqual([{ type: 'reimbursement', expense_receipt_id: 'receipt-zztest' }]);
+  await page.getByRole('button', { name: 'View invoice', exact: true }).click();
+  await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toBeVisible();
+  await expect(page.locator('.pay-line .main > b').filter({ hasText: /^Reimbursement \(receipt\)$/ })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
 test('ZZTEST switch off hides the receipt choice', async ({ page }) => {
   await page.goto(crewUrl('#/jobs'));
-  await setupReceiptWeek(page, { enabled: false });
+  await setupReceiptWeek(page, { enabled: false, review: false });
+  expect(await page.evaluate(() => window.__crewDemo.db.receiptListReads)).toBe(0);
+  await page.getByRole('button', { name: 'Review invoice', exact: true }).click();
+  await page.getByText('Supplier', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Add another item' }).click();
-  await expect(page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Add another item', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add a receipt', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__crewDemo.db.receiptListReads)).toBe(1);
 });
 
 test('ZZTEST an office receipt change returns to review before any submit', async ({ page }) => {
   await page.goto(crewUrl('#/jobs'));
   await setupReceiptWeek(page);
   await page.getByRole('button', { name: 'Add another item' }).click();
-  await page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true }).click();
+  await page.getByRole('button', { name: 'Add a receipt', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: /Supplier/ }).click();
   await page.evaluate(() => { window.__crewDemo.db.expenses[0].total_amount = 35; });
   await page.getByRole('button', { name: 'Send invoice', exact: true }).click();

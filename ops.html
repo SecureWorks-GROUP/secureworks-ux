@@ -4790,6 +4790,7 @@ __swOpsStampAssets([
         <button onclick="showView('financials')" data-view="financials">Financials</button>
         <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none">Debt</button>
         <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none">Matching</button>
+        <button onclick="showView('weeklycheck')" data-view="weeklycheck" data-weekly-check-nav style="display:none">Weekly check</button>
         <button onclick="showView('dispatch')" data-view="dispatch">Dispatch</button>
         <button onclick="showView('sales')" data-view="sales">Sales</button>
       </div>
@@ -5456,6 +5457,7 @@ __swOpsStampAssets([
 
     <!-- ═══════════ MATCHING: the Context reconciliation list (modules/ops-recon.js) ═══════════ -->
     <div id="viewRecon" class="view"><div id="reconRoot"></div></div>
+    <div id="viewWeeklycheck" class="view"><div id="weeklyCheckRoot"></div></div>
 
     <div class="view" id="viewSales">
       <div id="salesWorkspaceSubnav" class="sales-workspace-subnav" aria-label="Sales views">
@@ -5477,6 +5479,7 @@ __swOpsStampAssets([
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
     <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 3v7l5 5"/></svg></span>Debt</button>
     <button onclick="showView('recon')" data-view="recon" data-recon-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h9l-3-3M16 13H7l3 3"/></svg></span>Matching</button>
+    <button onclick="showView('weeklycheck')" data-view="weeklycheck" data-weekly-check-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 10 4 4 8-9"/></svg></span>Weekly check</button>
     <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#128666;</span>Dispatch</button>
     <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
   </div>
@@ -6510,7 +6513,7 @@ __swOpsStampAssets([
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
 <script>
-__swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}, {t:'js', u:'modules/ops-weekly-check.js?v=1'}]);
 </script>
 <!-- Job work order (docs/job-work-order-screens.md): on for office, every job type. ?wo=live does not hide it. -->
 <script>
@@ -7787,7 +7790,14 @@ function jobDetailIsOpen() {
 // writes the tab into the address bar, so a refresh, a restored browser tab or a
 // bookmark stays on the tab it names.
 var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
+// P4-10.3 stays off until staff notice and director copy proof are complete.
+function weeklyCheckEnabled() {
+  var value = new URLSearchParams(location.search).get('weeklycheck');
+  if (value !== null) return value === '1';
+  try { return localStorage.getItem('sw_weekly_check') === '1'; } catch (e) { return false; }
+}
 function opsVisibleView(view) {
+  if (view === 'weeklycheck' && !weeklyCheckEnabled()) return 'jobs';
   return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;
 }
 
@@ -7855,6 +7865,7 @@ function showView(view) {
   if (view === 'financials') loadFinancials();
   if (view === 'debt' && typeof loadDebtWorkshop === 'function') loadDebtWorkshop();
   if (view === 'recon' && typeof loadRecon === 'function') loadRecon();
+  if (view === 'weeklycheck' && window.WeeklyCheck) WeeklyCheck.mount(document.getElementById('weeklyCheckRoot'));
   if (view === 'dispatch') {
     if (typeof OpsDispatch !== 'undefined') OpsDispatch.show();
     loadMaterials();
@@ -7937,7 +7948,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['jobs', 'calendar', 'financials', 'debt', 'recon', 'dispatch', 'performance', 'booking', 'sales'];
+  var validTabs = ['jobs', 'calendar', 'financials', 'debt', 'recon', 'weeklycheck', 'dispatch', 'performance', 'booking', 'sales'];
   showView(validTabs.indexOf(hash) >= 0 ? hash : 'jobs');
 }
 
@@ -32884,6 +32895,8 @@ function initApp() {
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
   // Matching / Needs a person (TP-11): on by default for whoever the server lets read it; ?recon=0 turns it off.
   if (typeof reconProbeVisibility === 'function') reconProbeVisibility();
+  // Like Matching, the staff-only endpoint decides who may see the tab. Off by default.
+  if (weeklyCheckEnabled() && window.WeeklyCheck) WeeklyCheck.mount(document.getElementById('weeklyCheckRoot'));
   // Today is hidden and no longer loads the alert digest, so fetch it here
   // for the Jarvis bar badges on every tab.
   loadAiAlerts();

@@ -174,3 +174,114 @@ test('group route keeps every saved day and excluded hour through Save and reope
   expect(posts.some(p=>p.action==='generate_trade_invoice')).toBe(false);
   expect(posts.some(p=>p.action==='submit_group_work_order_hours')).toBe(false);
 });
+
+test('a bot-added line names who added it and keeps the rate the bot saved', async ({ appPage: page }) => {
+  const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
+  const week = perthWeekMonday();
+  const day = addIsoDays(week, 2);
+  const cards = [
+    {
+      assignment_id: 'as-bot-assigned',
+      job_id: 'job-bot-assigned',
+      job_number: 'SW-3331',
+      client_name: 'Ada Quartermain',
+      site_suburb: 'Fremantle',
+      scheduled_date: day,
+      work_date: day,
+      start_time: '07:00',
+      finish_time: '09:00',
+      break_minutes: 0,
+      hours: 2,
+      rate: 62,
+      description: 'Bot filled the fence',
+      included: true,
+      added_by_agent: true,
+      added_by_label: 'Jarvis'
+    },
+    {
+      assignment_id: null,
+      job_id: 'job-bot-searched',
+      job_number: 'SW-3332',
+      client_name: 'Ada Quartermain',
+      site_suburb: 'Fremantle',
+      scheduled_date: day,
+      work_date: day,
+      start_time: '10:00',
+      finish_time: '12:00',
+      break_minutes: 0,
+      hours: 2,
+      rate: 40,
+      description: 'Bot added a searched job',
+      included: true,
+      added_by_agent: true,
+      added_by_label: 'Jarvis'
+    },
+    {
+      assignment_id: null,
+      job_id: 'job-self',
+      job_number: 'SW-3333',
+      client_name: 'Own search',
+      scheduled_date: day,
+      work_date: day,
+      start_time: '13:00',
+      finish_time: '14:00',
+      break_minutes: 0,
+      hours: 1,
+      rate: 45,
+      rate_source: 'client_entered',
+      description: 'I found this job',
+      included: true,
+      manually_added: true
+    }
+  ];
+  await page.route('**/functions/v1/ops-api?**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action !== 'get_running_invoice_draft') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        draft_id: 'fixture-agent-draft',
+        status: 'draft',
+        created_by_agent: true,
+        draft_origin: 'agent',
+        agent_label: 'Jarvis',
+        xero: false,
+        submitted: false,
+        draft_builder: {
+          version: 1,
+          weekStart: week,
+          weekEnd: addIsoDays(week, 6),
+          manualLock: true,
+          jobCards: cards,
+          invRows: [],
+          invLumpLines: [],
+          dismissedKeys: [],
+          notes: '',
+          gst_on: false
+        },
+        suggested: [],
+        claimed: []
+      })
+    });
+  });
+  await signIn(page, PERSONAS.installer);
+  await openWeek(page);
+
+  await expect(page.locator('[data-invoice-agent-banner]')).toContainText('An assistant drafted lines on this invoice. Only you can send it.');
+  const assigned = page.locator('.jc-card').filter({ hasText: 'SW-3331' });
+  const searched = page.locator('.jc-card').filter({ hasText: 'SW-3332' });
+  const own = page.locator('.jc-card').filter({ hasText: 'SW-3333' });
+  await expect(assigned).toContainText('Added by Jarvis');
+  await expect(assigned).not.toContainText('You added this job');
+  await expect(assigned.locator('[data-cardrate-readonly]')).toHaveText('$50.00/hr');
+  await expect(searched).toContainText('Added by Jarvis');
+  await expect(searched).not.toContainText('You added this job');
+  await expect(searched.locator('[data-cardrate-readonly]')).toHaveText('$40.00/hr');
+  await expect(own).toContainText('You added this job. The office will check it.');
+  await expect(own).not.toContainText('Added by');
+  await expect(own.locator('[data-cardrate]')).toHaveValue('45');
+  await expect(page.locator('#invSubmitBtn')).toBeVisible();
+  await expect(page.locator('#invSubmitBtn')).toContainText('Submit Invoice');
+});

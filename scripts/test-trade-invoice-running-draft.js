@@ -365,10 +365,50 @@ async function checkPayableRoutes() {
   vm.createContext(pageScope);
   const timeStart = page.indexOf('  // <trade-time-entry>');
   vm.runInContext(page.slice(timeStart, page.indexOf('  // </trade-time-entry>', timeStart)), pageScope);
-  for (const name of ['invoiceGroupJob', '_serializeJobCardsDraft', '_runningInvoiceSnapshot', '_syncJobCardsFromDOM', '_pinAssignedCardRates', '_groupJobCardHtml', '_jobCardSyncHours', '_newJobCard', '_restoreJobCardsDraft']) {
+  for (const name of ['invoiceGroupJob', '_serializeJobCardsDraft', '_runningInvoiceSnapshot', '_syncJobCardsFromDOM', '_pinAssignedCardRates', '_jobCardAddedNote', '_groupJobCardHtml', '_jobCardSyncHours', '_newJobCard', '_restoreJobCardsDraft']) {
     vm.runInContext(pageFunction(name), pageScope);
   }
   pageScope._pinAssignedCardRates();
+  const heldCards = pageScope._jobCards;
+  pageScope._jobCards = [
+    { assignment_id: 'as-bot', rate: 40, rate_source: 'client_entered', added_by_agent: true, added_by_label: 'Jarvis', manually_added: false },
+    { assignment_id: null, rate: 40, rate_source: 'client_entered', added_by_agent: true, added_by_label: 'Jarvis', manually_added: false },
+    { assignment_id: null, rate: 31, rate_source: 'client_entered', manually_added: true },
+    { assignment_id: 'as-own', rate: 40, manually_added: false }
+  ];
+  pageScope._pinAssignedCardRates();
+  assert.strictEqual(pageScope._jobCards[0].rate, 99, 'an assigned bot line opens on the usual rate');
+  assert.strictEqual(pageScope._jobCards[0].rate_source, 'server_resolved');
+  assert.strictEqual(pageScope._jobCards[1].rate, 40, 'a bot line with no assignment keeps the saved rate');
+  assert.strictEqual(pageScope._jobCards[1].rate_source, 'client_entered');
+  assert.strictEqual(pageScope._jobCards[2].rate, 31, 'a searched-in job keeps its own rate');
+  assert.strictEqual(pageScope._jobCards[3].rate, 99, 'an assigned line opens on the usual rate');
+  const restoredBot = pageScope._restoreJobCardsDraft([{
+    job_id: 'job-bot',
+    assignment_id: null,
+    rate: 40,
+    rate_source: 'client_entered',
+    added_by_agent: true,
+    added_by_label: 'Jarvis',
+    work_date: '2026-10-22',
+    start_time: '10:00',
+    finish_time: '12:00',
+    break_minutes: 0,
+    description: 'Bot added a searched job',
+    included: true
+  }])[0];
+  assert.strictEqual(restoredBot.added_by_agent, true);
+  assert.strictEqual(restoredBot.added_by_label, 'Jarvis');
+  assert.strictEqual(restoredBot.rate, 40);
+  assert.strictEqual(restoredBot.hours, 2);
+  pageScope._jobCards = [restoredBot];
+  pageScope._pinAssignedCardRates();
+  assert.strictEqual(pageScope._jobCards[0].rate, 40, 'restoring a bot line does not replace its rate');
+  assert.strictEqual(pageScope._jobCardAddedNote({ added_by_agent: true, added_by_label: 'Jarvis' }), 'Added by Jarvis ');
+  assert.strictEqual(pageScope._jobCardAddedNote({ added_by_agent: true, added_by_label: 'A<B', manually_added: true }), 'Added by A&lt;B ');
+  assert.strictEqual(pageScope._jobCardAddedNote({ manually_added: true }), 'You added this job. The office will check it. ');
+  assert.strictEqual(pageScope._jobCardAddedNote({ assignment_id: 'as-1' }), '');
+  pageScope._jobCards = heldCards;
   pageScope._syncJobCardsFromDOM();
   const wholeCard = pageScope._groupJobCardHtml(stored[0]);
   assert.strictEqual((wholeCard.match(/data-saved-group-entry/g) || []).length, 3, 'one group card displays every saved day');

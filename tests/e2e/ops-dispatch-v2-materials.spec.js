@@ -297,7 +297,9 @@ function fakeV2(seed = {}) {
       if (f) return f;
       const j = job(b.job_id);
       const b64 = String(b.data_base64).slice(String(b.data_base64).indexOf(',') + 1);
-      const p = { id: PID(++fake.n.photo), supplier_id: b.supplier_id || null, file_name: b.file_name, content_type: 'image/jpeg', size_bytes: Math.floor(b64.length * 3 / 4), added_at: stamp() };
+      const pdf = /\.pdf$/i.test(b.file_name);
+      const p = { id: PID(++fake.n.photo), supplier_id: b.supplier_id || null, file_name: b.file_name, content_type: pdf ? 'application/pdf' : 'image/jpeg',
+        kind: pdf ? 'file' : 'photo', file_label: pdf ? 'PDF' : 'Photo', size_bytes: Math.floor(b64.length * 3 / 4), added_at: stamp() };
       j.photos.push(p);
       return { success: true, photo: p };
     },
@@ -321,9 +323,9 @@ function fakeV2(seed = {}) {
       if (open && !b.rebuild) return { success: true, unchanged: true, email: emailOut(open) };
       if (!s.approved) return no(409, 'no_approved_email');
       const lines = j.lines.filter((l) => l.supplier_id === b.supplier_id && !l.sent_on_email_id && l.status !== 'in_stock' && String(l.description || '').trim());
-      // The box's photos not already sent, three at most (Tweak 5).
+      // The box's photos and files not already sent, ten at most (Tweak 5; 16 Nov 2026).
       const gone = new Set(j.emails.filter((x) => ['sent', 'sending', 'send_unknown'].includes(x.status)).flatMap((x) => x.photo_ids));
-      const photoIds = j.photos.filter((p) => p.supplier_id === b.supplier_id && !gone.has(p.id)).slice(0, 3).map((p) => p.id);
+      const photoIds = j.photos.filter((p) => p.supplier_id === b.supplier_id && !gone.has(p.id)).slice(0, 10).map((p) => p.id);
       if (!lines.length && !photoIds.length) return no(409, 'no_lines_to_order');
       if (b.fulfilment !== undefined && b.fulfilment !== null && !['delivery', 'pickup'].includes(b.fulfilment)) return no(400, 'invalid_request');
       const date = b.delivery_date || null;
@@ -826,16 +828,93 @@ test.describe('Dispatch v2 Materials: Draft list and supplier boxes', () => {
 
     fake.fail.dispatch_v2_upload_photo = [{ status: 413, body: { error: 'This photo is 4.2 MB.', code: 'photo_too_large', size_bytes: 4200000 } }];
     await input.setInputFiles({ name: 'big.png', mimeType: 'image/png', buffer: PNG_1PX });
-    await expect(draftOf(mat).locator('[role="alert"]')).toHaveText('This photo is too big to send (4.2 MB). Outlook takes 3 MB at most. Take a smaller photo, or a screenshot of it, and add that.');
+    await expect(draftOf(mat).locator('[role="alert"]')).toHaveText('big.png is too big to send (4.2 MB). Outlook takes 3 MB at most. Take a smaller photo, or a screenshot of it, and add that.');
 
     // A file the browser cannot open as a picture goes as it is; the server says why it cannot take it.
-    fake.fail.dispatch_v2_upload_photo = [{ status: 400, body: { error: 'Only JPEG, PNG or WebP.', code: 'photo_type_not_allowed' } }];
+    fake.fail.dispatch_v2_upload_photo = [{ status: 400, body: { error: 'IMG_0001.HEIC cannot be attached.', code: 'file_type_not_allowed' } }];
     await input.setInputFiles({ name: 'IMG_0001.HEIC', mimeType: 'image/heic', buffer: Buffer.from('not a picture a browser can open') });
-    await expect(draftOf(mat).locator('[role="alert"]')).toHaveText('Dispatch can only send JPEG, PNG or WebP photos, and this file is another kind (an iPhone HEIC photo or a PDF, for example). ' +
-      'Take a screenshot of it and add that, or on the iPhone set Camera, Formats to Most Compatible.');
+    await expect(draftOf(mat).locator('[role="alert"]')).toHaveText('IMG_0001.HEIC cannot be attached. Only photos (JPEG, PNG, WebP), PDF, Excel (.xlsx, .xls), CSV and Word (.docx, .doc) files can go on an order. ' +
+      'For an iPhone HEIC photo, take a screenshot of it and add that, or on the iPhone set Camera, Formats to Most Compatible.');
     expect(fake.uploads[2]).toEqual({ file_name: 'IMG_0001.HEIC', head: 'data:image/heic;base64,' });
     // The refused photos were not added.
     await expect(draftOf(mat).locator('.dpc-v2-photo')).toHaveCount(1);
+  });
+});
+
+// ── Photos AND files on a box (Shaun, 16 Nov 2026) ───────────────────────────
+
+test.describe('Dispatch v2 Materials: files on a supplier box', () => {
+  // A file dragged from the computer, made in the page (names made up).
+  const dropOf = (page, files) => page.evaluateHandle((list) => {
+    const d = new DataTransfer();
+    list.forEach((f) => d.items.add(new File([f.body], f.name, { type: f.type })));
+    return d;
+  }, files);
+
+  test('a PDF dropped on a supplier box goes up as it is, shows its PDF tag, and makes a file-only order with the PDF attached', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat, writes } = await boot(page, fake);
+    const banksia = boxOf(mat, 'Banksia');
+    await expect(banksia.locator('.dpc-v2-drop')).toHaveText('Drop photos or files here');
+    await expect(banksia.locator('[data-dpc-v2="photo-add"]')).toHaveText('+ Add photo or file');
+    const input = banksia.locator('input[type="file"][data-dpc-v2-file]');
+    await expect(input).toHaveAttribute('accept', 'image/*,.pdf,.xlsx,.xls,.csv,.docx,.doc');
+    await expect(input).toHaveAttribute('multiple', '');
+
+    // A line being moved carries text only: the box does not light up for it as a file.
+    const text = await page.evaluateHandle(() => { const d = new DataTransfer(); d.setData('text/plain', 'not a file'); return d; });
+    await banksia.dispatchEvent('dragover', { dataTransfer: text });
+    await expect(banksia).not.toHaveClass(/dpc-v2-over/);
+
+    const dt = await dropOf(page, [{ name: 'Solarspan-order-form.pdf', type: 'application/pdf', body: '%PDF-1.4 Solarspan order form' }]);
+    await banksia.locator('.dpc-v2-drop').dispatchEvent('dragover', { dataTransfer: dt });
+    await expect(banksia).toHaveClass(/dpc-v2-over/);
+    await banksia.locator('.dpc-v2-drop').dispatchEvent('drop', { dataTransfer: dt });
+    await expect(banksia).toContainText('File added: Solarspan-order-form.pdf (PDF), 0.1 MB.');
+    await expect(banksia).not.toHaveClass(/dpc-v2-over/);
+    const row = banksia.locator('.dpc-v2-photo.dpc-v2-isfile');
+    await expect(row.locator('.dpc-v2-kind')).toHaveText('PDF');
+    if (SHOT('file-on-box')) await banksia.screenshot({ path: SHOT('file-on-box') });
+    await expect(row.locator('.dpc-v2-photoname')).toContainText('Solarspan-order-form.pdf');
+    await expect(row.locator('[data-dpc-v2="photo-del"]')).toHaveAttribute('aria-label', 'Delete file Solarspan-order-form.pdf');
+    // Sent as it is (not shrunk to a JPEG), to the Banksia box.
+    expect(fake.uploads).toEqual([{ file_name: 'Solarspan-order-form.pdf', head: 'data:application/pdf;ba' }]);
+    expect(writes().filter((c) => c.action === 'dispatch_v2_upload_photo').map((c) => c.body.supplier_id)).toEqual([SID(2)]);
+
+    // A file alone makes an order, with the approved photo-only words.
+    await expect(banksia.locator('.dpc-v2-photoonly')).toHaveText('Photos only: the email will say Please see attached for materials needed.');
+    await makeHeld(mat, 'Banksia', '2026-11-10');
+    const body = await banksia.locator('[data-dpc-v2-mf="body"]').inputValue();
+    expect(body).toContain('Please see attached for materials needed.');
+    const tick = banksia.locator(`[data-dpc-v2-attach="${PID(1)}"]`);
+    await expect(tick).toBeChecked();
+    await expect(banksia.locator('.dpc-v2-attach label')).toContainText('PDF Solarspan-order-form.pdf');
+    if (SHOT('file-on-email')) await banksia.locator('.dpc-v2-mail').screenshot({ path: SHOT('file-on-email') });
+    // The per-email tick still works for a file.
+    await tick.uncheck();
+    await expect(banksia).toContainText('This email has no lines and no photo. Tick a photo, or discard it.');
+    expect(await mat.innerText()).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  test('several picked at once go up one at a time; one of another kind and one over 3 MB are refused by name and never sent', async ({ page }) => {
+    const fake = fakeV2(SPLIT());
+    const { mat } = await boot(page, fake);
+    const acacia = boxOf(mat, 'Acacia Steel');
+    const input = acacia.locator('input[type="file"][data-dpc-v2-file]');
+    await input.setInputFiles([
+      { name: 'Cut-list.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 cut list') },
+      { name: 'all.zip', mimeType: 'application/zip', buffer: Buffer.from('PK') },
+      { name: 'Big-plans.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(3100000, 32) },
+    ]);
+    const alert = acacia.locator('[role="alert"]');
+    await expect(alert).toContainText('Added 1 of 3. Not added:');
+    await expect(alert.locator('li')).toHaveText([
+      'all.zip cannot be attached. Only photos (JPEG, PNG, WebP), PDF, Excel (.xlsx, .xls), CSV and Word (.docx, .doc) files can go on an order.',
+      'Big-plans.pdf is 3.1 MB. Each photo or file must be under 3 MB to go with an Outlook email. Shrink it, or send that one from Outlook.',
+    ]);
+    // Only the good one went up.
+    expect(fake.uploads.map((u) => u.file_name)).toEqual(['Cut-list.pdf']);
+    await expect(acacia.locator('.dpc-v2-photo .dpc-v2-kind')).toHaveText(['PDF']);
   });
 });
 

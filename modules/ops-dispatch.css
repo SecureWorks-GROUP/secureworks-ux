@@ -945,3 +945,8 @@ p.dpc-deliv-sub { font-size: 13px; color: var(--mute); }
 .dpc .dpc-file-sw[aria-disabled="true"] { opacity: .55; cursor: progress; }
 .dpc .dpc-file-sw:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 .dpc .dpc-files-more { display: block; width: 100%; margin-bottom: 6px; border-style: dashed; font-size: 12.5px; color: var(--mute); padding: 7px; }
+/* Photos AND files on a box (16 Nov 2026): the drop area, and the kind tag beside a file (PDF, Excel, CSV, Word). Desktop only. */
+.dpc .dpc-v2-drop { margin: 6px 12px 0; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; color: var(--mute); font-size: 12.5px; text-align: center; }
+.dpc-v2-filedrag .dpc-v2-drop { border-color: var(--steel-2); color: var(--steel-2); }
+.dpc-v2-filedrag [data-dpc-v2-box].dpc-v2-over .dpc-v2-drop { border-color: var(--signal); color: var(--signal); background: #fff; }
+.dpc .dpc-v2-kind { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--steel-2); color: #fff; font-size: 11px; font-weight: 600; letter-spacing: .02em; }

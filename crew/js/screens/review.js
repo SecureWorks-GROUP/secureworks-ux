@@ -25,11 +25,13 @@ export function Review({ monday: mondayParam }) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
   const done = useRef(false);
+  const inclusive = Boolean(data && data.money && data.money.super_basis === 'inclusive_12_112_v1');
+  const moneyUnavailable = Boolean(data && data.money_unavailable === true);
   // One invoice a week: a week that is already sent opens the invoice itself.
   useEffect(() => { if (live && !done.current) go('/pay/invoice/' + live.id, { replace: true }); }, [live && live.id]);
 
   const send = async () => {
-    if (problems.length || !est.count || w.foreign) return;
+    if (problems.length || !est.count || w.foreign || moneyUnavailable) return;
     const left = est.ahead + est.unknown;
     const ok = await ask({ title: `Send your invoice for ${fmtWeek(monday)}?`, body: `About ${cash(est.pay)} to you. You can send one invoice a week, and you cannot change it after it is sent, so check it is all there.${est.ahead ? ` ${est.ahead === 1 ? 'One job later this week is' : est.ahead + ' jobs later this week are'} not on it. If you work ${est.ahead === 1 ? 'it' : 'them'}, send after that instead, or add ${est.ahead === 1 ? 'it' : 'them'} to next week.` : ''}${est.unknown ? ` ${plural(est.unknown, 'job')} ${est.unknown === 1 ? 'is' : 'are'} left off until the office says how ${est.unknown === 1 ? 'it is' : 'they are'} billed.` : ''}`, yes: left ? 'Send it without them' : 'Send invoice' });
     if (!ok) return;
@@ -75,7 +77,7 @@ export function Review({ monday: mondayParam }) {
     toast(friendly(err) + ' Nothing was sent.', { kind: 'bad', ms: 7000 });
   };
 
-  if (result) return html`<${Sent} res=${result} monday=${monday} />`;
+  if (result) return html`<${Sent} res=${result} monday=${monday} workOrder=${lines.some((l) => !l.off && !l.ahead && l.kind === 'work_order')} />`;
 
   const on = lines.filter((l) => !l.off && !l.ahead && !l.unknown);
   const of = (kind) => on.filter((l) => l.kind === kind);
@@ -95,9 +97,9 @@ export function Review({ monday: mondayParam }) {
     else if (l.kind === 'work_order') {
       const rec = round2((l.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0));
       detail = [l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
-    } else if (l.kind === 'commission') detail = 'commission, no super on it';
+    } else if (l.kind === 'commission') detail = inclusive ? 'commission, includes super' : 'commission, no super on it';
     else if (l.kind === 'other') detail = l.type || 'Other';
-    else if (l.kind === 'deduction') detail = 'taken off this invoice';
+    else if (l.kind === 'deduction') detail = 'left off this invoice';
     // A rate above the office rate bills, and the office checks it before it is paid (owner, 15 Nov 2026).
     const above = !problem && l.kind === 'hours' && !l.off && l.usualRate > 0 && Number(l.rate) > l.usualRate + 0.004
       ? `Above your office rate of ${cash(l.usualRate)}. The office checks it before it is paid.` : '';
@@ -108,8 +110,9 @@ export function Review({ monday: mondayParam }) {
   return html`<${Page} title="Invoice" back="Timesheet" onBack=${() => (route.query && route.query.from === 'pay' ? go('/pay/week/' + monday, { replace: true }) : back('/pay/week/' + monday))} right=${html`<${StatusBadge} status=${sentBack ? 'sent_back' : 'draft'} />`} flush
     foot=${html`${w.foreign ? html`<p class="t-small">This week has lines from the Trade App that cannot be sent from here.</p>`
         : problems.length ? html`<p class="t-small">${problems.length === 1 ? `${problems[0].title}: ${lineProblem(problems[0], ctx).toLowerCase()}` : `${problems.length} lines still need something`}</p>` : null}
-      <${Button} block class="big" busy=${sending} disabled=${!est.count || problems.length > 0 || w.foreign > 0} onClick=${send}>Send invoice<//>`}>
+      <${Button} block class="big" busy=${sending} disabled=${!est.count || problems.length > 0 || w.foreign > 0 || moneyUnavailable} onClick=${send}>Send invoice<//>`}>
     <div class="pay-who t-num">Pay week ${weekWords(monday)} · ${user.name}</div>
+    ${moneyUnavailable ? html`<p class="block note-banner pay-gap" role="status">The pay figures could not be worked out right now. Your hours are saved. Try again in a minute.</p>` : null}
     ${sentBack ? html`<div class="block note-banner bad pay-gap"><span><span class="t-strong">The office sent this back.</span> ${sentBack.office_note || 'Check each line, fix what is wrong and send it again.'}</span></div>` : null}
     ${hours.loading ? html`<${SkelRows} n=${3} />` : hours.error && !data ? html`<${LoadError} error=${hours.error} onRetry=${hours.refetch} what="this week" />` : html`
       ${data && data.rate_resolved === false && !w.rateEditable ? html`<div class="block note-banner pay-gap"><span>No pay rate is set for you yet. Call the office to have it set before you send.</span></div>` : null}
@@ -120,18 +123,27 @@ export function Review({ monday: mondayParam }) {
         ${wo.length ? html`<${PayGroup} label="Work order" right=${sub(wo)}>${wo.map(line)}<//>` : null}
         ${co.length ? html`<${PayGroup} label="Commission" right=${sub(co)}>${co.map(line)}<//>` : null}
         ${other.length ? html`<${PayGroup} label="Other items" right=${sub(other)}>${other.map(line)}<//>` : null}
-        ${off.length ? html`<${PayGroup} label="Taken off" right=${sub(off)}>${off.map(line)}<//>` : null}
+        ${off.length ? html`<${PayGroup} label="Adjustments" right=${sub(off)}>${off.map(line)}<//>` : null}
         <button type="button" class="pay-add" onClick=${() => openAddOther({ monday, lines, addLine: w.addLine })}>Add another item</button>
       </div>
 
-      ${est.count ? html`<div class="block card pay-sum pay-gap">
+      ${est.count && !moneyUnavailable ? html`<div class="block card pay-sum pay-gap">
+        ${inclusive ? html`
+          <div class="pay-sumrow"><span>Total (includes super)</span><span>${cash(est.base)}</span></div>
+          <div class="pay-sumrow"><span>Paid to your super fund</span><span>${cash(est.superPaid)}</span></div>
+          <div class="pay-sumrow total"><span>Paid to you</span><span>${cash(est.paidToYou)}</span></div>
+          ${est.reimb > 0 ? html`<div class="pay-sumrow"><span>Reimbursements</span><span>${cash(est.reimb)}</span></div>` : null}
+          ${gstOn ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(est.gst)}</span></div>` : null}
+          ${est.takeOff ? html`<div class="pay-sumrow"><span>Repayment</span><span>-${cash(est.takeOff)}</span></div>` : null}
+          ${est.intoBank !== est.paidToYou ? html`<div class="pay-sumrow"><span>Into your bank account</span><span>${cash(est.intoBank)}</span></div>` : null}
+        ` : html`
         <div class="pay-sumrow"><span>Gross earned${est.hours ? ` · ${hrs(est.hours)}` : ''}</span><span>${cash(est.gross)}</span></div>
-        <div class="pay-sumrow"><span>Super withheld, 6% of ${cash(est.superBase)}</span><span>-${cash(est.superHeld)}</span></div>
+        <div class="pay-sumrow"><span>Paid to your super fund, 6% of ${cash(est.superBase)}</span><span>-${cash(est.superHeld)}</span></div>
         ${gstOn ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(est.gst)}</span></div>` : null}
-        ${deduction && deduction.amount ? html`<div class="pay-sumrow"><span>${deduction.label || 'Weekly deduction'}</span><span>${est.takeOff ? '-' + cash(est.takeOff) : 'Not taken'}</span></div>` : null}
-        <div class="pay-sumrow total"><span>You are paid, about</span><span>${cash(est.pay)}</span></div>
+        ${deduction && deduction.amount ? html`<div class="pay-sumrow"><span>${deduction.label || 'Weekly repayment'}</span><span>${est.takeOff ? '-' + cash(est.takeOff) : 'Not taken'}</span></div>` : null}
+        <div class="pay-sumrow total"><span>You are paid, about</span><span>${cash(est.pay)}</span></div>`}
       </div>
-      <p class="block t-small pay-note">An estimate. The office system works out the exact figures when you send. The company pays another 6% super on top.</p>` : null}
+      <p class="block t-small pay-note">An estimate. The office system works out the exact figures when you send.${inclusive ? '' : ' The company pays another 6% super on top.'}</p>` : null}
 
       ${groups.length || unknown.length || leftOff.length || repaid.length ? html`<div class="pay-rows pay-gap">
         ${groups.length ? html`<${PayGroup} label="Group work order" right="Sent on its own">${groups.map((g) => {
@@ -158,19 +170,19 @@ export function Review({ monday: mondayParam }) {
 }
 
 // ------------------------------------------------------------------ sent
-function Sent({ res, monday }) {
+function Sent({ res, monday, workOrder }) {
   const held = res.office_review === 'held' || res.code === 'lines_awaiting_office_review';
   const xeroLater = res.code === 'XERO_PUSH_FAILED';
   const dedNote = res.recurring_deduction_week && res.recurring_deduction_week.note;
-  const figures = num(res.trade_payable) != null || num(res.gross_earned) != null;
+  const figures = Boolean(res.pay_view) || num(res.trade_payable) != null || num(res.gross_earned) != null;
   return html`<${DoneScreen} bar="Invoice" title="Invoice sent"
     lead=${held ? 'The office is checking a line on it. You are paid once they approve it.' : xeroLater ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}
     foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>
       ${res.invoice_id ? html`<${Button} kind="line" block onClick=${() => go('/pay/invoice/' + res.invoice_id, { replace: true })}>View invoice<//>` : null}`}>
-    ${figures ? html`<div class="card"><${PayRows} m=${{ ...res, trade_payable: res.trade_payable != null ? res.trade_payable : res.amount_payable != null ? res.amount_payable : res.net_pay }} /></div>` : html`<p class="t-small">The office system did not send the figures back. Open the invoice to see them.</p>`}
+    ${figures ? html`<div class="card"><${PayRows} workOrder=${workOrder} m=${{ ...res, trade_payable: res.trade_payable != null ? res.trade_payable : res.amount_payable != null ? res.amount_payable : res.net_pay }} /></div>` : html`<p class="t-small">The office system did not send the figures back. Open the invoice to see them.</p>`}
     ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}
     ${dedNote ? html`<p class="t-small">${dedNote}</p>` : null}
-    ${(res.wo_labour_payouts || []).map((p) => html`<p class="t-small">${cash(p.total_ex)} for ${p.name} was taken off your invoice. They bill SecureWorks themselves.</p>`)}
+    ${(res.wo_labour_payouts || []).map((p) => html`<p class="t-small">${cash(p.total_ex)} for your crew is not on your invoice. They bill SecureWorks themselves.</p>`)}
     <p class="t-small t-num">${[res.invoice_number, 'Pay week ' + weekWords(monday)].filter(Boolean).join(' · ')}</p>
   <//>`;
 }

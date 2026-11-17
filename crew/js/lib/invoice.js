@@ -34,6 +34,7 @@ export function invoiceBadge(inv) {
 }
 /** The amount this invoice pays the trade, straight from the server (null when it sent none). */
 export function invoicePays(inv) {
+  if (inv.pay_view) return num(inv.pay_view.into_bank);
   // `payable` (my_money rows) is already after the office's changes in Xero.
   if (inv.payable_after_xero != null) return Number(inv.payable_after_xero);
   if (inv.payable != null) return Number(inv.payable);
@@ -181,7 +182,7 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
   // Amounts the trade takes off the whole invoice (made in the current Trade App).
   for (const lp of (draft && draft.lumps) || []) {
     if (!lp) continue;
-    lines.push({ key: 'lump:' + lp.id, lumpId: lp.id, kind: 'deduction', title: String(lp.description || '').trim() || 'Amount taken off', description: String(lp.description || '').trim(), amount: Math.abs(Number(lp.amount) || 0), date: '', added: true, off: false });
+    lines.push({ key: 'lump:' + lp.id, lumpId: lp.id, kind: 'deduction', title: String(lp.description || '').trim() || 'Adjustment amount', description: String(lp.description || '').trim(), amount: Math.abs(Number(lp.amount) || 0), date: '', added: true, off: false });
   }
   return lines.sort((x, y) => String(x.date || '9').localeCompare(String(y.date || '9')) || x.title.localeCompare(y.title));
 }
@@ -239,19 +240,35 @@ export function lineSummary(line) {
   if (line.kind === 'work_order') return line.amountLocked ? 'Work order, agreed with the office' : 'Work order';
   if (line.kind === 'commission') return 'Commission';
   if (line.kind === 'unknown') return UNKNOWN_MODE_WORDS;
-  if (line.kind === 'deduction') return 'Taken off';
+  if (line.kind === 'deduction') return 'Adjustment';
   return line.type || 'Other';
 }
 
 /** Estimate only. The server works out the real figures when the invoice is sent. */
-export function estimate(lines, { gstOn, deduction }) {
-  let gross = 0; let commission = 0; let hours = 0; let unfinished = 0;
+export function estimate(lines, { gstOn, deduction, basis }) {
+  let gross = 0; let commission = 0; let reimb = 0; let hours = 0; let unfinished = 0;
   for (const l of lines) {
     if (l.off || l.ahead || l.unknown) continue;
     const amt = lineAmount(l);
     if (amt == null) { unfinished += 1; continue; }
     gross += amt; if (l.kind === 'commission') commission += amt;
+    if (l.type === 'reimbursement') reimb += amt;
     if (l.kind === 'hours') hours += lineHours(l) || 0;
+  }
+  if (basis === 'inclusive_12_112_v1') {
+    gross = round2(gross); reimb = round2(reimb);
+    const base = round2(gross - reimb);
+    const superCents = Math.floor((Math.round(base * 100) * 6 + 28) / 56);
+    const superPaid = superCents / 100;
+    const paidToYou = round2(base - superPaid);
+    const gst = gstOn ? Math.floor((Math.round(base * 100) + 5) / 10) / 100 : 0;
+    const takeOff = Number(deduction && deduction.amount) || 0;
+    const intoBank = round2(paidToYou + reimb + gst - takeOff);
+    return { gross, base, superPaid, paidToYou, reimb, gst, intoBank, takeOff, pay: intoBank,
+      hours: round2(hours), unfinished,
+      count: lines.filter((l) => !l.off && !l.ahead && !l.unknown).length,
+      ahead: lines.filter((l) => l.ahead && !l.off && !l.unknown).length,
+      unknown: lines.filter((l) => l.unknown && !l.ahead).length };
   }
   const superHeld = Math.round(Math.max(0, gross - commission) * 0.06 * 100) / 100;
   const gst = gstOn ? Math.round(gross * 0.1 * 100) / 100 : 0;

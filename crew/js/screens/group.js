@@ -354,7 +354,7 @@ function ShareSent({ result, title, onDone }) {
   return html`<${DoneScreen} bar="Group work order" title=${good ? 'Share invoiced' : 'Do not send it again'} lead=${lead} wait=${!good}
     foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>
       <${Button} kind="line" block onClick=${onDone}>Back to the group work order<//>`}>
-    ${good && (num(res.trade_payable) != null || num(res.gross_earned) != null) ? html`<div class="card"><${PayRows} m=${res} /></div>
+    ${good && (res.pay_view || num(res.trade_payable) != null || num(res.gross_earned) != null) ? html`<div class="card"><${PayRows} m=${res} workOrder /></div>
       ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}` : null}
     ${good ? html`<p class="t-small t-num">${[res.invoice_number, title].filter(Boolean).join(' · ')}</p>` : html`<p class="t-small">Call the office and tell them your share for ${title} may not have saved. They can see it from their side.</p>`}
   <//>`;

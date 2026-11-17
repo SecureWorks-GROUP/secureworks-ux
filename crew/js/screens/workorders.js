@@ -162,13 +162,13 @@ export function WorkOrders({ openId }) {
     ${crewLines.length ? html`<${Section} label="Crew already billed on this job">
       <div class="block card pad pay-opts">
         <p class="t-small">You approved these. Leave one on and it comes off this work order: they bill the company themselves, so nobody is paid twice.</p>
-        ${crewLines.map((c) => html`<${Toggle} key=${chargeId(c)} label=${`${c.trade_name || 'Crew'} · ${cash(chargeAmt(c))}`} hint=${c.description || 'Take this off my work order'} checked=${!off.includes(chargeId(c))} onChange=${(on) => setOff((cur) => (on ? cur.filter((x) => x !== chargeId(c)) : [...cur, chargeId(c)]))} />`)}
+        ${crewLines.map((c) => html`<${Toggle} key=${chargeId(c)} label=${`${c.trade_name || 'Crew'} · ${cash(chargeAmt(c))}`} hint=${c.description || 'Crew paid separately'} checked=${!off.includes(chargeId(c))} onChange=${(on) => setOff((cur) => (on ? cur.filter((x) => x !== chargeId(c)) : [...cur, chargeId(c)]))} />`)}
       </div><//>` : null}
 
     ${f.ready ? html`<div class="block card pad pay-gap"><${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gst} onChange=${setGst} /></div>
       ${taken.length ? html`<div class="block card pay-sum pay-gap">
         <div class="pay-sumrow"><span>Work order</span><span>${cash(w.subtotal)}</span></div>
-        <div class="pay-sumrow"><span>Crew taken off</span><span>-${cash(takenTotal)}</span></div>
+        <div class="pay-sumrow"><span>Crew paid separately</span><span>-${cash(takenTotal)}</span></div>
         <div class="pay-sumrow total"><span>You invoice about</span><span>${cash(estimate)}</span></div>
       </div><p class="block t-small pay-note">An estimate, before super and GST. The office system works out the exact figures when you send.</p>` : null}` : null}
   <//>`;
@@ -181,9 +181,9 @@ function WoSent({ res, wo }) {
   return html`<${DoneScreen} bar="Work order" title=${later ? 'Invoice saved' : 'Invoice sent'}
     lead=${held ? 'The office is checking a line on it. You are paid once they approve it.' : later ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}
     foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>`}>
-    ${num(res.trade_payable) != null || num(res.gross_earned) != null ? html`<div class="card"><${PayRows} m=${res} /></div>
+    ${res.pay_view || num(res.trade_payable) != null || num(res.gross_earned) != null ? html`<div class="card"><${PayRows} m=${res} workOrder /></div>
       ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}` : null}
-    ${off ? html`<p class="t-small">${cash(Math.abs(off))} of crew pay was taken off this work order. They bill the company themselves.</p>` : null}
+    ${off ? html`<p class="t-small">${cash(Math.abs(off))} of crew pay is paid separately from this work order. They bill the company themselves.</p>` : null}
     <p class="t-small t-num">${[res.xero_bill_number || res.invoice_number, wo.wo_number, titleOf(wo)].filter(Boolean).join(' · ')}</p>
   <//>`;
 }

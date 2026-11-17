@@ -74,11 +74,7 @@ thread's contract (secureworks-projects `job-profit/trade-app/contract.md`).
     the screen says so. Reverse: set the draft to phone-only in
     `js/lib/invoice.js`.
 
-11. **Expenses are not in the invoice total.**
-    Options: add them to "You are paid" as the first mockup did; show them as
-    repaid separately. Why: an expense is its own record and its own bill in
-    Xero, so the invoice total has to equal the invoice's bill. Reverse: needs
-    a server field for "expenses approved and unpaid"; see the contract, D-3.
+11. **A reimbursement is its own line on the invoice, with its receipt, and carries no super (owner ruling, 17 Nov 2026).**
 
 12. **Days booked but not yet worked are not on the timesheet.**
     They were clutter. One line says how many are still to come. Reverse: list

@@ -38,8 +38,8 @@ test('timesheet first, then one invoice for the pay week', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Review invoice' }).click();
   await expect(page.locator('.pay-cap').first()).toContainText('Hourly');
-  await expect(page.getByText('You are paid, about')).toBeVisible();
-  await expect(page.getByText('An estimate.')).toBeVisible();
+  await expect(page.getByText('Paid to you', { exact: true })).toBeVisible();
+  await expect(page.getByText('An estimate.', { exact: false })).toBeVisible();
   // Expenses and the group work order are shown, but outside what this invoice pays.
   await expect(page.locator('.pay-cap', { hasText: 'Expenses, repaid separately' })).toBeVisible();
   await expect(page.locator('.pay-cap', { hasText: 'Group work order' })).toContainText('Sent on its own');
@@ -47,7 +47,7 @@ test('timesheet first, then one invoice for the pay week', async ({ page }) => {
   await page.getByRole('button', { name: 'Send invoice' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /Send/ }).click();
   await expect(page.getByRole('heading', { name: 'Invoice sent' })).toBeVisible();
-  await expect(page.locator('.pay-sumrow.total')).toContainText('You are paid');
+  await expect(page.locator('.pay-sumrow.total')).toContainText('Paid to you');
 
   // One invoice a week: the week now reads as sent, and it is under Invoices.
   await page.getByRole('button', { name: 'Done' }).click();
@@ -130,4 +130,40 @@ test('a trade sets their own rate for a job; above the office rate it says the o
   await expect(page.locator('.pay-line', { hasText: 'Morley' })).not.toContainText('Above your office rate');
   await expect(page.getByRole('button', { name: 'Send invoice' })).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test('ZZTEST sent invoice uses only server pay rows and optional tax guide', async ({ page }) => {
+  await page.goto(crewUrl('#/jobs'));
+  await page.waitForFunction(() => Boolean(window.__crewDemo));
+  await page.evaluate(() => {
+    const { db } = window.__crewDemo;
+    db.me.name = 'Crew';
+    db.invoices.push({ id: 'ZZTEST-pay', invoice_number: 'ZZTEST-001', status: 'paid', lines: [],
+      pay_view: { basis: 'inclusive_12_112_v1', total_inc_super: 1120, paid_to_super: 120, paid_to_you: 1000,
+        reimbursements: 0, gst: 0, repayment: null, into_bank: 1000, tax_set_aside: { percent: 20, amount: 200 } } });
+    location.hash = '#/pay/invoice/ZZTEST-pay';
+  });
+  const rows = page.locator('.pay-sumrow');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toHaveText('Total (includes super)$1,120.00');
+  await expect(rows.nth(1)).toHaveText('Paid to your super fund$120.00');
+  await expect(rows.nth(2)).toHaveText('Paid to you$1,000.00');
+  await expect(rows.nth(3)).toContainText('Suggested to set aside for tax');
+  await expect(rows.nth(3)).toContainText('$200.00');
+  await expect(page.getByText('A guide only, not tax advice.')).toBeVisible();
+  await expect(page.getByText('Into your bank account', { exact: true })).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText(/taken off|withheld/i);
+});
+
+test('ZZTEST unavailable money keeps the week editable and Send disabled', async ({ page }) => {
+  await page.goto(crewUrl('#/jobs'));
+  await page.waitForFunction(() => Boolean(window.__crewDemo));
+  await page.evaluate(() => {
+    const ops = window.__crewDemo.ops; const original = ops.my_hours;
+    ops.my_hours = (params) => ({ ...original(params), money_unavailable: true });
+    location.hash = '#/pay/week/2026-11-09/invoice';
+  });
+  await expect(page.getByText('The pay figures could not be worked out right now. Your hours are saved. Try again in a minute.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send invoice' })).toBeDisabled();
+  await expect(page.locator('.pay-sum')).toHaveCount(0);
 });

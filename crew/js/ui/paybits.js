@@ -52,7 +52,7 @@ function listWords(names) {
 }
 
 /** How a line is paid, in the words used on every pay screen. The server decides which. */
-export const PAY_TYPE = { hours: 'Hourly', work_order: 'Work order', commission: 'Commission', group: 'Group work order', other: 'Other item', deduction: 'Taken off', unknown: '' };
+export const PAY_TYPE = { hours: 'Hourly', work_order: 'Work order', commission: 'Commission', group: 'Group work order', other: 'Other item', deduction: 'Adjustment', unknown: '' };
 
 // ---------- the timesheet ----------
 /** My days on a group work order: what the server sent, else the days saved on this phone. */
@@ -173,7 +173,22 @@ export function DoneScreen({ bar, title, lead, wait, children, foot }) {
  * What an invoice pays, exactly as the server sent it. `m` is an invoice or a
  * send result. Nothing is worked out here: a figure that was not sent is left out.
  */
-export function PayRows({ m, totalLabel = 'You are paid', hours }) {
+export function PayRows({ m, totalLabel = 'You are paid', hours, workOrder = false }) {
+  if (m.pay_view) {
+    const v = m.pay_view;
+    const hasWorkOrder = workOrder || m.invoice_source === 'work_order' || (m.lines || []).some((l) => /^(work[ _]order|group[ _]share)$/.test(l.line_type || ''));
+    const row = (label, value, total = false, note = '') => html`<div class=${cx('pay-sumrow', total && 'total')}><span>${label}${note ? html`<small class="t-small" style="display:block">${note}</small>` : null}</span><span>${value}</span></div>`;
+    return html`<div class="pay-sum">
+      ${row(hasWorkOrder ? 'Work order total (includes super)' : 'Total (includes super)', cash(v.total_inc_super))}
+      ${row('Paid to your super fund', cash(v.paid_to_super))}
+      ${row('Paid to you', cash(v.paid_to_you), true)}
+      ${v.reimbursements > 0 ? row('Reimbursement (receipt)', cash(v.reimbursements)) : null}
+      ${v.gst > 0 ? row('GST', cash(v.gst), false, 'Set this aside for your BAS.') : null}
+      ${v.repayment ? row('Repayment: ' + v.repayment.label, '-' + cash(v.repayment.amount), false, 'Balance left ' + cash(v.repayment.balance_left)) : null}
+      ${num(v.into_bank) !== num(v.paid_to_you) ? row('Into your bank account', cash(v.into_bank)) : null}
+      ${v.tax_set_aside ? row('Suggested to set aside for tax', cash(v.tax_set_aside.amount), false, 'A guide only, not tax advice.') : null}
+    </div>`;
+  }
   const gst = num(m.gst != null ? m.gst : m.gst_amount);
   const ded = m.recurring_deduction && num(m.recurring_deduction.amount) ? m.recurring_deduction : null;
   const adj = m.xero_adjustments && Array.isArray(m.xero_adjustments.lines) ? m.xero_adjustments.lines.filter((l) => num(l.amount)) : [];
@@ -184,11 +199,11 @@ export function PayRows({ m, totalLabel = 'You are paid', hours }) {
   const h = hours != null ? hours : num(m.total_hours);
   return html`<div class="pay-sum">
     ${num(m.grand_total) != null ? html`<div class="pay-sumrow"><span>Work orders</span><span>${cash(m.grand_total)}</span></div>` : null}
-    ${num(m.final_deductions_total) ? html`<div class="pay-sumrow"><span>Taken off</span><span>-${cash(Math.abs(m.final_deductions_total))}</span></div>` : null}
+    ${num(m.final_deductions_total) ? html`<div class="pay-sumrow"><span>Adjustments</span><span>-${cash(Math.abs(m.final_deductions_total))}</span></div>` : null}
     ${num(m.gross_earned) != null ? html`<div class="pay-sumrow"><span>Gross earned${h ? ` · ${hrs(h)}` : ''}</span><span>${cash(m.gross_earned)}</span></div>` : null}
-    ${withheld ? html`<div class="pay-sumrow"><span>Super withheld</span><span>-${cash(withheld)}</span></div>` : null}
+    ${withheld ? html`<div class="pay-sumrow"><span>Paid to your super fund</span><span>-${cash(withheld)}</span></div>` : null}
     ${gst ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(gst)}</span></div>` : null}
-    ${ded ? html`<div class="pay-sumrow"><span>${ded.label || 'Weekly deduction'}</span><span>-${cash(ded.amount)}</span></div>` : null}
+    ${ded ? html`<div class="pay-sumrow"><span>${ded.label || 'Weekly repayment'}</span><span>-${cash(ded.amount)}</span></div>` : null}
     ${adj.length && before != null ? html`<div class="pay-sumrow"><span>Before the office changed it</span><span>${cash(before)}</span></div>` : null}
     ${adj.map((l) => html`<div class="pay-sumrow"><span>${l.description || 'Changed by the office'}</span><span>${cash(l.amount)}</span></div>`)}
     <div class="pay-sumrow total"><span>${totalLabel}</span><span>${pays != null ? cash(pays) : 'Ask the office'}</span></div>
@@ -197,6 +212,7 @@ export function PayRows({ m, totalLabel = 'You are paid', hours }) {
 
 /** One sentence on where the super goes, from the server's own figures. */
 export function superNote(m) {
+  if (m.super_basis === 'inclusive_12_112_v1' || m.pay_view && m.pay_view.basis === 'inclusive_12_112_v1') return 'Your total includes super. 12/112 of it goes to your super fund.';
   const total = num(m.super_amount);
   if (!total) return '';
   return num(m.worker_withhold) ? `${cash(total)} goes to your super in total (yours plus the company's share).` : `${cash(total)} goes to your super, paid by the company on top.`;

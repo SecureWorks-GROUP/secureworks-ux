@@ -72,7 +72,7 @@ test('a work order is billed at the amount agreed with the office, with no box t
   expect(errors).toEqual([]);
 });
 
-test('commission is offered only where the server allows it, and no super is taken off it', async ({ page }) => {
+test('commission is offered only where the server allows it, with inclusive super', async ({ page }) => {
   const errors = watchErrors(page);
   // A crew member is never offered commission.
   await openWithSpy(page, 'crew');
@@ -97,8 +97,10 @@ test('commission is offered only where the server allows it, and no super is tak
 
   await page.getByRole('button', { name: 'Review invoice' }).click();
   await expect(page.locator('.pay-cap', { hasText: /^Commission/ })).toContainText('$500.00');
-  // No super is held back from commission: the estimate's super base leaves it out.
-  await expect(page.getByText('Super withheld, 6% of $0.00')).toBeVisible();
+  // Commission carries the same inclusive super as the other work lines.
+  await expect(page.locator('.pay-sumrow', { hasText: 'Total (includes super)' })).toContainText('$500.00');
+  await expect(page.locator('.pay-sumrow', { hasText: 'Paid to your super fund' })).toContainText('$53.57');
+  await expect(page.locator('.pay-sumrow.total')).toContainText('$446.43');
 
   const sent = await send(page);
   expect(sent).toHaveLength(1);

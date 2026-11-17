@@ -62,7 +62,7 @@ export function useWeek(mondayParam) {
   const groups = useGroupWeek(data);
   const gstOn = draft.gst == null ? (data && typeof data.gst_on === 'boolean' ? data.gst_on : user.gstDefault) : draft.gst;
   const deduction = data && data.recurring_deduction_week;
-  const est = estimate(lines, { gstOn, deduction });
+  const est = estimate(lines, { gstOn, deduction, basis: data && data.money && data.money.super_basis });
   const ctx = { monday, rateEditable };
   const problems = lines.filter((l) => lineProblem(l, ctx));
   const latest = useRef({}); latest.current = { data, lines, gstOn, serverOn };
@@ -280,11 +280,11 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         <${Field} label=${line.added ? 'What you did' : 'What you did (optional)'}><input class="input" value=${f.description} placeholder="e.g. Set posts, hung gates" onInput=${(e) => set('description', e.currentTarget.value)} /><//>
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
-        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Take off anything you paid other crew out of it.</p>`
+        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Record anything you paid other crew as an adjustment.</p>`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
         ${recorded > 0 ? html`<p class="t-small">${hrs(recorded)} recorded on this job this week. The hours are a record only. The pay is the work order amount.</p>` : null}
         ${(line.charges || []).length ? html`<${Field} label="Crew already billed on this job">
-          <div class="stack tight">${line.charges.map((c) => html`<${Toggle} label=${c.trade_name + ' ' + cash(Math.abs(c.amount_ex))} hint=${c.description || 'Take this off my work order'} checked=${f.chargeIds.includes(c.line_id)} onChange=${(on) => set('chargeIds', on ? [...f.chargeIds, c.line_id] : f.chargeIds.filter((x) => x !== c.line_id))} />`)}</div><//>` : null}
+          <div class="stack tight">${line.charges.map((c) => html`<${Toggle} label=${c.trade_name + ' ' + cash(Math.abs(c.amount_ex))} hint=${c.description || 'Crew paid separately'} checked=${f.chargeIds.includes(c.line_id)} onChange=${(on) => set('chargeIds', on ? [...f.chargeIds, c.line_id] : f.chargeIds.filter((x) => x !== c.line_id))} />`)}</div><//>` : null}
         <${Field} label="Helpers you pay from this job">
           <div class="stack tight">${f.helpers.map((hp, i) => html`<div class="pay-helper">
             <input class="input" placeholder="Name" value=${hp.name || ''} onInput=${(e) => helper(i, 'name', e.currentTarget.value)} />
@@ -294,7 +294,7 @@ function LineSheet({ line, ctx, onSave, onClose }) {
             <${Button} kind="line" small onClick=${() => set('helpers', [...f.helpers, { name: '', hours: '', rate: '' }])}>Add a helper<//></div><//>
         <${Field} label="Note (optional)"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>
       ` : html`
-        <${Field} label=${line.kind === 'commission' ? 'Commission amount (before GST)' : line.kind === 'deduction' ? 'Amount to take off (before GST)' : 'Amount (before GST)'}><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>
+        <${Field} label=${line.kind === 'commission' ? 'Commission amount (before GST)' : line.kind === 'deduction' ? 'Adjustment amount (before GST)' : 'Amount (before GST)'}><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>
         ${line.kind !== 'commission' ? html`<${Field} label="What it is for"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>` : null}
       `}
       ${line.added || simple ? null : html`<${Toggle} label="Leave this off the invoice" hint="For a day you were booked but did not work." checked=${f.off} onChange=${(v) => set('off', v)} />`}

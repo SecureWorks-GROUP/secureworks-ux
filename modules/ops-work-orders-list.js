@@ -209,10 +209,35 @@ var WorkOrdersListCore = (function () {
       card('Over the work order', String(c.over), c.over > 0 ? ' rag-red' : ' rag-green');
   }
 
+  // Changes history paging. ops-api work_order_changes sorts by changed_at then
+  // id, newest first, and returns rows strictly before `before`. Two changes
+  // can share one changed_at, so asking for "before the last row's time" would
+  // skip the rest of a tie. Instead ask for one microsecond past the last row
+  // (the database keeps microseconds), which includes the whole tie, and drop
+  // the rows already on screen by id.
+  function cursorAfter(iso) {
+    var m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:?\d{2})?$/.exec(String(iso || ''));
+    if (!m) return null;
+    var whole = Date.parse(m[1] + (m[3] || 'Z'));
+    if (!isFinite(whole)) return null;
+    var micros = Number(((m[2] || '') + '000000').slice(0, 6)) + 1;
+    var ms = whole + Math.floor(micros / 1000000) * 1000;
+    micros = micros % 1000000;
+    return new Date(ms).toISOString().slice(0, 19) + '.' + String(micros + 1000000).slice(1) + 'Z';
+  }
+
+  function appendChanges(shown, page) {
+    var seen = {};
+    (shown || []).forEach(function (r) { if (r && r.id != null) seen[r.id] = true; });
+    var fresh = (page || []).filter(function (r) { return r && !(r.id != null && seen[r.id]); });
+    return { rows: (shown || []).concat(fresh), added: fresh.length };
+  }
+
   return {
     statusOf: statusOf, matchesFilter: matchesFilter, visible: visible, counts: counts,
     types: types, typeLabel: typeLabel, totals: totals, rowHtml: rowHtml, statsHtml: statsHtml,
-    money: money, esc: esc, FILTERS: FILTERS, STATUS_WORDS: STATUS_WORDS
+    money: money, esc: esc, FILTERS: FILTERS, STATUS_WORDS: STATUS_WORDS,
+    cursorAfter: cursorAfter, appendChanges: appendChanges
   };
 })();
 // </work-orders-list-core>
@@ -222,7 +247,9 @@ var WorkOrdersList = (function () {
   var C = WorkOrdersListCore;
   var state = { rows: [], capRead: 'ok', loaded: false, failed: false, filter: 'all', type: 'all', search: '', seq: 0 };
 
-  var changes = { rows: [], busy: false, failed: false, exhausted: false, before: null, seq: 0 };
+  var CHANGES_PAGE = 50;
+  var CHANGES_MAX = 200; // the most ops-api work_order_changes returns in one read
+  var changes = { rows: [], busy: false, failed: false, exhausted: false, stuck: false, before: null, seq: 0 };
 
   function office() {
     return !!(window.JobWorkOrderOps && window.JobWorkOrderOps.viewerIsOffice());
@@ -448,11 +475,20 @@ var WorkOrdersList = (function () {
           '<td class="wol-num">' + C.esc(C.money(r.profit_before_ex) || 'not known') + '</td><td class="wol-num">' + C.esc(C.money(r.profit_after_ex) || 'not known') + '</td></tr>';
       });
       h += '</tbody></table></div>';
-      if (!changes.exhausted && !changes.failed) h += '<button type="button" class="btn btn-secondary" data-wo-changes-older' + (changes.busy ? ' disabled' : '') + '>Load older</button>';
+      if (changes.stuck) h += '<p class="wol-note">More changes share the same time as the last one shown and could not all be listed here.</p>' +
+        '<button type="button" class="btn btn-secondary" data-wo-changes-skip>Skip to older changes</button>';
+      else if (!changes.exhausted && !changes.failed) h += '<button type="button" class="btn btn-secondary" data-wo-changes-older' + (changes.busy ? ' disabled' : '') + '>Load older</button>';
     }
     host.innerHTML = h;
     var older = host.querySelector('[data-wo-changes-older]');
-    if (older) older.onclick = function () { loadChanges(changes.rows[changes.rows.length - 1].changed_at); };
+    if (older) older.onclick = function () {
+      var last = changes.rows[changes.rows.length - 1].changed_at;
+      loadChanges(C.cursorAfter(last) || last);
+    };
+    // Past a tie longer than the server's largest page: ask strictly before
+    // that time, as main did, so older changes are never out of reach.
+    var skip = host.querySelector('[data-wo-changes-skip]');
+    if (skip) skip.onclick = function () { loadChanges(changes.rows[changes.rows.length - 1].changed_at); };
     var retry = host.querySelector('[data-wo-changes-retry]');
     if (retry) retry.onclick = function () { loadChanges(changes.before); };
   }
@@ -466,17 +502,29 @@ var WorkOrdersList = (function () {
     changes.before = before || null;
     changes.busy = true;
     changes.failed = false;
-    if (!before) { changes.rows = []; changes.exhausted = false; }
+    if (!before) { changes.rows = []; changes.exhausted = false; changes.stuck = false; }
     paintChanges();
     try {
-      var params = { limit: 50 };
+      var params = { limit: CHANGES_PAGE };
       if (before) params.before = before;
       var data = await window.opsFetch('work_order_changes', params);
       if (my !== changes.seq || !office()) return;
       if (!data || !Array.isArray(data.changes)) throw new Error('Changes missing');
-      // Page rather than accumulate an unbounded history in this tab.
-      if (data.changes.length || !before) changes.rows = data.changes;
-      changes.exhausted = data.changes.length === 0;
+      var merged = C.appendChanges(before ? changes.rows : [], data.changes);
+      // A full page that only repeats rows already shown is one time shared
+      // by more than a page: read that time once more at the largest page.
+      if (before && merged.added === 0 && data.changes.length >= params.limit) {
+        params = { limit: CHANGES_MAX, before: before };
+        data = await window.opsFetch('work_order_changes', params);
+        if (my !== changes.seq || !office()) return;
+        if (!data || !Array.isArray(data.changes)) throw new Error('Changes missing');
+        merged = C.appendChanges(changes.rows, data.changes);
+      }
+      // Load older adds the next page under the rows already shown.
+      changes.rows = merged.rows;
+      // A short page means nothing older is left.
+      changes.exhausted = data.changes.length < params.limit;
+      changes.stuck = !changes.exhausted && !!before && merged.added === 0;
     } catch (e) {
       if (my !== changes.seq) return;
       changes.failed = true;
@@ -490,7 +538,7 @@ var WorkOrdersList = (function () {
   function setType(t) { state.type = t || 'all'; paint(); }
   function setSearch(q) { state.search = String(q || ''); paint(); }
 
-  return { load: load, paint: paint, setFilter: setFilter, setType: setType, setSearch: setSearch, _state: state };
+  return { load: load, paint: paint, setFilter: setFilter, setType: setType, setSearch: setSearch, _state: state, _changes: function () { return changes.rows.slice(); } };
 })();
 
 window.WorkOrdersListCore = WorkOrdersListCore;

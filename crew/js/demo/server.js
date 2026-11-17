@@ -29,11 +29,17 @@ export function createDemoServer(persona) {
   const need = (jobId) => { const j = db.job(jobId); if (!j) fail(404, { error: 'Job not found', code: 'job_not_found' }); if (!onJob(jobId) && !manages(j)) fail(500, { error: 'You are not assigned to this job' }); return j; };
   const loggedFor = (a) => db.logged.find((l) => l.assignment_id === a.id) || null;
 
-  function money(gross, { gstOn, commission = 0 }) {
-    const base = Math.max(0, gross - commission);
-    const super_amount = round2(base * 0.12); const worker_withhold = round2(base * 0.06);
-    const net_pay = round2(gross - worker_withhold); const gst = gstOn ? round2(gross * 0.1) : 0;
-    return { gst_on: Boolean(gstOn), gross_earned: round2(gross), super_rate: 0.12, super_amount, worker_withhold, company_contribution: round2(super_amount - worker_withhold), net_pay, amount_payable: net_pay, gst, total_inc: round2(gross + gst), trade_payable: round2(net_pay + gst) };
+  function money(gross, { gstOn, reimbursement = 0 }) {
+    const base = round2(gross - reimbursement);
+    const super_amount = Math.floor((Math.round(base * 100) * 6 + 28) / 56) / 100;
+    const net_pay = round2(base - super_amount);
+    const gst = gstOn ? Math.floor((Math.round(base * 100) + 5) / 10) / 100 : 0;
+    const intoBank = round2(net_pay + reimbursement + gst);
+    const pay_view = { basis: 'inclusive_12_112_v1', total_inc_super: base, paid_to_super: super_amount,
+      paid_to_you: net_pay, reimbursements: reimbursement, gst, repayment: null, into_bank: intoBank, tax_set_aside: null };
+    return { gst_on: Boolean(gstOn), super_basis: pay_view.basis, money: { super_basis: pay_view.basis },
+      gross_earned: round2(gross), super_rate: 0.12, super_amount, worker_withhold: super_amount,
+      company_contribution: 0, net_pay, amount_payable: net_pay, gst, total_inc: round2(gross + gst), trade_payable: intoBank, pay_view };
   }
   function modeOf(job) {
     if (db.groups.some((g) => g.job_id === job.id)) return 'group_work_order';
@@ -322,6 +328,13 @@ export function createDemoServer(persona) {
     const fn = table[action];
     if (!fn) fail(403, { error: 'An authorised operator session is required.', code: 'operator_access_required' });
     const out = fn(params || {}, body || {});
+    const present = (inv) => {
+      if (!inv || inv.pay_view) return inv;
+      return { ...inv, ...money(inv.gross_earned, { gstOn: inv.gst_on }) };
+    };
+    if (out && out.invoice) out.invoice = present(out.invoice);
+    if (out && Array.isArray(out.invoices)) out.invoices = out.invoices.map(present);
+    if (out && out.invoice_id && out.gross_earned != null && !out.pay_view) Object.assign(out, present(out));
     return JSON.parse(JSON.stringify(out === undefined ? null : out));
   };
   handler.db = db;

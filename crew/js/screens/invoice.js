@@ -11,11 +11,11 @@ import { PayRows, PayGroup, PayLine, InvoiceBadge, superNote, whenWords, weekWor
 
 const LINE_KIND = {
   travel: 'Travel', materials: 'Materials', equipment: 'Equipment', commission: 'Commission', 'work order': 'Work order', work_order: 'Work order',
-  'group share': 'Your share', group_share: 'Your share', crew_work_order_deduction: 'Crew taken off', labour_deduction: 'Crew labour taken off',
-  'final payout deduction': 'Taken off', final_payout_deduction: 'Taken off', deduction: 'Taken off', lump_sum: 'Taken off', adjustment: 'Adjustment', other: 'Other'
+  'group share': 'Your share', group_share: 'Your share', crew_work_order_deduction: 'Crew paid separately', labour_deduction: 'Crew labour paid separately',
+  'final payout deduction': 'Adjustment', final_payout_deduction: 'Adjustment', deduction: 'Adjustment', lump_sum: 'Adjustment', adjustment: 'Adjustment', other: 'Other'
 };
 // The pay type each line sits under, in the order they are listed.
-const GROUPS = [['hourly', 'Hourly'], ['work_order', 'Work order'], ['group', 'Group work order'], ['commission', 'Commission'], ['other', 'Other items'], ['off', 'Taken off']];
+const GROUPS = [['hourly', 'Hourly'], ['work_order', 'Work order'], ['group', 'Group work order'], ['commission', 'Commission'], ['other', 'Other items'], ['off', 'Adjustment']];
 const typeOf = (l) => String(l.line_type || 'labour').toLowerCase();
 const isLabour = (l) => typeOf(l) === 'labour';
 function groupOf(l) {

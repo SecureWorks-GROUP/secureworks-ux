@@ -28808,6 +28808,20 @@
     });
   };
 
+  // FU17: the server refuses an explicit draft that changed or could not be
+  // read. Keep the entered lines and identity; never retry as a new draft.
+  function _draftInvoiceSaveProblem(err) {
+    var body = (err && err.body) || {};
+    var message = String(body.error || body.message || (err && err.message) || '');
+    if (/selected (?:undated|weekly\/hourly) draft is no longer replaceable|weekly\/hourly draft has an external Xero identity/i.test(message)) {
+      return 'This draft has changed or is no longer available. Your changes have not been saved. Open Invoice history and reopen the draft before saving again.';
+    }
+    if (/Could not read the selected undated draft/i.test(message)) {
+      return 'Could not check this draft. Your changes have not been saved. Try saving again.';
+    }
+    return '';
+  }
+
   window.saveDraftInvoice = function() {
     if (_crewReceiptSubmitBlocked()) return;
     _syncRowsFromDOM();
@@ -28854,6 +28868,11 @@
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;
+      var draftProblem = isExpense && draftBody.draft_id ? _draftInvoiceSaveProblem(err) : '';
+      if (draftProblem) {
+        toast(draftProblem, true);
+        return;
+      }
       return _handleFinancialWriteFailure('save_trade_invoice_draft', draftBody, err, ctx).then(function(result) {
         if (_financialWriteAborted(result)) return;
         var capturedId = (err && err.draft_id) || (result && result.draft_id) || _draftInvoiceId || '';

@@ -1,7 +1,7 @@
 // Clocking on and off. One clock runs at a time. The server stamps the real
 // times; at clock off the trade confirms start, finish and break once, and
 // those saved times are what fill their timesheet later.
-import { html, cx, useEffect, useState } from '../lib/h.js';
+import { html, cx, useEffect, useRef, useState } from '../lib/h.js';
 import { api, ApiError, friendly } from '../lib/api.js';
 import { getState, setState, local, invalidate, useStore, peekQuery } from '../lib/store.js';
 import { queueWrite } from '../lib/outbox.js';
@@ -28,6 +28,16 @@ function setClock(clock) {
   if (clock) local.set('clock', clock); else local.del('clock');
   setState({ clock });
 }
+// P1-16.2 adds this block only while trade_week_autofill_v1 is on. No
+// additional read on a clock press; an absent answer keeps the existing flow.
+function clockHours(clock) {
+  const week = mondayOf(clock ? tsToDate(clock.since) : todayISO());
+  const hours = peekQuery('hours:' + week) || peekQuery('hours:' + mondayOf(todayISO()));
+  return hours && hours.week_summary ? hours : null;
+}
+export function isForgottenClock(clock) {
+  return Boolean(clock && tsToDate(clock.since) < todayISO() && clockHours(clock));
+}
 /** Adopt what the server says is running (called after every jobs load). */
 export function syncClock(running) {
   const cur = getState().clock;
@@ -40,6 +50,13 @@ export function restoreClock() { const saved = local.get('clock'); if (saved) se
 /** Clock on to a booking. Resolves true when the clock is running (or queued). */
 export async function clockOn(booking) {
   const cur = getState().clock;
+  if (isForgottenClock(cur)) {
+    openClockOff({ onDone: ({ queued }) => {
+      if (queued) { toast('The earlier times are saved on this phone. Clock on when they have sent.'); return; }
+      clockOn(booking);
+    } });
+    return false;
+  }
   if (cur && cur.assignmentId !== booking.id) { toast(`You are still clocked on at ${cur.title}. Clock off there first.`, { kind: 'bad' }); return false; }
   const body = { assignment_id: booking.assignmentId || booking.id, event: 'clock_on', timestamp: now().toISOString(), idempotency_key: key(), break_minutes: 0 };
   const loc = await position(); if (loc) body.location = loc;
@@ -104,12 +121,30 @@ export function openClockOff(opts = {}) {
 function ClockOffSheet({ clock, onClose, onDone }) {
   const today = todayISO();
   const sameDay = tsToDate(clock.since) === today;
-  const [start, setStart] = useState(sameDay ? roundHM(tsToHM(clock.since)) : '');
-  const [finish, setFinish] = useState(roundHM(nowHM()));
-  const [brk, setBrk] = useState(clock.breakMin > 0 ? (BREAKS.some(([v]) => v === clock.breakMin) ? clock.breakMin : 'other') : null);
-  const [other, setOther] = useState(clock.breakMin > 0 && !BREAKS.some(([v]) => v === clock.breakMin) ? String(clock.breakMin) : '');
+  const [defaults] = useState(() => {
+    const hours = clockHours(clock);
+    const forgotten = Boolean(hours && tsToDate(clock.since) < today);
+    const card = ((hours && hours.assignments) || []).find((a) => a.id === clock.assignmentId);
+    const suggestion = card && card.suggestion;
+    const fallbackEnd = new Date(Date.parse(clock.since) + 8 * 60 * 60 * 1000);
+    const usual = hours && hours.usual_break_minutes;
+    const brk = clock.breakMin > 0 ? clock.breakMin : !hours ? null
+      : forgotten && !(suggestion && suggestion.finish_time) ? 30
+      : Number.isFinite(usual) && usual >= 0 ? usual
+      : now().getTime() - Date.parse(clock.since) > 5 * 60 * 60 * 1000 ? 30 : 0;
+    return { enabled: Boolean(hours), forgotten, brk,
+      finish: forgotten ? (suggestion && suggestion.finish_time) || (tsToDate(fallbackEnd) === tsToDate(clock.since) ? tsToHM(fallbackEnd) : '23:55') : roundHM(nowHM()) };
+  });
+  const workDate = defaults.forgotten ? tsToDate(clock.since) : today;
+  const day = fmtDayYear(workDate);
+  const [start, setStart] = useState(defaults.forgotten ? tsToHM(clock.since) : sameDay ? roundHM(tsToHM(clock.since)) : '');
+  const [finish, setFinish] = useState(defaults.finish);
+  const [brk, setBrk] = useState(defaults.brk == null ? null : BREAKS.some(([v]) => v === defaults.brk) ? defaults.brk : 'other');
+  const [other, setOther] = useState(defaults.brk != null && !BREAKS.some(([v]) => v === defaults.brk) ? String(defaults.brk) : '');
   const [finished, setFinished] = useState(false);
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
+  const clockStopped = useRef(false);
   const [recorded] = useState(() => `${fmtClock(tsToHM(clock.since))} to ${fmtClock(nowHM())}`);
   const breakMin = brk === 'other' ? Number(other) || 0 : brk;
   const hours = brk == null ? NaN : hoursBetween(start, finish, breakMin);
@@ -121,16 +156,19 @@ function ClockOffSheet({ clock, onClose, onDone }) {
   const canFinish = !onDone && Boolean(job) && !jobIsClosed(job.status);
 
   const save = async (shut, withTimes) => {
+    if (saving.current) return;
+    saving.current = true;
     setBusy(true);
     const body = { assignment_id: clock.assignmentId, event: 'clock_off', timestamp: now().toISOString(), idempotency_key: key(), break_minutes: withTimes ? breakMin : clock.breakMin || 0 };
     const loc = await position(); if (loc) body.location = loc;
-    const timesBody = withTimes ? { jobId: clock.jobId, assignmentId: clock.assignmentId, work_date: todayISO(), start_time: start, finish_time: finish, break_minutes: breakMin, hours, source: 'clock_off' } : null;
+    const timesBody = withTimes ? { jobId: clock.jobId, assignmentId: clock.assignmentId, work_date: defaults.forgotten ? workDate : todayISO(), start_time: start, finish_time: finish, break_minutes: breakMin, hours, source: defaults.forgotten ? 'clock_off_suggested' : 'clock_off' } : null;
     let queued = false;
     try {
-      const res = await api('clock_event', null, body);
+      const res = clockStopped.current ? null : await api('clock_event', null, body);
       if (res && res.success === false) throw new ApiError(res.error || 'Could not clock off', { status: 409, body: res });
+      if (defaults.enabled) clockStopped.current = true;
     } catch (err) {
-      if (err instanceof ApiError && err.refused) { setBusy(false); toast('Not saved: ' + friendly(err) + ' Ask the office to fix this clock.', { kind: 'bad', ms: 7000 }); return; }
+      if (err instanceof ApiError && err.refused) { saving.current = false; setBusy(false); toast('Not saved: ' + friendly(err) + ' Ask the office to fix this clock.', { kind: 'bad', ms: 7000 }); return; }
       queueWrite({ action: 'clock_event', body, jobId: clock.jobId, label: 'Clock off' });
       queued = true;
     }
@@ -141,8 +179,14 @@ function ClockOffSheet({ clock, onClose, onDone }) {
           const r = await api('log_my_job_hours', null, timesBody);
           if (r && r.ok === false) throw new ApiError(r.error || r.message || 'Times not saved', { status: 409, body: r });
         } catch (err) {
-          if (err instanceof ApiError && err.refused) toast('Clocked off, but your times were not saved: ' + friendly(err) + ' Add them on your timesheet.', { kind: 'bad', ms: 7000 });
-          else queueWrite({ action: 'log_my_job_hours', body: timesBody, jobId: clock.jobId, label: 'Hours for ' + clock.title });
+          if (err instanceof ApiError && err.refused) {
+            toast('Clocked off, but your times were not saved: ' + friendly(err) + (defaults.enabled ? ' Check the times and save again.' : ' Add them on your timesheet.'), { kind: 'bad', ms: 7000 });
+            if (defaults.enabled) { saving.current = false; setBusy(false); return; }
+          }
+          else {
+            if (defaults.enabled) queued = true;
+            queueWrite({ action: 'log_my_job_hours', body: timesBody, jobId: clock.jobId, label: 'Hours for ' + clock.title });
+          }
         }
       }
     }
@@ -152,15 +196,15 @@ function ClockOffSheet({ clock, onClose, onDone }) {
     setBusy(false);
     shut();
     if (onDone) { onDone({ hours: withTimes ? hours : null, queued }); return; }
-    toast(withTimes ? `Clocked off. ${fmtHrs(hours)} saved to your timesheet.` : 'Clocked off. Add your times on your timesheet.', { kind: 'ok', action: finished && canFinish ? null : { label: 'Timesheet', run: () => go('/pay/week/' + mondayOf(today)) } });
+    toast(withTimes ? `Clocked off. ${fmtHrs(hours)} saved to your timesheet.` : 'Clocked off. Add your times on your timesheet.', { kind: 'ok', action: finished && canFinish ? null : { label: 'Timesheet', run: () => go('/pay/week/' + mondayOf(workDate)) } });
     if (finished && canFinish) setTimeout(() => go(`/job/${clock.jobId}/${report ? 'report' : 'finish'}`), 240);
   };
 
-  return html`<${Sheet} tall title="Clock off" onClose=${onClose}
+  return html`<${Sheet} tall title=${defaults.forgotten ? `You did not clock off on ${day}` : 'Clock off'} onClose=${onClose}
     foot=${(shut) => html`
-      <${Button} class="big" block busy=${busy} disabled=${!ok} onClick=${() => save(shut, true)}>Save to timesheet<//>
-      <p class="t-small clockoff-goes">${ok ? `Goes on your timesheet for pay week ${fmtWeekShort(mondayOf(today))}.` : brk == null ? 'Choose your break to save.' : 'Check the start and finish times.'}</p>
-      <button type="button" class="link tap clockoff-later" disabled=${busy} onClick=${() => save(shut, false)}>Clock off now, add times later</button>`}>
+      <${Button} class="big" block busy=${busy} disabled=${!ok} onClick=${() => save(shut, true)}>${defaults.enabled ? `${defaults.forgotten ? 'Save ' + day : 'Clock off'} · ${ok ? fmtHrs(hours) : 'check times'}` : 'Save to timesheet'}<//>
+      <p class="t-small clockoff-goes">${ok ? `Goes on your timesheet for pay week ${fmtWeekShort(mondayOf(workDate))}.` : brk == null ? 'Choose your break to save.' : 'Check the start and finish times.'}</p>
+      ${defaults.forgotten ? null : html`<button type="button" class="link tap clockoff-later" disabled=${busy} onClick=${() => save(shut, false)}>Clock off now, add times later</button>`}`}>
     <div class="clockoff">
       <div class="card clockoff-job">
         <${JobLine} job=${job || {}} vertical=${job ? vertical : null} />
@@ -170,7 +214,7 @@ function ClockOffSheet({ clock, onClose, onDone }) {
       <section>
         <h3 class="t-cap">Time worked</h3>
         <div class="card">
-          <div class="frow"><span>Date</span><span class="t-value nums">${fmtDayYear(today)}</span></div>
+          <div class="frow"><span>Date</span><span class="t-value nums">${day}</span></div>
           <label class="frow"><span>Start</span><input class="input" type="time" step="300" value=${start} onInput=${(e) => setStart(e.currentTarget.value)} /></label>
           <label class="frow"><span>Finish</span><input class="input" type="time" step="300" value=${finish} onInput=${(e) => setFinish(e.currentTarget.value)} /></label>
           <label class="frow"><span>Break</span><select class=${cx('input', brk == null && 'unset')} value=${brk == null ? '' : String(brk)} onChange=${(e) => { const v = e.currentTarget.value; setBrk(v === '' ? null : v === 'other' ? 'other' : Number(v)); }}>
@@ -179,7 +223,7 @@ function ClockOffSheet({ clock, onClose, onDone }) {
           ${brk === 'other' ? html`<label class="frow"><span>Break in minutes</span><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} /></label>` : null}
           <div class="frow total"><span>Hours</span><span class=${ok ? 't-figure' : 't-small'}>${ok ? fmtHrs(hours) : brk == null ? 'Choose your break' : 'Check the times'}</span></div>
         </div>
-        <p class="t-small clockoff-note">${sameDay ? `The clock recorded ${recorded}. Check the times before you save.` : 'You clocked on before today. Put in the start time you worked today.'}</p>
+        <p class="t-small clockoff-note">${defaults.forgotten ? 'Suggested finish. Change it if it is wrong.' : sameDay ? `The clock recorded ${recorded}. Check the times before you save.` : 'You clocked on before today. Put in the start time you worked today.'}</p>
       </section>
 
       ${canFinish ? html`<section>

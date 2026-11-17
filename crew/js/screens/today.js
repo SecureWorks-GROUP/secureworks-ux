@@ -11,7 +11,7 @@ import { todayISO, addDays, mondayOf, fmtDay, fmtRelDay, tsToHM, tsToDate } from
 import { bookingsByDate, bookingState, jobTitle, jobAddress, mapsUrl } from '../lib/model.js';
 import { buildLines, lineHours } from '../lib/invoice.js';
 import { Page, Section, Sheet, Button, Field, Picks, Skel, LoadError, JobLine, StatusBadge, toast, openOverlay } from '../ui/kit.js';
-import { clockOn, openClockOff, openBreak, useElapsed } from './clock.js';
+import { clockOn, openClockOff, openBreak, useElapsed, isForgottenClock } from './clock.js';
 import { NeedsOk, needsOk, bookingStatus, useBookingChanges, ChangesBanner, markOnTheWay, useMyDaysOff, useCrewWith, BookingItem, openBooking, openBookingJob } from './bookings.js';
 import { fmtClock, fmtHrs, fmtDayYear, fmtWeekShort, fmtElapsed } from './words.js';
 
@@ -112,8 +112,11 @@ function OnSiteCard({ clock, booking }) {
   const t = useElapsed(clock.since);
   const job = booking ? booking.job : jobStub(clock.jobId);
   const sameDay = tsToDate(clock.since) === todayISO();
+  const forgotten = isForgottenClock(clock);
   const open = () => { if (job) rememberJobStub(job); go('/job/' + clock.jobId); };
   return html`<section class="block card pad nowjob" aria-label="On site">
+    ${forgotten ? html`<div><b class="t-head">You did not clock off on ${fmtDayYear(tsToDate(clock.since))}</b>
+      <${Button} block onClick=${() => openClockOff()}>Sort it out<//></div>` : null}
     <div class="nowjob-top"><span class="t-cap nums">Clocked on ${sameDay ? '' : fmtDay(tsToDate(clock.since)) + ', '}${fmtClock(tsToHM(clock.since))}${clock.pending ? ' · waiting for signal' : ''}</span><${StatusBadge} status="on_site" /></div>
     <button type="button" class="nowjob-where" onClick=${open}>
       <${JobLine} job=${job || {}} vertical=${booking ? booking.vertical : null} />
@@ -122,7 +125,7 @@ function OnSiteCard({ clock, booking }) {
     <div class="nowjob-time"><span class="t-cap">Time on site${clock.breakMin ? ` · ${clock.breakMin} min break` : ''}</span><span class="t-title nums" aria-live="off">${fmtElapsed(t)}</span></div>
     <div class="nowjob-go">
       <${Button} kind="line" class="tall" onClick=${() => openBreak()}>Break<//>
-      <${Button} class="big tall" onClick=${() => openClockOff()}>Clock off<//>
+      <${Button} kind=${forgotten ? 'line' : 'primary'} class="big tall" onClick=${() => openClockOff()}>Clock off<//>
     </div>
   </section>`;
 }

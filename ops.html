@@ -6603,6 +6603,8 @@ var _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
 var _digestBase = window.SUPABASE_URL + '/functions/v1/daily-digest';
 var _digestCache = null;
 var _digestCacheTime = 0;
+var _digestFetching = false; // one digest request at a time
+var _digestFailedAt = 0;     // a failed read waits 5 minutes before the next try
 var _amberExpanded = false;
 var _calView = 'crew'; // 'crew', 'week', or 'month'
 var _unschedJobs = []; // Unscheduled jobs for crew sidebar
@@ -7992,33 +7994,61 @@ document.addEventListener('click', function(e) {
 // TODAY TAB
 // ════════════════════════════════════════════════════════════
 
+// The digest is built once a day (7am Perth) and stored; this reads the stored one.
 async function loadAiAlerts() {
+  // Cache for 30 minutes
+  if (_digestCache && Date.now() - _digestCacheTime < 30 * 60 * 1000) {
+    renderAiAlerts(_digestCache);
+    return;
+  }
+  // After a failed read, wait 5 minutes; keep showing the last digest.
+  if (_digestFailedAt && Date.now() - _digestFailedAt < 5 * 60 * 1000) {
+    if (_digestCache) renderAiAlerts(_digestCache);
+    return;
+  }
+  if (_digestFetching) return;
+  _digestFetching = true;
   try {
-    // Cache for 30 minutes
-    if (_digestCache && Date.now() - _digestCacheTime < 30 * 60 * 1000) {
-      renderAiAlerts(_digestCache);
-      return;
-    }
-
     var resp = await fetch(_digestBase, {
       headers: await opsAuthHeaders()
     });
     if (!resp.ok) throw new Error('Digest API error: ' + resp.status);
     var digest = await resp.json();
+    _digestFailedAt = 0;
     _digestCache = digest;
     _digestCacheTime = Date.now();
     _jarvisLastUpdate = Date.now();
     renderAiAlerts(digest);
-    updateJarvisSummary();
+    if (!digest.not_built_yet) updateJarvisSummary();
   } catch (e) {
     console.error('loadAiAlerts error:', e);
-    // Don't show panel if digest fails — non-critical
+    // Non-critical: keep the last digest on screen and try again in 5 minutes.
+    _digestFailedAt = Date.now();
+    if (_digestCache) renderAiAlerts(_digestCache);
+  } finally {
+    _digestFetching = false;
   }
+}
+
+// "Built for Monday 17 November" (Perth day), from when the build ran, else the
+// stored date. More than a day old: today's digest has not been built yet.
+function digestBuiltLine(digest) {
+  var when = digest.built_at ? new Date(digest.built_at)
+    : (digest.digest_date ? new Date(digest.digest_date + 'T12:00:00+08:00') : null);
+  if (!when || isNaN(when.getTime())) return '';
+  var perthDay = function(d) { return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10); };
+  var words = when.toLocaleDateString('en-AU', { timeZone: 'Australia/Perth', weekday: 'long', day: 'numeric', month: 'long' });
+  var age = Math.round((Date.parse(perthDay(new Date())) - Date.parse(perthDay(when))) / 86400000);
+  var text = 'Built for ' + words + '.' + (age > 1 ? " Today's digest has not been built yet." : '');
+  return '<div class="ai-alert-built" style="font-size:11px;color:var(--text-muted,#888);margin-top:6px">' + escapeHtml(text) + '</div>';
 }
 
 function renderAiAlerts(digest) {
   var panel = document.getElementById('aiAlertsPanel');
+  // Nothing built yet: show nothing (never an "all clear" from an empty digest).
+  if (digest && digest.not_built_yet) { panel.style.display = 'none'; return; }
   if (!digest || !digest.alerts) return;
+  var builtLine = digestBuiltLine(digest);
 
   var alerts = digest.alerts || [];
   var narrative = digest.ai_narrative || digest.summary_text || '';
@@ -8027,7 +8057,7 @@ function renderAiAlerts(digest) {
 
   // If no alerts and no narrative, show green "all clear"
   if (alerts.length === 0) {
-    document.getElementById('aiNarrative').innerHTML = '<div class="ai-alert-green">&#9989; All clear — no issues detected this morning.' + (narrative ? ' ' + narrative : '') + '</div>';
+    document.getElementById('aiNarrative').innerHTML = '<div class="ai-alert-green">&#9989; All clear. No issues detected this morning.' + (narrative ? ' ' + narrative : '') + builtLine + '</div>';
     panel.style.display = 'block';
     return;
   }
@@ -8035,7 +8065,9 @@ function renderAiAlerts(digest) {
   // Render narrative
   var narHtml = '';
   if (narrative) {
-    narHtml = '<div class="ai-alert-narrative"><div class="narrative-label">AI Morning Brief</div>' + narrative + '</div>';
+    narHtml = '<div class="ai-alert-narrative"><div class="narrative-label">AI Morning Brief</div>' + narrative + builtLine + '</div>';
+  } else {
+    narHtml = builtLine;
   }
   document.getElementById('aiNarrative').innerHTML = narHtml;
 

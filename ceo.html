@@ -1010,12 +1010,17 @@ function makeChart(canvasId, config) {
 
 // ── AI Alerts for CEO ──
 var _ceoAmberOpen = false;
+var _ceoDigestFetching = false; // one digest request at a time
+// The digest is built once a day (7am Perth) and stored; this reads the stored one.
 async function loadCeoAlerts() {
+  if (_ceoDigestFetching) return;
+  _ceoDigestFetching = true;
   try {
     var digestUrl = window.SUPABASE_URL + '/functions/v1/daily-digest';
     var resp = await fetch(digestUrl, { headers: await ceoAuthHeaders() });
-    if (!resp.ok) return;
+    if (!resp.ok) return; // keep whatever is on screen
     var digest = await resp.json();
+    if (digest.not_built_yet) return; // nothing built yet: nothing to show
     var alerts = digest.alerts || [];
     var narrative = digest.ai_narrative || digest.summary_text || '';
     var panel = document.getElementById('ceoAlertsPanel');
@@ -1024,7 +1029,7 @@ async function loadCeoAlerts() {
 
     // Narrative
     if (narrative) {
-      document.getElementById('ceoNarrative').innerHTML = '<div class="ceo-narrative"><div class="nar-label">AI Morning Brief</div>' + narrative + '</div>';
+      document.getElementById('ceoNarrative').innerHTML = '<div class="ceo-narrative"><div class="nar-label">AI Morning Brief</div>' + narrative + ceoDigestBuiltLine(digest) + '</div>';
     }
 
     // Red alerts
@@ -1055,7 +1060,22 @@ async function loadCeoAlerts() {
     showToast('Failed to load alerts', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadCeoAlerts()' }
     ]);
+  } finally {
+    _ceoDigestFetching = false;
   }
+}
+
+// "Built for Monday 17 November" (Perth day), from when the build ran, else the
+// stored date. More than a day old: today's digest has not been built yet.
+function ceoDigestBuiltLine(digest) {
+  var when = digest.built_at ? new Date(digest.built_at)
+    : (digest.digest_date ? new Date(digest.digest_date + 'T12:00:00+08:00') : null);
+  if (!when || isNaN(when.getTime())) return '';
+  var perthDay = function(d) { return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10); };
+  var words = when.toLocaleDateString('en-AU', { timeZone: 'Australia/Perth', weekday: 'long', day: 'numeric', month: 'long' });
+  var age = Math.round((Date.parse(perthDay(new Date())) - Date.parse(perthDay(when))) / 86400000);
+  var text = 'Built for ' + words + '.' + (age > 1 ? " Today's digest has not been built yet." : '');
+  return '<div class="ceo-digest-built" style="font-size:11px;color:var(--sw-mid);margin-top:6px">' + escapeHtml(text) + '</div>';
 }
 function toggleCeoAmber() {
   _ceoAmberOpen = !_ceoAmberOpen;

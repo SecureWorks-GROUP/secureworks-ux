@@ -262,7 +262,7 @@ export function estimate(lines, { gstOn, deduction, basis }) {
     const superPaid = superCents / 100;
     const paidToYou = round2(base - superPaid);
     const gst = gstOn ? Math.floor((Math.round(base * 100) + 5) / 10) / 100 : 0;
-    const takeOff = Number(deduction && deduction.amount) || 0;
+    const takeOff = deduction && deduction.applied !== false ? Number(deduction.amount) || 0 : 0;
     const intoBank = round2(paidToYou + reimb + gst - takeOff);
     return { gross, base, superPaid, paidToYou, reimb, gst, intoBank, takeOff, pay: intoBank,
       hours: round2(hours), unfinished,

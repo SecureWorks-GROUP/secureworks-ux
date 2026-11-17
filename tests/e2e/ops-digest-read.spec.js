@@ -90,7 +90,7 @@ test('the all-clear line has no dash and carries the built line', async ({ page 
   await page.evaluate(() => loadAiAlerts());
   await expect(page.locator('#aiNarrative')).toContainText('All clear. No issues detected this morning.');
   await expect(page.locator('#aiNarrative')).toContainText('Built for Monday 16 November.');
-  expect(await page.locator('#aiNarrative').innerText()).not.toContain('—');
+  expect(await page.locator('#aiNarrative').innerText()).not.toContain('\u2014');
 });
 
 test('before the first build the panel stays hidden, never an all clear', async ({ page }) => {
@@ -143,4 +143,55 @@ test('a failed read keeps the last digest on screen and waits 5 minutes', async 
   fail = false;
   await page.evaluate(() => { _digestFailedAt = Date.now() - 6 * 60 * 1000; return loadAiAlerts(); });
   expect(calls.length).toBe(n + 1);
+});
+
+// ── CEO page: the same stored read, guard and built line ─────────────────
+
+async function openCeo(page, digestReply) {
+  // No sign-in: the page's own functions are called with a stand-in header,
+  // so no whitelisted address appears in the test.
+  await installSupabaseAuthStub(page, { users: {}, profileEndpoint: `${SUPABASE_ORIGIN}/functions/v1/ghl-proxy` });
+  await page.route(`${SUPABASE_ORIGIN}/functions/v1/reporting-api**`, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{}',
+  }));
+  const digestCalls = [];
+  await page.route(`${SUPABASE_ORIGIN}/functions/v1/daily-digest**`, async (route) => {
+    digestCalls.push({ url: route.request().url(), method: route.request().method() });
+    const reply = await digestReply(digestCalls.length);
+    await route.fulfill({ status: reply.status || 200, contentType: 'application/json', body: JSON.stringify(reply.body || {}) });
+  });
+  await page.goto('/ceo.html');
+  await page.evaluate(() => {
+    window.ceoAuthHeaders = async () => ({ Authorization: 'Bearer e2e-access-token' });
+  });
+  return digestCalls;
+}
+
+test('CEO page: the stored digest shows its Perth built day', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-18T01:00:00.000Z') });
+  const calls = await openCeo(page, () => ({ body: STORED }));
+  await page.evaluate(() => loadCeoAlerts());
+  await expect(page.locator('#ceoRedAlerts')).toContainText('Stand-in red alert');
+  await expect(page.locator('#ceoNarrative')).toContainText(
+    "Built for Monday 16 November. Today's digest has not been built yet.",
+  );
+  expect(calls.every((c) => c.method === 'GET' && new URL(c.url).searchParams.get('action') === null)).toBe(true);
+});
+
+test('CEO page: before the first build the panel stays hidden', async ({ page }) => {
+  await openCeo(page, () => ({
+    body: { alerts: [], summary_text: '', stored: true, digest_date: null, not_built_yet: true },
+  }));
+  await page.evaluate(() => loadCeoAlerts());
+  expect(await page.evaluate(() => document.getElementById('ceoAlertsPanel').style.display)).toBe('none');
+});
+
+test('CEO page: overlapping loads send one read', async ({ page }) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const calls = await openCeo(page, async () => { await gate; return { body: STORED }; });
+  await page.evaluate(() => { loadCeoAlerts(); loadCeoAlerts(); loadCeoAlerts(); });
+  await page.waitForTimeout(300);
+  expect(calls.length).toBe(1);
+  release();
 });

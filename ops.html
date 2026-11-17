@@ -5140,7 +5140,7 @@ __swOpsStampAssets([
       <!-- Work Orders -->
       <div id="subWorkorders" class="sub-view">
         <!-- Every job work order, listed like Quotes and Invoices
-             (modules/ops-work-orders-list.js, // <work-orders-list-core>). Read only;
+             (modules/ops-work-orders-list.js, // <work-orders-list-core>);
              a row opens the job's work order, Set amount goes to the fill queue below. -->
         <div class="stat-grid" id="woJobStats" style="grid-template-columns: repeat(5, 1fr);"></div>
         <div class="filter-bar wol-bar">
@@ -5189,6 +5189,10 @@ __swOpsStampAssets([
           </table>
         </div>
         </details>
+        <section id="woChanges" aria-labelledby="woChangesTitle" hidden>
+          <h3 id="woChangesTitle">Changes</h3>
+          <div id="woChangesBody"></div>
+        </section>
       </div>
 
       <!-- Bill Reconciliation: moved here from the retired Materials tab so finance

@@ -8,7 +8,8 @@
 //         approved customer variations), billed by every trade, left, billed
 //         in full and over. That is the rule the invoice doors refuse by, so
 //         this list and a refusal never disagree. The page works out no figure.
-// Writes: none. A row opens the job's work order panel (JobWorkOrderOps
+// Writes: change_work_order_amount, with an amount and reason from staff.
+//         A row opens the job's work order panel (JobWorkOrderOps
 //         .openForJob). A draft's "Set amount" scrolls to its row in the
 //         office fill queue (modules/ops-office-wo-queue.js), which owns the
 //         fill and approve writes.
@@ -169,7 +170,7 @@ var WorkOrdersListCore = (function () {
       '<td class="wol-num' + (left !== null && left < 0 ? ' wol-over' : '') + '" data-wo-left data-sort="' + esc(left) + '">' + money(left) + '</td>';
   }
 
-  function rowHtml(row, capRead, fmtDay) {
+  function rowHtml(row, capRead, fmtDay, canChange) {
     var st = statusOf(row);
     var agreed = num(row.agreed_labour_ex);
     var day = row.approved_at || row.created_at || '';
@@ -186,6 +187,9 @@ var WorkOrdersListCore = (function () {
     h += '<td>';
     if (st === 'needs_amount' || st === 'draft') {
       h += '<button type="button" class="btn btn-secondary btn-sm" data-wo-set-amount="' + esc(row.id) + '">' + (st === 'needs_amount' ? 'Set amount' : 'Approve') + '</button>';
+    }
+    if (canChange && String(row.status).toLowerCase() === 'approved') {
+      h += '<button type="button" class="btn btn-secondary btn-sm" data-wo-change-amount="' + esc(row.id) + '">Change amount</button>';
     }
     h += '</td></tr>';
     return h;
@@ -208,7 +212,7 @@ var WorkOrdersListCore = (function () {
   return {
     statusOf: statusOf, matchesFilter: matchesFilter, visible: visible, counts: counts,
     types: types, typeLabel: typeLabel, totals: totals, rowHtml: rowHtml, statsHtml: statsHtml,
-    money: money, FILTERS: FILTERS, STATUS_WORDS: STATUS_WORDS
+    money: money, esc: esc, FILTERS: FILTERS, STATUS_WORDS: STATUS_WORDS
   };
 })();
 // </work-orders-list-core>
@@ -217,6 +221,12 @@ var WorkOrdersList = (function () {
   'use strict';
   var C = WorkOrdersListCore;
   var state = { rows: [], capRead: 'ok', loaded: false, failed: false, filter: 'all', type: 'all', search: '', seq: 0 };
+
+  var changes = { rows: [], busy: false, failed: false, exhausted: false, before: null, seq: 0 };
+
+  function office() {
+    return !!(window.JobWorkOrderOps && window.JobWorkOrderOps.viewerIsOffice());
+  }
 
   function el(id) { return document.getElementById(id); }
 
@@ -234,6 +244,9 @@ var WorkOrdersList = (function () {
       '.wol-bar select{font-size:12px;padding:4px 8px}' +
       '.wol-note{font-size:12px;color:var(--sw-text-sec,#6b7280);margin:6px 0 10px}' +
       '.wol-fold{margin-top:20px}.wol-fold>summary{cursor:pointer;font-weight:600;font-size:13px;padding:6px 0}' +
+      '.wol-dialog{margin:auto;max-height:calc(100vh - 32px);overflow:auto;width:min(440px,calc(100vw - 32px));box-sizing:border-box;border:1px solid var(--sw-border,#d1d5db);border-radius:12px;padding:24px;background:var(--sw-white,#fff);color:var(--sw-text,#293c46)}' +
+      '.wol-dialog .wol-note{color:var(--sw-text,#293c46)}.wol-dialog::backdrop{background:rgba(20,30,40,.35)}.wol-dialog h2{font-size:20px;margin:0 0 16px}.wol-dialog label{display:block;margin:16px 0 6px;font-weight:600}.wol-dialog input,.wol-dialog textarea{width:100%;box-sizing:border-box}.wol-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}' +
+      '#woChanges{margin-top:28px}#woChanges h3{font-size:16px;margin-bottom:12px}#woChanges td{vertical-align:top}#woChanges th{white-space:normal}#woChanges td:nth-child(3){white-space:nowrap}#woChanges .wol-num{white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}' +
       '@media (max-width:700px){.wol-bar .filter-search{width:100%!important}}';
     document.head.appendChild(s);
   }
@@ -291,7 +304,7 @@ var WorkOrdersList = (function () {
         (state.rows.length ? 'No work orders match.' : 'No job work orders yet.') + '</td></tr>';
       return;
     }
-    body.innerHTML = rows.map(function (r) { return C.rowHtml(r, state.capRead, fmtDay); }).join('');
+    body.innerHTML = rows.map(function (r) { return C.rowHtml(r, state.capRead, fmtDay, office()); }).join('');
   }
 
   function openRow(jobId) {
@@ -320,6 +333,8 @@ var WorkOrdersList = (function () {
     if (!table || table.__wolWired) return;
     table.__wolWired = true;
     table.addEventListener('click', function (e) {
+      var change = e.target.closest('[data-wo-change-amount]');
+      if (change) { e.stopPropagation(); openChange(change.getAttribute('data-wo-change-amount')); return; }
       var btn = e.target.closest('[data-wo-set-amount]');
       if (btn) { e.stopPropagation(); goToFill(btn.getAttribute('data-wo-set-amount')); return; }
       var tr = e.target.closest('[data-wo-row]');
@@ -335,6 +350,7 @@ var WorkOrdersList = (function () {
   async function load() {
     injectCss();
     wire();
+    loadChanges();
     var my = ++state.seq;
     state.failed = false;
     if (!state.loaded) paint();
@@ -351,6 +367,123 @@ var WorkOrdersList = (function () {
       state.failed = true;
     }
     paint();
+  }
+
+  function openChange(id) {
+    if (!office()) return;
+    var row = state.rows.find(function (r) { return String(r.id) === String(id); });
+    if (!row || String(row.status).toLowerCase() !== 'approved') return;
+    var old = el('woAmountDialog');
+    if (old) old.remove();
+    var dialog = document.createElement('dialog');
+    dialog.id = 'woAmountDialog';
+    dialog.className = 'wol-dialog';
+    dialog.setAttribute('aria-labelledby', 'woAmountTitle');
+    var allowed = row.cap && row.cap.allowed_ex;
+    dialog.innerHTML = '<form><h2 id="woAmountTitle">Change amount</h2>' +
+      '<p>Amount now ' + C.esc(C.money(allowed) || 'not known') + '</p>' +
+      '<label for="woNewAmount">New amount (includes super, before GST)</label>' +
+      '<input class="form-input" id="woNewAmount" type="number" min="0" step="0.01" required>' +
+      '<label for="woChangeWhy">Why</label><textarea class="form-input" id="woChangeWhy" rows="3" required minlength="3"></textarea>' +
+      '<p class="wol-note">Every change goes on the owner&#39;s list.</p><p role="alert" data-wo-change-error></p>' +
+      '<footer><button type="button" class="btn btn-secondary" data-wo-change-cancel>Cancel</button>' +
+      '<button type="submit" class="btn btn-primary" disabled>Save</button></footer></form>';
+    document.body.appendChild(dialog);
+    var form = dialog.querySelector('form');
+    var amount = dialog.querySelector('input');
+    var why = dialog.querySelector('textarea');
+    var save = dialog.querySelector('[type="submit"]');
+    var cancel = dialog.querySelector('[data-wo-change-cancel]');
+    var busy = false;
+    function valid() { return amount.value.trim() !== '' && isFinite(Number(amount.value)) && Number(amount.value) >= 0 && why.value.trim().length >= 3; }
+    form.addEventListener('input', function () { save.disabled = busy || !valid(); });
+    cancel.addEventListener('click', function () { if (!busy) dialog.close(); });
+    dialog.addEventListener('cancel', function (e) { if (busy) e.preventDefault(); });
+    dialog.addEventListener('close', function () { dialog.remove(); });
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (busy || !valid() || !office()) return;
+      busy = true;
+      save.disabled = cancel.disabled = true;
+      amount.disabled = why.disabled = true;
+      dialog.querySelector('[data-wo-change-error]').textContent = '';
+      try {
+        await window.opsPost('change_work_order_amount', { work_order_id: row.id, to_ex: Number(amount.value), reason: why.value.trim() });
+        dialog.close();
+        await load();
+      } catch (err) {
+        dialog.querySelector('[data-wo-change-error]').textContent = err.message || 'The amount could not be changed. Try again.';
+      } finally {
+        busy = false;
+        amount.disabled = why.disabled = cancel.disabled = false;
+        save.disabled = !valid();
+      }
+    });
+    dialog.showModal();
+  }
+
+  function peopleWords(detail) {
+    detail = detail || {};
+    if (detail.action === 'add') return typeof detail.count === 'number' ? 'Named ' + detail.count + ' people' : 'Named people';
+    if (detail.action === 'remove' || detail.action === 'leave') return 'Removed a person';
+    if (detail.action === 'restore') return 'Restored a person';
+    return 'People change';
+  }
+
+  function paintChanges() {
+    var host = el('woChangesBody');
+    if (!host) return;
+    var h = '';
+    if (changes.busy) h += '<p role="status">Loading changes...</p>';
+    if (changes.failed) h += '<p role="alert">The changes could not be read. Try again.</p><button type="button" class="btn btn-secondary" data-wo-changes-retry>Try again</button>';
+    if (!changes.busy && !changes.failed && !changes.rows.length) h += '<p>No work order changes yet.</p>';
+    if (changes.rows.length) {
+      h += '<div class="data-table-wrap"><table class="data-table"><thead><tr>';
+      ['When', 'Who', 'Job', 'What', 'From', 'To', 'Why', 'Expected profit before', 'Expected profit after'].forEach(function (label) { h += '<th>' + label + '</th>'; });
+      h += '</tr></thead><tbody>';
+      changes.rows.forEach(function (r) {
+        var people = r.kind === 'people';
+        h += '<tr><td>' + C.esc(fmtDay(String(r.changed_at || '').slice(0, 10))) + '</td><td>' + C.esc(r.changed_by_name || 'Not known') + '</td><td>' + C.esc(r.job_number || 'Not known') + '</td><td>' + (people ? 'People' : 'Amount') + '</td>' +
+          '<td class="wol-num">' + (people ? '-' : C.esc(C.money(r.from_ex) || 'not known')) + '</td><td>' + (people ? C.esc(peopleWords(r.detail)) : C.esc(C.money(r.to_ex) || 'not known')) + '</td><td>' + C.esc(r.reason) + '</td>' +
+          '<td class="wol-num">' + C.esc(C.money(r.profit_before_ex) || 'not known') + '</td><td class="wol-num">' + C.esc(C.money(r.profit_after_ex) || 'not known') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      if (!changes.exhausted && !changes.failed) h += '<button type="button" class="btn btn-secondary" data-wo-changes-older' + (changes.busy ? ' disabled' : '') + '>Load older</button>';
+    }
+    host.innerHTML = h;
+    var older = host.querySelector('[data-wo-changes-older]');
+    if (older) older.onclick = function () { loadChanges(changes.rows[changes.rows.length - 1].changed_at); };
+    var retry = host.querySelector('[data-wo-changes-retry]');
+    if (retry) retry.onclick = function () { loadChanges(changes.before); };
+  }
+
+  async function loadChanges(before) {
+    var section = el('woChanges');
+    if (!section) return;
+    section.hidden = !office();
+    if (!office()) { changes.seq++; changes.rows = []; return; }
+    var my = ++changes.seq;
+    changes.before = before || null;
+    changes.busy = true;
+    changes.failed = false;
+    if (!before) { changes.rows = []; changes.exhausted = false; }
+    paintChanges();
+    try {
+      var params = { limit: 50 };
+      if (before) params.before = before;
+      var data = await window.opsFetch('work_order_changes', params);
+      if (my !== changes.seq || !office()) return;
+      if (!data || !Array.isArray(data.changes)) throw new Error('Changes missing');
+      // Page rather than accumulate an unbounded history in this tab.
+      if (data.changes.length || !before) changes.rows = data.changes;
+      changes.exhausted = data.changes.length === 0;
+    } catch (e) {
+      if (my !== changes.seq) return;
+      changes.failed = true;
+    }
+    if (my !== changes.seq) return;
+    changes.busy = false;
+    paintChanges();
   }
 
   function setFilter(f) { state.filter = C.FILTERS.indexOf(f) === -1 ? 'all' : f; paint(); }

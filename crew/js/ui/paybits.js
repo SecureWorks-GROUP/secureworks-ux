@@ -184,7 +184,7 @@ export function PayRows({ m, totalLabel = 'You are paid', hours, workOrder = fal
       ${row('Paid to you', cash(v.paid_to_you), true)}
       ${v.reimbursements > 0 ? row('Reimbursement (receipt)', cash(v.reimbursements)) : null}
       ${v.gst > 0 ? row('GST', cash(v.gst), false, 'Set this aside for your BAS.') : null}
-      ${v.repayment ? row('Repayment: ' + v.repayment.label, '-' + cash(v.repayment.amount), false, 'Balance left ' + cash(v.repayment.balance_left)) : null}
+      ${v.repayment ? row(v.repayment.label, '-' + cash(v.repayment.amount), false, Number.isFinite(num(v.repayment.balance_left)) ? 'Balance left ' + cash(v.repayment.balance_left) : '') : null}
       ${num(v.into_bank) !== num(v.paid_to_you) ? row('Into your bank account', cash(v.into_bank)) : null}
       ${v.tax_set_aside ? row('Suggested to set aside for tax', cash(v.tax_set_aside.amount), false, 'A guide only, not tax advice.') : null}
     </div>`;

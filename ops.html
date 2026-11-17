@@ -13314,8 +13314,10 @@ async function loadJobs(opts) {
   // Restoration has its own board read (restoration_board); see <restoration-board>.
   if (_pipelineTab === 'restoration') return loadRestorationBoard(opts);
   var s = null;
+  // Capture the stamp BEFORE the board on every load. A change during the board
+  // read must remain detectable by the next background check.
+  try { s = await opsFetch('pipeline_stamp'); } catch (e) { /* A failed stamp still loads the board. */ }
   if (opts.background) {
-    try { s = await opsFetch('pipeline_stamp'); } catch (e) { /* A failed stamp still loads the board. */ }
     if (s && s.stamp != null && s.stamp === _pipelineStamp
         && Date.now() - _pipelineLoadedAt < 30 * 60 * 1000) return;
   }
@@ -13354,12 +13356,6 @@ async function loadJobs(opts) {
       loadMakesafeBoardStory();
       loadMakesafeBoardReviewAffordances();
       loadMakesafeBoardPackChips();
-    }
-    if (!opts.background) {
-      try {
-        var stamp = await opsFetch('pipeline_stamp');
-        _pipelineStamp = stamp && stamp.stamp != null ? stamp.stamp : null;
-      } catch (e) { /* Keep the next background load eligible after a failed stamp read. */ }
     }
   } catch (e) {
     console.error('loadJobs error:', e);

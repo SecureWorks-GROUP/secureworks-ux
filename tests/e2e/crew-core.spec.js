@@ -127,6 +127,29 @@ test('forgotten finish falls back to eight hours and a half-hour break', async (
   await expect(sheet.locator('input[type=time]').nth(1)).toHaveValue('15:00');
   await expect(sheet.locator('select')).toHaveValue('30');
   await expect(sheet.getByRole('button', { name: /^Save .* · 7.5 h$/ })).toBeEnabled();
+  await expect(sheet).toContainText('Suggested finish. Change it if it is wrong.');
+  await expect(sheet).not.toContainText('past midnight');
+});
+
+test('forgotten finish says when eight hours would pass midnight and it stopped at the end of the day', async ({ page }) => {
+  const ids = await clockFixture(page, { earlier: true, suggestion: false, usual: null, start: '18:00' });
+  await page.getByRole('button', { name: 'Sort it out' }).click();
+  const sheet = page.getByRole('dialog', { name: /^You did not clock off on/ });
+  await expect(sheet.locator('input[type=time]').nth(1)).toHaveValue('23:55');
+  await expect(sheet).toContainText('the end of that day, because eight hours after you clocked on runs past midnight. Change it if it is wrong.');
+  await expect(sheet).not.toContainText('Suggested finish. Change it if it is wrong.');
+  await clockPicture(page, 'forgotten-clock-off-midnight');
+  await sheet.getByRole('button', { name: /^Save .* ·/ }).click();
+  await expect(sheet).not.toBeVisible();
+  expect((await page.evaluate(() => window.__clockWrites))[1]).toMatchObject({ action: 'log_my_job_hours', body: { work_date: ids.day, start_time: '18:00', finish_time: '23:55', source: 'clock_off_suggested' } });
+});
+
+test('a server finish is never described as capped, even after a late start', async ({ page }) => {
+  await clockFixture(page, { earlier: true, start: '18:00' });
+  await page.getByRole('button', { name: 'Sort it out' }).click();
+  const sheet = page.getByRole('dialog', { name: /^You did not clock off on/ });
+  await expect(sheet).toContainText('Suggested finish. Change it if it is wrong.');
+  await expect(sheet).not.toContainText('past midnight');
 });
 
 test('a refused earlier save preserves edits and a retry starts the next job only after saving', async ({ page }) => {

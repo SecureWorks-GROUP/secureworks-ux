@@ -21,6 +21,24 @@ module.exports = defineConfig({
     video: 'off',
     ...devices['Desktop Chrome']
   },
+  projects: [
+    {}, // Preserve the existing unnamed Desktop Chrome project.
+    {
+      name: 'webkit-desktop',
+      use: { ...devices['Desktop Safari'] },
+      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+    },
+    {
+      name: 'webkit-ipad',
+      use: { ...devices['iPad (gen 7)'] },
+      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+    },
+    {
+      name: 'webkit-phone',
+      use: { ...devices['iPhone 13'] },
+      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+    }
+  ],
   webServer: externalBaseUrl ? undefined : {
     command: 'npm run serve:e2e',
     url: 'http://127.0.0.1:4173/trade.html',

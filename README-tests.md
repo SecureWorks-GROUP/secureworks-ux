@@ -12,6 +12,40 @@ npm run test:e2e
 
 `playwright.config.js` starts a local static server automatically. Set `E2E_BASE_URL` to test an already-served deployment instead.
 
+## Phase 2 screen checks in WebKit
+
+The `webkit-desktop`, `webkit-ipad` and `webkit-phone` projects cover only
+`(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$`.
+The existing unnamed Desktop Chrome project keeps its full suite.
+
+Install WebKit in the automation browser directory:
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH=/private/tmp/ws4-r2-browser/browsers npx playwright install webkit
+```
+
+Runs are headless. Acquire `/tmp/se-heavy.lock` and then use
+`mkdir /tmp/se-browser.lock` before a browser run. If either lock already exists,
+leave it alone and wait. Run one browser at a time with one worker:
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH=/private/tmp/ws4-r2-browser/browsers npm run test:reconcile:webkit -- --workers=1
+```
+
+After the run, release only the locks you acquired with
+`rmdir /tmp/se-browser.lock` and `rmdir /tmp/se-heavy.lock`.
+The owner's everyday Chrome is never used. Headless Chrome for Testing from the
+automation browser directory is the fallback if WebKit is unavailable.
+
+Discovery needs no browser launch:
+
+```bash
+npx playwright test --list --project=webkit-ipad
+```
+
+Only matching specs should be listed. Zero tests is acceptable until the screen
+specs land.
+
 Covered flows (Trade App and Ops Dash):
 
 1. Login UI renders and bad credentials produce a stable inline rejection.

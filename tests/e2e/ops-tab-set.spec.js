@@ -120,7 +120,7 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
   await page.locator('.header-nav button[data-view="financials"]').click();
   // Job profit is an owner-only sub-tab: it stays hidden for this non-owner session.
   const subTabs = page.locator('#viewFinancials .sub-tab:visible');
-  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills']);
+  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills', 'Pay run']);
   await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
   await expect(page.locator('#subPos')).toHaveClass(/active/);
   // Supplier Price Updates lost its Materials home; it now lives here with its actions.
@@ -135,6 +135,19 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
   await page.locator('#viewFinancials .sub-tab[data-sub="billrecon"]').click();
   await expect(page.locator('#subBillrecon #matReconPanel')).toBeVisible();
   await expect.poll(() => apiCalls.includes('materials_recon_queue')).toBe(true);
+});
+
+// P1-10.6: the Pay run sub tab opens #subPayrun and reads pay_run once. Until the
+// back end answers it (an empty answer here), it shows the error words, never zeros.
+test('Financials Pay run opens its panel, reads pay_run and shows the error words on an unanswered read', async ({ page }) => {
+  const { apiCalls } = await bootOps(page);
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await page.locator('#viewFinancials .sub-tab[data-sub="payrun"]').click();
+  await expect(page.locator('#subPayrun')).toHaveClass(/active/);
+  await expect(page.locator('#subPayrun [data-pay-run] [role="alert"]')).toHaveText('The pay run could not be read, so nothing is shown. Try again.');
+  await expect(page.locator('#subPayrun')).not.toContainText('$0.00');
+  expect(apiCalls.filter((a) => a === 'pay_run')).toHaveLength(1);
+  expect(apiCalls).not.toContain('trade_pay_settings');
 });
 
 // ── Dispatch, slice 1 (modules/ops-dispatch.js) ──────────────────────────────

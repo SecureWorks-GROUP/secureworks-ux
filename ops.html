@@ -5044,6 +5044,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
         <button class="sub-tab" onclick="showSubTab('billrecon')" data-sub="billrecon">Bill Reconciliation</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
+        <button class="sub-tab" onclick="showSubTab('payrun')" data-sub="payrun">Pay run</button>
         <!-- The Finance Health sub-tab is hidden (Captain 2026-10-06). Its panel,
              loader and ops-api action stay. -->
         <button class="sub-tab" onclick="showSubTab('jobprofit')" data-sub="jobprofit" style="display:none;" title="Owner, admins and office staff: job profitability, expected vs actual cost, money timeline">Job profit</button>
@@ -5220,6 +5221,9 @@ __swOpsStampAssets([
         <div id="matReconBody"><div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div></div>
       </div>
       </div>
+
+      <!-- Pay run (modules/ops-pay-run.js): the weekly pay run, read only, with the pay settings at its foot. -->
+      <div id="subPayrun" class="sub-view"><div id="payRunHost"></div></div>
 
       <!-- Trade Bills -->
       <div id="subTradebills" class="sub-view">
@@ -19173,6 +19177,10 @@ function showSubTab(tab) {
   if (tab === 'billrecon') { loadMaterialsRecon(); if (window.BillsAi) BillsAi.load(); }
   if (tab === 'quotes') loadQuotes();
   if (tab === 'tradebills') loadTradeBills();
+  if (tab === 'payrun') {
+    if (window.PayRun) PayRun.open(document.getElementById('payRunHost'), btn);
+    else document.getElementById('payRunHost').textContent = 'The pay run screen did not load. Reload the page and try again.';
+  }
   if (tab === 'financehealth') loadFinanceHealth();
   if (tab === 'jobprofit') loadJobProfit();
 }
@@ -32964,6 +32972,12 @@ if (document.readyState === 'loading') {
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-debt-workshop.js?v=1'}
+]);
+</script>
+<!-- The weekly pay run and pay settings (modules/ops-pay-run.js) -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-pay-run.js?v=1'}
 ]);
 </script>
 <!-- AI bill placement in Bills to place (modules/ops-bills-ai.js) -->

@@ -26217,7 +26217,8 @@
   }
   // An assigned card bills the trade's usual rate (the one the office holds
   // for them). Only while ops-api honours it does a rate the trade typed for
-  // that job (Captain 2026-10-13) bill instead. A searched-in card keeps its own.
+  // that job (Captain 2026-10-13) bill instead. A searched-in card keeps its
+  // own. A job a bot added, with no assignment, keeps the rate the bot saved.
   function _pinAssignedCardRates() {
     // Wait for routing before replacing a saved rate on a possible group job.
     if (!invoiceRoutesSettled()) return;
@@ -26226,10 +26227,19 @@
     var editable = _assignedRateEditable();
     _jobCards.forEach(function(c) {
       if (!c || c.manually_added || invoiceGroupJob(c)) return;
+      if (c.added_by_agent && !c.assignment_id) return;
       var typed = editable && c.typed_rate != null;
       c.rate = typed ? (Number(c.typed_rate) || 0) : (usualRate > 0 ? usualRate : 0);
       c.rate_source = (typed && c.rate !== usualRate) ? 'client_entered' : 'server_resolved';
     });
+  }
+  // Who put this job on the draft. A bot line names the bot. A job the
+  // person searched in still says they added it.
+  function _jobCardAddedNote(c) {
+    if (!c) return '';
+    if (c.added_by_agent) return 'Added by ' + esc(c.added_by_label) + ' ';
+    if (c.manually_added) return 'You added this job. The office will check it. ';
+    return '';
   }
   // False when the card's rate is not the trade's to type.
   function _setJobCardRate(c, n) {
@@ -26534,7 +26544,7 @@
         if (cardMode !== 'hours') html += '<input type="text" value="' + descVal + '" placeholder="' + descPlaceholder + '" ' + (cardMode === 'commission' ? 'readonly style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-text-sec);box-sizing:border-box;background:rgba(0,0,0,0.03)"' : 'onchange="setJobCardDescription(' + c._idx + ',this.value)" style="width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--sw-border);border-radius:7px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box"') + '>';
         if (!_invRunningHydrating) {
           html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">'
-            + (c.manually_added ? 'You added this job. The office will check it. ' : '')
+            + _jobCardAddedNote(c)
             + '<button type="button" data-cardremove="' + c._idx + '" onclick="removeDraftJobCard(' + c._idx + ')" style="background:none;border:0;padding:0;font:inherit;font-size:10px;font-weight:600;color:var(--sw-red);cursor:pointer">Remove</button></div>';
         }
         // [M4 U2] Over-allowance make-safe variation prompt (hours mode only). Capture, never blocks.

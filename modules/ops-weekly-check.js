@@ -116,8 +116,8 @@
       data = result; drafts = {}; message = ''; reveal(true);
     } catch (error) {
       if (generation !== sequence) return;
-      message = ''; loadError = true;
-      if (error.status === 401 || error.status === 403) { data = null; drafts = {}; reveal(false); }
+      data = null; drafts = {}; message = ''; loadError = true;
+      if (error.status === 401 || error.status === 403) reveal(false);
     }
     busy = false;
     render();

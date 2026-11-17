@@ -167,3 +167,52 @@ test('ZZTEST unavailable money keeps the week editable and Send disabled', async
   await expect(page.getByRole('button', { name: 'Send invoice' })).toBeDisabled();
   await expect(page.locator('.pay-sum')).toHaveCount(0);
 });
+
+const { setupReceiptWeek } = require('../helpers/crew-receipts');
+
+test('ZZTEST receipt is selected without an amount box and sent as an id outside super', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto(crewUrl('#/jobs'));
+  await setupReceiptWeek(page);
+  await expect(page.getByText('Paid to you', { exact: true }).locator('..')).toContainText('$500.00');
+  await page.getByRole('button', { name: 'Add another item' }).click();
+  await page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Reimbursement (receipt)' });
+  await expect(picker.locator('input')).toHaveCount(0);
+  await expect(picker.getByRole('button', { name: /No photo/ })).toBeDisabled();
+  await picker.getByRole('button', { name: /Supplier/ }).click();
+  await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toContainText('$80.00');
+  await expect(page.getByText('Paid to you', { exact: true }).locator('..')).toContainText('$500.00');
+  await expect(page.locator('.pay-sumrow').filter({ hasText: 'Into your bank account' })).toContainText('$580.00');
+  // Real save and reopen of the demo server's saved weekly draft.
+  await expect(page.locator('.pay-note[role=status]')).toContainText('saved to your account', { timeout: 8000 });
+  await page.evaluate(() => { Object.keys(localStorage).filter((k) => k.startsWith('crew:week:')).forEach((k) => localStorage.removeItem(k)); location.hash = '#/jobs'; });
+  await page.evaluate(() => { location.hash = '#/pay/week/2026-11-09/invoice'; });
+  await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toContainText('$80.00');
+  await page.getByRole('button', { name: 'Send invoice', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Send invoice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Invoice sent' })).toBeVisible();
+  await expect(page.getByText(/With the office: this receipt is waiting for approval/)).toBeVisible();
+  const body = await page.evaluate(() => window.__crewDemo.db.receiptSubmitBody);
+  expect(body.extra_items).toEqual([{ type: 'reimbursement', expense_receipt_id: 'receipt-zztest' }]);
+  expect(errors).toEqual([]);
+});
+
+test('ZZTEST switch off hides the receipt choice', async ({ page }) => {
+  await page.goto(crewUrl('#/jobs'));
+  await setupReceiptWeek(page, { enabled: false });
+  await page.getByRole('button', { name: 'Add another item' }).click();
+  await expect(page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true })).toHaveCount(0);
+});
+
+test('ZZTEST an office receipt change returns to review before any submit', async ({ page }) => {
+  await page.goto(crewUrl('#/jobs'));
+  await setupReceiptWeek(page);
+  await page.getByRole('button', { name: 'Add another item' }).click();
+  await page.getByRole('button', { name: 'Reimbursement (receipt)', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /Supplier/ }).click();
+  await page.evaluate(() => { window.__crewDemo.db.expenses[0].total_amount = 35; });
+  await page.getByRole('button', { name: 'Send invoice', exact: true }).click();
+  await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toContainText('$35.00');
+  expect(await page.evaluate(() => window.__crewDemo.db.receiptSubmitBody)).toBeUndefined();
+});

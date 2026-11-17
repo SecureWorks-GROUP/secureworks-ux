@@ -234,7 +234,7 @@ export function createDemoServer(persona) {
       const monday = b.week_start;
       const held = liveInvoice(monday);
       if (held) fail(409, { ok: false, success: false, saved: false, code: 'WEEK_ALREADY_INVOICED', already_submitted: true, invoice_id: held.id, invoice_number: held.invoice_number, userMessage: 'You already have an invoice for that week.' });
-      const lines = []; let gross = 0; let commission = 0; let hoursTotal = 0; let heldLine = false;
+      const lines = []; let gross = 0; let commission = 0; let hoursTotal = 0; let heldLine = false; let reimbursement = 0; const skipped_items = []; const receiptIds = new Set();
       for (const m of b.manual_assignments || []) {
         const a = db.assignments.find((x) => x.id === m.assignment_id && x.user_id === me.id);
         if (!a) fail(422, { ok: false, userMessage: 'One of your job cards could not be found. Reload and try again.' });
@@ -251,6 +251,21 @@ export function createDemoServer(persona) {
       const notBooked = (b.extra_items || []).filter((x) => x.job_id && !onJob(x.job_id) && !manages(db.job(x.job_id) || {}));
       if (notBooked.length) fail(403, { ok: false, code: 'extra_job_not_allowed', jobs: notBooked.map((x) => x.job_number), error: 'You are not booked on one of these jobs.' });
       for (const x of b.extra_items || []) {
+        if (x.type === 'reimbursement') {
+          if (receiptIds.has(x.expense_receipt_id)) continue;
+          receiptIds.add(x.expense_receipt_id);
+          const e = ops.list_expenses({ limit: 100 }).expenses.find((r) => r.id === x.expense_receipt_id);
+          if (!db.flags.reimbursements || !e?.reimbursement?.claimable) {
+            skipped_items.push({ expense_receipt_id: x.expense_receipt_id, code: e?.reimbursement?.reason || 'reimbursement_switch_off', words: e?.reimbursement?.reason === 'reimbursement_already_claimed' ? 'This receipt is already on an invoice.' : 'This receipt could not be added. Check it under Expenses.' });
+            continue;
+          }
+          const amount = Number(e.total_amount);
+          if (!(amount > 0)) fail(422, { error: 'The receipt amount must be positive' });
+          const awaiting = e.status !== 'approved' || !e.job_id;
+          lines.push({ id: db.id('l'), line_type: 'reimbursement', expense_receipt_id: e.id, description: 'Reimbursement - ' + e.vendor_name, job_number: e.jobs?.job_number, line_total_ex: amount, office_review_status: awaiting ? 'awaiting' : 'approved' });
+          gross += amount; reimbursement += amount; heldLine = heldLine || awaiting;
+          continue;
+        }
         const amt = round2(Number(x.quantity) * Number(x.rate));
         if (String(x.type).toLowerCase() === 'commission') commission += amt;
         if (x.unit === 'hr') hoursTotal += Number(x.quantity);
@@ -258,12 +273,12 @@ export function createDemoServer(persona) {
         gross += amt; if (String(x.type).toLowerCase() !== 'work order' || true) heldLine = heldLine || ['travel', 'materials', 'equipment', 'other'].includes(String(x.type).toLowerCase());
       }
       if (!lines.length) fail(400, { ok: false, userMessage: 'Nothing to invoice yet.' });
-      const m = money(round2(gross), { gstOn: b.gst_on, commission });
+      const m = money(round2(gross), { gstOn: b.gst_on, commission, reimbursement });
       const n = db.invoices.length + 418;
       const inv = { id: db.id('inv'), user_id: me.id, week_start: monday, week_end: addDays(monday, 6), invoice_number: 'SW-INV-' + me.name.split(' ').map((w) => w[0]).join('') + '-0' + n, status: heldLine ? 'pending_acknowledgment' : 'pushed_to_xero', invoice_source: 'hourly', notes: b.notes || '', ...m, total_hours: round2(hoursTotal), xero_bill_id: heldLine ? null : 'xb-' + n, submitted_at: db.now().toISOString(), created_at: db.now().toISOString(), paid_at: null, lines };
       db.invoices.push(inv);
       (b.manual_assignments || []).forEach((x) => { const a = db.assignments.find((y) => y.id === x.assignment_id); if (a) a.invoiced_in = inv.id; });
-      return { ok: true, success: true, invoice_id: inv.id, invoice_number: inv.invoice_number, total_hours: inv.total_hours, line_count: lines.length, ...m, ...(heldLine ? { office_review: 'held', code: 'lines_awaiting_office_review', xero_bill_id: null } : { xero_bill_id: inv.xero_bill_id, xero_bill_number: inv.invoice_number }), pending_ops_review: false };
+      return { ok: true, success: true, skipped_items, invoice_id: inv.id, invoice_number: inv.invoice_number, total_hours: inv.total_hours, line_count: lines.length, ...m, ...(heldLine ? { office_review: 'held', code: 'lines_awaiting_office_review', xero_bill_id: null } : { xero_bill_id: inv.xero_bill_id, xero_bill_number: inv.invoice_number }), pending_ops_review: false };
     },
     // The saved weekly draft: one a person a week, in the shape the current Trade App writes.
     // It never sends anything and bills nothing.

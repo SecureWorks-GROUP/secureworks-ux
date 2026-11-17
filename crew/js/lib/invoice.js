@@ -4,6 +4,7 @@
 // exact request the server expects. No screen code in here.
 import { hoursBetween, todayISO, addDays, fmtDay, fmtTime } from './dates.js';
 import { verticalOf, jobTitle } from './model.js';
+import { refreshReceiptLine } from './reimbursements.js';
 
 const LIVE_OFF = ['draft', 'failed', 'ops-reject'];
 /** An invoice that holds its week (cannot send another for that week). */
@@ -90,7 +91,7 @@ function entryOf(card) {
  * draft = { edits: { [key]: {...} }, added: [line], lumps: [{ id, description, amount }], gst, notes }
  * `jobModes` is { [jobId]: row } from trade_invoice_job_modes, for jobs the trade added themselves.
  */
-export function buildLines(hours, draft, { workOrders = [], perMetre = false, jobModes = null } = {}) {
+export function buildLines(hours, draft, { workOrders = [], perMetre = false, jobModes = null, receiptRows = null, userId = null } = {}) {
   const edits = (draft && draft.edits) || {};
   const usualRate = hours && hours.rate_resolved !== false && Number(hours.rate) > 0 ? Number(hours.rate) : 0;
   const unavailable = Boolean(hours && hours.invoice_mode_unavailable === true);
@@ -161,6 +162,10 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
     });
   }
   for (const a of (draft && draft.added) || []) {
+    if (a.kind === 'reimbursement') {
+      if (!lines.some((l) => l.kind === 'reimbursement' && l.receiptId === a.receiptId)) lines.push(refreshReceiptLine(a, receiptRows, userId));
+      continue;
+    }
     const edit = edits[a.key] || {};
     const merged = { ...a, ...edit, usualRate, rate: edit.rate != null && edit.rate !== '' ? Number(edit.rate) : a.rate != null ? a.rate : usualRate, added: true, off: false };
     if (a.kind !== 'other') {
@@ -205,6 +210,7 @@ export function lineAmount(line) {
 /** Plain words for what is still missing on a line, or '' when it is ready. */
 export function lineProblem(line, { monday, rateEditable }) {
   if (line.off || line.ahead || line.unknown) return '';
+  if (line.kind === 'reimbursement') return line.receiptProblem || '';
   if (line.kind === 'deduction') return !line.description ? 'Say what it is for' : line.amount > 0 ? '' : 'Add the amount';
   const today = todayISO(); const sunday = addDays(monday, 6);
   if (line.kind === 'hours') {
@@ -286,6 +292,10 @@ export function buildSubmit(lines, { monday, gstOn, notes, rateEditable }) {
   const manual_assignments = []; const extra_items = [];
   for (const l of lines) {
     if (l.off || l.ahead || l.unknown) continue;
+    if (l.kind === 'reimbursement') {
+      if (!l.receiptProblem && l.receiptId) extra_items.push({ type: 'reimbursement', expense_receipt_id: l.receiptId });
+      continue;
+    }
     if (l.kind === 'deduction') {
       // Same row the current Trade App sends for an amount taken off the invoice.
       extra_items.push({ type: 'Deduction', row_type: 'lump_sum', line_kind: 'lump_sum', description: l.description, quantity: 1, unit: 'ea', hours: 1, rate: -Math.abs(Number(l.amount)),
@@ -435,6 +445,10 @@ export function draftFromBuilder(builder, hours) {
   for (const r of builder.invRows || []) {
     if (!crewRow(r)) continue;
     const x = r.crew_line || {};
+    if (x.kind === 'reimbursement' && x.receiptId) {
+      out.added.push({ key: x.key || 'receipt:' + x.receiptId, kind: 'reimbursement', receiptId: x.receiptId, title: 'Reimbursement (receipt)' });
+      continue;
+    }
     out.added.push({ key: x.key || 'add:row:' + out.added.length, kind: 'other', type: x.type || 'Other', jobId: r.job_id || null, jobNumber: r.job_text || '', title: x.title || r.job_text || 'Job', suburb: x.suburb || '', client: r.client_name || '', vertical: x.vertical || 'other', jobType: r.division || '', date: r.date || '', amount: Number(r.amount) || 0, description: r.description || '' });
   }
   for (const lp of builder.invLumpLines || []) if (lp && (lp.description || Number(lp.amount))) out.lumps.push({ id: lp.id || 'il-' + out.lumps.length, description: lp.description || '', amount: Math.abs(Number(lp.amount) || 0) });
@@ -507,6 +521,10 @@ export function builderFromDraft(hours, draft, lines, { monday, gstOn }) {
   const rows = (base.invRows || []).filter((r) => !crewRow(r));
   for (const a of (draft && draft.added) || []) {
     const l = byKey.get(a.key) || { ...a, ...(edits[a.key] || {}) };
+    if (a.kind === 'reimbursement') {
+      rows.push({ _source: 'crew_app', crew_line: { key: a.key, kind: 'reimbursement', receiptId: a.receiptId } });
+      continue;
+    }
     if (a.kind === 'other') {
       rows.push({ date: l.date || '', job_id: l.jobId || null, job_text: l.jobNumber || '', description: l.description || '', division: l.jobType || '', hours: 0, rate: 0, amount: Number(l.amount) || 0, start_time: '', finish_time: '', break_minutes: 0, client_name: l.client || '', _source: 'crew_app',
         crew_line: { key: a.key, type: l.type || 'Other', title: l.title || '', suburb: l.suburb || '', vertical: l.vertical || 'other' } });

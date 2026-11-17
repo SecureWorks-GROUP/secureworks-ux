@@ -7,6 +7,7 @@ import { local, invalidate } from '../lib/store.js';
 import { go, back, useRoute } from '../lib/router.js';
 import { fmtWeek, fmtDow, fmtDom, fmtDate, addDays, hoursBetween, tsToDate } from '../lib/dates.js';
 import { lineHours, lineAmount, lineProblem, buildSubmit, invoiceForWeek, helpersTotal, UNKNOWN_MODE_WORDS } from '../lib/invoice.js';
+import { refreshReceiptLine, receiptSendFacts } from '../lib/reimbursements.js';
 import { bookMyself } from '../lib/data.js';
 import { Page, Button, StatusBadge, Field, Toggle, SkelRows, LoadError, toast, ask, buzz } from '../ui/kit.js';
 import { cash, hrs, plural, weekWords, PayGroup, PayLine, PayRows, DoneScreen, superNote, num } from '../ui/paybits.js';
@@ -32,6 +33,14 @@ export function Review({ monday: mondayParam }) {
 
   const send = async () => {
     if (problems.length || !est.count || w.foreign || moneyUnavailable) return;
+    const selected = lines.filter((l) => l.kind === 'reimbursement');
+    if (selected.length) {
+      try {
+        const fresh = await api('list_expenses', { limit: 100 });
+        const changed = selected.some((l) => { const next = refreshReceiptLine(l, fresh.expenses, user.id); return next.receiptProblem || ['amount', 'description', 'date', 'status', 'jobNumber'].some((k) => next[k] !== l[k]); });
+        if (changed) { await w.receipts.refetch(); toast('A receipt changed at the office. Check it again before sending.', { kind: 'bad', ms: 7000 }); return; }
+      } catch { await w.receipts.refetch(); toast('Your receipts could not be checked. Nothing was sent. Try again when you have signal.', { kind: 'bad', ms: 7000 }); return; }
+    }
     const left = est.ahead + est.unknown;
     const ok = await ask({ title: `Send your invoice for ${fmtWeek(monday)}?`, body: `About ${cash(est.pay)} to you. You can send one invoice a week, and you cannot change it after it is sent, so check it is all there.${est.ahead ? ` ${est.ahead === 1 ? 'One job later this week is' : est.ahead + ' jobs later this week are'} not on it. If you work ${est.ahead === 1 ? 'it' : 'them'}, send after that instead, or add ${est.ahead === 1 ? 'it' : 'them'} to next week.` : ''}${est.unknown ? ` ${plural(est.unknown, 'job')} ${est.unknown === 1 ? 'is' : 'are'} left off until the office says how ${est.unknown === 1 ? 'it is' : 'they are'} billed.` : ''}`, yes: left ? 'Send it without them' : 'Send invoice' });
     if (!ok) return;
@@ -45,7 +54,7 @@ export function Review({ monday: mondayParam }) {
       w.sent();
       invalidate('invoices'); invalidate('hours'); invalidate('money');
       buzz([14, 60, 14, 60, 30]);
-      setResult(res);
+      setResult({ ...res, receiptFacts: receiptSendFacts(lines, res) });
     } catch (err) { await sendFailed(err, body); }
     setSending(false);
   };
@@ -82,13 +91,13 @@ export function Review({ monday: mondayParam }) {
   const on = lines.filter((l) => !l.off && !l.ahead && !l.unknown);
   const of = (kind) => on.filter((l) => l.kind === kind);
   const sub = (list) => { const amounts = list.map(lineAmount); return amounts.some((a) => a == null) ? '' : cash(round2(amounts.reduce((s, a) => s + a, 0))); };
-  const hourly = of('hours'); const wo = of('work_order'); const co = of('commission'); const other = of('other'); const off = of('deduction');
+  const hourly = of('hours'); const wo = of('work_order'); const co = of('commission'); const other = of('other'); const off = of('deduction'); const reimbursements = of('reimbursement');
   const hourlyHours = round2(hourly.reduce((s, l) => s + (lineHours(l) || 0), 0));
   const unknown = lines.filter((l) => l.unknown && !l.ahead);
   const leftOff = lines.filter((l) => l.off);
   const sunday = addDays(monday, 6);
   // Receipts the trade paid for themselves this week. Each is its own record, paid back on its own, never part of this invoice.
-  const repaid = ((expenses.data && expenses.data.expenses) || []).filter((e) => e.submitted_by === user.id && e.payment_method === 'personal_card' && String(e.status || '').toLowerCase() !== 'rejected')
+  const repaid = ((expenses.data && expenses.data.expenses) || []).filter((e) => !lines.some((l) => l.kind === 'reimbursement' && l.receiptId === e.id) && e.submitted_by === user.id && e.payment_method === 'personal_card' && String(e.status || '').toLowerCase() !== 'rejected')
     .filter((e) => { const d = String(e.receipt_date || tsToDate(e.created_at) || '').slice(0, 10); return d >= monday && d <= sunday; });
   const line = (l) => {
     const problem = l.kind === 'hours' && !l.off && (!l.start || !l.finish) ? 'Add start and finish times' : lineProblem(l, ctx); const amt = lineAmount(l);
@@ -98,6 +107,7 @@ export function Review({ monday: mondayParam }) {
       const rec = round2((l.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0));
       detail = [l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
     } else if (l.kind === 'commission') detail = inclusive ? 'commission, includes super' : 'commission, no super on it';
+    else if (l.kind === 'reimbursement') detail = [l.description, l.date ? fmtDate(l.date) : '', 'no super or GST added'].filter(Boolean).join(' · ');
     else if (l.kind === 'other') detail = l.type || 'Other';
     else if (l.kind === 'deduction') detail = 'left off this invoice';
     // A rate above the office rate bills, and the office checks it before it is paid (owner, 15 Nov 2026).
@@ -123,8 +133,9 @@ export function Review({ monday: mondayParam }) {
         ${wo.length ? html`<${PayGroup} label="Work order" right=${sub(wo)}>${wo.map(line)}<//>` : null}
         ${co.length ? html`<${PayGroup} label="Commission" right=${sub(co)}>${co.map(line)}<//>` : null}
         ${other.length ? html`<${PayGroup} label="Other items" right=${sub(other)}>${other.map(line)}<//>` : null}
+        ${reimbursements.length ? html`<${PayGroup} label="Reimbursements" right=${sub(reimbursements)}>${reimbursements.map(line)}<//>` : null}
         ${off.length ? html`<${PayGroup} label="Adjustments" right=${sub(off)}>${off.map(line)}<//>` : null}
-        <button type="button" class="pay-add" onClick=${() => openAddOther({ monday, lines, addLine: w.addLine })}>Add another item</button>
+        <button type="button" class="pay-add" onClick=${() => openAddOther({ monday, lines, addLine: w.addLine, reimbursementsOn: w.reimbursementsOn, userId: user.id })}>Add another item</button>
       </div>
 
       ${est.count && !moneyUnavailable ? html`<div class="block card pay-sum pay-gap">
@@ -182,6 +193,8 @@ function Sent({ res, monday, workOrder }) {
     ${figures ? html`<div class="card"><${PayRows} workOrder=${workOrder} m=${{ ...res, trade_payable: res.trade_payable != null ? res.trade_payable : res.amount_payable != null ? res.amount_payable : res.net_pay }} /></div>` : html`<p class="t-small">The office system did not send the figures back. Open the invoice to see them.</p>`}
     ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}
     ${dedNote ? html`<p class="t-small">${dedNote}</p>` : null}
+    ${(res.receiptFacts?.skipped || []).map((words) => html`<p class="t-small" role="status">${words}</p>`)}
+    ${(res.receiptFacts?.accepted || []).map((l) => html`<p class="t-small">${l.description}: ${l.waiting ? 'With the office: this receipt is waiting for approval.' : 'Receipt approved by the office.'}</p>`)}
     ${(res.wo_labour_payouts || []).map((p) => html`<p class="t-small">${cash(p.total_ex)} for your crew is not on your invoice. They bill SecureWorks themselves.</p>`)}
     <p class="t-small t-num">${[res.invoice_number, 'Pay week ' + weekWords(monday)].filter(Boolean).join(' · ')}</p>
   <//>`;

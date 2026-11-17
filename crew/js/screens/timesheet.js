@@ -13,6 +13,7 @@ import {
   buildLines, lineProblem, estimate, pickableDays, invoiceForWeek, sentBackForWeek, invoicePays, readMode,
   draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, UNKNOWN_MODE_WORDS
 } from '../lib/invoice.js';
+import { receiptsEnabled, receiptProblem, receiptLine } from '../lib/reimbursements.js';
 import { bookMyself } from '../lib/data.js';
 import { Icon } from '../ui/icons.js';
 import { Page, Button, Sheet, StatusBadge, JobLine, KV, Field, Picks, TimeInput, BREAKS, Toggle, SkelRows, Empty, LoadError, toast, openOverlay, buzz, IconButton } from '../ui/kit.js';
@@ -43,11 +44,14 @@ export function useWeek(mondayParam) {
   const live = invoiceForWeek(list, monday);
   const sentBack = sentBackForWeek(list, monday);
   const data = hours.data;
+  const receipts = useQuery('reimbursements:' + user.id, () => api('list_expenses', { limit: 100 }), { ttl: 0 });
+  const receiptRows = !receipts.error && !receipts.loading && !receipts.refreshing && data?.money?.super_basis === 'inclusive_12_112_v1' ? receipts.data?.expenses : null;
+  const reimbursementsOn = receiptsEnabled(receiptRows);
   const rateEditable = Boolean(data && data.trade_rate_editable === true);
   const serverOn = Boolean(data && data.running_invoice_draft === true);
 
   // Jobs the trade added themselves: how each is billed is asked of the server, never kept from a draft.
-  const addedIds = [...new Set(draft.added.filter((a) => a.kind !== 'other' && a.jobId).map((a) => String(a.jobId)))].sort().join(',');
+  const addedIds = [...new Set(draft.added.filter((a) => a.kind !== 'other' && a.kind !== 'reimbursement' && a.jobId).map((a) => String(a.jobId)))].sort().join(',');
   const modesQ = useQuery(addedIds ? 'jobmodes:' + addedIds : null, () => api('trade_invoice_job_modes', { job_ids: addedIds }), { ttl: 60000 });
   const jobModes = useMemo(() => {
     if (!addedIds) return {};
@@ -56,9 +60,9 @@ export function useWeek(mondayParam) {
   }, [modesQ.data, addedIds]);
   const lines = useMemo(() => {
     if (!data) return [];
-    const built = buildLines(data, draft, { workOrders: (wos.data && wos.data.work_orders) || [], perMetre: user.perMetre, jobModes });
+    const built = buildLines(data, draft, { workOrders: (wos.data && wos.data.work_orders) || [], perMetre: user.perMetre, jobModes, receiptRows, userId: user.id });
     return modesQ.error && !jobModes ? built.map((l) => (l.unknown && l.added ? { ...l, modePending: false, modeFailed: true } : l)) : built;
-  }, [data, draft, wos.data, jobModes, modesQ.error]);
+  }, [data, draft, wos.data, jobModes, modesQ.error, receiptRows]);
   const groups = useGroupWeek(data);
   const gstOn = draft.gst == null ? (data && typeof data.gst_on === 'boolean' ? data.gst_on : user.gstDefault) : draft.gst;
   const deduction = data && data.recurring_deduction_week;
@@ -143,6 +147,12 @@ export function useWeek(mondayParam) {
   const patch = (key, change) => setDraft((d) => ({ ...d, edits: { ...d.edits, [key]: { ...(d.edits[key] || {}), ...change } } }));
   const addLine = (line) => setDraft((d) => ({ ...d, added: [...d.added, line] }));
   const edit = (line) => {
+    if (line.kind === 'reimbursement') {
+      openOverlay((close) => html`<${Sheet} title="Reimbursement (receipt)" onClose=${close} foot=${(shut) => html`<${Button} kind="line" block onClick=${() => { setDraft((d) => ({ ...d, added: d.added.filter((a) => a.key !== line.key) })); shut(); }}>Remove from this invoice<//>`}>
+        <p>${line.description || 'Receipt'}</p><p>${line.receiptProblem || cash(line.amount)}</p>
+        <p class="t-small">The amount comes from the receipt. Check it under Expenses if it needs changing.</p>
+      <//>`); return;
+    }
     if (line.unknown) { openOverlay((close) => html`<${UnknownSheet} line=${line} onClose=${close} onRemove=${line.added ? () => setDraft((d) => ({ ...d, added: d.added.filter((a) => a.key !== line.key) })) : null} />`); return; }
     openOverlay((close) => html`<${LineSheet} line=${line} ctx=${ctx} onClose=${close}
       onSave=${(change) => {
@@ -159,7 +169,7 @@ export function useWeek(mondayParam) {
     local.del('week:' + monday);
     if (id && latest.current.serverOn) api('delete_trade_invoice', null, { invoice_id: id }).catch(() => {});
   };
-  return { user, monday, thisMonday, hours, data, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: save, sent, syncWords, foreign: draft.foreign || 0 };
+  return { user, monday, thisMonday, hours, data, receipts, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: save, sent, syncWords, foreign: draft.foreign || 0 };
 }
 
 export function Timesheet({ monday: mondayParam }) {
@@ -363,10 +373,12 @@ function AddJobSheet({ monday, user, lines, addLine, refetch, onClose }) {
 
 // ----------------------------------------------------- add another amount
 export function openAddOther(props) { openOverlay((close) => html`<${AddOtherSheet} ...${props} onClose=${close} />`); }
-function AddOtherSheet({ monday, lines, addLine, onClose }) {
+function AddOtherSheet({ monday, lines, addLine, onClose, reimbursementsOn = false, userId }) {
   const jobs = useMemo(() => { const m = new Map(); lines.forEach((l) => { if (l.jobId && !l.unknown && !m.has(l.jobId)) m.set(l.jobId, l); }); return [...m.values()]; }, [lines]);
   const [type, setType] = useState('Travel'); const [jobId, setJobId] = useState(jobs[0] ? jobs[0].jobId : null);
   const [amount, setAmount] = useState(''); const [desc, setDesc] = useState('');
+  const [receiptMode, setReceiptMode] = useState(false);
+  if (receiptMode) return html`<${ReceiptPicker} lines=${lines} addLine=${addLine} userId=${userId} onClose=${onClose} />`;
   const days = pickableDays(monday);
   const ok = jobId && Number(amount) > 0 && desc.trim();
   const add = (shut) => {
@@ -375,12 +387,40 @@ function AddOtherSheet({ monday, lines, addLine, onClose }) {
     shut();
   };
   return html`<${Sheet} title="Add another item" sub="Travel or another amount agreed with the office." onClose=${onClose} foot=${(shut) => html`<${Button} block disabled=${!ok} onClick=${() => add(shut)}>Add to this invoice<//>`}>
+    ${reimbursementsOn ? html`<${Button} kind="line" block onClick=${() => setReceiptMode(true)}>Reimbursement (receipt)<//>` : null}
     ${!jobs.length ? html`<${Empty} title="Add the job first">An extra amount has to go against a job. Add the job to the timesheet, then add the extra.<//>` : html`<div class="stack">
       <${Field} label="What is it?"><${Picks} value=${type} options=${[['Travel', 'Travel'], ['Materials', 'Materials'], ['Equipment', 'Equipment'], ['Other', 'Other']]} onChange=${setType} /><//>
       <${Field} label="Which job?"><div class="picks">${jobs.map((j) => html`<button type="button" class="pick" aria-pressed=${String(jobId === j.jobId)} onClick=${() => setJobId(j.jobId)}>${j.title}</button>`)}</div><//>
       <${Field} label="Amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${amount} onInput=${(e) => setAmount(e.currentTarget.value)} placeholder="$" /><//>
       <${Field} label="What it is for"><input class="input" value=${desc} onInput=${(e) => setDesc(e.currentTarget.value)} placeholder=${type === 'Travel' ? 'e.g. 84 km to site and back' : 'A few words'} /><//>
-      <p class="t-small">The office checks extra amounts before they are paid. Bought something with a receipt? Add it under Expenses on the Pay screen. It is paid back separately, not on this invoice.</p>
+      <p class="t-small">The office checks extra amounts before they are paid. ${reimbursementsOn ? 'Use Reimbursement (receipt) for something you paid for yourself. Its amount comes from the receipt.' : 'Bought something with a receipt? Add it under Expenses on the Pay screen. It is paid back separately, not on this invoice.'}</p>
     </div>`}
+  <//>`;
+}
+
+
+function ReceiptPicker({ lines, addLine, userId, onClose }) {
+  const q = useQuery('receipt-picker:' + userId, () => api('list_expenses', { limit: 100 }), { ttl: 0 });
+  const rows = (q.data?.expenses || []).filter((r) => r.submitted_by === userId);
+  const on = !q.error && !q.loading && !q.refreshing && receiptsEnabled(rows);
+  const picked = new Set(lines.filter((l) => l.kind === 'reimbursement').map((l) => l.receiptId));
+  const pick = async (row) => {
+    try {
+      const fresh = await api('list_expenses', { limit: 100 });
+      const receipt = (fresh.expenses || []).find((r) => r.id === row.id && r.submitted_by === userId);
+      const problem = receiptProblem(receipt);
+      if (problem) { toast(problem, { kind: 'bad' }); q.refetch(); return; }
+      addLine(receiptLine(receipt)); onClose();
+    } catch (err) { toast(friendly(err) + ' No receipt was added.', { kind: 'bad' }); q.refetch(); }
+  };
+  return html`<${Sheet} title="Reimbursement (receipt)" sub="The receipt sets the amount. No super or GST is added to it." onClose=${onClose}>
+    ${q.loading || q.refreshing ? html`<${SkelRows} n=${3} />` : q.error ? html`<${LoadError} error=${q.error} onRetry=${q.refetch} what="your receipts" />`
+      : !on || !rows.length ? html`<${Empty} title="No receipts to pay back. Add one under Expenses first."><${Button} kind="line" onClick=${() => { onClose(); go('/pay/receipt'); }}>Add a receipt<//><//>`
+      : html`<div class="pay-sheetlist">${rows.map((r) => {
+        const reason = picked.has(r.id) ? 'Already on this invoice' : receiptProblem(r);
+        return html`<button type="button" class="item" key=${r.id} disabled=${Boolean(reason)} onClick=${() => pick(r)}>
+          <span class="main"><b>${r.vendor_name || 'Receipt'}</b><span class="sub">${r.receipt_date || 'Date not read'}${Number(r.total_amount) > 0 ? ' · ' + cash(r.total_amount) : ''}</span>${reason ? html`<span class="sub">${reason}</span>` : null}</span>
+        </button>`;
+      })}</div>`}
   <//>`;
 }

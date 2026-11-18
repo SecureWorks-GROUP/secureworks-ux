@@ -16,7 +16,8 @@ const {
   stockDivisionOfJob,
   divisionsForUser,
   nextStepWords,
-  serverWordsOf
+  serverWordsOf,
+  missingReceiptField
 } = await import('../../crew/js/screens/receipt.js');
 
 Deno.test('spendCaptureEnabled stays false until the server explicitly sends spend_capture_v2 true', () => {
@@ -140,4 +141,20 @@ Deno.test('serverWordsOf reads P2-06.4 error-code plus message bodies without ex
 
   const offline = makeErr('No signal', { offline: true });
   equal(serverWordsOf(offline), 'No signal. Nothing is lost: press Save receipt again when you are back in range.');
+});
+
+Deno.test('missingReceiptField lets no-job and stock receipts save when my_jobs fails, while refusing unverified jobs', () => {
+  const filled = { vendor: 'ZZTEST Supplier', total: 55, date: '2026-11-13', paid: 'company_card', what: 'fuel' };
+
+  // Switch off: no_job needs no my_jobs read (jobAllowed false) and saves cleanly.
+  equal(missingReceiptField({ v2: false, ...filled, dest: { kind: 'no_job', via: 'general_business' }, jobAllowed: false }), '');
+  equal(missingReceiptField({ v2: false, ...filled, dest: null, jobAllowed: false }), 'Pick the job, or no job');
+  equal(missingReceiptField({ v2: false, ...filled, dest: { kind: 'job', id: 'zz-foreign' }, jobAllowed: false }), 'Pick the job, or no job');
+  equal(missingReceiptField({ v2: false, ...filled, dest: { kind: 'job', id: 'zz-own' }, jobAllowed: true }), '');
+
+  // Switch on: stock needs no my_jobs row once division is on profile, while unverified job or legacy no_job is refused.
+  equal(missingReceiptField({ v2: true, ...filled, dest: { kind: 'stock', division: 'fencing' }, jobAllowed: false }), '');
+  equal(missingReceiptField({ v2: true, ...filled, dest: { kind: 'no_job', via: 'general_business' }, jobAllowed: false }), 'Pick the job or the stock this was for');
+  equal(missingReceiptField({ v2: true, ...filled, dest: { kind: 'job', id: 'zz-foreign' }, jobAllowed: false }), 'Pick the job or the stock this was for');
+  equal(missingReceiptField({ v2: true, ...filled, dest: { kind: 'job', id: 'zz-own' }, jobAllowed: true }), '');
 });

@@ -5181,6 +5181,8 @@ __swOpsStampAssets([
             <tbody id="woJobTableBody"></tbody>
           </table>
         </div>
+        <!-- Billed over the agreed amount: read only, staff only (modules/ops-overbilled.js, // <overbilled-core>). -->
+        <section id="woOverbilled" data-overbilled-host aria-label="Billed over the agreed amount"></section>
         <div style="margin-top:20px;"></div>
         <div id="officeWoFill" data-office-wo-fill-host></div>
         <details class="wol-fold" id="woOldCrewFold">
@@ -5477,7 +5479,7 @@ __swOpsStampAssets([
     <div id="viewDebt" class="view"><div id="debtWorkshopRoot"></div></div>
 
     <!-- ═══════════ MATCHING: the Context reconciliation list (modules/ops-recon.js) ═══════════ -->
-    <div id="viewRecon" class="view"><div id="reconRoot"></div><div id="agentProposalsRoot" hidden></div></div>
+    <div id="viewRecon" class="view"><div id="reconRoot"></div><div id="agentProposalsRoot" hidden></div><div id="receiptConfirmRoot" hidden></div></div>
     <div id="viewWeeklycheck" class="view"><div id="weeklyCheckRoot"></div></div>
 
     <div class="view" id="viewSales">
@@ -6546,6 +6548,10 @@ __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}, {t:'js', u
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-agent-proposals.js?v=1'}]);
 </script>
+<!-- Receipts not booked on their job: the office confirm (modules/ops-receipt-confirm.js, backend #1656). -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-receipt-confirm.js?v=1'}]);
+</script>
 <!-- Job work order (docs/job-work-order-screens.md): on for office, every job type. ?wo=live does not hide it. -->
 <script>
 __swOpsStampAssets([
@@ -6557,6 +6563,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=3'},
   {t:'js', u:'modules/ops-work-orders-list.js?v=1'},
+  {t:'js', u:'modules/ops-overbilled.js?v=1'},
   {t:'js', u:'modules/ops-trade-repayments.js?v=1'}
 ]);
 </script>
@@ -19876,6 +19883,7 @@ function packetJobWorkOrder(data) {
 
 async function loadWOs() {
   if (window.WorkOrdersList) WorkOrdersList.load();
+  if (window.Overbilled) Overbilled.mount();
   if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {

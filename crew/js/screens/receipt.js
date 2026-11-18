@@ -115,6 +115,27 @@ export function serverWordsOf(err) {
   return friendly(err);
 }
 
+export function missingReceiptField(opts = {}) {
+  const { v2, vendor, total, date, paid, what, dest, jobAllowed } = opts;
+  const validDest = Boolean(dest && (dest.kind === 'stock' || (!v2 && dest.kind === 'no_job') || (dest.kind === 'job' && jobAllowed)));
+  if (v2) {
+    if (!validDest) return 'Pick the job or the stock this was for';
+    if (!String(vendor || '').trim()) return 'Add the shop name';
+    if (!(total > 0)) return 'Add the total';
+    if (!date) return 'Pick the date on the receipt';
+    if (!paid) return 'Say how it was paid';
+    if (!what) return 'Say what it was for';
+    return '';
+  }
+  if (!String(vendor || '').trim()) return 'Add the shop name';
+  if (!(total > 0)) return 'Add the total';
+  if (!date) return 'Pick the date on the receipt';
+  if (!paid) return 'Say how it was paid';
+  if (!what) return 'Say what it was for';
+  if (!validDest) return 'Pick the job, or no job';
+  return '';
+}
+
 async function sha256(blob) {
   try {
     const buf = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
@@ -180,11 +201,11 @@ export function Receipt({ jobId, poId }) {
 
   useEffect(() => () => { if (photo && photo.preview) URL.revokeObjectURL(photo.preview); }, [photo]);
   useEffect(() => {
-    if (dest && dest.kind === 'job' && dest.id === jobId && !pickedOwnIds.current.has(jobId) && (jobQ.locked || (!user.office && myBookings.data && !ownJobIds.has(jobId)))) {
+    if (dest && dest.kind === 'job' && dest.id === jobId && !pickedOwnIds.current.has(jobId) && (jobQ.locked || (!user.office && (bookingsFailed || (myBookings.data && !ownJobIds.has(jobId)))))) {
       picked.current = false;
       setDest(null);
     }
-  }, [jobId, jobQ.locked, user.office, myBookings.data, ownJobIds, dest]);
+  }, [jobId, jobQ.locked, user.office, bookingsFailed, myBookings.data, ownJobIds, dest]);
   useEffect(() => {
     if (v2 && dest && dest.kind === 'no_job') setDest(null);
   }, [v2, dest]);
@@ -284,24 +305,19 @@ export function Receipt({ jobId, poId }) {
   const divisions = useMemo(() => divisionsForUser(user, ownBookings), [user, ownBookings]);
   const chosen = dest && dest.kind === 'job' ? options.find((o) => o.job_id === dest.id) || ownJobs.find((o) => o.job_id === dest.id) || null : null;
   const total = num(f.total);
-  const missing = v2
-    ? (!dest || dest.kind === 'no_job' ? 'Pick the job or the stock this was for'
-      : !f.vendor.trim() ? 'Add the shop name'
-      : !(total > 0) ? 'Add the total'
-      : !f.date ? 'Pick the date on the receipt'
-      : !f.paid ? 'Say how it was paid'
-      : !f.what ? 'Say what it was for'
-      : '')
-    : (!f.vendor.trim() ? 'Add the shop name'
-      : !(total > 0) ? 'Add the total'
-      : !f.date ? 'Pick the date on the receipt'
-      : !f.paid ? 'Say how it was paid'
-      : !f.what ? 'Say what it was for'
-      : !dest ? 'Pick the job, or no job'
-      : '');
+  const missing = missingReceiptField({
+    v2,
+    vendor: f.vendor,
+    total,
+    date: f.date,
+    paid: f.paid,
+    what: f.what,
+    dest,
+    jobAllowed: Boolean(dest && dest.kind === 'job' && allowedJob(dest.id))
+  });
 
   const save = async () => {
-    if (missing || saving || bookingsFailed || bookingsLoading) return;
+    if (missing || saving) return;
     setSaving(true); setSaveError('');
     const items = ((expense.extraction && expense.extraction.line_items) || []).filter((li) => li && li.description);
     const sum = items.reduce((s, li) => s + (Number(li.total != null ? li.total : li.amount) || 0), 0);
@@ -396,18 +412,6 @@ export function Receipt({ jobId, poId }) {
   }
 
   if (step === 'check') {
-    if (bookingsLoading) {
-      return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')}
-        foot=${html`<${Button} block class="big" disabled=${true}>${v2 ? 'Save receipt' : 'Send receipt'}<//>`}>
-        <${SkelRows} n=${4} />
-      <//>`;
-    }
-    if (bookingsFailed) {
-      return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')}
-        foot=${html`<${Button} block class="big" disabled=${true}>${v2 ? 'Save receipt' : 'Send receipt'}<//>`}>
-        <${LoadError} error=${myBookings.error || new Error('Could not load your jobs.')} onRetry=${myBookings.refetch} what="your jobs" />
-      <//>`;
-    }
     const read = expense.extraction && (expense.extraction.vendor_name || num(expense.extraction.total_amount) != null);
     const yesterday = addDays(today, -1);
     const dateMode = f.date === today ? 'today' : f.date === yesterday ? 'yesterday' : f.date || f.otherDate ? 'other' : null;
@@ -435,7 +439,10 @@ export function Receipt({ jobId, poId }) {
         <${Field} label="How was it paid?"><${Picks} value=${f.paid} options=${PAID_WITH} onChange=${(v) => set('paid', v)} /><//>
         <${Field} label="What was it for?"><${Picks} value=${f.what} options=${WHAT_FOR} onChange=${(v) => set('what', v)} /><//>
         <${Field} label="Which job?">
-          ${!v2 || options.length || user.office || !user.manager ? html`<div class="picks">
+          ${bookingsLoading ? html`<${SkelRows} n=${2} />`
+            : bookingsFailed ? html`<${LoadError} error=${myBookings.error || new Error('Could not load your jobs.')} onRetry=${myBookings.refetch} what="your jobs" />`
+            : null}
+          ${!v2 || options.length || user.office || !user.manager || bookingsFailed || bookingsLoading ? html`<div class="picks">
             ${options.map((o) => html`<button type="button" class="pick" key=${o.job_id} aria-pressed=${String(Boolean(dest && dest.kind === 'job' && dest.id === o.job_id))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'job', id: o.job_id, via: suggested.current[0] && suggested.current[0].job_id === o.job_id ? 'jarvis_top' : suggested.current.some((s) => s.job_id === o.job_id) ? 'jarvis_alt' : 'manual_search' }); }}>${jobTitle(o)}</button>`)}
             ${!v2 ? html`<button type="button" class="pick" aria-pressed=${String(Boolean(dest && dest.kind === 'no_job'))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'no_job', via: 'general_business' }); }}>No job, general business</button>` : null}
             <button type="button" class="pick" onClick=${findJob}>Another job</button>
@@ -447,7 +454,7 @@ export function Receipt({ jobId, poId }) {
           <div class="picks">
             ${divisions.map(([div, label]) => html`<button type="button" class="pick" key=${div} aria-pressed=${String(Boolean(dest && dest.kind === 'stock' && dest.division === div))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'stock', division: div }); }}>${label}</button>`)}
           </div>
-        <//>` : !ownJobs.length ? html`<div class="note-banner plain"><span>No jobs or divisions are set on your account yet. Ask the office to add you first.</span></div>` : null) : null}
+        <//>` : !ownJobs.length && !bookingsFailed && !bookingsLoading ? html`<div class="note-banner plain"><span>No jobs or divisions are set on your account yet. Ask the office to add you first.</span></div>` : null) : null}
       </div>
     <//>`;
   }

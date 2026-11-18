@@ -62,10 +62,16 @@ async function setupReceiptDemo(page, opts = {}) {
 
     db.expenses.splice(0, db.expenses.length);
     window.__updates = [];
+    window.__origOps = window.__origOps || {
+      submit_expense: ops.submit_expense,
+      suggest_job_for_expense: ops.suggest_job_for_expense,
+      update_expense: ops.update_expense,
+      my_jobs: ops.my_jobs
+    };
+    const baseOps = window.__origOps;
 
-    const origSubmit = ops.submit_expense;
     ops.submit_expense = (p, b) => {
-      const res = origSubmit(p, b);
+      const res = baseOps.submit_expense(p, b);
       res.extraction = cfg.unreadTotal
         ? { vendor_name: 'ZZTEST Supplier', receipt_date: today, total_amount: null, gst_amount: null, line_items: [] }
         : { vendor_name: 'ZZTEST Supplier', receipt_date: today, total_amount: 55, gst_amount: 5, line_items: [{ description: 'Fixings pack', quantity: 1, unit_price: 55, total: 55 }] };
@@ -74,9 +80,8 @@ async function setupReceiptDemo(page, opts = {}) {
       return res;
     };
 
-    const origSuggest = ops.suggest_job_for_expense;
     ops.suggest_job_for_expense = (p, b) => {
-      const res = origSuggest(p, b);
+      const res = baseOps.suggest_job_for_expense(p, b);
       if (cfg.suggestForeignJob) {
         res.suggestions.unshift({
           job_id: 'zz-other-4', job_number: 'SWP-990004', client_name: 'Other Crew Client',
@@ -86,7 +91,6 @@ async function setupReceiptDemo(page, opts = {}) {
       return res;
     };
 
-    const origUpdate = ops.update_expense;
     ops.update_expense = (p, b) => {
       window.__updates.push(JSON.parse(JSON.stringify(b)));
       if (window.__forceUpdateError) {
@@ -94,19 +98,21 @@ async function setupReceiptDemo(page, opts = {}) {
         window.__forceUpdateError = null;
         throw err;
       }
-      return origUpdate(p, b);
+      return baseOps.update_expense(p, b);
     };
 
     if (cfg.failBookingsOnce) {
       const apiLib = await import('/crew/js/lib/api.js');
       window.__failMyJobs = true;
-      const origMyJobs = ops.my_jobs;
       ops.my_jobs = (p) => {
         if (window.__failMyJobs) {
           throw new apiLib.ApiError('Jobs could not be read.', { status: 503, body: { error: 'Jobs could not be read.' } });
         }
-        return origMyJobs(p);
+        return baseOps.my_jobs(p);
       };
+    } else {
+      window.__failMyJobs = false;
+      ops.my_jobs = baseOps.my_jobs;
     }
 
     store.clearQueries();
@@ -389,5 +395,57 @@ test('409 refusals, office-edit conflicts, failed jobs reads and unread totals b
 
   await page.getByRole('button', { name: 'Save receipt', exact: true }).click();
   await expect(page.getByText('Saved. It will be on your next invoice as a reimbursement.', { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('a failed my_jobs read shows LoadError for jobs without blocking saving a no-job or stock receipt', async ({ page }) => {
+  const errors = watchErrors(page);
+
+  // 1. spend_capture_v2 OFF: my_jobs fails, LoadError shows inside Which job?, and "No job, general business" saves cleanly.
+  await setupReceiptDemo(page, { spendCaptureV2: false, reimbursements: false, failBookingsOnce: true });
+  await openCheckWithPhoto(page);
+
+  const jobGroup = page.getByRole('group', { name: 'Which job?' });
+  await expect(jobGroup.getByText('Could not load your jobs')).toBeVisible();
+  await expect(page.getByText('You are not booked on a job yet.')).toHaveCount(0);
+
+  await page.getByRole('group', { name: 'How was it paid?' }).getByRole('button', { name: 'Company card', exact: true }).click();
+  await page.getByRole('group', { name: 'What was it for?' }).getByRole('button', { name: 'Fuel', exact: true }).click();
+  const sendBtn = page.getByRole('button', { name: 'Send receipt', exact: true });
+  await expect(sendBtn).toBeDisabled();
+
+  const noJobBtn = jobGroup.getByRole('button', { name: 'No job, general business', exact: true });
+  await expect(noJobBtn).toBeVisible();
+  await noJobBtn.click();
+  await expect(sendBtn).toBeEnabled();
+  await sendBtn.click();
+
+  await expect(page.getByRole('heading', { name: 'Receipt sent' })).toBeVisible();
+  await expect(page.locator('.kvrow', { hasText: 'Job' })).toContainText('No job');
+  let updates = await page.evaluate(() => window.__updates);
+  expect(updates).toHaveLength(1);
+  expect(updates[0]).toMatchObject({ category: 'fuel', payment_method: 'company_card', job_id: null, business_category: 'vehicle' });
+
+  // 2. spend_capture_v2 ON with a profile division: my_jobs fails, LoadError shows for jobs, and division stock saves cleanly.
+  await setupReceiptDemo(page, { spendCaptureV2: true, reimbursements: false, managed: ['fencing'], failBookingsOnce: true });
+  await openCheckWithPhoto(page);
+
+  await expect(page.getByRole('group', { name: 'Which job?' }).getByText('Could not load your jobs')).toBeVisible();
+  await expect(page.getByText('No jobs or divisions are set on your account yet.')).toHaveCount(0);
+
+  await page.getByRole('group', { name: 'How was it paid?' }).getByRole('button', { name: 'Company card', exact: true }).click();
+  await page.getByRole('group', { name: 'What was it for?' }).getByRole('button', { name: 'Consumables', exact: true }).click();
+  const saveBtn = page.getByRole('button', { name: 'Save receipt', exact: true });
+  await expect(saveBtn).toBeDisabled();
+
+  await page.getByRole('group', { name: 'Not for one job? Pick the stock:' }).getByRole('button', { name: 'Fencing stock', exact: true }).click();
+  await expect(saveBtn).toBeEnabled();
+  await saveBtn.click();
+
+  await expect(page.getByText('Saved to fencing stock.', { exact: true })).toBeVisible();
+  updates = await page.evaluate(() => window.__updates);
+  expect(updates).toHaveLength(1);
+  expect(updates[0]).toMatchObject({ capture_version: 2, stock_division: 'fencing', category: 'consumables', payment_method: 'company_card' });
+  expect('job_id' in updates[0]).toBe(false);
   expect(errors).toEqual([]);
 });

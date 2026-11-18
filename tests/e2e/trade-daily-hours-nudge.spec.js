@@ -31,7 +31,7 @@ test.describe('daily hours nudge', () => {
     await expect(nudge).toContainText("Add today's hours");
     await expect(nudge).toContainText('SWMS-261400');
     await expect(nudge).toContainText('Nothing is sent');
-    await page.screenshot({ path: '/opt/cursor/artifacts/hours-nudge.png' });
+    await page.screenshot({ path: test.info().outputPath('hours-nudge.png') });
 
     await page.locator('[data-hours-nudge-go]').click();
     await expect(page.locator('[data-hours-today-strip]')).toContainText('Nothing is sent until you press Submit');
@@ -41,7 +41,7 @@ test.describe('daily hours nudge', () => {
     await expect(card.locator('[data-cardstart]')).toHaveValue('');
     await expect(card.locator('[data-cardfinish]')).toHaveValue('');
     await card.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: '/opt/cursor/artifacts/hours-nudge-today.png' });
+    await page.screenshot({ path: test.info().outputPath('hours-nudge-today.png') });
 
     await fillCardTime(card, 8, { date: addIsoDays(perthWeekMonday(), 2) });
     await expectCardHours(card, 8);
@@ -51,7 +51,7 @@ test.describe('daily hours nudge', () => {
     await expect(page.locator('[data-invoice-save-note]')).toContainText('does not send');
     await expect(page.locator('#invSubmitBtn')).toBeVisible();
     await page.locator('#invSaveBtn').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: '/opt/cursor/artifacts/hours-nudge-draft.png' });
+    await page.screenshot({ path: test.info().outputPath('hours-nudge-draft.png') });
 
     await page.locator('[data-view="schedule"]').click();
     await expect(page.locator('#dailyHoursNudge')).toHaveAttribute('data-hours-nudge-state', 'logged');

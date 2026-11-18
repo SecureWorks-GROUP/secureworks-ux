@@ -2,7 +2,6 @@ const fs = require('fs');
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 
-const SHOTS = '/opt/cursor/artifacts';
 
 test.describe('Trade password reset', () => {
   test('the live trade app URL is the reset redirect', () => {
@@ -16,7 +15,7 @@ test.describe('Trade password reset', () => {
     await page.locator('#btnForgotPassword').click();
     await expect(page.getByRole('heading', { name: 'Forgot password?' })).toBeVisible();
     await expect(page.locator('#forgotEmail')).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/trade-forgot-password.png` });
+    await page.screenshot({ path: test.info().outputPath('trade-forgot-password.png') });
 
     await page.locator('#forgotEmail').fill('not-an-email');
     await page.locator('#btnSendReset').click();
@@ -26,7 +25,7 @@ test.describe('Trade password reset', () => {
     await page.locator('#btnSendReset').click();
     await expect(page.locator('#forgotSent')).toHaveText("If that email has an account, we've sent a reset link.");
     await expect(page.locator('#forgotError')).toBeHidden();
-    await page.screenshot({ path: `${SHOTS}/trade-reset-sent.png` });
+    await page.screenshot({ path: test.info().outputPath('trade-reset-sent.png') });
 
     const calls = await page.evaluate(() => window.__swResetCalls);
     expect(calls).toHaveLength(1);
@@ -47,7 +46,7 @@ test.describe('Trade password reset', () => {
     await expect(page.getByRole('heading', { name: 'Set a new password' })).toBeVisible();
     await expect(page.locator('#newPassword')).toBeVisible();
     await expect(page.locator('#bottomNav')).toBeHidden();
-    await page.screenshot({ path: `${SHOTS}/trade-set-new-password.png` });
+    await page.screenshot({ path: test.info().outputPath('trade-set-new-password.png') });
 
     await page.locator('#newPassword').fill('short');
     await page.locator('#confirmPassword').fill('short');

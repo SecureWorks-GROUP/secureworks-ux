@@ -150,7 +150,7 @@ The public Supabase URL and anon key remain app configuration, not GitHub secret
 
 ```text
 playwright.config.js             Generic runner, local server, traces, screenshots
-.github/workflows/playwright-e2e.yml
+.github/workflows/trade-app-e2e.yml
                                  PR job, browser cache, failure artifacts
 tests/e2e/                       User-visible flow specs
 tests/fixtures/*.json            Recorded, synthetic read models only
@@ -165,7 +165,7 @@ Repo-specific feed action names and roles belong in `tests/fixtures/test.js`, no
 
 ## Copy this pattern to another tool repo
 
-1. Copy `playwright.config.js`, `.github/workflows/playwright-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
+1. Copy `playwright.config.js`, `.github/workflows/trade-app-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
 2. Install `@playwright/test` and copy the four npm scripts from this repo's `package.json`.
 3. Change the served HTML path in the workflow/config only if the tool is not at the repository root.
 4. Replace the personas in `tests/fixtures/test.js` with that tool's minimum roles.

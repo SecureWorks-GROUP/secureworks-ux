@@ -145,6 +145,9 @@ test('a group work order: hours, the customer signs, shares locked, then the sha
   await expect(page.getByRole('button', { name: 'Invoice my share' })).toBeVisible();
   // Each person sees their own share, worked out by the server from the hours.
   await page.getByRole('button', { name: 'Invoice my share' }).click();
+  // The share is not paid yet, so the confirm never says it was paid to you.
+  await expect(page.getByRole('dialog')).toContainText('is your share');
+  await expect(page.getByRole('dialog')).not.toContainText('paid to you');
   await page.getByRole('dialog').getByRole('button', { name: 'Invoice my share' }).click();
   await expect(page.getByRole('heading', { name: 'Share invoiced' })).toBeVisible();
 

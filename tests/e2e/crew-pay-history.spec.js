@@ -757,6 +757,10 @@ test('ZZTEST fixture holding a single not_in_xero invoice renders cleanly with n
   await expect(superItems.first().locator('.side')).toHaveText('Not yet processed');
   await expect(superItems.first().locator('.pay-fundstate')).toHaveCount(0);
   expect(await superItems.first().innerText()).not.toContain('$0');
+  if (process.env.CREW_PAY_HISTORY_PROOF) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: `${process.env.CREW_PAY_HISTORY_PROOF}/my-pay-one-not-in-xero-phone-390.png`, animations: 'disabled', fullPage: true });
+  }
   expect(errors).toEqual([]);
 });
 

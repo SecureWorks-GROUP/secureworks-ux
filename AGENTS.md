@@ -59,7 +59,9 @@ and the right panel of Sources, Context story and Messages; none of the job
 sections below Scope and notes is drawn on a make-safe). It reads
 `pipeline&dispatch=1&board=v2` (Active and Archive), `dispatch_arrival`,
 `dispatch_v2_replies`, `dispatch_v2_materials` and the v1 `dispatch_materials`
-(kept for the pad, Deliveries and old purchase orders) once per job open, `dispatch_v2_replies_unmatched` for the tray,
+(kept for the pad, Deliveries and old purchase orders) once per job open, `dispatch_v2_replies_unmatched` for the tray
+(its cards list each email's files and, item 16b, the "Read from the PDF" line, with the jobs the PDF points at first
+under Could be, marked "from the PDF": a suggestion only, `modules/dispatch-tray-files.js`, backend contract 3j),
 `dispatch_v2_supplier_search` as a person types in Add supplier,
 `dispatch_v2_photo_url` when a photo is opened, `dispatch_order_pdf` when an
 old order's PDF is opened, `job_detail` (once per job

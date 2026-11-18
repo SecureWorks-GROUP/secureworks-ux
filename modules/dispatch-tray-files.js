@@ -18,7 +18,14 @@
  * An ops-api from before item 16 sends no attachments field: the card is
  * drawn exactly as before.
  *
- * Exposes window.OpsDispatchTrayFiles = { html(email), doneWords(resp) }.
+ * Item 16b (Shaun, 18 Nov 2026): the PDFs and pictures on a tray email are
+ * read once by the document reader, and the card shows what was printed on
+ * them ("Read from the PDF: 13 Woodall Ct, Ref SWP-26100"). The jobs it
+ * points at come first under Could be, marked "from the PDF". A suggestion
+ * only: staff still press the job. Contract section 3j (pdf_read).
+ *
+ * Exposes window.OpsDispatchTrayFiles = { html(email), doneWords(resp),
+ * pdfLine(email), candidateLabel(candidate) }.
  * The Open press is handled here, on any [data-dpc-tf-open] inside .dpc.
  */
 (function (global) {
@@ -53,6 +60,25 @@
       h += '</li>';
     });
     return h + '</ul>';
+  }
+
+  var PDF_STATES = { read: 1, reading: 1, no_words: 1, cannot_read: 1 };
+
+  /** Item 16b: what was read on the email's PDFs, or '' (nothing to read, or an ops-api from before 16b). */
+  function pdfLine(email) {
+    var r = email && typeof email === 'object' ? email.pdf_read : null;
+    if (!r || typeof r !== 'object' || !PDF_STATES[r.state]) return '';
+    var line = text(r.line);
+    if (!line) return '';
+    return '<p class="dpc-tf-read dpc-tf-read-' + esc(r.state) + '">' + esc(line) + '</p>';
+  }
+
+  /** Item 16b: the words on a Could be button. A job the PDF points at says so; the line above says what was read. */
+  function candidateLabel(c) {
+    if (!c || typeof c !== 'object') return '';
+    var num = text(c.job_number) || 'Job';
+    if (c.from_pdf === true) return num + ', from the PDF';
+    return num + (text(c.reason) ? ', ' + text(c.reason) : '');
   }
 
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
@@ -132,5 +158,5 @@
     });
   }
 
-  global.OpsDispatchTrayFiles = { html: html, doneWords: doneWords };
+  global.OpsDispatchTrayFiles = { html: html, doneWords: doneWords, pdfLine: pdfLine, candidateLabel: candidateLabel };
 })(typeof window !== 'undefined' ? window : globalThis);

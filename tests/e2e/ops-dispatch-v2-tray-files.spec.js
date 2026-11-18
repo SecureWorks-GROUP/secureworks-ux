@@ -150,6 +150,45 @@ test.describe('Dispatch v2 tray: the files on a supplier email', () => {
     expect(of('update_job_status').concat(of('update_repair_stage'), of('send_sms'))).toEqual([]);
   });
 
+  // Item 16b (Shaun, 18 Nov 2026, contract section 3j): what was read on the
+  // PDFs, and the job it points at first under Could be. A suggestion only.
+  test('16b: the card shows what was read on the PDF, the job it points at comes first, and only a press puts it on', async ({ page }) => {
+    let emails = [
+      EMAIL({
+        pdf_read: { state: 'read', line: 'Read from the PDF: 1 Test Street, Testville, Ref SWP-950001', files_read: 1, found: { job_numbers: ['SWP-950001'], supplier_refs: [] }, suggested_job_ids: [JOB.id] },
+        candidates: [
+          { job_id: JOB.id, job_number: 'SWP-950001', order_id: null, supplier_name: 'Ampelite', reason: 'Read from the PDF: 1 Test Street, Testville, Ref SWP-950001', from_pdf: true, score: 170 },
+          { job_id: 'job-t2', job_number: 'SWP-950002', order_id: 'ord-2', supplier_name: 'Ampelite', reason: 'Open order from this supplier' },
+        ],
+      }),
+      EMAIL({ id: 'tf-wait', pdf_read: { state: 'reading', line: 'Reading the PDF to suggest a job (can take an hour or so)', files_read: 0, found: { job_numbers: [], supplier_refs: [] }, suggested_job_ids: [] } }),
+      EMAIL({ id: 'tf-none', pdf_read: { state: 'none', line: null, files_read: 0, found: { job_numbers: [], supplier_refs: [] }, suggested_job_ids: [] } }),
+    ];
+    const { tray: t, of } = await boot(page, {
+      dispatch_v2_replies_unmatched: () => Object.assign(tray(emails)(), { pdf_reads_read: 'ok' }),
+      dispatch_v2_replies_assign: (url, body) => {
+        emails = emails.filter((m) => m.id !== body.email_id);
+        return { ok: true, job_number: 'SWP-950001', email: { id: body.email_id, job_id: body.job_id }, documents: { read: 'ok', saved: [], skipped: [] } };
+      },
+    });
+    const card = t.locator('[data-dpc-tray-item="tf-1"]');
+    await expect(card.locator('.dpc-tf-read')).toHaveText('Read from the PDF: 1 Test Street, Testville, Ref SWP-950001');
+    const cands = card.locator('[data-dpc-tray-assign]');
+    await expect(cands).toHaveCount(2);
+    await expect(cands.nth(0)).toHaveText('SWP-950001, from the PDF');
+    await expect(cands.nth(0)).toHaveClass(/dpc-tray-cand-pdf/);
+    await expect(cands.nth(1)).toHaveText('SWP-950002, Open order from this supplier');
+    await expect(t.locator('[data-dpc-tray-item="tf-wait"] .dpc-tf-read')).toHaveText('Reading the PDF to suggest a job (can take an hour or so)');
+    await expect(t.locator('[data-dpc-tray-item="tf-none"] .dpc-tf-read')).toHaveCount(0);
+    expect(await t.innerText()).not.toMatch(NO_DASH);
+    // Nothing is put on a job until the press.
+    expect(of('dispatch_v2_replies_assign')).toEqual([]);
+    await cands.nth(0).click();
+    await expect(t).toContainText('Put on SWP-950001.');
+    expect(of('dispatch_v2_replies_assign').map((c) => [c.body.email_id, c.body.job_id])).toEqual([['tf-1', JOB.id]]);
+    expect(of('update_job_status').concat(of('update_repair_stage'), of('send_sms'))).toEqual([]);
+  });
+
   test('an ops-api from before item 16 draws the card as before; a failed files read says so', async ({ page }) => {
     const old = EMAIL({ id: 'tf-old' });
     delete old.attachments;

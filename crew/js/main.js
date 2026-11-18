@@ -158,7 +158,7 @@ async function boot() {
     local.set('demoPersona', persona);
     const server = demo.createDemoServer(persona);
     // ?switches=off shows the app as it behaves before the three server switches are turned on.
-    if (params.get('switches') === 'off') Object.assign(server.db.flags, { companyView: false, selfBooking: false, rateEditable: false });
+    if (params.get('switches') === 'off') Object.assign(server.db.flags, { companyView: false, selfBooking: false, rateEditable: false, spendCaptureV2: false });
     setDemoHandler(server);
     setState({ demo: true, ready: true, user: params.has('signedout') ? null : decorate(demo.demoProfile(persona)) });
     window.__crewDemoSignIn = () => setState({ user: decorate(demo.demoProfile(persona)) });

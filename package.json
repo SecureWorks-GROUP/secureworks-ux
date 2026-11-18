@@ -1,6 +1,7 @@
 {
   "scripts": {
     "test:ops-agent-proposals": "node --test tests/unit/ops-agent-proposals.test.cjs",
+    "test:ops-receipt-confirm": "node --test tests/unit/ops-receipt-confirm.test.cjs",
     "serve:e2e": "python3 -m http.server 4173 --bind 127.0.0.1",
     "test:portal-confirmation": "node scripts/test-trade-portal-confirmation.js",
     "test:portal-link-hygiene": "node scripts/test-f5-portal-link-hygiene.js",

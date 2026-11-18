@@ -26,8 +26,21 @@ function isCount(v) {
 function validSuperInvoice(r) {
   if (!r || typeof r !== 'object') return false;
   if (r.status === 'not_recorded' || r.status === 'not_in_xero') return r.amount === 0;
+  if (r.status === 'marked_paid_by_office') return isAmount(r.amount) && isISODate(r.marked_paid_on);
   if (r.status === 'paid_to_fund' || r.status === 'to_be_paid') return isAmount(r.amount);
   return false;
+}
+
+// The office marked a run's super paid (ops-api 'marked_paid_by_office', with
+// the Perth day it did). My pay never says the super reached the fund. An older
+// ops-api still sends 'paid_to_fund' for the same fact, with no day.
+const MARKED_PAID = new Set(['marked_paid_by_office', 'paid_to_fund']);
+
+export function superStateWords(inv) {
+  if (inv.status === 'to_be_paid') return 'To be paid to your fund';
+  if (inv.status === 'marked_paid_by_office') return `Marked paid by the office on ${fmtDateYear(inv.marked_paid_on)}`;
+  if (inv.status === 'paid_to_fund') return 'Marked paid by the office';
+  return null;
 }
 
 export function superNotRecordedCount(d) {
@@ -59,7 +72,7 @@ export function unrecordedPeriodSet(kind, periodRows, byInvoice, totalNotRecorde
   const rowMap = new Map(periodRows.map((r) => [keyOf(r), r]));
   const oldestSlicedMonth = kind === 'months' && periodRows.length >= 24 ? periodRows[periodRows.length - 1].month : null;
   const counted = byInvoice.filter((inv) => inv && isISODate(inv.week_start) &&
-    (inv.status === 'not_recorded' || inv.status === 'paid_to_fund' || inv.status === 'to_be_paid'));
+    (inv.status === 'not_recorded' || inv.status === 'to_be_paid' || MARKED_PAID.has(inv.status)));
 
   const canHold = (k, inv) => {
     if (!rowMap.has(k)) return Boolean(oldestSlicedMonth && k < oldestSlicedMonth);
@@ -252,8 +265,8 @@ export function PayHistory() {
           <span class="main">
             <b>${isISODate(inv.week_start) ? weekWords(inv.week_start) : inv.invoice_number || 'Invoice'}</b>
             ${inv.invoice_number && isISODate(inv.week_start) ? html`<span class="sub t-num">${inv.invoice_number}</span>` : null}
-            ${inv.status === 'paid_to_fund' || inv.status === 'to_be_paid'
-              ? html`<span class=${cx('sub pay-fundstate', inv.status === 'paid_to_fund' && 'ok')}>${inv.status === 'paid_to_fund' ? 'Paid to your fund' : 'To be paid to your fund'}</span>`
+            ${superStateWords(inv)
+              ? html`<span class=${cx('sub pay-fundstate', MARKED_PAID.has(inv.status) && 'ok')}>${superStateWords(inv)}</span>`
               : null}
           </span>
           <span class="side">${inv.status === 'not_recorded'

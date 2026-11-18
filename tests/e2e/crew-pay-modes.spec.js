@@ -146,8 +146,9 @@ test('a group work order: hours, the customer signs, shares locked, then the sha
   // Each person sees their own share, worked out by the server from the hours.
   await page.getByRole('button', { name: 'Invoice my share' }).click();
   // The share is not paid yet, so the confirm never says it was paid to you.
-  // The cash figure is the share less super; 'Your share' on the card is the larger figure, so one label never carries two numbers.
-  await expect(page.getByRole('dialog')).toContainText('is your share less super');
+  // On all_in_12_v2 the cash figure equals the share, so the confirm calls it the share, never 'less super'.
+  await expect(page.getByRole('dialog')).toContainText('is your share and');
+  await expect(page.getByRole('dialog')).not.toContainText('less super');
   await expect(page.getByRole('dialog')).not.toContainText('paid to you');
   await page.getByRole('dialog').getByRole('button', { name: 'Invoice my share' }).click();
   await expect(page.getByRole('heading', { name: 'Share invoiced' })).toBeVisible();
@@ -158,5 +159,22 @@ test('a group work order: hours, the customer signs, shares locked, then the sha
   expect(sent[0].week_start).toBeUndefined();
   expect(sent[0].manual_assignments || []).toEqual([]);
   expect(sent[0].extra_items).toEqual([{ type: 'group share', group_id: 'g-dunc' }]);
+  expect(errors).toEqual([]);
+});
+
+test('a group share whose cash figure is below the share: the confirm says less super', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openWithSpy(page, 'crew', () => {
+    const ops = window.__crewDemo.ops; const real = ops.group_work_order_my_share;
+    // A share where super is held back: the cash figure is below the share.
+    ops.group_work_order_my_share = (p, b) => {
+      const r = real(p, b);
+      return r && r.group_id ? { ...r, awaiting: 'frozen', client_signed: true, pot_total: 1000, my_share: 500, my_cash_pay: 446.43, my_super: 53.57 } : r;
+    };
+  });
+  await page.evaluate(() => { location.hash = '#/pay/group/j-dunc'; });
+  await page.getByRole('button', { name: 'Invoice my share' }).click();
+  await expect(page.getByRole('dialog')).toContainText('is your share less super');
+  await expect(page.getByRole('dialog')).not.toContainText('paid to you');
   expect(errors).toEqual([]);
 });

@@ -56,12 +56,13 @@ test('a trade saves their own year PDF; the app sends only the year and a not-ye
   expect(text).toContain('ZZTEST-INV-99  ');
   expect(text).toContain('Not yet processed');
   expect(text).toContain('1 invoice not yet processed');
-  // Super is never said to have reached the fund: the office marked this run paid (no stamp held, so no day).
+  // Super is never said to have reached the fund: the demo holds the office's stamp for its paid runs
+  // (as trade_pay_runs.super_marked_paid_at, since #733), so a marked run gives its Perth day.
   expect(text).not.toContain('Paid to your super fund');
   expect(text).toContain('Super on your pay  ');
   expect(text).toContain('Your pay  ');
   expect(text).not.toContain('Paid to you');
-  expect(text).toMatch(/ZZTEST-INV-\d+  \S+  \$[\d.]+  \$[\d.]+  \$[\d.]+  Marked paid by the office\)/);
+  expect(text).toMatch(/ZZTEST-INV-\d+  \S+  \$[\d.]+  \$[\d.]+  \$[\d.]+  Marked paid by the office on \d{1,2} [A-Z][a-z]{2} \d{4}\)/);
   await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toHaveText('Saved. Look in your downloads.');
 
   await pickYear(page, 2026);
@@ -85,6 +86,19 @@ test('a trade saves their own year PDF; the app sends only the year and a not-ye
   expect(stampedText).toMatch(/ZZTEST-INV-97 [^)]*Marked paid by the office on 1 Nov 2026\)/);
   expect(stampedText).toMatch(/ZZTEST-INV-98 [^)]*To be paid to your fund\)/);
   expect(stampedText).not.toContain('Paid to your super fund');
+
+  // A run marked paid with no stamp held (an older ops-api) says so with no day, never that it reached the fund.
+  await page.evaluate(() => {
+    const { db } = window.__crewDemo;
+    db.paidSuperRuns = new Set([db.invoices.find((i) => i.id === 'inv-h1').pay_run_id]);
+  });
+  await pickYear(page, 2026);
+  await pickYear(page, 2027);
+  const [unstamped] = await Promise.all([page.waitForEvent('download'), yearButton(page).click()]);
+  const unstampedText = fs.readFileSync(await unstamped.path(), 'latin1');
+  expect(unstampedText).toMatch(/ZZTEST-INV-97 [^)]*Marked paid by the office\)/);
+  expect(unstampedText).toMatch(/ZZTEST-INV-98 [^)]*To be paid to your fund\)/);
+  expect(unstampedText).not.toContain('Paid to your super fund');
   if (process.env.YEAR_PDF_SHOT) {
     await page.locator('section', { hasText: 'Year summary for your accountant' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: process.env.YEAR_PDF_SHOT + '/my-pay-year-pdf-saved.png' });

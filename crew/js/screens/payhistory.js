@@ -6,7 +6,7 @@ import { html, cx, useState } from '../lib/h.js';
 import { go, back } from '../lib/router.js';
 import { fmtDay, fmtMonth, isISODate } from '../lib/dates.js';
 import { Page, Section, KV, Button, SkelRows, buzz } from '../ui/kit.js';
-import { cash, num, weekWords } from '../ui/paybits.js';
+import { cash, num, plural, weekWords } from '../ui/paybits.js';
 import { usePayHistory } from './pay.js';
 
 const TABS = [
@@ -15,9 +15,39 @@ const TABS = [
   ['years', 'Years']
 ];
 
+const NOT_RECORDED_KEYS = [
+  'not_recorded_invoices',
+  'not_recorded_count',
+  'not_recorded',
+  'super_not_recorded_invoices',
+  'super_not_recorded_count',
+  'super_not_recorded',
+  'unrecorded_invoices',
+  'unrecorded_count',
+  'figures_incomplete'
+];
+
 function isAmount(v) {
   const n = num(v);
   return n !== null && Number.isFinite(n) && n >= 0;
+}
+
+function readOptionalCount(obj) {
+  if (!obj || typeof obj !== 'object') return { present: false, valid: true, count: 0 };
+  for (const key of NOT_RECORDED_KEYS) {
+    if (obj[key] !== undefined && obj[key] !== null) {
+      const n = num(obj[key]);
+      const ok = n !== null && Number.isInteger(n) && n >= 0;
+      return { present: true, valid: ok, count: ok ? n : 0 };
+    }
+  }
+  return { present: false, valid: true, count: 0 };
+}
+
+export function superNotRecordedCount(d) {
+  const fromSuper = readOptionalCount(d && d.super);
+  if (fromSuper.present) return fromSuper.count;
+  return readOptionalCount(d).count;
 }
 
 function validTotals(t) {
@@ -37,6 +67,7 @@ export function validPayHistory(d) {
   const sup = d.super;
   if (!sup || typeof sup !== 'object' || !isAmount(sup.this_fy) || !isAmount(sup.since_start) || !Array.isArray(sup.by_invoice)) return false;
   if (!sup.by_invoice.every((r) => r && isAmount(r.amount) && (r.status === 'paid_to_fund' || r.status === 'to_be_paid'))) return false;
+  if (!readOptionalCount(sup).valid || !readOptionalCount(d).valid) return false;
   if (!d.rate_history.every((r) => r && isISODate(r.effective_from) && isAmount(r.hourly_rate))) return false;
   return true;
 }
@@ -78,8 +109,9 @@ export function PayHistory() {
   const rates = [...d.rate_history].sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)));
   const cmp = d.this_year_vs_last;
   const sup = d.super;
+  const unrecorded = superNotRecordedCount(d);
   const hasPay = d.weeks.length > 0 || d.months.length > 0 || d.years.length > 0 || sup.by_invoice.length > 0 ||
-    num(sup.since_start) > 0 || num(cmp.last_fy_same_point.paid_to_you) > 0 || num(cmp.last_fy_same_point.paid_to_super) > 0;
+    num(sup.since_start) > 0 || unrecorded > 0 || num(cmp.last_fy_same_point.paid_to_you) > 0 || num(cmp.last_fy_same_point.paid_to_super) > 0;
 
   if (!hasPay) {
     return html`<${Page} title="My pay" back="Pay" onBack=${() => back('/pay')}>
@@ -149,6 +181,7 @@ export function PayHistory() {
           <span class="side"><span class="pay-figure">${cash(inv.amount)}</span></span>
         </div>`)}
       </div>
+      ${unrecorded > 0 ? html`<p class="block t-small pay-note">Super not recorded on ${plural(unrecorded, 'invoice')}</p>` : null}
     <//>
 
     <${RateSection} rates=${rates} />

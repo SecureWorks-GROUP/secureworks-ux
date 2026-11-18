@@ -214,7 +214,7 @@ registerDemo((db, h) => {
       const weeks = new Map(); const months = new Map(); const fyMap = new Map();
       const thisYear = zero(); const lastYear = zero();
       const byInvoice = [];
-      let sinceStart = 0; let tax = 0;
+      let sinceStart = 0; let tax = 0; let notRecorded = 0;
       const taxPct = db.taxSetAsidePercent == null ? null : Number(db.taxSetAsidePercent);
       const paidRuns = db.paidSuperRuns || new Set();
 
@@ -224,10 +224,12 @@ registerDemo((db, h) => {
         if (['VOIDED', 'DELETED'].includes(String(row.xero_bill_status || '').toUpperCase())) continue;
         const dayStr = row.week_end || (row.created_at || '').slice(0, 10);
         if (!dayStr || dayStr > nowDay) continue;
-        const legacy = 'super_basis' in row && row.super_basis !== 'inclusive_12_112_v1' && !row.pay_view;
-        const view = row.pay_view || (legacy ? null : money(row.gross_earned, { gstOn: row.gst_on }).pay_view);
-        const paidToYou = view ? Number(view.paid_to_you) : Number(row.net_pay);
-        const superAmt = view ? Number(view.paid_to_super) : Number(row.super_amount);
+        const noSuper = row.super_amount == null && row.super_basis == null && !row.pay_view;
+        if (noSuper) notRecorded += 1;
+        const legacy = !noSuper && 'super_basis' in row && row.super_basis !== 'inclusive_12_112_v1' && !row.pay_view;
+        const view = row.pay_view || (noSuper || legacy ? null : money(row.gross_earned, { gstOn: row.gst_on }).pay_view);
+        const paidToYou = noSuper ? Number(row.total_inc) : view ? Number(view.paid_to_you) : Number(row.net_pay);
+        const superAmt = noSuper ? 0 : view ? Number(view.paid_to_super) : Number(row.super_amount);
         sinceStart = round2(sinceStart + superAmt);
         const comparable = dayStr >= lastFy && dayStr <= lastCutoff;
         if (dayStr < start && !comparable) continue;
@@ -263,6 +265,7 @@ registerDemo((db, h) => {
         super: {
           this_fy: thisYear.paid_to_super,
           since_start: sinceStart,
+          ...(notRecorded > 0 ? { not_recorded_invoices: notRecorded } : {}),
           by_invoice: byInvoice.sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)) || String(b.invoice_id).localeCompare(String(a.invoice_id)))
         },
         tax_set_aside: taxPct === null ? null : { percent: taxPct, this_fy_amount: tax },

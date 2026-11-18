@@ -121,6 +121,7 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
   await expect(superSec).toContainText(fmtCash(expected.super.since_start));
   await expect(superSec).toContainText('To be paid to your fund');
   await expect(superSec).toContainText('Paid to your fund');
+  await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
 
   // Your rate card: newest effective_from first.
   const rateSec = page.locator('section.sec', { has: page.getByRole('heading', { name: 'Your rate', exact: true }) });
@@ -303,4 +304,28 @@ test('ZZTEST bad paths: loading skeleton, failed or incomplete read never render
   await expect(page.locator('.pay-hrow').first()).toContainText('$1,120.00');
   await expect(page.locator('.pay-hsuper').first()).toContainText('ZZTEST-RETRY-1');
   await expect(page.locator('.pay-hsuper').first()).toContainText('Paid to your fund');
+  await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
+
+  // Optional not-recorded super count renders when positive and hides when zero or absent.
+  await page.evaluate(async () => {
+    const store = await import('/crew/js/lib/store.js');
+    const cur = store.peekQuery('payhistory');
+    store.primeQuery('payhistory', { ...cur, super: { ...cur.super, not_recorded_invoices: 3 } });
+  });
+  await expect(page.getByText('Super not recorded on 3 invoices', { exact: true })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const store = await import('/crew/js/lib/store.js');
+    const cur = store.peekQuery('payhistory');
+    const { not_recorded_invoices, ...cleanSuper } = cur.super;
+    store.primeQuery('payhistory', { ...cur, super: cleanSuper, super_not_recorded_count: 1 });
+  });
+  await expect(page.getByText('Super not recorded on 1 invoice', { exact: true })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const store = await import('/crew/js/lib/store.js');
+    const cur = store.peekQuery('payhistory');
+    store.primeQuery('payhistory', { ...cur, super_not_recorded_count: 0 });
+  });
+  await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
 });

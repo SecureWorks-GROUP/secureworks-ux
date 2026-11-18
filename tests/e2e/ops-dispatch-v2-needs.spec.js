@@ -156,12 +156,38 @@ test.describe('Dispatch v2: Needs you now', () => {
     await expect(page.locator('.header-nav [data-view="dispatch"] .dpc-tab-n')).toHaveCount(0);
   });
 
-  test('a tray that could not be read hides Emails to sort rather than show 0', async ({ page }) => {
+  // Item 20 (18 Nov 2026): the chip is the one way into the tray, so a tray
+  // that could not be read shows ? (never 0) and still opens it to retry.
+  test('a tray that could not be read shows Emails to sort ? and still opens the tray to retry', async ({ page }) => {
     const fake = fakePayment({ onAccount: true });
     const api = twoJobs(fake);
     api.dispatch_v2_replies_unmatched = () => ({ status: 500, body: { error: 'e2e' } });
     const { root } = await boot(page, fake, { api });
     await expect(chip(root, 'To pay')).toHaveText('To pay 1');
-    await expect(chip(root, 'Emails to sort')).toHaveCount(0);
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort ?');
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toContainText('Could not load the unmatched supplier emails.');
+    await expect(chip(root, 'Emails to sort')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('Emails to sort is the only way into the tray, and shuts it again even once it is empty', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    let left = 1;
+    const api = twoJobs(fake);
+    api.dispatch_v2_replies_unmatched = () => ({ ok: true, include_other: false, emails: [], counts: { needs_confirmation: 0, unmatched_order_desk: left, unmatched_other: 0 } });
+    const { root } = await boot(page, fake, { api });
+    await expect(root.locator('[data-dpc-tray-toggle]')).toHaveCount(0);
+    await expect(root).not.toContainText('Unmatched supplier emails');
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort 1');
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toBeVisible();
+    // The tray read again (here by its own tick box) now has nothing left.
+    left = 0;
+    await root.locator('[data-dpc-region="tray"] [data-dpc-tray-other]').check();
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort 0');
+    await expect(chip(root, 'Emails to sort')).toBeEnabled();
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toBeHidden();
+    await expect(chip(root, 'Emails to sort')).toBeDisabled();
   });
 });

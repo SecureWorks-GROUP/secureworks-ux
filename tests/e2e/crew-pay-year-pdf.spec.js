@@ -58,6 +58,9 @@ test('a trade saves their own year PDF; the app sends only the year and a not-ye
   expect(text).toContain('1 invoice not yet processed');
   // Super is never said to have reached the fund: the office marked this run paid (no stamp held, so no day).
   expect(text).not.toContain('Paid to your super fund');
+  expect(text).toContain('Super on your pay  ');
+  expect(text).toContain('Your pay  ');
+  expect(text).not.toContain('Paid to you');
   expect(text).toMatch(/ZZTEST-INV-\d+  \S+  \$[\d.]+  \$[\d.]+  \$[\d.]+  Marked paid by the office\)/);
   await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toHaveText('Saved. Look in your downloads.');
 

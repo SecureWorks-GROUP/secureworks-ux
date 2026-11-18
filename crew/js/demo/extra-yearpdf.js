@@ -66,9 +66,9 @@ registerDemo((db, h) => ({
     });
     return pdfBlob([
       `Pay summary, 1 July ${Number(fy) - 1} to 30 June ${fy}`, me.name || 'Trade', '',
-      `Total (includes super)  ${m(total)}`, `Super  ${m(sup)}`, `Paid to you  ${m(you)}`,
+      `Total (includes super)  ${m(total)}`, `Super on your pay  ${m(sup)}`, `Your pay  ${m(you)}`,
       ...(pending ? [`${pending} invoice${pending === 1 ? '' : 's'} not yet processed`] : []), '',
-      'Invoice number  Week starting  Total  Super  Paid to you  Super state', ...table, '',
+      'Invoice number  Week starting  Total  Super  Your pay  Super state', ...table, '',
       'Built from your SecureWorks invoices. A summary, not tax advice. Give it to your accountant.'
     ]);
   }

@@ -833,3 +833,29 @@ test('ZZTEST payhistory does not persist to localStorage and sign-out clears all
   });
   expect(errors).toEqual([]);
 });
+
+test('ZZTEST a lapsed session clears pay figures but keeps the unsent week and the clock, as on main', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto(crewUrl('#/pay'));
+  await page.waitForFunction(() => Boolean(window.__crewDemo));
+  await expect(page.locator('.pay-inv').first()).toBeVisible();
+
+  const after = await page.evaluate(async () => {
+    const store = await import('/crew/js/lib/store.js');
+    const auth = await import('/crew/js/lib/auth.js');
+    store.local.set('week:2026-11-09', { edits: { a1: { start_time: '07:00' } } });
+    store.local.set('clock', { job_id: 'zz-job', started_at: '2026-11-13T07:00:00+08:00' });
+    // The path ops-api's lost-sign-in hook takes (configureApi authLost).
+    await auth.signOut({ keepDrafts: true });
+    const keys = Object.keys(localStorage);
+    return {
+      queryKeys: keys.filter((k) => k.startsWith('crew:q:')),
+      weekKeys: keys.filter((k) => k.startsWith('crew:week:')),
+      profileKey: localStorage.getItem('crew:profile'),
+      clockKept: localStorage.getItem('crew:clock') !== null,
+      memMoney: store.peekQuery('money')
+    };
+  });
+  expect(after).toEqual({ queryKeys: [], weekKeys: ['crew:week:2026-11-09'], profileKey: null, clockKept: true, memMoney: undefined });
+  expect(errors).toEqual([]);
+});

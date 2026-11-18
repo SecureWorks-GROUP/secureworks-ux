@@ -104,16 +104,21 @@ export function decorate(p) {
 }
 export function manages(user, vertical) { return Boolean(user && (user.office || user.managed.includes(vertical))); }
 
-function wipeSignedOut() {
+// Pay figures (every cached read, kept or in memory) and the profile go on any
+// sign-out. The week's draft and the running clock go only when the person
+// presses Sign out: a session that lapses keeps them, as before, so the trade
+// signs back in to the same unsent week.
+function wipeSignedOut({ keepDrafts = false } = {}) {
   profileFor = null;
   local.del('profile');
+  clearQueries();
+  if (keepDrafts) return;
   local.del('clock');
   local.clear('week:');
-  clearQueries();
 }
 
 export async function initAuth() {
-  configureApi({ getToken, authLost: () => signOut() });
+  configureApi({ getToken, authLost: () => signOut({ keepDrafts: true }) });
   if (getState().demo) return;
   const { supabaseUrl, supabaseKey } = window.CREW_CONFIG;
   if (!window.supabase || !window.supabase.createClient) { setState({ ready: true, bootError: 'offline' }); return; }
@@ -122,7 +127,7 @@ export async function initAuth() {
     session = next || null;
     if (event === 'SIGNED_OUT' || !next) {
       profileFor = null;
-      if (event === 'SIGNED_OUT') wipeSignedOut();
+      if (event === 'SIGNED_OUT') wipeSignedOut({ keepDrafts: true });
       setState({ user: null, ready: true, clock: null });
       return;
     }
@@ -140,8 +145,8 @@ export async function signIn(email, password) {
   const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw new Error(/invalid/i.test(error.message) ? 'Wrong email or password.' : error.message);
 }
-export async function signOut() {
-  wipeSignedOut();
+export async function signOut({ keepDrafts = false } = {}) {
+  wipeSignedOut({ keepDrafts });
   if (getState().demo) { setState({ user: null, clock: null }); return; }
   try { await sb.auth.signOut(); } catch { /* already out */ }
   setState({ user: null, ready: true, clock: null });

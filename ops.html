@@ -5178,6 +5178,8 @@ __swOpsStampAssets([
             <tbody id="woJobTableBody"></tbody>
           </table>
         </div>
+        <!-- Billed over the agreed amount: read only, staff only (modules/ops-overbilled.js, // <overbilled-core>). -->
+        <section id="woOverbilled" data-overbilled-host aria-label="Billed over the agreed amount"></section>
         <div style="margin-top:20px;"></div>
         <div id="officeWoFill" data-office-wo-fill-host></div>
         <details class="wol-fold" id="woOldCrewFold">
@@ -6535,6 +6537,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
   {t:'js', u:'modules/ops-office-wo-queue.js?v=2'},
   {t:'js', u:'modules/ops-work-orders-list.js?v=1'},
+  {t:'js', u:'modules/ops-overbilled.js?v=1'},
   {t:'js', u:'modules/ops-trade-repayments.js?v=1'}
 ]);
 </script>
@@ -19850,6 +19853,7 @@ function packetJobWorkOrder(data) {
 
 async function loadWOs() {
   if (window.WorkOrdersList) WorkOrdersList.load();
+  if (window.Overbilled) Overbilled.load();
   if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {

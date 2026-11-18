@@ -175,6 +175,7 @@ button.pay-line:active { background: var(--frost); }
 .pay-hnums { display: grid; gap: 3px; }
 .pay-hkv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; line-height: 18px; color: var(--mid); min-width: 0; }
 .pay-hkv > span:last-child { color: var(--slate); white-space: nowrap; }
+.pay-hkv > span.t-small:last-child { color: var(--mid); }
 .pay-hkv.strong { color: var(--slate); font-weight: 700; }
 .pay-hkv.strong > span:last-child { font-size: 15px; line-height: 20px; font-weight: 800; }
 .pay-hcompare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

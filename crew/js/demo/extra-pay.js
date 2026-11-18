@@ -214,7 +214,7 @@ registerDemo((db, h) => {
       const weeks = new Map(); const months = new Map(); const fyMap = new Map();
       const thisYear = zero(); const lastYear = zero();
       const byInvoice = [];
-      let sinceStart = 0; let tax = 0; let notRecorded = 0;
+      let sinceStart = 0; let tax = 0; let notRecorded = 0; let notInXero = 0;
       const taxPct = db.taxSetAsidePercent == null ? null : Number(db.taxSetAsidePercent);
       const paidRuns = db.paidSuperRuns || new Set();
 
@@ -224,6 +224,14 @@ registerDemo((db, h) => {
         if (['VOIDED', 'DELETED'].includes(String(row.xero_bill_status || '').toUpperCase())) continue;
         const dayStr = row.week_end || (row.created_at || '').slice(0, 10);
         if (!dayStr || dayStr > nowDay) continue;
+        if (!('xero_bill_id' in row)) fail(503, { code: 'pay_history_unreadable', error: 'Could not read your pay history. Try again.' });
+        if (!row.xero_bill_id) {
+          notInXero += 1;
+          if (dayStr >= start) {
+            byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: row.week_start || mondayOf(dayStr), amount: 0, status: 'not_in_xero' });
+          }
+          continue;
+        }
         const noSuper = row.super_amount == null && row.super_basis == null && !row.pay_view;
         if (noSuper) notRecorded += 1;
         const legacy = !noSuper && 'super_basis' in row && row.super_basis !== 'inclusive_12_112_v1' && !row.pay_view;
@@ -266,6 +274,7 @@ registerDemo((db, h) => {
           this_fy: thisYear.paid_to_super,
           since_start: sinceStart,
           not_recorded_count: notRecorded,
+          not_in_xero_count: notInXero,
           by_invoice: byInvoice.sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)) || String(b.invoice_id).localeCompare(String(a.invoice_id)))
         },
         tax_set_aside: taxPct === null ? null : { percent: taxPct, this_fy_amount: tax },

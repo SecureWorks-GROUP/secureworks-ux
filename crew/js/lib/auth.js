@@ -60,7 +60,7 @@ async function enterPreview(owner, tradeId) {
   try {
     const res = await api('trade_preview_context', { user_id: tradeId });
     if (!res || res.read_only !== true || !res.profile) throw new Error('Preview is not available.');
-    clearQueries();
+    clearQueries({ persisted: false });
     setState({ user: decorate(res.profile), preview: { id: tradeId, name: res.profile.name || res.profile.full_name || 'a trade', owner: owner.name || owner.email || '' }, clock: null, ready: true });
     return true;
   } catch (err) {
@@ -104,6 +104,14 @@ export function decorate(p) {
 }
 export function manages(user, vertical) { return Boolean(user && (user.office || user.managed.includes(vertical))); }
 
+function wipeSignedOut() {
+  profileFor = null;
+  local.del('profile');
+  local.del('clock');
+  local.clear('week:');
+  clearQueries();
+}
+
 export async function initAuth() {
   configureApi({ getToken, authLost: () => signOut() });
   if (getState().demo) return;
@@ -114,7 +122,7 @@ export async function initAuth() {
     session = next || null;
     if (event === 'SIGNED_OUT' || !next) {
       profileFor = null;
-      if (event === 'SIGNED_OUT') { local.del('profile'); clearQueries(); }
+      if (event === 'SIGNED_OUT') wipeSignedOut();
       setState({ user: null, ready: true, clock: null });
       return;
     }
@@ -133,8 +141,10 @@ export async function signIn(email, password) {
   if (error) throw new Error(/invalid/i.test(error.message) ? 'Wrong email or password.' : error.message);
 }
 export async function signOut() {
-  if (getState().demo) { setState({ user: null }); return; }
+  wipeSignedOut();
+  if (getState().demo) { setState({ user: null, clock: null }); return; }
   try { await sb.auth.signOut(); } catch { /* already out */ }
+  setState({ user: null, ready: true, clock: null });
 }
 /** Sends the reset email. The link opens the existing Trade App page, which is
  *  the address the sign-in service allows; the new password works here too. */

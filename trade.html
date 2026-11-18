@@ -5052,7 +5052,18 @@
     });
   }
 
+  // <trade-labour-card> trade_labour_budget carries the job's labour budget,
+  // the remainder and every crew member's rate and cost. A trade (a managed
+  // lead included) sees hours only: no budget figure ever reaches a trade.
+  function tradeStripLabourBudgetMoney(res) {
+    ['labour_budget', 'remainder', 'total_cost', 'quoted_labour'].forEach(function(k) { delete res[k]; });
+    (Array.isArray(res.trades) ? res.trades : []).forEach(function(t) {
+      if (t && typeof t === 'object') { delete t.rate; delete t.cost; }
+    });
+  }
+
   var TRADE_MONEY_DOOR = {
+    trade_labour_budget: tradeStripLabourBudgetMoney,
     my_jobs: tradeStripJobListMoney,
     search_all_jobs: tradeStripJobListMoney,
     trade_job_detail: tradeStripJobDetailMoney,
@@ -12049,6 +12060,101 @@
       .trim();
   }
 
+  // <trade-labour-card> One labour card for both job views. It reads the
+  // fields ops-api trade_labour_budget really sends (labour_budget,
+  // total_hours, total_cost, remainder, trades[], rate_assumed, rate_missing).
+  // A failed read says so; a missing figure reads Not known, never 0.
+  function tradeLabourShifts(n) { return n + (n === 1 ? ' shift' : ' shifts'); }
+  function tradeLabourCount(v) {
+    if (v == null || v === '') return 0;
+    var n = Number(v);
+    return isFinite(n) && n > 0 ? Math.round(n) : 0;
+  }
+  function tradeLabourNum(v) {
+    if (v == null || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  function tradeLabourMoney(n) {
+    return '$' + Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+  function tradeLabourRateNotes(lb) {
+    var notes = [];
+    var assumed = tradeLabourCount(lb.rate_assumed);
+    var missing = tradeLabourCount(lb.rate_missing);
+    if (assumed) notes.push('<div data-labour-rate-assumed style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">Rate assumed on ' + tradeLabourShifts(assumed) + '</div>');
+    if (missing) notes.push('<div data-labour-rate-missing style="font-size:12px;color:#B45309;margin-top:6px">' + tradeLabourShifts(missing) + ' with no rate, left out</div>');
+    return notes.join('');
+  }
+  function tradeLabourTile(label, value, color) {
+    return '<div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">' +
+      '<div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px">' + label + '</div>' +
+      '<div style="font-size:18px;font-weight:700;color:' + (color || 'var(--sw-dark)') + '">' + value + '</div></div>';
+  }
+  function tradeLabourCardTitle() {
+    return tradeViewerIsOffice() ? 'Labour Budget' : 'Labour hours';
+  }
+  function tradeLabourCardHtml(lb) {
+    var office = tradeViewerIsOffice();
+    var inner = '<h3>' + tradeLabourCardTitle() + '</h3>';
+    if (!lb || typeof lb !== 'object') {
+      return inner + '<div data-labour-error style="font-size:13px;color:var(--sw-text-sec)">Could not load labour</div>';
+    }
+    var hours = tradeLabourNum(lb.total_hours);
+    var trades = Array.isArray(lb.trades) ? lb.trades : [];
+    var tiles = [];
+    if (office) {
+      var budget = tradeLabourNum(lb.labour_budget);
+      var cost = tradeLabourNum(lb.total_cost);
+      var remainder = tradeLabourNum(lb.remainder);
+      tiles.push(tradeLabourTile('Budget', budget == null ? 'Not known' : budget > 0 ? tradeLabourMoney(budget) : 'None'));
+      tiles.push(tradeLabourTile('Logged', hours == null ? 'Not known' : hours.toFixed(1) + ' hrs'));
+      tiles.push(tradeLabourTile('Cost', cost == null ? 'Not known' : tradeLabourMoney(cost)));
+      if (budget != null && budget > 0 && remainder != null) {
+        tiles.push(tradeLabourTile('Remainder', tradeLabourMoney(remainder) + (remainder < 0 ? ' over' : ''), remainder >= 0 ? 'var(--sw-green)' : '#E74C3C'));
+      }
+    } else {
+      tiles.push(tradeLabourTile('Hours logged', hours == null ? 'Not known' : hours.toFixed(1) + ' hrs'));
+    }
+    inner += '<div data-labour-tiles style="display:flex;justify-content:space-between;gap:8px;margin-bottom:12px">' + tiles.join('') + '</div>';
+    if (office && tradeLabourNum(lb.labour_budget) === 0) {
+      inner += '<div style="font-size:13px;color:var(--sw-text-sec);margin-bottom:8px">No labour budget allocated</div>';
+    }
+    if (trades.length) {
+      inner += '<div style="border-top:1px solid var(--sw-border);padding-top:10px">';
+      inner += '<div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px">Hours by trade</div>';
+      trades.forEach(function(t) {
+        var tHours = tradeLabourNum(t && t.hours);
+        var tCost = office ? tradeLabourNum(t && t.cost) : null;
+        inner += '<div data-labour-trade style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:13px">';
+        inner += '<span style="color:var(--sw-dark)">' + esc((t && t.name) || 'Trade') + '</span>';
+        inner += '<span style="font-weight:600;color:var(--sw-dark)">' + (tHours == null ? 'Not known' : tHours.toFixed(1) + ' hrs') + (tCost == null ? '' : ' &middot; ' + tradeLabourMoney(tCost)) + '</span>';
+        inner += '</div>';
+      });
+      inner += '</div>';
+    } else if (hours === 0 && !tradeLabourCount(lb.rate_missing)) {
+      inner += '<div style="font-size:13px;color:var(--sw-text-sec)">No hours logged yet</div>';
+    }
+    inner += tradeLabourRateNotes(lb);
+    return inner;
+  }
+  function renderTradeLabourCardShell(cardId, jobId) {
+    setTimeout(function() {
+      api('trade_labour_budget', { jobId: jobId }).then(function(lb) {
+        var card = document.getElementById(cardId);
+        if (card) card.innerHTML = tradeLabourCardHtml(lb);
+      }).catch(function() {
+        var card = document.getElementById(cardId);
+        if (card) card.innerHTML = tradeLabourCardHtml(null);
+      });
+    }, 0);
+    return '<div class="detail-section" id="' + cardId + '" data-labour-card>' +
+      '<h3>' + tradeLabourCardTitle() + '</h3>' +
+      '<div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Loading...</div>' +
+      '</div>';
+  }
+  // </trade-labour-card>
+
   // Quote / job values and other trades' pay are office-only (admin /
   // ops_manager). A tier-3 or managed-vertical lead is not office.
   // See <trade-office-money-door>.
@@ -13043,63 +13149,8 @@
     // lead-aware panel so a second, lead-blind crew list cannot come back.
     if (crew.length > 0) h += renderCrewRosterPanel(data);
 
-    // ── Labour Budget Card (complete only) ──
-    if (isJobDone(phase)) (function loadLabourBudget() {
-      var lbId = 'labourBudgetCard';
-      h += '<div class="detail-section" id="' + lbId + '">';
-      h += '  <h3>Labour Budget</h3>';
-      h += '  <div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Loading...</div>';
-      h += '</div>';
-
-      setTimeout(function() {
-        api('trade_labour_budget', { jobId: job.id }).then(function(lb) {
-          var card = document.getElementById(lbId);
-          if (!card) return;
-          var inner = '<h3>Labour Budget</h3>';
-          if (!lb || lb.budget == null || lb.budget === 0) {
-            inner += '<div style="font-size:13px;color:var(--sw-text-sec)">No labour budget allocated</div>';
-            card.innerHTML = inner;
-            return;
-          }
-          var budget = Number(lb.budget) || 0;
-          var logged = Number(lb.logged_hours) || 0;
-          var spent = Number(lb.spent) || 0;
-          var remainder = budget - spent;
-          var remainColor = remainder >= 0 ? 'var(--sw-green)' : '#E74C3C';
-          inner += '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:12px">';
-          inner += '  <div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '    <div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px">Budget</div>';
-          inner += '    <div style="font-size:18px;font-weight:700;color:var(--sw-dark)">$' + budget.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0}) + '</div>';
-          inner += '  </div>';
-          inner += '  <div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '    <div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px">Logged</div>';
-          inner += '    <div style="font-size:18px;font-weight:700;color:var(--sw-dark)">' + logged.toFixed(1) + ' hrs</div>';
-          inner += '  </div>';
-          inner += '  <div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '    <div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px">Remainder</div>';
-          inner += '    <div style="font-size:18px;font-weight:700;color:' + remainColor + '">$' + Math.abs(remainder).toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0}) + (remainder < 0 ? ' over' : '') + '</div>';
-          inner += '  </div>';
-          inner += '</div>';
-          if (lb.breakdown && lb.breakdown.length > 0) {
-            inner += '<div style="border-top:1px solid var(--sw-border);padding-top:10px">';
-            inner += '  <div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px">Hours by Trade</div>';
-            lb.breakdown.forEach(function(t) {
-              var tName = t.name || t.trade_name || 'Unknown';
-              var tHours = Number(t.hours) || 0;
-              inner += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:13px">';
-              inner += '  <span style="color:var(--sw-dark)">' + esc(tName) + '</span>';
-              inner += '  <span style="font-weight:600;color:var(--sw-dark)">' + tHours.toFixed(1) + ' hrs</span>';
-              inner += '</div>';
-            });
-            inner += '</div>';
-          }
-          card.innerHTML = inner;
-        }).catch(function() {
-          var card = document.getElementById(lbId);
-          if (card) card.innerHTML = '<h3>Labour Budget</h3><div style="font-size:13px;color:var(--sw-text-sec)">Could not load labour budget</div>';
-        });
-      }, 0);
-    })();
+    // ── Labour card (complete only) ── office sees the budget; a trade sees hours only.
+    if (isJobDone(phase)) h += renderTradeLabourCardShell('labourBudgetCard', job.id);
 
     // ── Work Order (pre_confirm, confirmed, complete — only if has content) ──
     if (wo && (phase === 'pre_confirm' || phase === 'confirmed' || isJobDone(phase)) && (wo.special_instructions || (wo.scope_items && wo.scope_items.length > 0))) {
@@ -14534,43 +14585,7 @@
     h += renderSpecialInstructions(data, phase);
 
     // Labour budget (complete phase, office only)
-    if (isJobDone(phase) && tradeCanSeeSowPricing()) {
-      h += '<div class="detail-section" id="tabLabourBudget">';
-      h += '  <h3>Labour Budget</h3>';
-      h += '  <div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Loading...</div>';
-      h += '</div>';
-      setTimeout(function() {
-        api('trade_labour_budget', { jobId: job.id }).then(function(lb) {
-          var card = document.getElementById('tabLabourBudget');
-          if (!card) return;
-          var inner = '<h3>Labour Budget</h3>';
-          if (!lb || lb.budget == null || lb.budget === 0) {
-            inner += '<div style="font-size:13px;color:var(--sw-text-sec)">No labour budget allocated</div>';
-            card.innerHTML = inner; return;
-          }
-          var budget = Number(lb.budget) || 0;
-          var logged = Number(lb.logged_hours) || 0;
-          var spent = Number(lb.spent) || 0;
-          var remainder = budget - spent;
-          var remainColor = remainder >= 0 ? 'var(--sw-green)' : '#E74C3C';
-          inner += '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:12px">';
-          inner += '<div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '<div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase">Budget</div>';
-          inner += '<div style="font-size:18px;font-weight:700;color:var(--sw-dark)">$' + budget.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0}) + '</div></div>';
-          inner += '<div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '<div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase">Logged</div>';
-          inner += '<div style="font-size:18px;font-weight:700;color:var(--sw-dark)">' + logged.toFixed(1) + ' hrs</div></div>';
-          inner += '<div style="flex:1;text-align:center;padding:10px 4px;background:var(--sw-light);border-radius:8px">';
-          inner += '<div style="font-size:11px;color:var(--sw-text-sec);text-transform:uppercase">Remainder</div>';
-          inner += '<div style="font-size:18px;font-weight:700;color:' + remainColor + '">$' + Math.abs(remainder).toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0}) + (remainder < 0 ? ' over' : '') + '</div></div>';
-          inner += '</div>';
-          card.innerHTML = inner;
-        }).catch(function() {
-          var card = document.getElementById('tabLabourBudget');
-          if (card) card.innerHTML = '<h3>Labour Budget</h3><div style="font-size:13px;color:var(--sw-text-sec)">Could not load</div>';
-        });
-      }, 0);
-    }
+    if (isJobDone(phase) && tradeCanSeeSowPricing()) h += renderTradeLabourCardShell('tabLabourBudget', job.id);
 
     // Financials removed — customer quote/sell price not shown to installers
 

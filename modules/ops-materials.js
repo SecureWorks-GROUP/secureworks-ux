@@ -97,6 +97,7 @@ function renderTradeBillTable(invoices) {
 
 function renderTradeRatesPanel(rates) {
   var panel = document.getElementById('tradeRatesPanel');
+  if (window.rateHistoryEnabled) return renderRatesWithSetter(panel, rates);
   if (!rates.length) {
     panel.innerHTML = '';
     return;
@@ -117,6 +118,7 @@ var _rateModalUserId = null;
 var _rateModalName = '';
 
 function openRateModal(userId, name, currentRate) {
+  if (window.rateHistoryEnabled) resetRateHistory(userId);
   _rateModalUserId = userId;
   _rateModalName = name;
   document.getElementById('rateModalTitle').textContent = 'Set Rate — ' + name;

@@ -110,11 +110,22 @@ there. Guards: `tests/e2e/ops-tab-set.spec.js`,
 `tests/e2e/ops-dispatch-v2-materials.spec.js`,
 `tests/e2e/ops-dispatch-v2-restored.spec.js`.
 The v1 / v2 switch (`<dispatch-version>` in ops.html, Shaun 26 Oct 2026): v2 is the
-default; "Switch back to v1" on the Dispatch tab, or `?dispatch_version=v1`, loads
-the kept v1 screen (`modules/ops-dispatch-v1.js` and `.css`, frozen copies of main
-at d0b6419) instead, remembered per browser in localStorage `sw_dispatch_version`.
-Only one of the two files is ever loaded. Never build on the v1 copy; new work
-goes in `modules/ops-dispatch.js`. Guard: `tests/e2e/ops-dispatch-switch.spec.js`.
+default; `?dispatch_version=v1` in the address loads the kept v1 screen
+(`modules/ops-dispatch-v1.js` and `.css`, frozen copies of main at d0b6419)
+instead, remembered per browser in localStorage `sw_dispatch_version`, and the v1
+screen's "Switch to v2" comes back. Only one of the two files is ever loaded. Never
+build on the v1 copy; new work goes in `modules/ops-dispatch.js`. Guard:
+`tests/e2e/ops-dispatch-switch.spec.js`.
+READ NOW (item 19, Shaun 18 Nov 2026): the v2 screen has no "Switch back to v1".
+Read now sits in that corner (`modules/dispatch-read-now.js`). One press sends
+ops-api `dispatch_v2_read_now` (backend contract section 3j: reads Outlook now,
+then matches supplier replies), then `OpsDispatch.reloadAll()` reads the board,
+the tray and the open job again with no page refresh, and one line says what
+happened. Reads mail only; never sends. Item 20: the "Emails to sort" chip in
+Needs you now is the only way into the Unmatched supplier emails tray (the
+separate button is gone); it shows `?` when the tray could not be read. Guards:
+`tests/e2e/ops-dispatch-v2-read-now.spec.js`, `tests/unit/dispatch-read-now.test.cjs`,
+`tests/e2e/ops-dispatch-v2-needs.spec.js`.
 
 ONLY ORDERS ON ACTIVE JOBS ARE ON THE BOARD (Shaun 2026-10-26). An order with
 no job, or on a finished job (complete, invoiced, final_payment, get_review,

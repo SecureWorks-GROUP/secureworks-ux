@@ -216,8 +216,7 @@ var OfficeWoFillCore = (function () {
     h += '<span class="owg-count" data-office-wo-gaps-count="jobs_with_held_lines">Jobs with pay waiting: ' + esc(c.jobs_with_held_lines) + '</span>';
     h += '</div>';
     if (opts.released && opts.released > 0) {
-      h += '<div class="owg-released" role="status" data-office-wo-gaps-released>' +
-        esc(opts.released) + ' waiting lines were released for the next pay run</div>';
+      h += '<div class="owg-released" role="status" data-office-wo-gaps-released>Work order approved</div>';
     }
     if (!parsed.jobs.length) {
       h += '<div class="owf-empty" data-office-wo-gaps-empty>Every live job has a work order with an amount.</div></section>';

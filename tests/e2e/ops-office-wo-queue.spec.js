@@ -393,7 +393,7 @@ test('P1-05.3 loading, empty, error without zero, Retry recovery, and trade excl
   expect(await page.evaluate(() => window.__reads)).toEqual([]);
 });
 
-test('P1-05.3 Open a work order retries after refusal, reloads, and saving plus approving shows released waiting lines', async ({ page }) => {
+test('P1-05.3 Open a work order retries after refusal, reloads, and saving plus approving shows Work order approved', async ({ page }) => {
   await bootGaps(page);
   const twoDaysAgo = new Date(Date.now() - (2 * 86400000 + 3600000)).toISOString();
 
@@ -528,7 +528,7 @@ test('P1-05.3 Open a work order retries after refusal, reloads, and saving plus 
 
   await page.locator('[data-office-wo-fill="ZZTEST-wo-301"] [data-office-wo-fill-approve]').click();
   await expect(section.locator('[data-office-wo-gaps-released]')).toHaveText(
-    '3 waiting lines were released for the next pay run'
+    'Work order approved'
   );
   await expect(section).toContainText('Every live job has a work order with an amount.');
 });

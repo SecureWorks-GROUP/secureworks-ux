@@ -262,7 +262,7 @@ test('undo a recorded decision: asks first, sends the decision id, reads the lis
   await bill.getByRole('button', { name: 'Yes, record it' }).click();
   const recent = page.locator('#reconcilePlaceRoot .rp-recent');
   await recent.getByRole('button', { name: 'Undo' }).click();
-  await expect(recent).toContainText('Undo this? It puts the item back on the list as it was before.');
+  await expect(recent.locator('[data-rp-undo-confirm]')).toContainText('Undo this? Bill ZZTEST Supplier ZZ-100, recorded as: Put $1,000.00 ex GST on SWF-990001, 12 Test St. Undoing puts it back on the list as it was before.');
   expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([]);
   const reads = (await page.evaluate(() => window.__reads)).length;
   await recent.getByRole('button', { name: 'Yes, undo it' }).click();
@@ -292,4 +292,19 @@ test('409 copy: when the item has gone, its refusal shows above the list', async
   await expect(page.locator('#reconcilePlaceRoot [data-rp-notice]')).toHaveText('Someone already decided this one. It is no longer on the list.');
   await expect(page.locator('#reconcilePlaceRoot')).not.toContainText('reconcile_item_closed');
   await expect(card(page, 'ZZTEST-bill')).toHaveCount(0);
+});
+
+test('the Undo confirm of a credit names its amount ex GST and its job, without the bill credit words', async ({ page }) => {
+  await open(page, { lists: { bills: [BILL, CREDIT] } });
+  const bill = card(page, 'ZZTEST-bill');
+  await bill.getByRole('button', { name: 'Put on SWF-990001' }).click();
+  await expect(bill.locator('[data-rp-confirm]')).toContainText('Its credit follows it.');
+  await bill.getByRole('button', { name: 'Yes, record it' }).click();
+  const recent = page.locator('#reconcilePlaceRoot .rp-recent');
+  await recent.getByRole('button', { name: 'Undo' }).click();
+  await expect(recent.locator('[data-rp-undo-confirm]')).toContainText('Bill ZZTEST Supplier ZZ-100, recorded as: Put $1,000.00 ex GST on SWF-990001, 12 Test St.');
+  await expect(recent.locator('[data-rp-undo-confirm]')).not.toContainText('follows');
+  await recent.getByRole('button', { name: 'Keep it' }).click();
+  await expect(recent.locator('[data-rp-undo-confirm]')).toHaveCount(0);
+  expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([]);
 });

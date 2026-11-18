@@ -301,8 +301,9 @@
     item.lines.forEach(function (l) { if (l.cents > 0) plus += l.cents; else minus += l.cents; });
     return { plus: plus, minus: minus };
   }
-  function confirmWords(item, pending) {
-    var carried = carriedCount(item) ? ' ' + carriedWords(carriedCount(item)) : '';
+  // withoutCarried: the words alone, without the credits that followed (the Undo confirm uses it).
+  function confirmWords(item, pending, withoutCarried) {
+    var carried = carriedCount(item) && !withoutCarried ? ' ' + carriedWords(carriedCount(item)) : '';
     var t = signedTotals(item), net = ' (net ' + documentWords(t.plus + t.minus) + ')';
     if (pending.action === 'place') {
       var job = jobLabel(pending.job);
@@ -316,6 +317,15 @@
     // A split lists exactly the parts partsFor sends, in its order, each by its own sign.
     var bits = pending.summary.map(function (s) { return s.line + ', ' + partWords(s.cents, s.job); });
     return 'Split ' + documentWords(item.cents) + ': ' + bits.join('; ') + '.' + carried;
+  }
+  // The Undo confirm names exactly what was recorded: the document, the amount ex GST and the
+  // job (or not for a job), in the words the confirm showed before it was recorded.
+  function undoWords(d) {
+    var head = d.document ? d.document + ', recorded as: ' : 'Recorded as: ';
+    return 'Undo this? ' + head + d.recorded + ' Undoing puts it back on the list as it was before.';
+  }
+  function documentName(item) {
+    return [item.kind_words, item.party, item.document_number].filter(Boolean).join(' ');
   }
   function carriedWords(n) { return n === 1 ? 'Its credit follows it.' : 'Its ' + n + ' credits follow it.'; }
   function doneWords(pending, item) {
@@ -465,7 +475,7 @@
       var h = '<li data-rp-decision="' + esc(d.decision_id) + '">' + esc(d.words);
       if (d.undone) h += ' <strong>Undone by you, just now. It is back on the list.</strong>';
       if (d.confirm && canUndo(recent, i)) {
-        h += '<div class="rp-confirm">Undo this? It puts the item back on the list as it was before.' +
+        h += '<div class="rp-confirm" data-rp-undo-confirm>' + esc(d.recorded ? undoWords(d) : 'Undo this? It puts the item back on the list as it was before.') +
           '<div class="rp-acts"><button type="button" class="rp-yes" data-rp="undo_yes">Yes, undo it</button><button type="button" data-rp="undo_back">Keep it</button></div></div>';
       } else if (canUndo(recent, i)) {
         h += ' <button type="button" data-rp="undo">Undo</button>';
@@ -607,7 +617,8 @@
         } else {
           // Recorded: keep the decision id (Undo sends it), then read the list again so the
           // item and any credits that followed it drop off.
-          recent.unshift({ decision_id: res.decision_id, item_id: item.id, words: doneWords(p, item) });
+          recent.unshift({ decision_id: res.decision_id, item_id: item.id, words: doneWords(p, item),
+            document: documentName(item), recorded: confirmWords(item, p, true) });
           if (recent.length > 10) recent.length = 10;
           item.busy = false;
           return refresh();
@@ -766,7 +777,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, undoWords: undoWords, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;

@@ -488,7 +488,7 @@ test('undo asks first, sends only the decision id once, then reads the list agai
   assert.equal(undoPosts(f).length, 0, 'no undo without the first press');
   await f.api.undo('ZZTEST-d1', 'undo');
   assert.equal(undoPosts(f).length, 0, 'the first press only asks');
-  assert.match(f.root.innerHTML, /Undo this\? It puts the item back on the list as it was before\./);
+  assert.match(f.root.innerHTML, /Undo this\? Bill ZZTEST Supplier ZZ-1, recorded as: Put \$1,000\.00 ex GST on SWF-990001, 12 Test St\. Undoing puts it back on the list as it was before\./);
   await f.api.undo('ZZTEST-d1', 'undo_back');
   assert.doesNotMatch(f.root.innerHTML, /Undo this\?/);
   await f.api.undo('ZZTEST-d1', 'undo');
@@ -593,4 +593,39 @@ test('409 copy: the server words stay on the card after the re-read, or above th
   assert.doesNotMatch(g.root.innerHTML, /data-rp-notice/);
   await g.api.refresh();
   assert.doesNotMatch(g.root.innerHTML, /data-rp-notice|That job is not live/, 'a later read clears it');
+});
+
+// Before-decide item (director, 19 Nov): the Undo confirm names the amount ex GST and the job.
+test('the Undo confirm names the document, the amount ex GST and the job, for place, a credit, not for a job and a split', async () => {
+  const undoText = async (f, id) => {
+    await f.api.undo('ZZTEST-d1', 'undo');
+    const m = /data-rp-undo-confirm>([^<]*)</.exec(f.root.innerHTML);
+    return m && m[1].replace(/&#39;/g, "'");
+  };
+  const credit = raw({ id: 'ZZTEST-credit', kind: 'credit', kind_words: 'Credit', document_number: 'CN-7', amount_ex: -120.5,
+    lines: [{ line_id: 'C1', description: 'Returned posts', amount_ex: -120.5 }], bill: null });
+  const c = fixture({ bills: [credit] });
+  await c.api.refresh();
+  await c.api.press('ZZTEST-credit', 'accept_job');
+  await c.api.press('ZZTEST-credit', 'record');
+  assert.equal(await undoText(c), 'Undo this? Credit ZZTEST Supplier CN-7, recorded as: Take $120.50 ex GST off SWF-990001, 12 Test St (a credit). Undoing puts it back on the list as it was before.');
+
+  const o = fixture();
+  await o.api.refresh();
+  await o.api.press('ZZTEST-item-1', 'overhead');
+  await o.api.press('ZZTEST-item-1', 'record');
+  assert.equal(await undoText(o), 'Undo this? Bill ZZTEST Supplier ZZ-1, recorded as: Mark $1,000.00 ex GST as not for a job (overhead). Undoing puts it back on the list as it was before.');
+
+  const sp = fixture();
+  await sp.api.refresh();
+  await sp.api.press('ZZTEST-item-1', 'split');
+  await sp.api.press('ZZTEST-item-1', 'search', 'SWP');
+  await sp.api.press('ZZTEST-item-1', 'pick', 0);
+  sp.api.partCount('ZZTEST-item-1', 0, 0, true);
+  sp.api.partEdit('ZZTEST-item-1', 0, 0, 'target', 'job:' + J1); sp.api.partEdit('ZZTEST-item-1', 0, 0, 'text', '600');
+  sp.api.partEdit('ZZTEST-item-1', 0, 1, 'target', 'job:J2'); sp.api.partEdit('ZZTEST-item-1', 0, 1, 'text', '400');
+  await sp.api.press('ZZTEST-item-1', 'save_split');
+  await sp.api.press('ZZTEST-item-1', 'record');
+  assert.equal(await undoText(sp), 'Undo this? Bill ZZTEST Supplier ZZ-1, recorded as: Split $1,000.00 ex GST: Posts, $600.00 ex GST on SWF-990001; Posts, $400.00 ex GST on SWP-990002. Undoing puts it back on the list as it was before.');
+  assert.equal(P.undoWords({ document: '', recorded: 'Put $5.00 ex GST on SWF-990001.' }), 'Undo this? Recorded as: Put $5.00 ex GST on SWF-990001. Undoing puts it back on the list as it was before.');
 });

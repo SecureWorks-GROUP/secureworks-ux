@@ -36,8 +36,9 @@
   // </ops-asset-cache-bust>
   // <dispatch-version> Which Dispatch screen this browser loads: v2 (the
   // default, modules/ops-dispatch.*) or v1 kept as it was (modules/ops-dispatch-v1.*).
-  // The switch on the Dispatch tab, or ?dispatch_version=v1 / v2 in the address,
+  // ?dispatch_version=v1 / v2 in the address (or Switch to v2 on the v1 screen)
   // picks one and this browser remembers it. Both run on the same back end.
+  // Since 18 Nov 2026 the v2 screen has no switch back (Read now sits there).
   window.__swDispatchVersion = (function () {
     var KEY = 'sw_dispatch_version', pick = null;
     try {
@@ -5325,14 +5326,23 @@ __swOpsStampAssets([
          LIVE purchase order board that used to be the Materials view (Captain
          ruling); it reads and writes real POs through loadMaterials(). -->
     <div id="viewDispatch" class="view">
-      <!-- <dispatch-version> The v1 / v2 switch: this browser only, reloads the page. -->
+      <!-- <dispatch-version> v2 shows Read now (item 19, 18 Nov 2026:
+           modules/dispatch-read-now.js reads Outlook, matches supplier replies
+           and reloads Dispatch, no page refresh). v1 keeps Switch to v2. v1
+           is reached only by ?dispatch_version=v1 in the address (this
+           browser only, reloads the page). -->
       <div id="dispatchVersionBar" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; font-size:11px; color:var(--sw-text-sec); margin-bottom:6px;"></div>
       <script>
       (function () {
         var bar = document.getElementById('dispatchVersionBar');
         var v1 = window.__swDispatchVersion === 'v1';
-        bar.innerHTML = '<span data-dispatch-version="' + (v1 ? 'v1' : 'v2') + '">' + (v1 ? 'Dispatch v1 (the old screen)' : 'Dispatch v2') + '</span>' +
-          '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-switch="' + (v1 ? 'v2' : 'v1') + '">' + (v1 ? 'Switch to v2' : 'Switch back to v1') + '</button>';
+        if (!v1) {
+          bar.innerHTML = '<span data-dispatch-read-line role="status" aria-live="polite"></span>' +
+            '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-read-now>Read now</button>';
+          return;
+        }
+        bar.innerHTML = '<span data-dispatch-version="v1">Dispatch v1 (the old screen)</span>' +
+          '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-switch="v2">Switch to v2</button>';
         bar.querySelector('[data-dispatch-switch]').addEventListener('click', function () {
           if (!window.swSetDispatchVersion(this.getAttribute('data-dispatch-switch'))) alert('This browser blocks saved settings, so the switch cannot be kept. Add ?dispatch_version=' + this.getAttribute('data-dispatch-switch') + ' to the address instead.');
         });
@@ -6522,8 +6532,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/dispatch-book-install.js?v=1'},
   // Dispatch's tray files (item 16 part 1): the files on an Unmatched supplier email.
   {t:'js', u:'modules/dispatch-tray-files.js?v=1'},
+  // Dispatch's Read now button (item 19, 18 Nov 2026; only v2 shows it).
+  {t:'js', u:'modules/dispatch-read-now.js?v=1'},
   // <dispatch-version>
-  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=18'}
+  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=19'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->

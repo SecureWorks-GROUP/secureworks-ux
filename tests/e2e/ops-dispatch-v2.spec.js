@@ -638,8 +638,8 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_replies_assign: (url, body) => { emails = emails.filter((m) => m.id !== body.email_id); return { ok: true, job_number: body.job_id === 'job-p1' ? 'SWP-910002' : 'SWR-910003' }; },
       dispatch_v2_replies_hide: (url, body) => { emails = emails.filter((m) => m.id !== body.email_id); return { ok: true }; },
     });
-    const btn = root.locator('[data-dpc-tray-toggle]');
-    await expect(btn).toHaveText('Unmatched supplier emails 3');
+    const btn = root.locator('[data-dpc-needs="emails"]');
+    await expect(btn).toHaveText('Emails to sort 3');
     await btn.click();
     const tray = root.locator('[data-dpc-region="tray"]');
     await expect(tray.locator('h3')).toHaveText('Unmatched supplier emails');
@@ -653,7 +653,7 @@ test.describe('Dispatch v2 supplier replies', () => {
     await expect(tray).toContainText('Hide this email from the tray? It stays in admin@.');
     await tray.locator('[data-dpc-tray-hide-go="tu-3"]').click();
     await expect(tray).toContainText('Nothing to sort. Every supplier email is on a job.');
-    await expect(btn).toHaveText('Unmatched supplier emails 0');
+    await expect(btn).toHaveText('Emails to sort 0');
     expect(of('dispatch_v2_replies_assign').map((c) => [c.body.email_id, c.body.job_id, c.body.order_id || null])).toEqual([['tu-1', 'job-p1', 'ord-9'], ['tu-2', 'job-r1', null]]);
     expect(of('dispatch_v2_replies_hide').map((c) => c.body.email_id)).toEqual(['tu-3']);
   });
@@ -667,8 +667,8 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_replies_unmatched: () => ({ ok: true, include_other: false, emails, counts: { needs_confirmation: emails.filter((m) => m.state === 'needs_confirmation').length, unmatched_order_desk: emails.filter((m) => m.state === 'unmatched').length, unmatched_other: 0 } }),
       dispatch_v2_replies_clear: (url, body) => { emails = emails.filter((m) => !body.email_ids.includes(m.id)); return { ok: true, cleared: body.email_ids.length, skipped: 0 }; },
     });
-    const btn = root.locator('[data-dpc-tray-toggle]');
-    await expect(btn).toHaveText('Unmatched supplier emails 2');
+    const btn = root.locator('[data-dpc-needs="emails"]');
+    await expect(btn).toHaveText('Emails to sort 2');
     await btn.click();
     const tray = root.locator('[data-dpc-region="tray"]');
     await expect(tray.locator('[data-dpc-tray-item]')).toHaveCount(2);
@@ -683,7 +683,7 @@ test.describe('Dispatch v2 supplier replies', () => {
     await expect(tray).toContainText('Cleared 2 emails from this list.');
     await expect(tray).toContainText('Nothing to sort. Every supplier email is on a job.');
     await expect(tray.locator('[data-dpc-tray-clear]')).toHaveCount(0);
-    await expect(btn).toHaveText('Unmatched supplier emails 0');
+    await expect(btn).toHaveText('Emails to sort 0');
     expect(of('dispatch_v2_replies_clear').map((c) => c.body.email_ids)).toEqual([['tc-1', 'tc-2']]);
   });
 });
@@ -736,7 +736,7 @@ test('at 390 the list, rail, Arrival line, replies and tray have no sideways scr
     dispatch_v2_replies_unmatched: () => ({ ok: true, emails: [EMAIL({ id: 'tu-1', state: 'unmatched', rung: null, job_id: null })], counts: { needs_confirmation: 0, unmatched_order_desk: 1 } }),
   }, { viewport: { width: 390, height: 844 } });
   await expect(root.locator('.dpc-job')).toHaveCount(3);
-  await root.locator('[data-dpc-tray-toggle]').click();
+  await root.locator('[data-dpc-needs="emails"]').click();
   await expect(root.locator('[data-dpc-tray-item]')).toHaveCount(1);
   await root.locator('[data-dpc-region="tape"] [data-dpc-stage="awaiting_supplier"]').click();
   await expect(root.locator('.dpc-tape-confirm')).toBeVisible();

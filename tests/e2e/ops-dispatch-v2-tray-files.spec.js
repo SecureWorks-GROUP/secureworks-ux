@@ -70,7 +70,7 @@ async function boot(page, api) {
   await page.goto(OPS_FILE + '#dispatch');
   await expect(page.locator('#viewDispatch')).toHaveClass(/active/);
   const root = page.locator('#dispatchRoot');
-  await root.locator('[data-dpc-tray-toggle]').click();
+  await root.locator('[data-dpc-needs="emails"]').click();
   const tray = root.locator('[data-dpc-region="tray"]');
   await expect(tray.locator('h3')).toHaveText('Unmatched supplier emails');
   const of = (action) => calls.filter((c) => c.action === action);

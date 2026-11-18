@@ -1861,12 +1861,18 @@
       var failed = state.base.status === 'error';
       return h + '<span class="dpc-needs-note">' + (failed ? 'Could not read the jobs.' : 'Reading the jobs...') + '</span></div>';
     }
+    var tray = state.rep.tray;
     needsKinds().forEach(function (k) {
-      if (!n.shown[k.key]) return;
+      // Emails to sort is the one way into the tray (item 20): pressed while
+      // the tray is open, so it can always shut it, even at 0; and when the
+      // tray could not be read it still shows, with ?, to open it and retry.
+      var mail = k.key === 'emails';
+      var unread = mail && !n.shown.emails && tray.status === 'error';
+      if (!n.shown[k.key] && !unread) return;
       var count = n.counts[k.key] || 0;
-      var on = state.needs.kind === k.key;
-      h += '<button type="button" class="dpc-needs-chip dpc-need-' + k.key + (count ? '' : ' dpc-needs-zero') + '" data-dpc-needs="' + k.key + '" aria-pressed="' + on + '"' +
-        (count || on ? '' : ' disabled') + '>' + esc(k.label) + ' <b>' + count + '</b></button>';
+      var on = mail ? tray.open : state.needs.kind === k.key;
+      h += '<button type="button" class="dpc-needs-chip dpc-need-' + k.key + (count || unread ? '' : ' dpc-needs-zero') + '" data-dpc-needs="' + k.key + '" aria-pressed="' + on + '"' +
+        (mail ? ' aria-controls="dpc-tray"' : '') + (count || on || unread ? '' : ' disabled') + '>' + esc(k.label) + ' <b>' + (unread ? '?' : count) + '</b></button>';
     });
     if (!n.total) h += '<span class="dpc-needs-note">Nothing needs you right now.</span>';
     else if (needsFiltering()) h += '<button type="button" class="dpc-textbtn" data-dpc-needs="' + esc(state.needs.kind) + '">Show all jobs</button>';
@@ -4757,18 +4763,14 @@
 
   // ── the Unmatched supplier emails tray ──
 
+  // The tray's count, shown on the Emails to sort chip in Needs you now (item
+  // 20, 18 Nov 2026: the chip is the one way into the tray; the separate
+  // Unmatched supplier emails button is gone).
   function trayCount() {
     var t = state.rep.tray;
     var c = t.data && t.data.counts;
     if (!c) return null;
     return (Number(c.needs_confirmation) || 0) + (Number(c.unmatched_order_desk) || 0);
-  }
-
-  function trayBtnHtml() {
-    var t = state.rep.tray;
-    var n = trayCount();
-    var count = t.status === 'error' ? ' <b class="dpc-tray-n dpc-tray-n-fail">?</b>' : n === null ? '' : ' <b class="dpc-tray-n' + (n ? ' on' : '') + '">' + n + '</b>';
-    return '<button type="button" class="dpc-tray-btn" data-dpc-tray-toggle aria-expanded="' + t.open + '" aria-controls="dpc-tray">Unmatched supplier emails' + count + '</button>';
   }
 
   // Every job listed in Active and Archive, for "Put on job".
@@ -4856,12 +4858,6 @@
   function paintTray() {
     needsWorkOut();
     paintNeeds();
-    var btn = root() ? root().querySelector('[data-dpc-tray-toggle]') : null;
-    if (btn) {
-      var had = document.activeElement === btn;
-      btn.outerHTML = trayBtnHtml();
-      if (had) root().querySelector('[data-dpc-tray-toggle]').focus({ preventScroll: true });
-    }
     var el = region('tray');
     if (!el) return;
     var a = document.activeElement;
@@ -7168,7 +7164,7 @@
   function render() {
     var r = root();
     if (!r) return;
-    var h = '<div class="dpc"><div class="dpc-header"><div class="dpc-row"><div class="dpc-grow"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>' + trayBtnHtml() + '</div></div>';
+    var h = '<div class="dpc"><div class="dpc-header"><div class="dpc-row"><div class="dpc-grow"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div></div></div>';
     h += needsBarHtml();
     h += trayHtml();
     h += '<div class="dpc-layout' + (state.leftOpen ? '' : ' dpc-left-closed') + (state.rightOpen ? '' : ' dpc-right-closed') + '">' + queueHtml() + workspaceHtml() + contextHtml() + '</div>';
@@ -7199,7 +7195,7 @@
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
       '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
-      '[data-dpc-tray-toggle],[data-dpc-tray-clear],[data-dpc-tray-clear-go],[data-dpc-tray-clear-no],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
+      '[data-dpc-tray-clear],[data-dpc-tray-clear-go],[data-dpc-tray-clear-no],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto],' +
       '[data-dpc-file-vis],[data-dpc-files-all]') : null;
     if (!t || t.disabled) return;
@@ -7339,10 +7335,6 @@
     } else if ((id = t.getAttribute('data-dpc-rep-retry') || t.getAttribute('data-dpc-sug-retry'))) {
       var r = e && e.msg[id] && e.msg[id].retry;
       if (r) repPress(jobId, r.kind, id, r.extra);
-    } else if (t.hasAttribute('data-dpc-tray-toggle')) {
-      tray.open = !tray.open;
-      if (tray.open && (tray.status === 'idle' || tray.status === 'error')) loadTray(); else paintTray();
-      if (tray.open) { var panel = region('tray'); if (panel) panel.scrollIntoView({ block: 'nearest' }); }
     } else if (t.hasAttribute('data-dpc-tray-clear')) {
       tray.clearAsk = true;
       tray.msg = null;
@@ -7593,9 +7585,34 @@
     if (!r.firstChild) render();
     loadBase();
     // Both lists are read up front so the Active and Archive buttons carry
-    // their counts; the tray is read for its count on the header button.
+    // their counts; the tray is read for its count on the Emails to sort chip.
     loadView('archive');
     loadTray();
+  }
+
+  // Item 19, Read now (modules/dispatch-read-now.js, 18 Nov 2026): once
+  // Outlook is read, everything new mail can change is read again, keeping
+  // what is drawn and typed until each answer lands: the Active board (and
+  // with it the Needs you now bar and the open job's header), the tray (and
+  // its Emails to sort count), and the open job's supplier boxes, supplier
+  // replies, Arrival line, notes and emails. Reads only.
+  function reloadAll() {
+    var r = root();
+    if (!r || !r.firstChild) return;
+    loadBase();
+    loadTray();
+    var row = state.jobId ? state.row : null;
+    if (!row || !row.id) return;
+    var jobId = row.id;
+    loadNotes(jobId, true);
+    if (isMakesafe(row)) return;
+    if (v2Entry(jobId)) readV2(jobId, true);
+    if (repEntry(jobId)) readReplies(jobId, true);
+    loadArrival(row);
+    if (state.email[jobId]) {
+      if (state.tab === 'messages' && state.msg === 'email') loadEmail(jobId);
+      else delete state.email[jobId];
+    }
   }
 
   // ── The job page (ops.html Overview): one job's Dispatch stage ──
@@ -7675,5 +7692,5 @@
     state.row = null;
   }
 
-  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob, warmNeeds: warmNeeds };
+  global.OpsDispatch = { show: show, stageForJob: stageForJob, stageCardHtml: stageCardHtml, openJob: openJob, warmNeeds: warmNeeds, reloadAll: reloadAll };
 })(window);

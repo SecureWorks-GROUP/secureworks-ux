@@ -57,7 +57,7 @@ function emit(e) { e.listeners.forEach((fn) => fn()); }
 export function peekQuery(key) { const e = entries.get(key); return e ? e.data : undefined; }
 export function primeQuery(key, data, { persist = false } = {}) {
   const e = entry(key); e.data = data; e.error = null; e.ts = Date.now();
-  if (persist) local.set(uidKey(key), { ts: e.ts, data });
+  if (persist && state.user && !state.preview) local.set(uidKey(key), { ts: e.ts, data });
   emit(e);
 }
 /** Change a cached answer in place (optimistic updates). */
@@ -76,17 +76,21 @@ export function invalidate(match) {
     if (e.listeners.size && e.fetcher) run(key, e);
   });
 }
-export function clearQueries() { entries.clear(); }
+export function clearQueries({ persisted = true } = {}) {
+  entries.forEach((e) => { e.promise = null; });
+  entries.clear();
+  if (persisted) local.clear('q:');
+}
 
 function run(key, e, persist) {
   if (e.promise) return e.promise;
   const p = Promise.resolve().then(() => e.fetcher()).then((data) => {
-    if (e.promise !== p) return;
+    if (e.promise !== p || entries.get(key) !== e) return;
     e.data = data; e.error = null; e.ts = Date.now(); e.promise = null;
-    if ((e.persist || persist) && !state.preview) local.set(uidKey(key), { ts: e.ts, data });
+    if ((e.persist || persist) && state.user && !state.preview) local.set(uidKey(key), { ts: e.ts, data });
     emit(e);
   }).catch((err) => {
-    if (e.promise !== p) return;
+    if (e.promise !== p || entries.get(key) !== e) return;
     e.error = err; e.promise = null;
     emit(e);
   });

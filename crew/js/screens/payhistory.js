@@ -8,6 +8,7 @@ import { addDays, fmtDay, fmtMonth, isISODate } from '../lib/dates.js';
 import { Page, Section, KV, Button, SkelRows, buzz } from '../ui/kit.js';
 import { cash, num, plural, weekWords } from '../ui/paybits.js';
 import { usePayHistory } from './pay.js';
+import { YearPdf } from '../ui/yearpdf.js';
 
 const TABS = [
   ['weeks', 'Weeks'],
@@ -265,6 +266,8 @@ export function PayHistory() {
       </div>
       ${unrecorded > 0 ? html`<p class="block t-small pay-note">Super not recorded on ${plural(unrecorded, 'invoice')}</p>` : null}
     <//>
+
+    <${YearPdf} years=${d.years} />
 
     <${RateSection} rates=${rates} />
   <//>`;

@@ -152,7 +152,7 @@ async function boot() {
   const forced = window.CREW_CONFIG.forceDemo;
   if (params.has('demo') || forced) {
     const demo = await import('./demo/server.js');
-    await Promise.all([import('./demo/extra-pay.js'), import('./demo/extra-reports.js'), import('./demo/extra-manager.js')]);
+    await Promise.all([import('./demo/extra-pay.js'), import('./demo/extra-reports.js'), import('./demo/extra-manager.js'), import('./demo/extra-yearpdf.js')]);
     if (params.get('now')) setNow(new Date(params.get('now')));
     const persona = params.get('demo') || local.get('demoPersona', '') || (forced === true ? 'crew' : forced) || 'crew';
     local.set('demoPersona', persona);

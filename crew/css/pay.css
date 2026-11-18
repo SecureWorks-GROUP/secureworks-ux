@@ -188,3 +188,9 @@ button.pay-line:active { background: var(--frost); }
 .pay-fundstate { font-weight: 700; }
 .pay-fundstate.ok { color: var(--ok-text); }
 @media (max-width: 379px) { .pay-hcol { padding: 10px 10px; } .pay-hrow { padding: 10px 12px; } }
+
+/* ---------- Year summary PDF on My pay (ui/yearpdf.js) ---------- */
+.pay-ypdf { display: grid; gap: 10px; }
+.pay-yrow { display: grid; gap: 4px; }
+.pay-ysel { min-height: 44px; font-size: 16px; width: 100%; }
+.pay-ybad { color: var(--bad-text); font-weight: 700; }

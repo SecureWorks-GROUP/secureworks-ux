@@ -319,6 +319,35 @@
     };
   }
 
+  // Owner, 11 Nov 2026: an agent may help draft a trade invoice, and the
+  // invoice says so. agent_label is a short machine name (for example 'grok').
+  // These three give the words. '' means no agent is named.
+  function agentDisplayName(label) {
+    var raw = String(label == null ? '' : label).replace(/[^A-Za-z0-9 _.-]/g, '').replace(/[\s_.-]+/g, ' ').trim().slice(0, 40);
+    if (!raw) return '';
+    var lower = raw.toLowerCase();
+    if (lower === 'agent' || lower === 'assistant' || lower === 'ai' || lower === 'bot') return '';
+    if (lower === 'grok' || lower === 'grokbot' || lower === 'grok bot') return 'Grokbot';
+    return raw.split(' ').map(function (word) {
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(' ');
+  }
+
+  // The banner on an unsent draft. Keeps "Only you can send it."
+  function agentDraftBanner(label) {
+    var name = agentDisplayName(label);
+    if (!name) return 'An assistant drafted lines on this invoice. Only you can send it.';
+    return 'Drafted with help from ' + name + '. Check it. Only you can send it.';
+  }
+
+  // The line on a sent invoice. '' unless an agent added lines to it.
+  function agentInvoiceLine(invoice, tradeName) {
+    if (!invoice || invoice.created_by_agent !== true) return '';
+    var name = agentDisplayName(invoice.agent_label) || 'an assistant';
+    var who = String(tradeName == null ? '' : tradeName).replace(/\s+/g, ' ').trim();
+    return 'Prepared with help from ' + name + (who ? ', sent by ' + who : '') + '.';
+  }
+
   function hashSnapshot(snap) {
     return JSON.stringify(snap);
   }
@@ -341,6 +370,9 @@
     applyOwnerCommand: applyOwnerCommand,
     regenerate: regenerate,
     agentDraft: agentDraft,
+    agentDisplayName: agentDisplayName,
+    agentDraftBanner: agentDraftBanner,
+    agentInvoiceLine: agentInvoiceLine,
     hashSnapshot: hashSnapshot,
     dismissKey: dismissKey
   };

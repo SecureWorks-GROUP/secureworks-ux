@@ -227,7 +227,7 @@ test('a credit shows as a credit under its bill; deciding the bill carries it', 
   await f.api.refresh();
   const html = f.root.innerHTML;
   assert.ok(html.indexOf('data-rp-group="ZZTEST-item-1"') < html.indexOf('data-rp-id="ZZTEST-credit"'), 'the credit is inside the bill group');
-  assert.match(html, /Deciding this bill carries its credit below with it\./);
+  assert.match(html, /Deciding this bill carries these credits/);
   assert.match(html, /Credit \$120\.50 ex GST/);
   assert.match(html, /Decide the bill and this credit follows it\. Placing it alone fixes it here\./);
   assert.doesNotMatch(html, /-\$120/, 'never a bare minus');
@@ -308,7 +308,7 @@ test('backend #1675: a credit shared by several bills shows in full under the fi
   assert.match(html, /Shared by 2 bills: ZZ-1 \(still waiting for a decision\), ZZ-2 \(still waiting for a decision\)\./);
   assert.match(html, /Shared: decide its bills and this credit follows them\. Placing it alone fixes it here\./);
   assert.match(html, /Credit, shared<\/span> ZZTEST Supplier CN-9, Credit \$50\.00 ex GST\. Shown in full under bill ZZ-1\./);
-  assert.equal((html.match(/Deciding this bill carries its credit below with it\./g) || []).length, 2);
+  assert.equal((html.match(/Deciding this bill carries these credits/g) || []).length, 2);
   await f.api.press('ZZTEST-credit', 'overhead');
   await f.api.press('ZZTEST-credit', 'record');
   assert.equal(posts(f)[0].body.item_id, 'ZZTEST-credit');
@@ -319,4 +319,36 @@ test('backend #1675: a credit shared by several bills shows in full under the fi
   assert.doesNotMatch(w.root.innerHTML, /data-rp="(another|split|overhead)"/);
   // Several, but none named: not placed.
   assert.match(P.blockedWhy(P.itemFromList({ ...sharedCredit, bills: [] })), /did not name the bills/);
+});
+
+test('backend #1678: a bill shows the credits that follow it, read only, each a credit ex GST', async () => {
+  const bill = raw({ credits: [
+    { document_id: 'doc-cn1', document_number: 'CN-1', is_credit: true, amount_ex: 120.5, lines: [{ line_id: 'c1', description: 'Returned posts', amount_ex: 100.5, state: 'placed' }, { line_id: 'c2', description: 'Freight', amount_ex: 20, state: 'placed' }] },
+    { document_id: 'doc-cn2', document_number: 'CN-2', is_credit: true, amount_ex: null, lines: [] },
+  ] });
+  const f = fixture({ bills: [bill] });
+  await f.api.refresh();
+  const html = f.root.innerHTML;
+  assert.equal((html.match(/Deciding this bill carries these credits/g) || []).length, 1);
+  assert.match(html, /CN-1, Credit \$120\.50 ex GST/);
+  assert.match(html, /Returned posts, Credit \$100\.50 ex GST/);
+  assert.match(html, /CN-2, Amount not read/);
+  assert.doesNotMatch(html, /-\$/);
+  assert.match(html, /1 waiting/, 'the credits are not items of their own');
+  const block = html.slice(html.indexOf('data-rp-bill-credits'), html.indexOf('</div>', html.indexOf('data-rp-bill-credits')));
+  assert.doesNotMatch(block, /<button/, 'read only');
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  assert.match(f.root.innerHTML, /Put \$1,000\.00 ex GST on SWF-990001, 12 Test St\. Its 2 credits follow it\./);
+  await f.api.press('ZZTEST-item-1', 'record');
+  assert.deepEqual(posts(f)[0].body.parts, [{ job_id: J1 }], 'the bill is decided as before');
+  // No credits[] (or a credit item): nothing shown.
+  assert.deepEqual(P.itemFromList(raw()).bill_credits, []);
+  assert.deepEqual(P.itemFromList(raw({ kind: 'credit', credits: [{ amount_ex: 1 }] })).bill_credits, []);
+});
+
+test('the list is complete when its last page has no next, even when a tab count is higher', async () => {
+  const f = fixture();
+  f.host.read = async (action, params) => { f.calls.push({ action, params }); return { ok: true, enabled: true, items: params.tab === 'bills' ? [raw()] : [], counts: { bills: 3, card_bank: 0, receipts: 0 }, next: null }; };
+  await f.api.refresh();
+  assert.doesNotMatch(f.root.innerHTML, /more may be waiting/);
 });

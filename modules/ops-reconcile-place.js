@@ -134,6 +134,33 @@
     var list = Array.isArray(raw.bills) ? raw.bills.filter(function (b) { return b && typeof b === 'object'; }).map(billFromList) : [];
     return list.length > 1 ? list : null;
   }
+  // The credits that follow a bill (backend #1678): read only, shown under the bill. amount_ex is
+  // the size the credit takes off (never signed); null when not read.
+  function billCreditsFromList(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (c) { return c && typeof c === 'object'; }).map(function (c) {
+      var cents = Split.lineCents(c.amount_ex);
+      return {
+        document_number: str(c.document_number), cents: cents == null ? null : Math.abs(cents),
+        lines: (Array.isArray(c.lines) ? c.lines : []).filter(function (l) { return l && typeof l === 'object'; }).map(function (l) {
+          var lc = Split.lineCents(l.amount_ex);
+          return { description: str(l.description) || 'Line', cents: lc == null ? null : Math.abs(lc) };
+        })
+      };
+    });
+  }
+  function creditSize(cents) { return cents == null ? 'Amount not read' : 'Credit ' + dollars(cents) + ' ex GST'; }
+  var BILL_CARRIES = 'Deciding this bill carries these credits';
+  function billCreditsHtml(item) {
+    if (!item.bill_credits || !item.bill_credits.length) return '';
+    return '<div class="rp-bill-credits" data-rp-bill-credits><p class="rp-note" data-rp-carries>' + BILL_CARRIES + '</p><ul>' +
+      item.bill_credits.map(function (c) {
+        return '<li><span class="rp-tag">Credit</span> ' + esc(c.document_number || 'Number not read') + ', ' + esc(creditSize(c.cents)) +
+          (c.lines.length ? '<ul>' + c.lines.map(function (l) { return '<li>' + esc(l.description) + ', ' + esc(creditSize(l.cents)) + '</li>'; }).join('') + '</ul>' : '') +
+          '</li>';
+      }).join('') + '</ul></div>';
+  }
+  function carriedCount(item) { return (item.credits ? item.credits.length : 0) + (item.bill_credits ? item.bill_credits.length : 0); }
   function shared(item) { return !!(item.is_credit && item.bill && item.bill.several); }
   function billNumber(b) { return b.document_number || '(number not read)'; }
   function billStateWords(b) {
@@ -181,7 +208,8 @@
       lines: lines, held: raw.held && typeof raw.held === 'object' ? raw.held : null,
       is_credit: raw.kind === 'credit' || (Split.lineCents(raw.amount_ex) || 0) < 0,
       bill: billFromList(raw.bill),
-      bills: billsFromList(raw)
+      bills: billsFromList(raw),
+      bill_credits: raw.kind === 'credit' ? [] : billCreditsFromList(raw.credits)
     };
   }
   // A document can be placed here only with its hash, every line read and an amount on each.
@@ -215,16 +243,13 @@
   function confirmWords(item, pending) {
     var amt = dollars(Math.abs(item.cents)) + ' ex GST';
     var on = item.is_credit ? ' off ' : ' on ';
-    var carried = item.credits && item.credits.length ? ' ' + carriedWords(item.credits.length) : '';
+    var carried = carriedCount(item) ? ' ' + carriedWords(carriedCount(item)) : '';
     if (pending.action === 'place') return item.is_credit ? 'Take ' + amt + ' off ' + jobLabel(pending.job) + ' (a credit).' : 'Put ' + amt + ' on ' + jobLabel(pending.job) + '.' + carried;
     if (pending.action === 'overhead') return 'Mark ' + (item.is_credit ? 'the ' + amt + ' credit' : amt) + ' as not for a job (overhead).' + carried;
     var bits = pending.summary.map(function (s) { return dollars(s.cents) + (s.job ? on + (s.job.job_number || 'a job') : ' not for a job'); });
     return 'Split ' + (item.is_credit ? 'the ' + amt + ' credit' : amt) + ': ' + bits.join(', ') + '.' + carried;
   }
   function carriedWords(n) { return n === 1 ? 'Its credit follows it.' : 'Its ' + n + ' credits follow it.'; }
-  function billCarriesWords(n) {
-    return n === 1 ? 'Deciding this bill carries its credit below with it.' : 'Deciding this bill carries its ' + n + ' credits below with it.';
-  }
   function doneWords(pending, item) {
     var c = item && item.is_credit ? 'Credit ' : '';
     if (pending.action === 'place') return c + (c ? 'put on ' : 'Put on ') + (pending.job && pending.job.job_number || 'the job') + ' by you, just now.';
@@ -305,7 +330,7 @@
       (item.under && !shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Decide the bill and this credit follows it. Placing it alone fixes it here.</p>' : '') +
       (item.under && shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Shared: decide its bills and this credit follows them. Placing it alone fixes it here.</p>' : '') +
       (item.is_credit && shared(item) ? '<p class="rp-note" data-rp-shared-mark><span class="rp-tag">Shared</span> This credit follows more than one bill.</p>' : '') +
-      (item.credits && item.credits.length ? '<p class="rp-note" data-rp-carries>' + esc(billCarriesWords(item.credits.length)) + '</p>' : '') +
+      (item.bill_credits && item.bill_credits.length ? billCreditsHtml(item) : item.credits && item.credits.length ? '<p class="rp-note" data-rp-carries>' + BILL_CARRIES + '</p>' : '') +
       '<div class="rp-sug" data-rp-sug>' + esc(suggestionWords(item)) + '</div>';
     h += '<details class="rp-why"><summary>Why, and the lines</summary>';
     if (item.clues.length) {
@@ -383,11 +408,9 @@
       if (!res || !Array.isArray(res.items)) throw new Error('Missing items');
       items = items.concat(res.items);
       var next = typeof res.next === 'string' && res.next ? res.next : null;
-      if (!next) {
-        var count = res.counts && typeof res.counts[tab] === 'number' ? res.counts[tab] : null;
-        var more = count != null ? count > items.length : res.items.length >= READ_LIMIT;
-        return { items: items, more: more };
-      }
+      // No next: the list is complete when it speaks in cursors (#1675). Its counts can be above
+      // what it lists (#1678 leaves pay documents out), so they never raise the notice.
+      if (!next) return { items: items, more: !('next' in res) && res.items.length >= READ_LIMIT };
       after = next;
     }
     return { items: items, more: true };
@@ -605,7 +628,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, billWords: billWords, shared: shared, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -659,7 +682,7 @@
       '.rp-line-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}.rp-left{font-size:14px;font-weight:600}.rp-off{color:#b42318}' +
       '.rp-foot{font-size:14px;margin:12px 0 0}.rp-msg{margin:10px 0 0;padding:10px;border-radius:8px;background:#fdecec;color:#8a1c1c;font-size:13px}' +
       '.rp-recent{margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#eef8f1;color:#1d5b33;font-size:14px}.rp-recent h3{font-size:14px;margin:0 0 4px}.rp-recent ul{margin:0;padding-left:18px}.rp-recent .rp-note{margin:6px 0 0}' +
-      '.rp-shared-ref{font-size:13px;color:var(--sw-text-sec,#4a5560)}.rp-group{margin-bottom:10px}.rp-group>.rp-card{margin-bottom:0}.rp-credits{margin:0 0 0 18px;padding:8px 0 0 12px;border-left:3px solid #c9dcf7}.rp-credits .rp-card{margin-bottom:8px}' +
+      '.rp-bill-credits{margin-top:8px;font-size:13px}.rp-bill-credits ul{margin:4px 0 0;padding-left:18px}.rp-shared-ref{font-size:13px;color:var(--sw-text-sec,#4a5560)}.rp-group{margin-bottom:10px}.rp-group>.rp-card{margin-bottom:0}.rp-credits{margin:0 0 0 18px;padding:8px 0 0 12px;border-left:3px solid #c9dcf7}.rp-credits .rp-card{margin-bottom:8px}' +
       '@media(max-width:599px){.rp-acts button{flex:1 1 100%}}';
     document.head.appendChild(style);
     api.mount(root);

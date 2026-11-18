@@ -92,7 +92,7 @@ test('lists cost items from the three cost tabs, never a message, and places the
 test('a credit sits under its bill, says it follows the bill, and can be decided alone', async ({ page }) => {
   await open(page);
   const group = page.locator('#reconcilePlaceRoot [data-rp-group="ZZTEST-bill"]');
-  await expect(group.locator('[data-rp-carries]')).toHaveText('Deciding this bill carries its credit below with it.');
+  await expect(group.locator('[data-rp-carries]')).toHaveText('Deciding this bill carries these credits');
   const credit = group.locator('.rp-credits [data-rp-id="ZZTEST-credit"]');
   await expect(credit.locator('.rp-amt')).toHaveText('Credit $120.50 ex GST');
   await expect(credit.locator('[data-rp-credit]')).toContainText('Against bill ZZ-100: the bill is still waiting for a decision.');
@@ -199,4 +199,15 @@ test('a credit shared by two bills shows in full under the first and marked unde
   await expect(second.locator('[data-rp-shared="ZZTEST-shared"]')).toContainText('Credit, shared ZZTEST Supplier CN-9, Credit $50.00 ex GST. Shown in full under bill ZZ-100.');
   await expect(page.locator('#reconcilePlaceRoot [data-rp-id="ZZTEST-shared"]')).toHaveCount(1);
   await expect(page.locator('#reconcilePlaceRoot .rp-count')).toHaveText('3 waiting');
+});
+
+test('a bill shows the credits that follow it, read only, each a credit ex GST (backend #1678)', async ({ page }) => {
+  const bill = { ...BILL, credits: [{ document_id: 'doc-cn1', document_number: 'CN-1', is_credit: true, amount_ex: 120.5, lines: [{ line_id: 'c1', description: 'Returned posts', amount_ex: 120.5, state: 'placed' }] }] };
+  await open(page, { lists: { bills: [bill] } });
+  const block = page.locator('#reconcilePlaceRoot [data-rp-bill-credits]');
+  await expect(block.locator('[data-rp-carries]')).toHaveText('Deciding this bill carries these credits');
+  await expect(block).toContainText('CN-1, Credit $120.50 ex GST');
+  await expect(block).toContainText('Returned posts, Credit $120.50 ex GST');
+  await expect(block.locator('button')).toHaveCount(0);
+  await expect(page.locator('#reconcilePlaceRoot .rp-count')).toHaveText('1 waiting');
 });

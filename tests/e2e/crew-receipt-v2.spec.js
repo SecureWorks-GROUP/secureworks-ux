@@ -289,6 +289,65 @@ test('a trade sees only their own jobs and only the divisions they work for', as
   expect(errors).toEqual([]);
 });
 
+test('own jobs stay the default; a manager can pick another crew\'s job, sees the not-booked note, and the save keeps that job', async ({ page }) => {
+  const errors = watchErrors(page);
+  await setupReceiptDemo(page, { spendCaptureV2: true, onlyFencing: true, managed: ['patio'] });
+  // The server (cl-receipt-ownjob) answers a marked save with not_booked_on_job.
+  await page.evaluate(() => {
+    const { db, ops } = window.__crewDemo;
+    // As the live search: a manager sees their own division, not the company.
+    db.flags.companyView = false;
+    const wrapped = ops.update_expense;
+    ops.update_expense = (p, b) => {
+      const res = wrapped(p, b);
+      return b.job_id === 'zz-other-4' ? { ...res, not_booked_on_job: true } : res;
+    };
+  });
+  await openCheckWithPhoto(page);
+  await page.getByRole('group', { name: 'How was it paid?' }).getByRole('button', { name: 'Company card', exact: true }).click();
+  await page.getByRole('group', { name: 'What was it for?' }).getByRole('button', { name: 'Materials', exact: true }).click();
+
+  const jobGroup = page.getByRole('group', { name: 'Which job?' });
+  await jobGroup.getByRole('button', { name: 'Another job' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Which job was it for?' });
+  await sheet.getByPlaceholder('Suburb, name or job number').fill('ZZTEST');
+  await expect(sheet.getByRole('button', { name: /ZZTEST North/ })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: /ZZTEST Foreign/ })).toHaveCount(0);
+
+  await sheet.getByRole('button', { name: 'Not one of your jobs? Show every job you can see' }).click();
+  await expect(sheet.getByText('Showing every job you can see.', { exact: false })).toBeVisible();
+  await sheet.getByRole('button', { name: /ZZTEST Foreign/ }).click();
+
+  await expect(jobGroup.getByRole('button', { name: 'ZZTEST Foreign' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('You are not booked on this job. It saves there, and the office checks it before approving it.')).toBeVisible();
+  await page.getByRole('button', { name: 'Save receipt', exact: true }).click();
+  await expect(page.getByText('You are not booked on that job, so the office checks it first.', { exact: false })).toBeVisible();
+
+  const updates = await page.evaluate(() => window.__updates);
+  expect(updates).toHaveLength(1);
+  expect(updates[0]).toMatchObject({ capture_version: 2, job_id: 'zz-other-4' });
+  expect(errors).toEqual([]);
+});
+
+test('a plain trade who widens the search still sees only jobs the app lets them see, and an own job shows no note', async ({ page }) => {
+  const errors = watchErrors(page);
+  await setupReceiptDemo(page, { spendCaptureV2: true, onlyFencing: true });
+  // As the live search: a plain trade sees only jobs they are on.
+  await page.evaluate(() => { window.__crewDemo.db.flags.companyView = false; });
+  await openCheckWithPhoto(page);
+  const jobGroup = page.getByRole('group', { name: 'Which job?' });
+  await jobGroup.getByRole('button', { name: 'ZZTEST North' }).click();
+  await expect(page.getByText('You are not booked on this job.', { exact: false })).toHaveCount(0);
+
+  await jobGroup.getByRole('button', { name: 'Another job' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Which job was it for?' });
+  await sheet.getByRole('button', { name: 'Not one of your jobs? Show every job you can see' }).click();
+  await sheet.getByPlaceholder('Suburb, name or job number').fill('ZZTEST');
+  await expect(sheet.getByRole('button', { name: /ZZTEST North/ })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: /ZZTEST Foreign/ })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('409 refusals, office-edit conflicts, failed jobs reads and unread totals behave safely', async ({ page }) => {
   const errors = watchErrors(page);
   await setupReceiptDemo(page, { spendCaptureV2: true, reimbursements: true, failBookingsOnce: true, unreadTotal: true });

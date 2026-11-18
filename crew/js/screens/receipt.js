@@ -194,6 +194,7 @@ export function Receipt({ jobId, poId }) {
   const [savedStep, setSavedStep] = useState('');
   const [savedV2, setSavedV2] = useState(false);
   const [savedReimbOn, setSavedReimbOn] = useState(false);
+  const [savedUnbooked, setSavedUnbooked] = useState(false);
   const upload = useRef(null); const unsure = useRef(false); const picked = useRef(Boolean(jobId)); const suggested = useRef([]); const pickedOwnIds = useRef(new Set());
   const set = (k, v) => { setSaveError(''); setF((p) => ({ ...p, [k]: v })); };
   const v2 = spendCaptureEnabled({ expense, suggestData: suggestMeta, expensesData: expensesQ.data });
@@ -366,6 +367,7 @@ export function Receipt({ jobId, poId }) {
       setSavedV2(v2);
       setSavedReimbOn(Boolean(reimbOn));
       setSavedStep((res && res.next_step) || '');
+      setSavedUnbooked(Boolean(res && res.not_booked_on_job === true));
       buzz([14, 60, 14, 60, 30]);
       setStep('done');
     } catch (err) {
@@ -376,7 +378,7 @@ export function Receipt({ jobId, poId }) {
     setSaving(false);
   };
   const again = () => {
-    setPhoto(null); setReason(''); setExpense(null); setSuggestMeta(null); setProblem(null); setFound([]); setSaveError(''); setSavedStep(''); setSavedV2(false); setSavedReimbOn(false);
+    setPhoto(null); setReason(''); setExpense(null); setSuggestMeta(null); setProblem(null); setFound([]); setSaveError(''); setSavedStep(''); setSavedV2(false); setSavedReimbOn(false); setSavedUnbooked(false);
     upload.current = null; unsure.current = false; picked.current = Boolean(allowPropJob); suggested.current = []; pickedOwnIds.current = new Set();
     setDest(allowPropJob ? { kind: 'job', id: jobId, via: 'manual_search' } : null);
     setStep('shoot');
@@ -395,7 +397,8 @@ export function Receipt({ jobId, poId }) {
         ? 'Saved. It will be on your next invoice as a reimbursement.'
         : `${checker} checks it${chosen ? ` against ${jobTitle(chosen)}` : ''}. Nothing more for you to do.`;
     const showOutsideAppBanner = f.paid === 'personal_card' && !savedReimbOn;
-    return html`<${DoneScreen} bar="Expenses" title=${title} lead=${lead}
+    const doneLead = savedUnbooked ? `${lead} You are not booked on that job, so the office checks it first.` : lead;
+    return html`<${DoneScreen} bar="Expenses" title=${title} lead=${doneLead}
       foot=${html`<${Button} block class="big" onClick=${() => back('/pay')}>Done<//>
         <${Button} kind="line" block onClick=${again}>Add another receipt<//>`}>
       <div class="card">
@@ -445,6 +448,7 @@ export function Receipt({ jobId, poId }) {
             <button type="button" class="pick" onClick=${findJob}>Another job</button>
           </div>` : html`<p class="t-small">You are not booked on a job yet.</p>`}
           ${chosen ? html`<span class="pay-chosen"><${JobTag} number=${chosen.job_number} /><span>${[chosen.client_name, chosen.reason].filter(Boolean).join(' · ')}</span></span>` : null}
+          ${chosen && !user.office && !ownJobIds.has(chosen.job_id) ? html`<p class="t-small">You are not booked on this job. It saves there, and the office checks it before approving it.</p>` : null}
         <//>
         ${v2 ? (divisions.length ? html`<${Field} label="Not for one job? Pick the stock:">
           <div class="picks">
@@ -490,6 +494,9 @@ function NoReceiptSheet({ onSend, onClose }) {
 
 function FindJobSheet({ user, ownJobIds, ownJobs, onPick, onClose }) {
   const [q, setQ] = useState(''); const [term, setTerm] = useState('');
+  // Own jobs first. A trade buying for another crew can widen to every job the
+  // app lets them see; the server saves it there and marks it for the office.
+  const [anyJob, setAnyJob] = useState(false);
   useEffect(() => { const id = setTimeout(() => setTerm(q.trim()), 280); return () => clearTimeout(id); }, [q]);
   const search = useQuery(term.length >= 2 ? 'receipt-search:' + term.toLowerCase() : null, () => api('search_all_jobs', { q: term }), { ttl: 60000 });
   const results = useMemo(() => {
@@ -497,6 +504,8 @@ function FindJobSheet({ user, ownJobIds, ownJobs, onPick, onClose }) {
     const lens = search.data && search.data.lens;
     const kept = user.office
       ? raw
+      : anyJob
+      ? raw.filter((j) => j && j.id)
       : raw.filter((j) => {
           if (!j || !j.id) return false;
           if ('assigned_to_me' in j) return j.assigned_to_me === true;
@@ -514,16 +523,19 @@ function FindJobSheet({ user, ownJobIds, ownJobs, onPick, onClose }) {
       }
     }
     return kept.slice(0, 12);
-  }, [search.data, user, ownJobIds, ownJobs, term]);
+  }, [search.data, user, ownJobIds, ownJobs, term, anyJob]);
   return html`<${Sheet} title="Which job was it for?" onClose=${onClose} tall>
     ${(shut) => html`<div class="stack">
       <div class="search"><${Icon} name="jobs" size=${20} /><input class="input" type="search" autofocus placeholder="Suburb, name or job number" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} /></div>
-      ${term.length < 2 ? html`<p class="t-small">${user.office ? 'Search for the job. Finished jobs show too.' : 'Search your jobs. Finished jobs show too.'}</p>`
+      ${term.length < 2 ? html`<p class="t-small">${user.office ? 'Search for the job. Finished jobs show too.' : anyJob ? 'Search every job you can see. Finished jobs show too.' : 'Search your jobs. Finished jobs show too.'}</p>`
         : search.loading ? html`<${SkelRows} n=${3} />`
         : search.error && !results.length ? html`<${LoadError} error=${search.error} onRetry=${search.refetch} what="your jobs" />`
         : !results.length ? html`<${Empty} title="No job found">Try the suburb or the job number.<//>`
         : html`<div class="pay-sheetlist">${results.map((j) => html`<button type="button" class="item" key=${j.id} onClick=${() => { onPick(j); buzz(6); shut(); }}>
             <span class="main"><b>${jobTitle(j)}</b><span class="sub">${j.client_name || ''}</span><${JobLine} job=${j} vertical=${verticalOf(j)} /></span></button>`)}</div>`}
+      ${user.office ? null : anyJob
+        ? html`<p class="t-small">Showing every job you can see. If you are not booked on the one you pick, it still saves there and the office checks it.</p>`
+        : html`<button type="button" class="link tap pay-linkrow" onClick=${() => setAnyJob(true)}>Not one of your jobs? Show every job you can see</button>`}
     </div>`}
   <//>`;
 }

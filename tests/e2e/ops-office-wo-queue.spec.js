@@ -176,3 +176,428 @@ test('a draft with no allowance has no Approve until one is saved', async ({ pag
   await expect(queue.locator('[data-office-wo-fill-msg]')).toHaveText('Set the labour allowance. Use 0 when there is none.');
   expect(await page.evaluate(() => window.__posts.length)).toBe(0);
 });
+
+async function bootGaps(page) {
+  await page.route('**/*', (route) => {
+    const host = new URL(route.request().url()).hostname;
+    return host === '127.0.0.1' || host === 'localhost' ? route.continue() : route.abort();
+  });
+  await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
+  await showWorkOrders(page);
+  await page.evaluate(() => {
+    window.__reads = [];
+    window.__posts = [];
+    window.__openedJobs = [];
+    window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return 'ops_manager'; } } };
+    if (window.JobWorkOrderOps) {
+      window.JobWorkOrderOps.openForJob = function (jobId) { window.__openedJobs.push(jobId); };
+    }
+  });
+}
+
+test('P1-05.3 renders two gaps above the queue with counts, buttons, and waiting note only when held_lines > 0', async ({ page }) => {
+  await bootGaps(page);
+  const threeDaysAgo = new Date(Date.now() - (3 * 86400000 + 3600000)).toISOString();
+  const gapsPayload = {
+    counts: { no_work_order: 1, no_amount: 1, jobs_with_held_lines: 1 },
+    jobs: [
+      {
+        job_id: 'ZZTEST-job-201',
+        job_number: 'ZZTEST-201',
+        type: 'fencing',
+        status: 'scheduled',
+        reason: 'no_work_order',
+        work_order_id: null,
+        held_lines: 2,
+        held_amount_ex: 748,
+        held_trades: 2,
+        oldest_held_at: threeDaysAgo,
+      },
+      {
+        job_id: 'ZZTEST-job-202',
+        job_number: 'ZZTEST-202',
+        type: 'repair',
+        status: 'accepted',
+        reason: 'no_amount',
+        work_order_id: 'ZZTEST-wo-202',
+        held_lines: 0,
+        held_amount_ex: 0,
+        held_trades: 0,
+        oldest_held_at: null,
+      },
+    ],
+  };
+  const fillRow = {
+    id: 'ZZTEST-wo-202',
+    job_id: 'ZZTEST-job-202',
+    wo_number: 'WO-202',
+    status: 'draft',
+    agreed_labour_ex: null,
+    needs_allowance: true,
+    updated_at: '2026-11-18T01:00:00.000Z',
+    job_number: 'ZZTEST-202',
+    job_type: 'repair',
+    client_name: 'ZZTEST',
+    site_suburb: null,
+  };
+
+  await page.evaluate(({ gaps, draft }) => {
+    window.opsFetch = async function (action) {
+      window.__reads.push(action);
+      if (action === 'job_work_order_gaps') return gaps;
+      if (action === 'list_office_job_work_orders') return { enabled: true, work_orders: [draft] };
+      if (action === 'list_work_orders') return { work_orders: [], cap_read: 'ok' };
+      if (action === 'work_order_changes') return { changes: [] };
+      return {};
+    };
+    return loadWOs();
+  }, { gaps: gapsPayload, draft: fillRow });
+
+  const section = page.locator('[data-office-wo-gaps]');
+  await expect(section).toContainText('Needs a work order');
+  await expect(section).toContainText('Jobs with no work order: 1');
+  await expect(section).toContainText('Work orders with no amount: 1');
+  await expect(section).toContainText('Jobs with pay waiting: 1');
+
+  const isAbove = await page.evaluate(() => {
+    const gapsEl = document.getElementById('officeWoGaps');
+    const fillEl = document.getElementById('officeWoFill');
+    return Boolean(gapsEl && fillEl && (gapsEl.compareDocumentPosition(fillEl) & Node.DOCUMENT_POSITION_FOLLOWING));
+  });
+  expect(isAbove).toBe(true);
+
+  const row1 = section.locator('[data-office-wo-gap="ZZTEST-job-201"]');
+  await expect(row1).toContainText('ZZTEST-201');
+  await expect(row1).toContainText('fencing');
+  await expect(row1).toContainText('No work order');
+  await expect(row1.getByRole('button', { name: 'Open a work order' })).toBeVisible();
+  await expect(row1.locator('[data-office-wo-gap-waiting]')).toHaveText(
+    '2 pay lines from 2 trades are waiting on this job ($748.00), oldest 3 days'
+  );
+
+  const row2 = section.locator('[data-office-wo-gap="ZZTEST-job-202"]');
+  await expect(row2).toContainText('ZZTEST-202');
+  await expect(row2).toContainText('repair');
+  await expect(row2).toContainText('No amount yet');
+  await expect(row2.getByRole('button', { name: 'Fill the amount' })).toBeVisible();
+  await expect(row2.locator('[data-office-wo-gap-waiting]')).toHaveCount(0);
+
+  await row2.getByRole('button', { name: 'Fill the amount' }).click();
+  await expect(page.locator('[data-office-wo-fill="ZZTEST-wo-202"] [data-office-wo-allowance]')).toBeFocused();
+});
+
+test('P1-05.3 loading, empty, error without zero, Retry recovery, and trade exclusion', async ({ page }) => {
+  await bootGaps(page);
+  await page.evaluate(() => {
+    window.__gapMode = 'hold';
+    window.opsFetch = function (action) {
+      window.__reads.push(action);
+      if (action === 'list_office_job_work_orders') return Promise.resolve({ enabled: false, work_orders: [] });
+      if (action === 'job_work_order_gaps') {
+        if (window.__gapMode === 'hold') {
+          return new Promise((resolve) => { window.__resolveHold = resolve; });
+        }
+        if (window.__gapMode === 'error') {
+          const err = new Error('The list of jobs needing a work order could not be read');
+          err.status = 503;
+          err.code = 'gaps_unreadable';
+          return Promise.reject(err);
+        }
+        if (window.__gapMode === 'malformed') {
+          return Promise.resolve({ counts: { no_work_order: null, no_amount: 0, jobs_with_held_lines: 0 }, jobs: [] });
+        }
+        return Promise.resolve({
+          counts: { no_work_order: 0, no_amount: 0, jobs_with_held_lines: 0 },
+          jobs: [],
+        });
+      }
+      return Promise.resolve({});
+    };
+    window.__paintPromise = OfficeWoFill.paint();
+  });
+
+  const host = page.locator('#officeWoGaps');
+  await expect(host).toContainText('Checking for jobs with no work order...');
+  await expect(host).not.toContainText('0');
+
+  await page.evaluate(() => {
+    window.__resolveHold({
+      counts: { no_work_order: 0, no_amount: 0, jobs_with_held_lines: 0 },
+      jobs: [],
+    });
+    return window.__paintPromise;
+  });
+  await expect(host).toContainText('Jobs with no work order: 0');
+  await expect(host).toContainText('Work orders with no amount: 0');
+  await expect(host).toContainText('Jobs with pay waiting: 0');
+  await expect(host).toContainText('Every live job has a work order with an amount.');
+
+  await page.evaluate(() => {
+    window.__gapMode = 'error';
+    return OfficeWoFill.paint();
+  });
+  await expect(host.locator('[data-office-wo-gaps-error]')).toContainText(
+    'The list could not be read, so it is not shown. Try again.'
+  );
+  await expect(host.locator('[data-office-wo-gaps-counts]')).toHaveCount(0);
+  await expect(host).not.toContainText('0');
+
+  await page.evaluate(() => {
+    window.__gapMode = 'malformed';
+    return OfficeWoFill.paint();
+  });
+  await expect(host.locator('[data-office-wo-gaps-error]')).toContainText(
+    'The list could not be read, so it is not shown. Try again.'
+  );
+  await expect(host.locator('[data-office-wo-gaps-counts]')).toHaveCount(0);
+  await expect(host).not.toContainText('0');
+
+  await page.evaluate(() => { window.__gapMode = 'empty'; });
+  await host.getByRole('button', { name: 'Retry' }).click();
+  await expect(host).toContainText('Every live job has a work order with an amount.');
+
+  await page.evaluate(() => {
+    window.opsFetch = async function (action) {
+      if (action === 'list_office_job_work_orders') return { enabled: false, work_orders: [] };
+      if (action === 'job_work_order_gaps') {
+        return {
+          counts: { no_work_order: 0, no_amount: 1, jobs_with_held_lines: 0 },
+          jobs: [{
+            job_id: 'ZZTEST-job-off',
+            job_number: 'ZZTEST-299',
+            type: 'repair',
+            status: 'accepted',
+            reason: 'no_amount',
+            work_order_id: 'ZZTEST-wo-299',
+            held_lines: 0,
+            held_amount_ex: 0,
+            held_trades: 0,
+            oldest_held_at: null,
+          }],
+        };
+      }
+      return {};
+    };
+    return OfficeWoFill.paint();
+  });
+  await host.getByRole('button', { name: 'Fill the amount' }).click();
+  expect(await page.evaluate(() => window.__openedJobs)).toEqual(['ZZTEST-job-off']);
+
+  await page.evaluate(() => {
+    window.__reads = [];
+    window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return 'installer'; } } };
+    return OfficeWoFill.paint();
+  });
+  await expect(host).toBeEmpty();
+  expect(await page.evaluate(() => window.__reads)).toEqual([]);
+});
+
+test('P1-05.3 Open a work order retries after refusal, reloads, and saving plus approving shows released waiting lines', async ({ page }) => {
+  await bootGaps(page);
+  const twoDaysAgo = new Date(Date.now() - (2 * 86400000 + 3600000)).toISOString();
+
+  await page.evaluate((oldestAt) => {
+    window.__stage = 'no_wo';
+    window.__failCreateOnce = true;
+    window.opsFetch = async function (action) {
+      window.__reads.push(action);
+      if (action === 'job_work_order_gaps') {
+        if (window.__stage === 'no_wo') {
+          return {
+            counts: { no_work_order: 1, no_amount: 0, jobs_with_held_lines: 1 },
+            jobs: [{
+              job_id: 'ZZTEST-job-301',
+              job_number: 'ZZTEST-301',
+              type: 'patio',
+              status: 'scheduled',
+              reason: 'no_work_order',
+              work_order_id: null,
+              held_lines: 3,
+              held_amount_ex: 960,
+              held_trades: 2,
+              oldest_held_at: oldestAt,
+            }],
+          };
+        }
+        if (window.__stage === 'draft' || window.__stage === 'filled') {
+          return {
+            counts: { no_work_order: 0, no_amount: 1, jobs_with_held_lines: 1 },
+            jobs: [{
+              job_id: 'ZZTEST-job-301',
+              job_number: 'ZZTEST-301',
+              type: 'patio',
+              status: 'scheduled',
+              reason: 'no_amount',
+              work_order_id: 'ZZTEST-wo-301',
+              held_lines: 3,
+              held_amount_ex: 960,
+              held_trades: 2,
+              oldest_held_at: oldestAt,
+            }],
+          };
+        }
+        return {
+          counts: { no_work_order: 0, no_amount: 0, jobs_with_held_lines: 0 },
+          jobs: [],
+        };
+      }
+      if (action === 'list_office_job_work_orders') {
+        if (window.__stage === 'draft') {
+          return {
+            enabled: true,
+            work_orders: [{
+              id: 'ZZTEST-wo-301',
+              job_id: 'ZZTEST-job-301',
+              wo_number: 'WO-301',
+              status: 'draft',
+              agreed_labour_ex: null,
+              needs_allowance: true,
+              updated_at: '2026-11-18T02:00:00.000Z',
+              job_number: 'ZZTEST-301',
+              job_type: 'patio',
+              client_name: 'ZZTEST',
+              site_suburb: null,
+            }],
+          };
+        }
+        if (window.__stage === 'filled') {
+          return {
+            enabled: true,
+            work_orders: [{
+              id: 'ZZTEST-wo-301',
+              job_id: 'ZZTEST-job-301',
+              wo_number: 'WO-301',
+              status: 'draft',
+              agreed_labour_ex: 1200,
+              needs_allowance: false,
+              updated_at: '2026-11-18T02:05:00.000Z',
+              job_number: 'ZZTEST-301',
+              job_type: 'patio',
+              client_name: 'ZZTEST',
+              site_suburb: null,
+            }],
+          };
+        }
+        return { enabled: true, work_orders: [] };
+      }
+      return {};
+    };
+    window.opsPost = async function (action, body) {
+      window.__posts.push({ action, body });
+      if (action === 'create_work_order') {
+        if (window.__failCreateOnce) {
+          window.__failCreateOnce = false;
+          throw new Error('Could not create draft right now.');
+        }
+        window.__stage = 'draft';
+        return { created: true, work_order: { id: 'ZZTEST-wo-301' } };
+      }
+      if (action === 'fill_job_work_order_allowance') {
+        window.__stage = 'filled';
+        return { work_order_id: body.work_order_id, agreed_labour_ex: body.agreed_labour_ex, updated_at: '2026-11-18T02:05:00.000Z' };
+      }
+      if (action === 'approve_office_job_work_order') {
+        window.__stage = 'approved';
+        return { work_order_id: body.work_order_id, status: 'approved' };
+      }
+      return {};
+    };
+    return OfficeWoFill.paint();
+  }, twoDaysAgo);
+
+  const section = page.locator('[data-office-wo-gaps]');
+  const gapRow = section.locator('[data-office-wo-gap="ZZTEST-job-301"]');
+  await gapRow.getByRole('button', { name: 'Open a work order' }).click();
+  await expect(gapRow.locator('[data-office-wo-gap-msg]')).toHaveText('Could not create draft right now.');
+
+  await gapRow.getByRole('button', { name: 'Open a work order' }).click();
+  await expect(section.locator('[data-office-wo-gap="ZZTEST-job-301"]')).toContainText('No amount yet');
+  const postsAfterCreate = await page.evaluate(() => window.__posts.slice(0, 2));
+  expect(postsAfterCreate).toEqual([
+    { action: 'create_work_order', body: { kind: 'job', job_id: 'ZZTEST-job-301' } },
+    { action: 'create_work_order', body: { kind: 'job', job_id: 'ZZTEST-job-301' } },
+  ]);
+
+  await section.locator('[data-office-wo-gap="ZZTEST-job-301"]').getByRole('button', { name: 'Fill the amount' }).click();
+  const fillRow = page.locator('[data-office-wo-fill="ZZTEST-wo-301"]');
+  await expect(fillRow.locator('[data-office-wo-allowance]')).toBeFocused();
+  await fillRow.locator('[data-office-wo-allowance]').fill('1200');
+  await fillRow.locator('[data-office-wo-fill-save]').click();
+  await expect(section.locator('[data-office-wo-gaps-released]')).toHaveCount(0);
+
+  await page.locator('[data-office-wo-fill="ZZTEST-wo-301"] [data-office-wo-fill-approve]').click();
+  await expect(section.locator('[data-office-wo-gaps-released]')).toHaveText(
+    '3 waiting lines were released for the next pay run'
+  );
+  await expect(section).toContainText('Every live job has a work order with an amount.');
+});
+
+for (const width of [1280, 820]) {
+  test(`P1-05.3 fits cleanly at ${width}px without horizontal overflow`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 });
+    await bootGaps(page);
+    const fourDaysAgo = new Date(Date.now() - (4 * 86400000 + 3600000)).toISOString();
+    await page.evaluate((oldestAt) => {
+      window.opsFetch = async function (action) {
+        if (action === 'job_work_order_gaps') {
+          return {
+            counts: { no_work_order: 1, no_amount: 1, jobs_with_held_lines: 1 },
+            jobs: [
+              {
+                job_id: 'ZZTEST-job-401',
+                job_number: 'ZZTEST-401',
+                type: 'fencing',
+                status: 'scheduled',
+                reason: 'no_work_order',
+                work_order_id: null,
+                held_lines: 2,
+                held_amount_ex: 640,
+                held_trades: 2,
+                oldest_held_at: oldestAt,
+              },
+              {
+                job_id: 'ZZTEST-job-402',
+                job_number: 'ZZTEST-402',
+                type: 'repair',
+                status: 'accepted',
+                reason: 'no_amount',
+                work_order_id: 'ZZTEST-wo-402',
+                held_lines: 0,
+                held_amount_ex: 0,
+                held_trades: 0,
+                oldest_held_at: null,
+              },
+            ],
+          };
+        }
+        if (action === 'list_office_job_work_orders') {
+          return {
+            enabled: true,
+            work_orders: [{
+              id: 'ZZTEST-wo-402',
+              job_id: 'ZZTEST-job-402',
+              wo_number: 'WO-402',
+              status: 'draft',
+              agreed_labour_ex: null,
+              needs_allowance: true,
+              updated_at: '2026-11-18T03:00:00.000Z',
+              job_number: 'ZZTEST-402',
+              job_type: 'repair',
+              client_name: 'ZZTEST',
+              site_suburb: null,
+            }],
+          };
+        }
+        if (action === 'list_work_orders') return { work_orders: [], cap_read: 'ok' };
+        if (action === 'work_order_changes') return { changes: [] };
+        return {};
+      };
+      return loadWOs();
+    }, fourDaysAgo);
+
+    await expect(page.locator('[data-office-wo-gaps]')).toContainText('ZZTEST-401');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+}

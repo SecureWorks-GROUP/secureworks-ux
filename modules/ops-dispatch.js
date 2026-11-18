@@ -1562,10 +1562,12 @@
   // ── v2 slice 8: supplier replies and suggested delivery dates ──
   // Two reads, each writing nothing: dispatch_v2_replies once per job open
   // (and once after each press on it), and dispatch_v2_replies_unmatched once
-  // each time the tab is shown (and after each tray press). Seven presses, each
+  // each time the tab is shown (and after each tray press). Eight presses, each
   // sent once on a person's press, never on their own: confirm_guess,
-  // reject_guess, assign, hide, clear (Clear all), suggestion_accept and
-  // suggestion_dismiss.
+  // reject_guess, assign, hide, clear (Clear all), suggestion_accept,
+  // suggestion_dismiss and replies_dismiss (Dismiss on a supplier reply, or
+  // Dismiss all on the job; items 17 and 5, Shaun 18 Nov 2026). Dismiss on a
+  // reply takes it out of Supplier replied and changes nothing else.
   // Accept saves the supplier's delivery date on the supplier box and moves no
   // stage: when its answer offers a stage move, the rail's own confirm line
   // asks first, and only Move sends update_job_status.
@@ -1576,8 +1578,40 @@
     assign: 'dispatch_v2_replies_assign',
     hide: 'dispatch_v2_replies_hide',
     accept: 'dispatch_v2_suggestion_accept',
-    dismiss: 'dispatch_v2_suggestion_dismiss'
+    dismiss: 'dispatch_v2_suggestion_dismiss',
+    replydismiss: 'dispatch_v2_replies_dismiss',
+    replydismissall: 'dispatch_v2_replies_dismiss'
   };
+
+  // The busy and answer key for Dismiss all on the open job.
+  var REP_ALL = 'dismiss-all';
+
+  // The replies on a job read this session that show under Supplier replied
+  // (flagged by the server). Null when not read, or from an older server that
+  // does not say which are flagged.
+  function repFlagged(e) {
+    if (!e || e.status !== 'ok' || !e.data) return null;
+    var em = e.data.emails;
+    if (em.length && !em.some(function (m) { return Object.prototype.hasOwnProperty.call(m, 'flagged'); })) return null;
+    return em.filter(function (m) { return m.flagged === true; });
+  }
+
+  // After a Dismiss: the dismissed replies stop showing at once, before the
+  // re-read lands.
+  function repMarkDismissed(e, resp) {
+    if (!e || !e.data || !isObj(resp)) return;
+    var done = {};
+    (Array.isArray(resp.dismissed) ? resp.dismissed : []).forEach(function (m) { if (isObj(m) && m.id) done[m.id] = m; });
+    (Array.isArray(resp.already_dismissed) ? resp.already_dismissed : []).forEach(function (id) { if (id && !done[id]) done[id] = {}; });
+    e.data.emails = e.data.emails.map(function (m) {
+      if (!done[m.id]) return m;
+      var n = {};
+      Object.keys(m).forEach(function (k) { n[k] = m[k]; });
+      Object.keys(done[m.id]).forEach(function (k) { n[k] = done[m.id][k]; });
+      n.flagged = false;
+      return n;
+    });
+  }
 
   function isObj(v) { return !!v && typeof v === 'object'; }
 
@@ -1631,6 +1665,7 @@
     if (code === 'orders_not_wired') return { text: 'Supplier orders are not switched on yet, so a delivery date cannot be saved.' };
     if (code === 'supplier_box_not_found' || code === 'order_has_no_supplier_box') return { text: "That order's supplier box is no longer on the job, so the date was not saved." };
     if (code === 'job_not_found') return { changed: true, text: 'That job was not found. Showing the latest.' };
+    if (code === 'email_not_found' || code === 'not_on_a_job') return { changed: true, text: 'That email is not on this job any more. Showing the latest.' };
     return null;
   }
 
@@ -1639,6 +1674,11 @@
     if (kind === 'reject') return 'Sent back to the Unmatched supplier emails tray.';
     if (kind === 'hide') return 'Hidden from the tray. The email stays in admin@.';
     if (kind === 'dismiss') return 'Dismissed. No date was saved.';
+    if (kind === 'replydismiss') return 'Dismissed. It no longer shows under Supplier replied.';
+    if (kind === 'replydismissall') {
+      var n = resp && Array.isArray(resp.dismissed) ? resp.dismissed.length : 0;
+      return 'Dismissed ' + (n === 1 ? '1 reply' : n + ' replies') + '. They no longer show under Supplier replied.';
+    }
     if (kind === 'assign') {
       // Item 16 part 1: Put on job also saves the email's files to the job.
       var files = global.OpsDispatchTrayFiles && typeof global.OpsDispatchTrayFiles.doneWords === 'function' ? global.OpsDispatchTrayFiles.doneWords(resp) : '';
@@ -1729,7 +1769,8 @@
 
   var REP_NOT_DONE = {
     confirm: 'Not put on the job.', reject: 'Not sent back.', hide: 'Not hidden.',
-    dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.'
+    dismiss: 'Not dismissed.', assign: 'Not put on the job.', accept: 'Delivery date not saved.',
+    replydismiss: 'Not dismissed.', replydismissall: 'Not dismissed.'
   };
 
   // A stage's label, from the latest board answer, for a stage-move offer.
@@ -1740,19 +1781,25 @@
   }
 
   // One press on a supplier reply in the job's Emails panel. id is the email's id (confirm,
-  // reject) or the suggestion's (accept, dismiss).
+  // reject, replydismiss), the suggestion's (accept, dismiss), or REP_ALL for
+  // Dismiss all (replydismissall, with extra.email_ids).
   function repPress(jobId, kind, id, extra) {
     var e = repEntry(jobId);
     if (!e || !id || e.busy[id] || !REP_ACTIONS[kind]) return;
     e.busy[id] = kind;
     e.msg[id] = null;
     paintRepIf(jobId);
-    var body = kind === 'accept' || kind === 'dismiss' ? { suggestion_id: id } : { email_id: id };
+    var body = kind === 'accept' || kind === 'dismiss' ? { suggestion_id: id } : kind === 'replydismissall' ? {} : { email_id: id };
     if (extra) Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
     Promise.resolve().then(function () { return global.opsPost(REP_ACTIONS[kind], body); }).then(function (resp) {
       if (!resp || resp.ok !== true) throw new Error('Unexpected answer');
       delete e.busy[id];
       e.msg[id] = { ok: true, text: repDoneWords(kind, resp) + (kind === 'accept' ? acceptPayWords(resp) : '') };
+      if (kind === 'replydismiss' || kind === 'replydismissall') {
+        repMarkDismissed(e, resp);
+        paintRepIf(jobId);
+        needsRefresh();
+      }
       readReplies(jobId, true);
       if (kind === 'confirm' || kind === 'reject') trayReread();
       if (kind !== 'accept') return;
@@ -1789,8 +1836,9 @@
   //
   // What counts as what, and the two thresholds, live in
   // modules/dispatch-needs-you.js. It is worked out here from reads the tab
-  // already makes: the Active board, each opened job's replies read (date
-  // suggestions) and the tray's count. No new writes.
+  // already makes: the Active board (its supplier replies and open dates
+  // too), each opened job's replies read (fresher, so it wins for that job)
+  // and the tray's count. The only write is Dismiss on a reply, by a person.
 
   // The Dispatch tab's count is read again at most this often while another
   // tab is showing (Dispatch keeps it fresh itself while it is open).
@@ -1824,7 +1872,7 @@
   // Works out the bar from a list of board rows and the tray's count.
   function needsFrom(rows, emails) {
     if (!global.OpsDispatchNeeds) return null;
-    var jobs = rows.map(function (r) { return { id: r.id, board: boardOf(r), suggestions: needsSuggestions(r.id) }; });
+    var jobs = rows.map(function (r) { return { id: r.id, board: boardOf(r), suggestions: needsSuggestions(r.id), flagged: repFlagged(repEntry(r.id)) }; });
     var first = rows.map(boardOf).filter(function (b) { return b && arrivalOk(b.arrival); })[0];
     var today = first ? text(first.arrival.today) : perthToday();
     return global.OpsDispatchNeeds.summarise(jobs, { today: today, isHoliday: isWaHoliday }, emails);
@@ -2860,11 +2908,16 @@
     var e = row ? repEntry(row.id) : null;
     var open = e && e.status === 'ok' ? e.data.suggestions.filter(function (s) { return s.state === 'open'; }) : [];
     var guesses = e && e.status === 'ok' ? e.data.emails.filter(function (m) { return m.state === 'needs_confirmation'; }) : [];
+    // Replies not dismissed, leaving out those with a date to check (counted above).
+    var dated = {};
+    open.forEach(function (s) { dated[s.email_id] = true; });
+    var unread = (repFlagged(e) || []).filter(function (m) { return !dated[m.id]; });
     var h = '<div data-dpc-region="sugnote">';
-    if (open.length || guesses.length) {
+    if (open.length || guesses.length || unread.length) {
       var parts = [];
       if (open.length) parts.push(open.length === 1 ? '1 supplier delivery date to check' : open.length + ' supplier delivery dates to check');
       if (guesses.length) parts.push(guesses.length === 1 ? '1 best guess email to confirm' : guesses.length + ' best guess emails to confirm');
+      if (unread.length) parts.push(unread.length === 1 ? '1 supplier reply to read' : unread.length + ' supplier replies to read');
       h += '<div class="dpc-sugnote" role="status"><span class="dpc-grow">' + esc(parts.join(', ') + '.') + '</span><button type="button" data-dpc-rep-goto>Show in Emails</button></div>';
     }
     return h + '</div>';
@@ -4516,9 +4569,31 @@
         '<button type="button" class="dpc-primary" data-dpc-rep-confirm="' + esc(m.id) + '"' + off + '>' + (busy === 'confirm' ? 'Saving...' : 'Yes, this job') + '</button>' +
         '<button type="button" data-dpc-rep-reject="' + esc(m.id) + '"' + off + '>' + (busy === 'reject' ? 'Saving...' : 'Not this one') + '</button></div>';
     }
+    // Items 17 and 5 (Shaun, 18 Nov 2026): every reply shows under Supplier
+    // replied until a person presses Dismiss. A best guess is answered above
+    // first, and a reply with a date is dismissed by Accept or Dismiss on it.
+    if (m.flagged === true && !guess) {
+      h += '<div class="dpc-rep-ask dpc-rep-read"><span class="dpc-grow">Shows under Supplier replied until someone dismisses it.</span>' +
+        '<button type="button" data-dpc-rep-dismiss="' + esc(m.id) + '"' + off + '>' + (busy === 'replydismiss' ? 'Dismissing...' : 'Dismiss') + '</button></div>';
+    } else if (parseStamp(m.dismissed_at) && m.dismissed_source !== 'backfill') {
+      var by = text(m.dismissed_by_email);
+      h += '<p class="dpc-rep-why">' + esc('Dismissed' + (by ? ' by ' + by : '') + ', ' + stampText(m.dismissed_at) + '.') + '</p>';
+    }
     h += repMsgHtml(e.msg[m.id], 'data-dpc-rep-retry="' + esc(m.id) + '"');
     sugs.forEach(function (s) { h += sugHtml(e, s); });
     return h + '</li>';
+  }
+
+  // Above the job's email list: Dismiss all, when two or more replies show
+  // under Supplier replied. Its answer shows here (or at the top once done).
+  function repDismissAllHtml(e) {
+    var list = repFlagged(e) || [];
+    if (list.length < 2) return '';
+    var busy = e.busy[REP_ALL];
+    var ids = list.map(function (m) { return m.id; }).join(',');
+    var h = '<div class="dpc-rep-ask dpc-rep-readall"><span class="dpc-grow">' + esc(list.length + ' supplier replies show under Supplier replied.') + '</span>' +
+      '<button type="button" data-dpc-rep-dismiss-all="' + esc(ids) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Dismissing...' : 'Dismiss all (' + list.length + ')') + '</button></div>';
+    return h + repMsgHtml(e.msg[REP_ALL], 'data-dpc-rep-retry="' + REP_ALL + '"');
   }
 
   // ───────────────────────── render: Emails (the job's one email panel) ─────────────────────────
@@ -4572,7 +4647,7 @@
       r.data.emails.forEach(function (m) {
         var sugs = r.data.suggestions.filter(function (s) { return s.email_id === m.id; });
         rest.push({ key: 'r:' + m.id, kind: 'reply', m: m, sugs: sugs, at: m.received_at,
-          ask: m.state === 'needs_confirmation' || sugs.some(function (s) { return s.state === 'open'; }) });
+          ask: m.state === 'needs_confirmation' || m.flagged === true || sugs.some(function (s) { return s.state === 'open'; }) });
       });
     }
     var ms = function (v) { var t = Date.parse(text(v)); return isFinite(t) ? t : 0; };
@@ -4605,6 +4680,7 @@
     if (text(m.snippet)) h += '<span class="dpc-muted dpc-mail-prev">' + esc(text(m.snippet)) + '</span>';
     h += '<span class="dpc-mail-tags"><span class="dpc-type">Supplier</span>' + rungHtml(m);
     if (it.sugs.some(function (s) { return s.state === 'open'; })) h += '<span class="dpc-mail-drafttag">Date to check</span>';
+    else if (m.flagged === true) h += '<span class="dpc-mail-drafttag">Not dismissed</span>';
     return h + '</span></button>';
   }
 
@@ -4648,7 +4724,10 @@
       var shown = {};
       d.emails.forEach(function (m) { shown[m.id] = true; });
       d.suggestions.forEach(function (s) { shown[s.id] = true; });
+      // Dismiss all's answer shows beside its button while the button is there.
+      if ((repFlagged(r) || []).length >= 2) shown[REP_ALL] = true;
       Object.keys(r.msg).forEach(function (id) { if (!shown[id] && r.msg[id]) h += repMsgHtml(r.msg[id]); });
+      h += repDismissAllHtml(r);
     }
     var items = mailItems(jobId);
     var fails = '';
@@ -4688,7 +4767,7 @@
     return h + '</div>';
   }
 
-  var MAIL_FOCUS_KEYS = ['data-dpc-rep-confirm', 'data-dpc-rep-reject', 'data-dpc-rep-retry', 'data-dpc-sug-accept', 'data-dpc-sug-dismiss', 'data-dpc-sug-order', 'data-dpc-sug-retry', 'data-dpc-retry',
+  var MAIL_FOCUS_KEYS = ['data-dpc-rep-confirm', 'data-dpc-rep-reject', 'data-dpc-rep-retry', 'data-dpc-rep-dismiss', 'data-dpc-rep-dismiss-all', 'data-dpc-sug-accept', 'data-dpc-sug-dismiss', 'data-dpc-sug-order', 'data-dpc-sug-retry', 'data-dpc-retry',
     'data-dpc-mail', 'data-dpc-mail-key', 'data-dpc-mail-toggle', 'data-dpc-mail-goto', 'data-dpc-v2'];
   function paintMail() {
     var el = region('mail');
@@ -4720,7 +4799,7 @@
     var sec = region('mail');
     if (!sec) return;
     sec.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    var first = sec.querySelector('.dpc-mail-view [data-dpc-sug-accept]:not([disabled]),.dpc-mail-view [data-dpc-rep-confirm]:not([disabled])');
+    var first = sec.querySelector('.dpc-mail-view [data-dpc-sug-accept]:not([disabled]),.dpc-mail-view [data-dpc-rep-confirm]:not([disabled]),.dpc-mail-view [data-dpc-rep-dismiss]:not([disabled])');
     if (first) first.focus({ preventScroll: true });
   }
 
@@ -7194,7 +7273,7 @@
       '[data-dpc-mode],[data-dpc-onus],[data-dpc-needs],[data-dpc-fold],[data-dpc-stage],[data-dpc-stage-go],[data-dpc-stage-cancel],[data-dpc-stage-retry],[data-dpc-next-save],' +
       '[data-dpc-deliv-cal],[data-dpc-install],[data-dpc-sched-toggle],' +
       '[data-dpc-deliv-sight],[data-dpc-deliv-unsight],[data-dpc-deliv-confirm],[data-dpc-deliv-edit],[data-dpc-deliv-retry],[data-dpc-box-open],[data-dpc-box-edit],' +
-      '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
+      '[data-dpc-rep-goto],[data-dpc-rep-confirm],[data-dpc-rep-reject],[data-dpc-rep-retry],[data-dpc-rep-dismiss],[data-dpc-rep-dismiss-all],[data-dpc-sug-accept],[data-dpc-sug-dismiss],[data-dpc-sug-retry],' +
       '[data-dpc-tray-clear],[data-dpc-tray-clear-go],[data-dpc-tray-clear-no],[data-dpc-tray-confirm],[data-dpc-tray-reject],[data-dpc-tray-assign],[data-dpc-tray-put],[data-dpc-tray-hide],[data-dpc-tray-hide-go],[data-dpc-tray-hide-no],' +
       '[data-dpc-v2],[data-dpc-mat-clear],[data-dpc-mat-retry],[data-dpc-order-pdf],[data-dpc-mail],[data-dpc-mail-toggle],[data-dpc-mail-goto],' +
       '[data-dpc-file-vis],[data-dpc-files-all]') : null;
@@ -7332,6 +7411,10 @@
       repPress(jobId, 'accept', id, e && e.pick[id] ? { order_id: e.pick[id] } : null);
     } else if ((id = t.getAttribute('data-dpc-sug-dismiss'))) {
       repPress(jobId, 'dismiss', id);
+    } else if ((id = t.getAttribute('data-dpc-rep-dismiss'))) {
+      repPress(jobId, 'replydismiss', id);
+    } else if ((id = t.getAttribute('data-dpc-rep-dismiss-all'))) {
+      repPress(jobId, 'replydismissall', REP_ALL, { email_ids: id.split(',').filter(Boolean) });
     } else if ((id = t.getAttribute('data-dpc-rep-retry') || t.getAttribute('data-dpc-sug-retry'))) {
       var r = e && e.msg[id] && e.msg[id].retry;
       if (r) repPress(jobId, r.kind, id, r.extra);

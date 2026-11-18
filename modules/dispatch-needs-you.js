@@ -9,12 +9,14 @@
  *
  * Everything is worked out from what the board read (pipeline dispatch=1
  * board=v2) already returns for each job: board.arrival.orders (one per
- * supplier box or order) and board.install. Two things come from elsewhere:
- *   - date suggestions to Accept: the job's own dispatch_v2_replies read,
- *     which the screen only makes when a job is opened. The board does not
- *     carry them, so a job not opened yet this session counts only its boxes
- *     at Quote received under Supplier replied.
- *   - Emails to sort: the Unmatched supplier emails tray's own count.
+ * supplier box or order), board.install and board.replies (the supplier
+ * replies nobody has dismissed yet, and the open date suggestions; items 17
+ * and 5, Shaun 18 Nov 2026). A job opened this session uses its own
+ * dispatch_v2_replies read instead, which is fresher (job.flagged and
+ * job.suggestions). An older server carries no board.replies: a job not
+ * opened yet then counts only its boxes at Quote received under Supplier
+ * replied, as before. Emails to sort is the Unmatched supplier emails tray's
+ * own count.
  *
  * The seven kinds, in the order the bar shows them:
  *   order   To order          a supplier box whose order is not sent yet and
@@ -26,11 +28,16 @@
  *                             (order_drafted on the board; Shaun's Go,
  *                             13 Nov 2026). It moves the box out of To order.
  *   pay     To pay            a pay-first box at Awaiting payment (payment.to_pay)
- *   replied Supplier replied  a box at Quote received to check, or a matched
- *                             reply with a date suggestion to Accept
- *   follow  Follow up         order sent, still at Sent to supplier (no reply has
- *                             moved it) FOLLOW_UP_AFTER_WORKING_DAYS or more
- *                             working days after it went
+ *   replied Supplier replied  a box at Quote received to check, a matched
+ *                             reply with a date suggestion to Accept, or any
+ *                             other supplier reply on the job nobody has
+ *                             pressed Dismiss on ("Read R&R reply"; Shaun:
+ *                             every reply, acknowledgements too)
+ *   follow  Follow up         order sent, still at Sent to supplier, no reply
+ *                             from that supplier since (replied_at), and
+ *                             FOLLOW_UP_AFTER_WORKING_DAYS or more working
+ *                             days after it went. An old order with no
+ *                             supplier box counts the same way.
  *   risk    Date at risk      materials due after the install day, or no
  *                             confirmed date with the install
  *                             DATE_RISK_WITHIN_WORKING_DAYS working days away or less
@@ -120,9 +127,12 @@
   }
 
   // Why one job needs Shaun: [{ kind, text }], in chip order, at most one
-  // tag per kind and supplier. job: { id, board, suggestions } where
-  // suggestions is the job's dispatch_v2_replies suggestions (or null when
-  // not read). ctx: { today: 'YYYY-MM-DD', isHoliday }.
+  // tag per kind and supplier. job: { id, board, suggestions, flagged } where
+  // suggestions and flagged come from the job's own dispatch_v2_replies read
+  // (suggestions: every suggestion; flagged: the replies not dismissed, each
+  // { id, supplier_name }), or are null when the job was not read this
+  // session, and then board.replies is used. ctx: { today: 'YYYY-MM-DD',
+  // isHoliday }.
   function jobReasons(job, ctx) {
     var b = job && job.board;
     if (!isObj(b) || b.view === 'archive' || b.stage_phase === 'after') return [];
@@ -154,8 +164,9 @@
       else if (o.source === 'supplier_box' && o.order_sent === false) add('order', 'Order ' + name);
       if (toPay(o)) add('pay', 'Pay ' + name);
       if (stage === 'quote_received') add('replied', 'Check ' + name + ' quote');
-      // Still at Sent to supplier: no reply has moved it on.
-      if (o.order_sent === true && stage === 'sent' && today) {
+      // Still at Sent to supplier: no reply has moved it on, and the
+      // supplier has not answered since it went (item 5, 18 Nov 2026).
+      if (o.order_sent === true && stage === 'sent' && today && !text(o.replied_at)) {
         var sent = perthDay(o.sent_at);
         var waited = sent ? workingDaysBetween(sent, today, isHoliday) : null;
         if (waited !== null && waited >= FOLLOW_UP_AFTER_WORKING_DAYS) add('follow', 'Follow up ' + name + ', ' + daysWords(waited));
@@ -179,8 +190,23 @@
       var boxes = orders.filter(function (o) { return o.source === 'supplier_box'; });
       add('order', boxes.length ? 'Still at Order materials' : 'Set up order');
     }
-    (Array.isArray(job.suggestions) ? job.suggestions : []).forEach(function (s) {
-      if (isObj(s) && s.state === 'open') add('replied', 'Accept ' + (text(s.supplier_name) || 'supplier') + ' date');
+    // Supplier replies (items 17 and 5, Shaun 18 Nov 2026): a date to Accept,
+    // else every reply nobody has dismissed. A reply with an open date shows
+    // only as "Accept <supplier> date": Accept or Dismiss on the date also
+    // dismisses the reply.
+    var br = isObj(b.replies) ? b.replies : {};
+    var sugs = Array.isArray(job.suggestions) ? job.suggestions : Array.isArray(br.open_suggestions) ? br.open_suggestions : [];
+    var dated = {};
+    sugs.forEach(function (s) {
+      // The board lists open ones only, without a state.
+      if (!isObj(s) || (s.state !== undefined && s.state !== 'open')) return;
+      if (text(s.email_id)) dated[text(s.email_id)] = true;
+      add('replied', 'Accept ' + (text(s.supplier_name) || 'supplier') + ' date');
+    });
+    var flagged = Array.isArray(job.flagged) ? job.flagged : Array.isArray(br.flagged) ? br.flagged : [];
+    flagged.forEach(function (m) {
+      if (!isObj(m) || dated[text(m.id)]) return;
+      add('replied', 'Read ' + (text(m.supplier_name) || 'supplier') + ' reply');
     });
     var order = {};
     KINDS.forEach(function (k, i) { order[k.key] = i; });

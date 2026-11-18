@@ -18,6 +18,7 @@ const job = (id, orders, extra = {}) => ({
   id,
   board: { view: 'active', stage_phase: 'window', install: { booked: false, day: null, passed: false }, arrival: { today: TODAY, install_day: null, orders }, ...(extra.board || {}) },
   suggestions: extra.suggestions === undefined ? null : extra.suggestions,
+  flagged: extra.flagged === undefined ? null : extra.flagged,
 });
 const reasons = (j, c = ctx()) => N.jobReasons(j, c).map((r) => r.kind + ': ' + r.text);
 
@@ -119,6 +120,26 @@ test('Supplier replied: a quote to check, and an open date suggestion to Accept'
   assert.deepEqual(reasons(j), ['replied: Check Stratco quote', 'replied: Accept Stratco date']);
 });
 
+test('Supplier replied: every reply nobody dismissed, from the board, without opening the job (items 17 and 5)', () => {
+  // Ian Tan SWF-261631: R&R's standard acknowledgement, no date in it.
+  const ian = job('j', [order('R&R', { material_stage: 'sent' })], {
+    board: { replies: { flagged: [{ id: 'r1', supplier_name: 'R&R', received_at: '2026-11-16T05:46:00Z' }], open_suggestions: [] } },
+  });
+  assert.deepEqual(reasons(ian), ['replied: Read R&R reply']);
+  // Breeanna Moran SWF-261656: four Stratco replies, one tag.
+  const four = ['a', 'b', 'c', 'd'].map((id) => ({ id, supplier_name: 'Stratco', received_at: '2026-11-17T01:00:00Z' }));
+  assert.deepEqual(reasons(job('j', [], { board: { replies: { flagged: four, open_suggestions: [] } } })), ['replied: Read Stratco reply']);
+  // A reply with an open date shows as Accept only; the board lists open ones without a state.
+  const dated = job('j', [], {
+    board: { replies: { flagged: [{ id: 'r2', supplier_name: 'Stratco' }, { id: 'r3', supplier_name: 'CMI' }], open_suggestions: [{ id: 's1', email_id: 'r2', supplier_name: 'Stratco' }] } },
+  });
+  assert.deepEqual(reasons(dated), ['replied: Accept Stratco date', 'replied: Read CMI reply']);
+  // The job's own read (opened this session) wins over the board: dismissed there, gone here.
+  assert.deepEqual(reasons({ ...ian, flagged: [], suggestions: [] }), []);
+  // An older server: no board.replies, nothing new shows.
+  assert.deepEqual(reasons(job('j', [])), []);
+});
+
 test('Follow up: sent, no reply has moved it, two working days or more', () => {
   // Sent Mon 2/11 (Perth): Tue, Wed, Thu = 3 working days.
   assert.deepEqual(reasons(job('j', [order('R&R', { material_stage: 'sent', sent_at: '2026-11-02T02:00:00Z' })])), ['follow: Follow up R&R, 3 days']);
@@ -128,6 +149,10 @@ test('Follow up: sent, no reply has moved it, two working days or more', () => {
   assert.deepEqual(reasons(job('j', [order('R&R', { material_stage: 'sent', sent_at: '2026-11-04T02:00:00Z' })])), []);
   // A reply moved it on: no follow up.
   assert.deepEqual(reasons(job('j', [order('R&R', { material_stage: 'order_confirmed', sent_at: '2026-10-20T02:00:00Z' })])), []);
+  // Item 5: any reply from that supplier since it went stops it, even one that moved nothing.
+  assert.deepEqual(reasons(job('j', [order('R&R', { material_stage: 'sent', sent_at: '2026-11-02T02:00:00Z', replied_at: '2026-11-03T01:00:00Z' })])), []);
+  // An old order with no supplier box (sent_at from the order itself) counts the same way.
+  assert.deepEqual(reasons(job('j', [order('Metroll', { key: 'po:1', source: 'dispatch_order', material_stage: 'sent', sent_at: '2026-11-02T02:00:00Z', replied_at: null })])), ['follow: Follow up Metroll, 3 days']);
 });
 
 test('Follow up skips weekends and WA public holidays', () => {

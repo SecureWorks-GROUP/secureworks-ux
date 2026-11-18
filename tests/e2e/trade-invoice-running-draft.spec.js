@@ -45,7 +45,7 @@ test('Save keeps the draft without sending, and it is still there after a fresh 
   await card.locator('[data-carddesc]').blur();
   await page.locator('#invSaveBtn').scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: '/opt/cursor/artifacts/invoice-save-vs-submit.png',
+    path: test.info().outputPath('invoice-save-vs-submit.png'),
     fullPage: true
   });
 
@@ -74,7 +74,7 @@ test('Save keeps the draft without sending, and it is still there after a fresh 
   await expect(page.locator('#invSubmitBtn')).toBeVisible();
   await page.locator('#invSaveBtn').scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: '/opt/cursor/artifacts/invoice-saved-draft-reloaded.png',
+    path: test.info().outputPath('invoice-saved-draft-reloaded.png'),
     fullPage: true
   });
   expect(feedRequests.some((entry) => entry.action === 'generate_trade_invoice')).toBe(false);

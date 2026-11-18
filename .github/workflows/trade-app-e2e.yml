@@ -1,5 +1,6 @@
 # Was playwright-e2e.yml, switched off in the Actions settings on 30 Oct 2026.
 # A new path is a new workflow, so it runs again. Not a required check.
+# Runs the Trade App specs only (see the last test step).
 name: Trade App E2E
 
 on:
@@ -59,9 +60,12 @@ jobs:
         timeout-minutes: 5
         run: npx playwright test tests/e2e/trade-group-invoice.spec.js
 
-      - name: Run Playwright suite
+      # Director ruling 18 Nov (option B): the Trade App specs only (trade-*,
+      # crew-*), one job, about the 30 Oct cost. The full suite (npm run
+      # test:e2e, 1443 tests) no longer fits one job.
+      - name: Run Trade App specs
         timeout-minutes: 14
-        run: npm run test:e2e
+        run: npx playwright test tests/e2e/trade- tests/e2e/crew- --project=''
 
       - name: Upload failure traces and screenshots
         if: failure()

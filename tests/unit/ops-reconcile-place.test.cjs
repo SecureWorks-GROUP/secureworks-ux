@@ -28,7 +28,8 @@ test('only cost items are kept; a line the server marks not counted is left out'
 });
 
 test('words: amounts, dates, waits and suggestions', () => {
-  assert.deepEqual([1240, -120.5, null, '', true].map(P.amountWords), ['$1,240.00 ex GST', '-$120.50 ex GST', 'Amount not read', 'Amount not read', 'Amount not read']);
+  assert.deepEqual([1240, -120.5, null, '', true].map((a) => P.amountWords(a)), ['$1,240.00 ex GST', 'Credit $120.50 ex GST', 'Amount not read', 'Amount not read', 'Amount not read']);
+  assert.equal(P.amountWords(120.5, true), 'Credit $120.50 ex GST');
   assert.deepEqual(['2026-11-03', '2026-13-01', null].map(P.dateWords), ['3 Nov', 'Date not read', 'Date not read']);
   assert.deepEqual([0, 1, 3.9, null, -1].map(P.waitWords), ['Waiting since today', 'Waiting 1 day', 'Waiting 3 days', '', '']);
   const w = (extra) => P.suggestionWords(P.itemFromList(raw(extra)));
@@ -52,7 +53,11 @@ test('a refusal shows the server words, never a machine code', () => {
   assert.equal(P.refusalWords({ status: 409, body: { error: 'reconcile_evidence_changed', message: 'This changed while you were looking. The list has been read again, please choose again.' } }),
     'This changed while you were looking. The list has been read again, please choose again.');
   assert.equal(P.refusalWords({ status: 409, body: { error: 'reconcile_item_closed' }, message: 'reconcile_item_closed' }), 'This could not be recorded. The list has been read again, please choose again.');
-  assert.equal(P.refusalWords({ status: 403, body: { error: 'person_session_required' } }), 'Please sign in again. A decision is recorded against your own sign in.');
+  assert.equal(P.refusalWords({ status: 403, body: { error: 'operator_access_required', message: 'Only admin, owner or ops manager can decide a Reconcile item.' } }),
+    'Only admin, owner or ops manager can decide a Reconcile item.');
+  assert.equal(P.refusalWords({ status: 403, body: { error: 'person_session_required' } }), 'You cannot record this. Sign in again as office staff.');
+  assert.match(P.refusalWords(new TypeError('Load failed')), /connection dropped .* may or may not have been recorded/);
+  assert.match(P.listErrorWords(new TypeError('Load failed')), /connection dropped while reading the list/);
   assert.equal(P.listErrorWords({ status: 400, message: 'Unknown action' }), 'The cost line list is not on the server yet.');
   assert.equal(P.listErrorWords({ status: 503 }), 'The list could not be read. Nothing is shown as placed.');
 });
@@ -95,8 +100,12 @@ test('put on the suggested job asks first, then sends the six fields once', asyn
   await f.api.press('ZZTEST-item-1', 'record');
   assert.deepEqual(posts(f), [{ action: 'reconcile_decide', body: { item_id: 'ZZTEST-item-1', shown_hash: 'hash-1', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: true } }]);
   assert.match(f.root.innerHTML, /Put on SWF-990001 by you, just now\./);
+  assert.match(f.root.innerHTML, /data-rp-decision="ZZTEST-d1"/, 'the decision id is kept');
+  assert.match(f.root.innerHTML, /To reverse one, ask the office lead\./);
+  assert.doesNotMatch(f.root.innerHTML, /Undo/, 'no Undo button until reconcile_undo is on main');
+  assert.equal(f.calls.filter((c) => c.action === 'reconcile_list').length, 6, 'the list is read again after a recorded decision');
   await f.api.press('ZZTEST-item-1', 'record');
-  assert.equal(posts(f).length, 1, 'a finished card is never sent again');
+  assert.equal(posts(f).length, 1, 'a recorded card is never sent again without a new choice');
 });
 
 test('another job and not for a job send accepted_suggestion false', async () => {
@@ -169,53 +178,93 @@ test('a 409 shows the server words and reads the list again; an answer with no d
   assert.match(g.root.innerHTML, /did not confirm this was recorded/);
 });
 
-test('a full page shows the overflow notice; a failed read never shows the list as clear', async () => {
-  const many = Array.from({ length: 100 }, (_, i) => raw({ id: 'ZZTEST-' + i }));
-  const f = fixture({ bills: many, card_bank: [], receipts: [] });
+test('every page of a tab is read by its next cursor; a notice only when the list does not say it is complete', async () => {
+  const many = (from, n) => Array.from({ length: n }, (_, i) => raw({ id: 'ZZTEST-' + (from + i) }));
+  const f = fixture();
+  const pages = { '': { items: many(0, 100), next: 'c1' }, c1: { items: many(100, 100), next: 'c2' }, c2: { items: many(200, 5), counts: { bills: 205 } } };
+  f.host.read = async (action, params) => { f.calls.push({ action, params }); return params.tab === 'bills' ? pages[params.after || ''] : { items: [] }; };
   await f.api.refresh();
-  assert.match(f.root.innerHTML, /More may be waiting than this list shows/);
-  const g = fixture();
-  g.host.read = async () => { throw Object.assign(new Error('down'), { status: 503 }); };
+  assert.deepEqual(f.calls.filter((c) => c.params.tab === 'bills').map((c) => c.params.after || ''), ['', 'c1', 'c2']);
+  assert.match(f.root.innerHTML, /205 waiting/);
+  assert.doesNotMatch(f.root.innerHTML, /more may be waiting/);
+  const g = fixture({ bills: many(0, 100), card_bank: [], receipts: [] });
   await g.api.refresh();
-  assert.match(g.root.innerHTML, /The list could not be read\. Nothing is shown as placed\./);
-  assert.doesNotMatch(g.root.innerHTML, /Nothing to place/);
+  assert.match(g.root.innerHTML, /The list did not say it was complete, so more may be waiting/);
+  const h = fixture();
+  h.host.read = async () => { throw Object.assign(new Error('down'), { status: 503 }); };
+  await h.api.refresh();
+  assert.match(h.root.innerHTML, /The list could not be read\. Nothing is shown as placed\./);
+  assert.match(h.root.innerHTML, /Read the list again/);
+  assert.doesNotMatch(h.root.innerHTML, /Nothing to place/);
 });
 
-test('a credit shows as a credit with its bill and the bill state, and can be placed, split or marked', async () => {
+test('a dropped connection on a decision says so plainly and offers a re-read, without reading on its own', async () => {
+  const f = fixture(undefined, new TypeError('Load failed'));
+  await f.api.refresh();
+  await f.api.press('ZZTEST-item-1', 'overhead');
+  await f.api.press('ZZTEST-item-1', 'record');
+  assert.match(f.root.innerHTML, /The connection dropped before an answer came back/);
+  assert.match(f.root.innerHTML, /data-rp="reread">Read the list again/);
+  assert.equal(f.calls.filter((c) => c.action === 'reconcile_list').length, 3);
+  await f.api.press('ZZTEST-item-1', 'reread');
+  assert.equal(f.calls.filter((c) => c.action === 'reconcile_list').length, 6);
+});
+
+test('a credit shows as a credit under its bill; deciding the bill carries it', async () => {
   const credit = (bill, extra = {}) => raw({ id: 'ZZTEST-credit', kind: 'credit', kind_words: 'Credit', amount_ex: -120.5,
     lines: [{ line_id: 'C1', description: 'Returned posts', amount_ex: -120.5 }], suggestion: null, bill, ...extra });
   const words = (bill) => P.billWords(P.itemFromList(credit(bill)));
   assert.equal(words({ document_number: 'ZZ-1', state: 'waiting', item_id: 'ZZTEST-item-1' }), 'Against bill ZZ-1: the bill is still waiting for a decision.');
+  assert.equal(words({ document_number: 'ZZ-1', state: 'not_loaded' }), 'Against bill ZZ-1: waiting for its bill to load.');
   assert.equal(words({ document_number: 'ZZ-1', state: 'placed', job_id: J1, job_number: 'SWF-990001', job_site: '12 Test St' }), 'Against bill ZZ-1: the bill is on SWF-990001, 12 Test St.');
   assert.equal(words({ document_number: 'ZZ-1', state: 'overhead' }), 'Against bill ZZ-1: the bill is not for a job.');
   assert.equal(words({ document_number: 'ZZ-1', state: 'mystery' }), "Against bill ZZ-1: the bill's state was not read.");
   assert.equal(words(null), 'Not against a bill.');
   assert.equal(words(undefined), 'The bill this credit is against was not read.');
 
-  // Bill undecided: shown plainly, the credit is still placeable on its own.
-  const f = fixture({ bills: [raw(), credit({ document_number: 'ZZ-1', state: 'waiting', item_id: 'ZZTEST-item-1' })] });
+  // Bill undecided and on the list: the credit sits under it, and either can be decided.
+  const f = fixture({ bills: [raw(), credit({ document_number: 'ZZ-100', state: 'waiting', item_id: 'ZZTEST-item-1' })] });
   await f.api.refresh();
-  assert.match(f.root.innerHTML, /Credit \$120\.50 ex GST/);
-  assert.match(f.root.innerHTML, /Placing this credit does not decide its bill/);
-  assert.match(f.root.innerHTML, /Show the bill/);
-  await f.api.press('ZZTEST-credit', 'overhead');
-  assert.match(f.root.innerHTML, /Mark the \$120\.50 ex GST credit as not for a job \(overhead\)\./);
-  await f.api.press('ZZTEST-credit', 'record');
-  assert.match(f.root.innerHTML, /Credit marked not for a job by you, just now\./);
+  const html = f.root.innerHTML;
+  assert.ok(html.indexOf('data-rp-group="ZZTEST-item-1"') < html.indexOf('data-rp-id="ZZTEST-credit"'), 'the credit is inside the bill group');
+  assert.match(html, /Deciding this bill carries its credit below with it\./);
+  assert.match(html, /Credit \$120\.50 ex GST/);
+  assert.match(html, /Decide the bill and this credit follows it\. Placing it alone fixes it here\./);
+  assert.doesNotMatch(html, /-\$120/, 'never a bare minus');
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  assert.match(f.root.innerHTML, /Put \$1,000\.00 ex GST on SWF-990001, 12 Test St\. Its credit follows it\./);
+  const g = fixture({ bills: [raw(), credit({ document_number: 'ZZ-100', state: 'waiting', item_id: 'ZZTEST-item-1' })] });
+  await g.api.refresh();
+  await g.api.press('ZZTEST-credit', 'overhead');
+  assert.match(g.root.innerHTML, /Mark the \$120\.50 ex GST credit as not for a job \(overhead\)\./);
+  await g.api.press('ZZTEST-credit', 'record');
+  assert.match(g.root.innerHTML, /Credit marked not for a job by you, just now\./);
+
+  // Bill not loaded into the cost lines: waits, no buttons, nothing sent.
+  const w = fixture({ bills: [credit({ document_number: 'ZZ-200', state: 'not_loaded' })] });
+  await w.api.refresh();
+  assert.match(w.root.innerHTML, /waiting for its bill to load/);
+  assert.match(w.root.innerHTML, /This credit waits for its bill to load into the cost lines/);
+  assert.doesNotMatch(w.root.innerHTML, /data-rp="(another|split|overhead|accept_job)"/);
+  await w.api.press('ZZTEST-credit', 'overhead');
+  await w.api.press('ZZTEST-credit', 'record');
+  assert.equal(posts(w).length, 0);
 
   // Bill placed on a job: one press puts the credit where its bill is.
-  const g = fixture({ bills: [credit({ document_number: 'ZZ-1', state: 'placed', job_id: J1, job_number: 'SWF-990001', job_site: '12 Test St' })] });
-  await g.api.refresh();
-  assert.match(g.root.innerHTML, /Put on SWF-990001, where its bill is/);
-  await g.api.press('ZZTEST-credit', 'bill_job');
-  assert.match(g.root.innerHTML, /Take \$120\.50 ex GST off SWF-990001, 12 Test St \(a credit\)\./);
-  await g.api.press('ZZTEST-credit', 'record');
-  assert.deepEqual(posts(g)[0].body, { item_id: 'ZZTEST-credit', shown_hash: 'hash-1', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: false });
+  const b = fixture({ bills: [credit({ document_number: 'ZZ-1', state: 'placed', job_id: J1, job_number: 'SWF-990001', job_site: '12 Test St' })] });
+  await b.api.refresh();
+  assert.match(b.root.innerHTML, /Put on SWF-990001, where its bill is/);
+  await b.api.press('ZZTEST-credit', 'bill_job');
+  assert.match(b.root.innerHTML, /Take \$120\.50 ex GST off SWF-990001, 12 Test St \(a credit\)\./);
+  await b.api.press('ZZTEST-credit', 'record');
+  assert.deepEqual(posts(b)[0].body, { item_id: 'ZZTEST-credit', shown_hash: 'hash-1', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: false });
 
-  // A split credit sends negative parts that add up to the credit.
+  // A split credit reads as a credit and sends negative parts that add up to it.
   const h = fixture({ bills: [credit({ document_number: 'ZZ-1', state: 'split' })] });
   await h.api.refresh();
   await h.api.press('ZZTEST-credit', 'split');
+  assert.match(h.root.innerHTML, /Returned posts, Credit \$120\.50 ex GST/);
+  assert.match(h.root.innerHTML, /Left \$120\.50 ex GST/);
   await h.api.press('ZZTEST-credit', 'search', 'SWP');
   await h.api.press('ZZTEST-credit', 'pick', 0);
   h.api.partCount('ZZTEST-credit', 0, 0, true);

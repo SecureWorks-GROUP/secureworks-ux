@@ -538,3 +538,59 @@ test('a dropped or unclear undo never says undone and offers a re-read', async (
     assert.doesNotMatch(g.root.innerHTML, /Undone by you/);
   }
 });
+
+// Follow-up (director 02:45): lines not counted, a bill not counted, and the 409 copy.
+test('a line not counted is named on the card, kept out of the amounts and never sent', async () => {
+  const doc = raw({ amount_ex: 600, lines: [{ line_id: 'L1', description: 'Posts', amount_ex: 600, state: 'needs_person' }, { line_id: 'L2', description: 'Posts again', amount_ex: 600, state: null }] });
+  const f = fixture({ bills: [doc] });
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /1 line on this document is not counted \(set aside, for example as a duplicate\)\. It is not placed here and not in the amounts below\./);
+  assert.doesNotMatch(f.root.innerHTML, /Posts again/);
+  await f.api.press('ZZTEST-item-1', 'split');
+  assert.equal(P.footerHtml(f.api.state().items[0]), 'Lines total $600.00 ex GST. Allocated $0.00 ex GST. 1 line is not fully placed yet.');
+  assert.equal(f.api.state().items[0].split.lines.length, 1);
+  assert.equal(P.setAsideWords(2), '2 lines on this document are not counted (set aside, for example as a duplicate). They are not placed here and not in the amounts below.');
+});
+
+test('a document with no counted line says so plainly and has no buttons', async () => {
+  const doc = raw({ lines: [{ line_id: 'L1', description: 'Posts', amount_ex: 1000, state: null }] });
+  assert.equal(P.blockedWhy(P.itemFromList(doc)), 'No line on this document counts (each one is set aside, for example as a duplicate), so there is nothing to place here.');
+  const f = fixture({ bills: [doc] });
+  await f.api.refresh();
+  assert.doesNotMatch(f.root.innerHTML, /data-rp="(accept_job|split|overhead|other)"/);
+  assert.doesNotMatch(f.root.innerHTML, /has no amount/);
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  assert.equal(posts(f).length, 0);
+});
+
+test('a credit whose bill is not counted, alone or shared, is not placed from here', () => {
+  const credit = (extra) => P.itemFromList(raw({ id: 'ZZTEST-credit', kind: 'credit', amount_ex: -50, suggestion: null,
+    lines: [{ line_id: 'C1', description: 'Returned posts', amount_ex: -50 }], ...extra }));
+  const one = credit({ bill: { document_number: 'ZZ-1', state: 'not_counted', not_counted_reasons: ['duplicate_document'] } });
+  assert.equal(P.blockedWhy(one), 'This credit\'s bill is not counted (every line on it is set aside), so the credit is not placed from here. Tell the office lead.');
+  assert.equal(P.billWords(one), 'Against bill ZZ-1: the bill is not counted.');
+  const both = credit({ bill: { several: true }, bills: [{ document_number: 'ZZ-1', state: 'placed', job_number: 'SWF-990001' }, { document_number: 'ZZ-2', state: 'not_counted' }] });
+  assert.match(P.blockedWhy(both), /^One of the bills this credit is shared by is not counted/);
+  assert.match(P.billWords(both), /ZZ-2 \(not counted\)/);
+});
+
+test('409 copy: the server words stay on the card after the re-read, or above the list when the item has gone', async () => {
+  const words = 'Someone already decided this one.';
+  const lists = { bills: [raw()], card_bank: [], receipts: [] };
+  const f = fixture(lists, Object.assign(new Error('x'), { status: 409, body: { error: 'reconcile_item_closed', message: words, userMessage: words } }));
+  await f.api.refresh();
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  lists.bills = []; // decided elsewhere: the re-read no longer lists it
+  await f.api.press('ZZTEST-item-1', 'record');
+  assert.match(f.root.innerHTML, /data-rp-notice>Someone already decided this one\. It is no longer on the list\.</);
+  assert.doesNotMatch(f.root.innerHTML, /reconcile_item_closed/);
+  const kept = Object.assign(new Error('x'), { status: 409, body: { error: 'reconcile_job_not_live', message: 'That job is not live.' } });
+  const g = fixture(undefined, kept);
+  await g.api.refresh();
+  await g.api.press('ZZTEST-item-1', 'accept_job');
+  await g.api.press('ZZTEST-item-1', 'record');
+  assert.match(g.root.innerHTML, /That job is not live\./);
+  assert.doesNotMatch(g.root.innerHTML, /data-rp-notice/);
+  await g.api.refresh();
+  assert.doesNotMatch(g.root.innerHTML, /data-rp-notice|That job is not live/, 'a later read clears it');
+});

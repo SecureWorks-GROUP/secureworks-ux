@@ -133,8 +133,9 @@
   // item_id, state, job_id, job_number, job_site, division}] and `bill` (the one bill, null when
   // against none, {several: true} when it follows more than one). A state is waiting (the bill
   // waits for a decision; item_id its open item, or null), placed, split, overhead,
-  // division_stock, or not_loaded (the bill has no cost lines yet).
-  var BILL_STATES = { waiting: 1, placed: 1, split: 1, overhead: 1, division_stock: 1, not_loaded: 1 };
+  // division_stock, not_loaded (the bill has no cost lines yet) or not_counted (every line of
+  // the bill is set aside, for example as a duplicate: the bill counts for nothing).
+  var BILL_STATES = { waiting: 1, placed: 1, split: 1, overhead: 1, division_stock: 1, not_loaded: 1, not_counted: 1 };
   function billFromList(b) {
     if (b === null) return { none: true };
     if (!b || typeof b !== 'object') return null; // not said
@@ -187,6 +188,7 @@
   function billNumber(b) { return b.document_number || '(number not read)'; }
   function billStateWords(b) {
     if (b.state === 'not_loaded') return 'waiting for its bill to load';
+    if (b.state === 'not_counted') return 'not counted';
     if (b.state === 'waiting') return 'still waiting for a decision';
     if (b.state === 'placed') return 'on ' + jobLabel(b);
     if (b.state === 'split') return 'split across jobs';
@@ -205,6 +207,7 @@
     }
     var name = 'Against bill ' + billNumber(b);
     if (b.state === 'not_loaded') return name + ': waiting for its bill to load.';
+    if (b.state === 'not_counted') return name + ': the bill is not counted.';
     if (b.state === 'waiting') return name + ': the bill is still waiting for a decision.';
     if (b.state === 'placed') return name + ': the bill is on ' + jobLabel(b) + '.';
     if (b.state === 'split') return name + ': the bill is split across jobs.';
@@ -214,8 +217,11 @@
   }
   function itemFromList(raw) {
     if (!raw || typeof raw !== 'object' || !str(raw.id) || raw.card !== 'cost') return null;
-    var lines = (Array.isArray(raw.lines) ? raw.lines : [])
-      .filter(function (l) { return l && str(l.line_id) && !(Object.prototype.hasOwnProperty.call(l, 'state') && l.state == null); })
+    // A line with a null state is not counted (set aside, for example as a duplicate): it is
+    // never placed here, and the card says how many there are.
+    var notCounted = function (l) { return Object.prototype.hasOwnProperty.call(l, 'state') && l.state == null; };
+    var listed = (Array.isArray(raw.lines) ? raw.lines : []).filter(function (l) { return l && str(l.line_id); });
+    var lines = listed.filter(function (l) { return !notCounted(l); })
       .map(function (l) {
         return { line_id: l.line_id, description: str(l.description) || 'Line', amount_ex: l.amount_ex, cents: Split.lineCents(l.amount_ex), tag: str(l.tag) };
       });
@@ -227,7 +233,7 @@
       reason_words: str(raw.reason_words),
       suggestion: sug ? { outcome: str(sug.outcome), job_id: str(sug.job_id), job_number: str(sug.job_number), job_site: str(sug.job_site), division: str(sug.division) } : null,
       clues: Array.isArray(raw.clues) ? raw.clues : [], against: Array.isArray(raw.against) ? raw.against : [],
-      lines: lines, held: raw.held && typeof raw.held === 'object' ? raw.held : null,
+      lines: lines, set_aside: listed.filter(notCounted).length, held: raw.held && typeof raw.held === 'object' ? raw.held : null,
       is_credit: raw.kind === 'credit' || (Split.lineCents(raw.amount_ex) || 0) < 0,
       bill: billFromList(raw.bill),
       bills: billsFromList(raw),
@@ -242,12 +248,21 @@
     if (item.is_credit && item.bill && item.bill.state === 'not_loaded') {
       return 'This credit waits for its bill to load into the cost lines. It is placed with its bill once the bill is here.';
     }
+    if (item.is_credit && item.bill && item.bill.state === 'not_counted') {
+      return 'This credit\'s bill is not counted (every line on it is set aside), so the credit is not placed from here. Tell the office lead.';
+    }
     if (item.is_credit && !item.bill) return 'The bill this credit is against was not read, so it is not placed from here.';
     if (shared(item) && !item.bills) return 'The list did not name the bills this credit is shared by, so it is not placed from here.';
     if (shared(item) && item.bills.some(function (x) { return x.state === 'not_loaded'; })) {
       return 'This credit waits for one of its bills to load into the cost lines. It is placed once every bill is here.';
     }
+    if (shared(item) && item.bills.some(function (x) { return x.state === 'not_counted'; })) {
+      return 'One of the bills this credit is shared by is not counted (every line on it is set aside), so the credit is not placed from here. Tell the office lead.';
+    }
     if (!item.shown_hash) return 'This one cannot be placed here: the list did not say what it was shown with.';
+    if (!item.lines.length && item.set_aside) {
+      return 'No line on this document counts (each one is set aside, for example as a duplicate), so there is nothing to place here.';
+    }
     if (item.cents == null || !item.lines.length || item.lines.some(function (l) { return l.cents == null || l.cents === 0; })) {
       return 'A line on this document has no amount, so it cannot be placed here.';
     }
@@ -383,6 +398,10 @@
           esc(c.under_number || 'its first bill') + '.</p>';
       }).join('') + '</div></section>';
   }
+  function setAsideWords(n) {
+    return (n === 1 ? '1 line on this document is' : n + ' lines on this document are') +
+      ' not counted (set aside, for example as a duplicate). ' + (n === 1 ? 'It is' : 'They are') + ' not placed here and not in the amounts below.';
+  }
   function cardHtml(item) {
     var dis = item.busy ? ' disabled' : '';
     var h = '<article class="rp-card" data-rp-id="' + esc(item.id) + '"><div class="rp-top"><span>' + esc(item.kind_words) + ' ' + esc(item.party) +
@@ -394,7 +413,8 @@
       (item.under && shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Shared: decide its bills and this credit follows them. Placing it alone fixes it here.</p>' : '') +
       (item.is_credit && shared(item) ? '<p class="rp-note" data-rp-shared-mark><span class="rp-tag">Shared</span> This credit follows more than one bill.</p>' : '') +
       (item.bill_credits && item.bill_credits.length ? billCreditsHtml(item) : item.credits && item.credits.length ? '<p class="rp-note" data-rp-carries>' + BILL_CARRIES + '</p>' : '') +
-      '<div class="rp-sug" data-rp-sug>' + esc(suggestionWords(item)) + '</div>';
+      '<div class="rp-sug" data-rp-sug>' + esc(suggestionWords(item)) + '</div>' +
+      (item.set_aside && item.lines.length ? '<p class="rp-note" data-rp-set-aside>' + esc(setAsideWords(item.set_aside)) + '</p>' : '');
     h += '<details class="rp-why"><summary>Why, and the lines</summary>';
     if (item.clues.length) {
       h += '<h4>Why</h4><ul>' + item.clues.map(function (c) {
@@ -464,6 +484,7 @@
     if (state.phase === 'loading') return h + '<p role="status">Reading the list.</p></div>';
     if (state.phase === 'off') return h + '<p class="rp-note" data-rp-off>The cost line list is not switched on yet. Nothing here is placed until it is.</p></div>';
     if (state.phase === 'error') return h + '<p class="rp-msg" role="alert">' + esc(state.error) + '</p><button type="button" data-rp="reread">Read the list again</button></div>';
+    if (state.notice) h += '<p class="rp-msg" role="alert" data-rp-notice>' + esc(state.notice) + '</p>';
     if (state.more) h += '<p class="rp-note" data-rp-more>The list did not say it was complete, so more may be waiting. Read the list again after placing these.</p>';
     if (!state.items.length) return h + '<p>Nothing to place.</p></div>';
     return h + state.items.filter(function (i) { return !i.under; }).map(groupHtml).join('') + '</div>';
@@ -603,7 +624,10 @@
         var keep = item.message;
         await refresh();
         var again = find(item.id);
-        if (again) { again.message = keep; paint(); }
+        if (again) again.message = keep;
+        // The item left the list (someone decided it): its refusal still shows, above the list.
+        else if (state.phase === 'list') state.notice = keep + ' It is no longer on the list.';
+        paint();
       }
     }
     async function undo(decisionId, what) {
@@ -742,7 +766,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;

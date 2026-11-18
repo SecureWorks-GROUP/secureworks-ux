@@ -14,6 +14,8 @@
     return d.toLocaleDateString('en-AU', Object.assign({}, zone, { day: 'numeric', month: 'short', year: 'numeric' }));
   }
   function failure(err) {
+    var detail = err.body && typeof err.body.message === 'string' && err.body.message.trim();
+    if (detail) return detail;
     if (err.status === 403) return 'You do not have permission for this one. Ask an admin.';
     if (err.status === 409) return 'Someone has already decided this one.';
     if (err.status === 410) return 'This one has expired. Ask the agent again.';
@@ -64,10 +66,10 @@
         if (!res || !Array.isArray(res.proposals)) throw new Error('Missing proposals');
         var next = res.proposals.map(function (p) {
           if (!p || !p.id || typeof p.summary !== 'string') throw new Error('Missing proposal');
-          return Object.assign(rows.find(function (r) { return r.id === p.id; }) || {}, {
+          return {
             id: p.id, summary: p.summary, actor: p.actor, created_at: p.created_at,
             job_id: p.job_id, job_number: p.job_number
-          });
+          };
         }).sort(function (a, b) { return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0); });
         // Firstmate authorized the existing job_detail read, deduplicated in batches of four.
         var ids = Array.from(new Set(next.filter(function (r) { return r.job_id && !r.job_number; }).map(function (r) { return r.job_id; })));
@@ -94,7 +96,7 @@
       if (!active() || host.identity() !== owner) { paint(); return; }
       if (action === 'retry') return refresh();
       var row = rows.find(function (r) { return r.id === id; });
-      if (!row || row.busy || row.finished) return;
+      if (reading || !row || row.busy || row.finished) return;
       if (action === 'cancel') { row.mode = null; paint(); return; }
       if (action === 'carry' || action === 'decline') { row.mode = action; paint(); return; }
       if (action !== 'yes' && action !== 'no') return;
@@ -110,7 +112,7 @@
         }
         row.message = action === 'yes' ? 'Done.' : 'Declined.';
       } catch (err) { row.message = failure(err); }
-      // A refused or uncertain press gets no second attempt on the same proposal.
+      // Only a fresh pending list can offer this proposal again.
       row.busy = false; row.finished = true;
       if (who === host.identity()) paint(); else { rows = []; paint(); }
     }

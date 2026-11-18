@@ -48,8 +48,10 @@ async function open(page, { url = '/ops.html?reconcile_place=1', lists = { bills
     };
     window.opsPost = (action, body) => {
       window.__posts.push({ action, body });
+      if (action === 'reconcile_undo') return Promise.resolve({ ok: true, undone: true, decision_id: 'ZZTEST-undo', restored_item_id: 'ZZTEST-bill' });
       if (action !== 'reconcile_decide') return Promise.resolve({});
       if (decide && decide.dropped) return Promise.reject(new TypeError('Load failed'));
+      if (decide && decide.gone) lists.bills = []; // decided elsewhere: the re-read no longer lists it
       if (decide) return Promise.reject(Object.assign(new Error(decide.body.error), decide));
       return Promise.resolve({ decision_id: 'ZZTEST-decision', item_status: 'decided' });
     };
@@ -82,9 +84,8 @@ test('lists cost items from the three cost tabs, never a message, and places the
   await bill.getByRole('button', { name: 'Yes, record it' }).click();
   const recent = page.locator('#reconcilePlaceRoot .rp-recent');
   await expect(recent).toContainText('Put on SWF-990001 by you, just now.');
-  await expect(recent).toContainText('To reverse one, ask the office lead.');
   await expect(recent.locator('[data-rp-decision="ZZTEST-decision"]')).toHaveCount(1);
-  await expect(page.locator('#reconcilePlaceRoot').getByRole('button', { name: /Undo/ })).toHaveCount(0);
+  await expect(recent.getByRole('button', { name: 'Undo' })).toHaveCount(1);
   expect((await page.evaluate(() => window.__reads)).filter((r) => r.action === 'reconcile_list').length).toBe(6);
   expect(await decidePosts(page)).toEqual([{ action: 'reconcile_decide', body: { item_id: 'ZZTEST-bill', shown_hash: 'hash-bill', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: true } }]);
 });
@@ -252,4 +253,43 @@ test('a bill with a discount line: each line checked on its own, signed totals, 
     { line_id: 'L1', target: 'job', amount_ex: 100, job_id: J1 },
     { line_id: 'L2', target: 'job', amount_ex: -10, job_id: J1 },
   ]);
+});
+
+test('undo a recorded decision: asks first, sends the decision id, reads the list again', async ({ page }) => {
+  await open(page, { lists: { bills: [BILL] } });
+  const bill = page.locator('#reconcilePlaceRoot [data-rp-id="ZZTEST-bill"]');
+  await bill.getByRole('button', { name: 'Put on SWF-990001' }).click();
+  await bill.getByRole('button', { name: 'Yes, record it' }).click();
+  const recent = page.locator('#reconcilePlaceRoot .rp-recent');
+  await recent.getByRole('button', { name: 'Undo' }).click();
+  await expect(recent).toContainText('Undo this? It puts the item back on the list as it was before.');
+  expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([]);
+  const reads = (await page.evaluate(() => window.__reads)).length;
+  await recent.getByRole('button', { name: 'Yes, undo it' }).click();
+  await expect(recent).toContainText('Undone by you, just now. It is back on the list.');
+  await expect(recent.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+  expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([{ action: 'reconcile_undo', body: { decision_id: 'ZZTEST-decision' } }]);
+  expect((await page.evaluate(() => window.__reads)).length - reads).toBe(3);
+});
+
+test('a line not counted is named; a bill with no counted line has a plain line and no buttons', async ({ page }) => {
+  const some = { ...BILL, amount_ex: 600, lines: [{ line_id: 'L1', description: 'Posts', amount_ex: 600, state: 'needs_person' }, { line_id: 'L9', description: 'Posts again', amount_ex: 600, state: null }] };
+  const none = { ...BILL, id: 'ZZTEST-bill-2', document_number: 'ZZ-200', shown_hash: 'hash-bill-2', lines: [{ line_id: 'L2', description: 'Rails', amount_ex: 1000, state: null }] };
+  await open(page, { lists: { bills: [some, none] } });
+  await expect(card(page, 'ZZTEST-bill').locator('[data-rp-set-aside]')).toHaveText('1 line on this document is not counted (set aside, for example as a duplicate). It is not placed here and not in the amounts below.');
+  const blocked = card(page, 'ZZTEST-bill-2');
+  await expect(blocked).toContainText('No line on this document counts (each one is set aside, for example as a duplicate), so there is nothing to place here.');
+  await expect(blocked.getByRole('button')).toHaveCount(0);
+  await expect(blocked).not.toContainText('has no amount');
+});
+
+test('409 copy: when the item has gone, its refusal shows above the list', async ({ page }) => {
+  const words = 'Someone already decided this one.';
+  await open(page, { lists: { bills: [BILL] }, decide: { status: 409, gone: true, body: { error: 'reconcile_item_closed', message: words, userMessage: words } } });
+  const bill = card(page, 'ZZTEST-bill');
+  await bill.getByRole('button', { name: 'Put on SWF-990001' }).click();
+  await bill.getByRole('button', { name: 'Yes, record it' }).click();
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-notice]')).toHaveText('Someone already decided this one. It is no longer on the list.');
+  await expect(page.locator('#reconcilePlaceRoot')).not.toContainText('reconcile_item_closed');
+  await expect(card(page, 'ZZTEST-bill')).toHaveCount(0);
 });

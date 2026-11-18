@@ -19,7 +19,8 @@ registerDemo((db, h) => {
   const fyYearOf = (iso) => (Number(iso.slice(5, 7)) >= 7 ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
   const fyStartYear = fyYearOf(today);
   const lastFyStart = `${fyStartYear - 1}-07-01`;
-  db.paidSuperRuns = new Set();
+  // Runs whose super the office marked paid: run id -> the stamp (ISO), as trade_pay_runs.super_marked_paid_at.
+  db.paidSuperRuns = new Map();
   db.payRates = !staff && db.persona !== 'new' && !lead ? [
     { user_id: me.id, effective_from: `${fyStartYear - 1}-07-01`, hourly_rate: 50.4 },
     { user_id: me.id, effective_from: `${fyStartYear}-07-01`, hourly_rate: 56 },
@@ -40,7 +41,6 @@ registerDemo((db, h) => {
         total_hours: round2(gross / 56), xero_bill_id: 'xb-' + id, xero_bill_status: 'PAID', pay_run_id: runId,
         submitted_at: db.at(addDays(wk, 6), '16:30'), created_at: db.at(addDays(wk, 6), '16:30'), paid_at: db.at(addDays(wk, 11), '09:00'), amount_paid: m.pay_view.into_bank, lines: [] };
     };
-    ['ZZTEST-run-prev', 'ZZTEST-run-adj', 'ZZTEST-run-h1', 'ZZTEST-run-h2', 'ZZTEST-run-h3', 'ZZTEST-run-h4', 'ZZTEST-run-h5'].forEach((r) => db.paidSuperRuns.add(r));
     db.invoices.push(
       { id: 'inv-adj', user_id: me.id, week_start: w3, week_end: addDays(w3, 6), invoice_number: 'SW-INV-ST-0401', status: 'paid', invoice_source: 'hourly', notes: 'Thursday ran late to finish the oiling.', ...money(1980, { gstOn: false }), total_hours: 36, xero_bill_id: 'xb-a', xero_bill_status: 'PAID', pay_run_id: 'ZZTEST-run-adj',
         xero_adjustments: { total: -86.5, lines: [{ description: 'Fuel card, October', amount: -86.5, account_code: '449', kind: 'deduction' }] }, payable_after_xero: 1774.7, xero_pays: 1774.7,
@@ -57,6 +57,12 @@ registerDemo((db, h) => {
       histPaid('inv-h4', ly1, 'ZZTEST-INV-02', 1120, 'ZZTEST-run-h4'),
       histPaid('inv-h5', ly2, 'ZZTEST-INV-01', 560, 'ZZTEST-run-h5')
     );
+    // The office marked these runs' super paid on the day each invoice was paid.
+    for (const inv of db.invoices) {
+      if (['ZZTEST-run-prev', 'ZZTEST-run-adj', 'ZZTEST-run-h1', 'ZZTEST-run-h2', 'ZZTEST-run-h3', 'ZZTEST-run-h4', 'ZZTEST-run-h5'].includes(inv.pay_run_id)) {
+        db.paidSuperRuns.set(inv.pay_run_id, inv.paid_at || inv.created_at);
+      }
+    }
   }
 
   // ------------------------------------------------------------- receipts
@@ -216,7 +222,14 @@ registerDemo((db, h) => {
       const byInvoice = [];
       let sinceStart = 0; let tax = 0; let notRecorded = 0; let notInXero = 0;
       const taxPct = db.taxSetAsidePercent == null ? null : Number(db.taxSetAsidePercent);
-      const paidRuns = db.paidSuperRuns || new Set();
+      const paidRuns = db.paidSuperRuns || new Map();
+      // As ops-api superMarkedPaidWords: the office's stamp as a Perth (UTC+8) day.
+      const markedPaid = (stamp) => {
+        const ms = Date.parse(stamp);
+        if (!Number.isFinite(ms)) fail(503, { code: 'pay_history_unreadable', error: 'Could not read your pay history. Try again.' });
+        const d = new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
+        return { marked_paid_on: d, words: `Marked paid by the office on ${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` };
+      };
 
       for (const row of db.invoices) {
         if (row.user_id !== me.id) continue;
@@ -261,7 +274,8 @@ registerDemo((db, h) => {
         put(weeks, wk, totals);
         put(months, ym, totals);
         put(fyMap, `FY ${y}/${String(y + 1).slice(2)}`, totals);
-        byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: wk, amount: superAmt, status: noSuper ? 'not_recorded' : (paidRuns.has(row.pay_run_id) ? 'paid_to_fund' : 'to_be_paid') });
+        const marked = noSuper ? undefined : paidRuns.get(row.pay_run_id);
+        byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: wk, amount: superAmt, status: noSuper ? 'not_recorded' : (marked ? 'marked_paid_by_office' : 'to_be_paid'), ...(marked ? markedPaid(marked) : {}) });
       }
       const newest = (map) => [...map].sort(([a], [b]) => b.localeCompare(a));
       const monthLabel = (ym) => `${MON[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;

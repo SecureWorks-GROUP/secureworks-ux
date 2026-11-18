@@ -9,12 +9,68 @@ import { ApiError } from '../../crew/js/lib/api.js';
 (globalThis as Record<string, unknown>).document = { addEventListener() {} };
 
 const {
+  spendCaptureEnabled,
+  reimbursementSwitchOn,
+  savedReceiptReimbursedOnInvoice,
   stockDivisionOfVertical,
   stockDivisionOfJob,
   divisionsForUser,
   nextStepWords,
   serverWordsOf
 } = await import('../../crew/js/screens/receipt.js');
+
+Deno.test('spendCaptureEnabled stays false until the server explicitly sends spend_capture_v2 true', () => {
+  equal(spendCaptureEnabled({}), false);
+  equal(spendCaptureEnabled({ expense: { expense_id: 'ex-1' }, expensesData: { expenses: [] } }), false);
+  equal(spendCaptureEnabled({ expense: { spend_capture_v2: false }, expensesData: { spend_capture_v2: true } }), false);
+  equal(spendCaptureEnabled({ expense: { spend_capture_v2: true } }), true);
+  equal(spendCaptureEnabled({ expensesData: { spend_capture_v2: true } }), true);
+});
+
+Deno.test('reimbursementSwitchOn and savedReceiptReimbursedOnInvoice stay false unless server confirms claimable', () => {
+  equal(reimbursementSwitchOn(null), false);
+  equal(reimbursementSwitchOn({ expenses: [{ id: 'ex-1', payment_method: 'personal_card' }] }), false);
+  equal(
+    reimbursementSwitchOn({
+      expenses: [{ id: 'ex-1', reimbursement: { claimable: false, reason: 'reimbursement_switch_off' } }]
+    }),
+    false
+  );
+  equal(
+    reimbursementSwitchOn({
+      expenses: [{ id: 'ex-1', reimbursement: { claimable: true, reason: null } }]
+    }),
+    true
+  );
+
+  // Switch off on server -> never claimable on next invoice.
+  equal(
+    savedReceiptReimbursedOnInvoice({
+      expensesData: { expenses: [{ id: 'ex-1', payment_method: 'personal_card' }] },
+      expenseId: 'ex-1',
+      hasPhoto: true
+    }),
+    false
+  );
+  // Switch on, photo receipt -> claimable on next invoice.
+  equal(
+    savedReceiptReimbursedOnInvoice({
+      expensesData: { expenses: [{ id: 'ex-1', reimbursement: { claimable: true, reason: null } }] },
+      expenseId: 'ex-1',
+      hasPhoto: true
+    }),
+    true
+  );
+  // Switch on, no-photo slip -> server marks reimbursement_receipt_required, so do not promise invoice reimbursement.
+  equal(
+    savedReceiptReimbursedOnInvoice({
+      expensesData: { expenses: [{ id: 'ex-2', reimbursement: { claimable: false, reason: 'reimbursement_receipt_required' } }] },
+      expenseId: 'ex-2',
+      hasPhoto: false
+    }),
+    false
+  );
+});
 
 Deno.test('stockDivisionOfVertical and stockDivisionOfJob map only the three real stock divisions', () => {
   equal(stockDivisionOfVertical('patio'), 'patios');
@@ -50,8 +106,9 @@ Deno.test('divisionsForUser shows only divisions the trade works for, never gues
   );
 });
 
-Deno.test('nextStepWords returns the five exact P2-06.5 strings and a safe fallback when absent', () => {
-  equal(nextStepWords('reimbursed_on_next_invoice', {}), 'Saved. It will be on your next invoice as a reimbursement.');
+Deno.test('nextStepWords gates reimbursement invoice promise on server reimbursementOn and keeps exact v2 words', () => {
+  equal(nextStepWords('reimbursed_on_next_invoice', { reimbursementOn: false }), 'Saved. The office will see it.');
+  equal(nextStepWords('reimbursed_on_next_invoice', { reimbursementOn: true }), 'Saved. It will be on your next invoice as a reimbursement.');
   equal(nextStepWords('saved_against_job', { jobNumber: 'SWF-990001' }), 'Saved against SWF-990001.');
   equal(nextStepWords('saved_to_stock', { stockDivision: 'fencing' }), 'Saved to fencing stock.');
   equal(nextStepWords('saved_to_stock', { stockDivision: 'patios' }), 'Saved to patio stock.');

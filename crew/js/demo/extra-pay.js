@@ -304,7 +304,7 @@ registerDemo((db, h) => {
         routed_to: 'office', flow: 'unknown', created_at: nowIso(), ...capture };
       const nextStep = e.payment_method === 'personal_card' ? 'reimbursed_on_next_invoice' : e.payment_method === 'supplier_invoice' ? 'evidence_for_supplier_bill' : e.payment_method === 'cash' ? 'draft_bill' : e.payment_method === 'company_card' ? (e.job_id ? 'saved_against_job' : e.stock_division || e.business_category === 'general_stock' ? 'saved_to_stock' : null) : null;
       db.expenses.push(e);
-      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow, next_step: nextStep };
+      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow, next_step: nextStep, spend_capture_v2: Boolean(db.flags.spendCaptureV2) };
     },
     update_expense(p, b) {
       const e = db.expenses.find((x) => x.id === b.expense_id); if (!e) fail(404, { error: 'Expense not found' });
@@ -325,7 +325,7 @@ registerDemo((db, h) => {
         if (b.stock_division === null || e.stock_division) updates.stock_division = null;
       }
       const next = { ...e, ...updates };
-      if (b.capture_version === 2 && !next.job_id && !next.stock_division && db.flags.spendCaptureV2 !== false) {
+      if (b.capture_version === 2 && !next.job_id && !next.stock_division && db.flags.spendCaptureV2 === true) {
         fail(409, { error: 'expense_needs_job_or_division', message: 'Pick the job or the stock this was for.' });
       }
       Object.assign(e, updates);
@@ -340,12 +340,12 @@ registerDemo((db, h) => {
       mineRows.filter((a) => a.clocked_on_at && !a.clocked_off_at).forEach((a) => push(a.job_id, 0.95, 'You are clocked on there'));
       mineRows.filter((a) => a.scheduled_date === today).forEach((a) => push(a.job_id, 0.8, 'You are booked there today'));
       mineRows.filter((a) => a.scheduled_date < today && a.scheduled_date >= addDays(today, -6)).sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date)).forEach((a) => push(a.job_id, 0.5, 'You were there this week'));
-      return { suggestions: out, fallback: { label: 'General business (no job)', score: 0.3 }, generated_at: nowIso() };
+      return { suggestions: out, fallback: { label: 'General business (no job)', score: 0.3 }, generated_at: nowIso(), spend_capture_v2: Boolean(db.flags.spendCaptureV2) };
     },
     list_expenses(p) {
       let rows = db.expenses.filter((e) => (!p.job_id || e.job_id === p.job_id) && (!p.status || e.status === p.status));
       rows = rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, Number(p.limit) || 50);
-      return { expenses: rows.map((e) => {
+      return { spend_capture_v2: Boolean(db.flags.spendCaptureV2), expenses: rows.map((e) => {
         if (!db.flags.reimbursements) return { ...e, jobs: jobsJoin(e.job_id) };
         const reason = e.submitted_by !== me.id ? 'reimbursement_not_yours'
           : !['personal_card', 'cash'].includes(e.payment_method) ? 'reimbursement_not_personal_spend'

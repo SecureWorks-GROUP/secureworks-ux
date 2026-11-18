@@ -1,13 +1,15 @@
 // Receipts. Photo first, then only what the office needs: how it was paid, what
-// it was for, and which job or division stock. Nothing here waits in a queue:
-// with no signal the photo stays on screen until it can be sent.
+// it was for, and which job (or division stock once spend_capture_v2 is on).
+// Nothing here waits in a queue: with no signal the photo stays on screen until
+// it can be sent.
 import { html, cx, useEffect, useMemo, useRef, useState } from '../lib/h.js';
 import { api, putFile, ApiError, friendly } from '../lib/api.js';
-import { useQuery, useStore, invalidate } from '../lib/store.js';
+import { useQuery, useStore, invalidate, primeQuery } from '../lib/store.js';
 import { go, back } from '../lib/router.js';
 import { todayISO, addDays, fmtDate, fmtDay, tsToDate, isISODate } from '../lib/dates.js';
 import { jobTitle, verticalOf } from '../lib/model.js';
 import { useMyBookings, useJob, jobStub } from '../lib/data.js';
+import { receiptsEnabled } from '../lib/reimbursements.js';
 import { compressImage, pickPhotos } from '../lib/upload.js';
 import { Icon } from '../ui/icons.js';
 import { Page, Button, Sheet, Field, Picks, StatusBadge, JobLine, JobTag, KV, SkelRows, Empty, LoadError, toast, openOverlay, openLightbox, buzz } from '../ui/kit.js';
@@ -17,6 +19,8 @@ import { useExpenses } from './pay.js';
 const PAID_WITH = [['personal_card', 'I paid, pay me back'], ['company_card', 'Company card'], ['cash', 'Company cash'], ['supplier_invoice', 'Supplier account']];
 const PAID_WORDS = { personal_card: 'You paid, to be paid back', company_card: 'Company card', cash: 'Company cash', supplier_invoice: 'Supplier account' };
 const WHAT_FOR = [['materials', 'Materials'], ['fuel', 'Fuel'], ['tools', 'Tools'], ['consumables', 'Consumables'], ['parking', 'Parking'], ['meals', 'Meals'], ['vehicle_maintenance', 'Vehicle'], ['other', 'Other']];
+// Kept for the legacy no-job path while spend_capture_v2 is off on the server.
+const NO_JOB_HEADING = { materials: 'general_stock', tools: 'general_stock', consumables: 'general_stock', fuel: 'vehicle', parking: 'vehicle', vehicle_maintenance: 'vehicle', meals: 'overhead', other: 'other' };
 const STOCK_DIVISIONS = [['patios', 'Patio stock'], ['fencing', 'Fencing stock'], ['insurance', 'Insurance stock']];
 const STOCK_LABEL = { patios: 'Patio stock', fencing: 'Fencing stock', insurance: 'Insurance stock' };
 const STOCK_SAVED = { patios: 'patio stock', fencing: 'fencing stock', insurance: 'insurance stock' };
@@ -28,6 +32,29 @@ const STATUS = {
 };
 const statusOf = (e) => STATUS[String(e.status || '').toLowerCase()] || ['waiting', 'With the office'];
 const who = (name) => (name ? String(name)[0].toUpperCase() + String(name).slice(1) : 'The office');
+
+export function spendCaptureEnabled({ expense, suggestData, expensesData } = {}) {
+  for (const src of [expense, suggestData, expensesData]) {
+    if (src && typeof src.spend_capture_v2 === 'boolean') return src.spend_capture_v2;
+  }
+  return false;
+}
+
+export function reimbursementSwitchOn(expensesData, res) {
+  if (res && typeof res.trade_reimbursement_line_v1 === 'boolean') return res.trade_reimbursement_line_v1;
+  if (expensesData && typeof expensesData.trade_reimbursement_line_v1 === 'boolean') return expensesData.trade_reimbursement_line_v1;
+  return receiptsEnabled(expensesData && expensesData.expenses);
+}
+
+export function savedReceiptReimbursedOnInvoice({ expensesData, expenseId, res, hasPhoto } = {}) {
+  const rows = expensesData && Array.isArray(expensesData.expenses) ? expensesData.expenses : null;
+  if (rows && expenseId) {
+    const row = rows.find((r) => r && r.id === expenseId);
+    if (row) return Boolean(row.reimbursement && row.reimbursement.claimable === true);
+  }
+  if (res && typeof res.trade_reimbursement_line_v1 === 'boolean') return res.trade_reimbursement_line_v1 && Boolean(hasPhoto);
+  return Boolean(hasPhoto) && reimbursementSwitchOn(expensesData, res);
+}
 
 export function stockDivisionOfVertical(raw) {
   const v = String(raw || '').trim().toLowerCase();
@@ -66,8 +93,12 @@ export function divisionsForUser(user, ownBookings) {
   return STOCK_DIVISIONS.filter(([k]) => set.has(k));
 }
 
-export function nextStepWords(nextStep, { jobNumber = '', stockDivision = '' } = {}) {
-  if (nextStep === 'reimbursed_on_next_invoice') return 'Saved. It will be on your next invoice as a reimbursement.';
+export function nextStepWords(nextStep, { jobNumber = '', stockDivision = '', reimbursementOn = false } = {}) {
+  if (nextStep === 'reimbursed_on_next_invoice') {
+    return reimbursementOn
+      ? 'Saved. It will be on your next invoice as a reimbursement.'
+      : 'Saved. The office will see it.';
+  }
   if (nextStep === 'saved_against_job') return `Saved against ${jobNumber || 'the job'}.`;
   if (nextStep === 'saved_to_stock') return `Saved to ${STOCK_SAVED[stockDivision] || 'stock'}.`;
   if (nextStep === 'draft_bill') return 'Saved. The office will see it.';
@@ -97,6 +128,7 @@ export function Receipt({ jobId, poId }) {
   const user = useStore((s) => s.user);
   const online = useStore((s) => s.online);
   const myBookings = useMyBookings();
+  const expensesQ = useExpenses();
   const jobQ = useJob(jobId || null);
 
   const today = todayISO();
@@ -132,20 +164,29 @@ export function Receipt({ jobId, poId }) {
   const [reason, setReason] = useState('');
   const [problem, setProblem] = useState(null);
   const [expense, setExpense] = useState(null);
+  const [suggestMeta, setSuggestMeta] = useState(null);
   const [f, setF] = useState({ vendor: '', date: '', total: '', gst: '', paid: null, what: null });
   const [dest, setDest] = useState(jobId ? { kind: 'job', id: jobId, via: 'manual_search' } : null);
   const [found, setFound] = useState([]); // jobs suggested by the server or picked in search
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [savedStep, setSavedStep] = useState('');
-  const upload = useRef(null); const unsure = useRef(false); const picked = useRef(false); const suggested = useRef([]); const pickedOwnIds = useRef(new Set());
+  const [savedV2, setSavedV2] = useState(false);
+  const [savedReimbOn, setSavedReimbOn] = useState(false);
+  const upload = useRef(null); const unsure = useRef(false); const picked = useRef(Boolean(jobId)); const suggested = useRef([]); const pickedOwnIds = useRef(new Set());
   const set = (k, v) => { setSaveError(''); setF((p) => ({ ...p, [k]: v })); };
+  const v2 = spendCaptureEnabled({ expense, suggestData: suggestMeta, expensesData: expensesQ.data });
+
   useEffect(() => () => { if (photo && photo.preview) URL.revokeObjectURL(photo.preview); }, [photo]);
   useEffect(() => {
-    if (!picked.current && dest && dest.kind === 'job' && dest.id === jobId && (jobQ.locked || (!user.office && myBookings.data && !ownJobIds.has(jobId)))) {
+    if (dest && dest.kind === 'job' && dest.id === jobId && !pickedOwnIds.current.has(jobId) && (jobQ.locked || (!user.office && myBookings.data && !ownJobIds.has(jobId)))) {
+      picked.current = false;
       setDest(null);
     }
   }, [jobId, jobQ.locked, user.office, myBookings.data, ownJobIds, dest]);
+  useEffect(() => {
+    if (v2 && dest && dest.kind === 'no_job') setDest(null);
+  }, [v2, dest]);
 
   const take = async (camera) => {
     const files = await pickPhotos({ multiple: false, camera });
@@ -162,11 +203,11 @@ export function Receipt({ jobId, poId }) {
     const res = await api('list_expenses', { limit: 30 });
     const up = upload.current;
     const row = mine(res && res.expenses, user).find((e) => (up ? e.receipt_storage_path === up.path || e.receipt_photo_url === up.publicUrl : e.no_receipt_reason === why && Date.now() - Date.parse(e.created_at) < 15 * 60000));
-    return row ? { expense_id: row.id, extraction: { vendor_name: row.vendor_name, receipt_date: row.receipt_date, total_amount: row.total_amount, gst_amount: row.gst_amount, line_items: row.line_items }, routed_to: row.routed_to, status: row.status } : null;
+    return row ? { expense_id: row.id, extraction: { vendor_name: row.vendor_name, receipt_date: row.receipt_date, total_amount: row.total_amount, gst_amount: row.gst_amount, line_items: row.line_items }, routed_to: row.routed_to, status: row.status, spend_capture_v2: res && res.spend_capture_v2 } : null;
   };
 
   const send = async (shot, why) => {
-    setStep('sending'); setProblem(null); setSaveError('');
+    setStep('sending'); setProblem(null); setSaveError(''); setSuggestMeta(null);
     try {
       if (shot && !upload.current) {
         const type = shot.blob.type || 'image/jpeg';
@@ -198,9 +239,13 @@ export function Receipt({ jobId, poId }) {
       invalidate('expenses');
       setStep('check');
       api('suggest_job_for_expense', null, { merchant: x.vendor_name || '', receipt_date: x.receipt_date || '', total_amount: parsedTotal }).then((res) => {
+        setSuggestMeta(res || null);
         const list = ((res && res.suggestions) || []).slice(0, 6);
         suggested.current = list;
         setFound((cur) => [...cur, ...list.filter((s) => s && s.job_id && !cur.some((c) => c.job_id === s.job_id))]);
+        const v2Now = spendCaptureEnabled({ expense: made, suggestData: res, expensesData: expensesQ.data });
+        const firstOwn = list.find((s) => s && (user.office || ownJobIds.has(s.job_id)));
+        if (!v2Now && !picked.current && firstOwn) setDest({ kind: 'job', id: firstOwn.job_id, via: 'jarvis_top' });
       }).catch(() => {});
     } catch (err) {
       setProblem(err);
@@ -238,13 +283,21 @@ export function Receipt({ jobId, poId }) {
   const divisions = useMemo(() => divisionsForUser(user, ownBookings), [user, ownBookings]);
   const chosen = dest && dest.kind === 'job' ? options.find((o) => o.job_id === dest.id) || ownJobs.find((o) => o.job_id === dest.id) || null : null;
   const total = num(f.total);
-  const missing = !dest ? 'Pick the job or the stock this was for'
-    : !f.vendor.trim() ? 'Add the shop name'
-    : !(total > 0) ? 'Add the total'
-    : !f.date ? 'Pick the date on the receipt'
-    : !f.paid ? 'Say how it was paid'
-    : !f.what ? 'Say what it was for'
-    : '';
+  const missing = v2
+    ? (!dest || dest.kind === 'no_job' ? 'Pick the job or the stock this was for'
+      : !f.vendor.trim() ? 'Add the shop name'
+      : !(total > 0) ? 'Add the total'
+      : !f.date ? 'Pick the date on the receipt'
+      : !f.paid ? 'Say how it was paid'
+      : !f.what ? 'Say what it was for'
+      : '')
+    : (!f.vendor.trim() ? 'Add the shop name'
+      : !(total > 0) ? 'Add the total'
+      : !f.date ? 'Pick the date on the receipt'
+      : !f.paid ? 'Say how it was paid'
+      : !f.what ? 'Say what it was for'
+      : !dest ? 'Pick the job, or no job'
+      : '');
 
   const save = async () => {
     if (missing || saving || bookingsFailed || bookingsLoading) return;
@@ -253,51 +306,88 @@ export function Receipt({ jobId, poId }) {
     const sum = items.reduce((s, li) => s + (Number(li.total != null ? li.total : li.amount) || 0), 0);
     const label = (WHAT_FOR.find(([v]) => v === f.what) || [])[1] || 'Purchase';
     const ownSuggestions = user.office ? suggested.current : suggested.current.filter((s) => s && allowedJob(s.job_id));
-    const body = {
-      expense_id: expense.expense_id, vendor_name: f.vendor.trim(), receipt_date: f.date, total_amount: total, gst_amount: num(f.gst),
-      line_items: items.length && Math.abs(sum - total) <= 1 ? items : [{ description: `${label}, ${f.vendor.trim()}`, quantity: 1, unit_price: total, total }],
-      category: f.what, payment_method: f.paid, capture_version: 2,
-      jarvis_job_suggestion: {
-        suggestions: ownSuggestions,
-        chosen: dest.kind === 'job' ? dest.id : '',
-        chosen_via: dest.kind === 'job' ? dest.via : 'stock_' + dest.division
-      }
-    };
-    if (dest.kind === 'job') body.job_id = dest.id;
-    else body.stock_division = dest.division;
+    const hasJob = dest.kind === 'job';
+    const body = v2
+      ? {
+          expense_id: expense.expense_id, vendor_name: f.vendor.trim(), receipt_date: f.date, total_amount: total, gst_amount: num(f.gst),
+          line_items: items.length && Math.abs(sum - total) <= 1 ? items : [{ description: `${label}, ${f.vendor.trim()}`, quantity: 1, unit_price: total, total }],
+          category: f.what, payment_method: f.paid, capture_version: 2,
+          ...(hasJob ? { job_id: dest.id } : { stock_division: dest.division }),
+          jarvis_job_suggestion: {
+            suggestions: ownSuggestions,
+            chosen: hasJob ? dest.id : '',
+            chosen_via: hasJob ? dest.via : 'stock_' + dest.division
+          }
+        }
+      : {
+          expense_id: expense.expense_id, vendor_name: f.vendor.trim(), receipt_date: f.date, total_amount: total, gst_amount: num(f.gst),
+          line_items: items.length && Math.abs(sum - total) <= 1 ? items : [{ description: `${label}, ${f.vendor.trim()}`, quantity: 1, unit_price: total, total }],
+          category: f.what, payment_method: f.paid, job_id: hasJob ? dest.id : null,
+          business_category: hasJob ? null : NO_JOB_HEADING[f.what] || 'other',
+          jarvis_job_suggestion: {
+            suggestions: ownSuggestions,
+            chosen: hasJob ? dest.id : '',
+            chosen_via: hasJob ? dest.via : 'general_business'
+          }
+        };
     try {
       const res = await api('update_expense', null, body);
       if (res && res.success === false) throw new ApiError(res.message || res.error || 'Not saved', { status: 409, body: res });
+      let reimbOn = false;
+      if (f.paid === 'personal_card') {
+        const listed = await api('list_expenses', { limit: 100 }).catch(() => null);
+        if (listed) primeQuery('expenses', listed, { persist: true });
+        else invalidate('expenses');
+        reimbOn = savedReceiptReimbursedOnInvoice({
+          expensesData: listed,
+          expenseId: expense.expense_id,
+          res,
+          hasPhoto: Boolean(photo || upload.current)
+        });
+      } else {
+        invalidate('expenses');
+      }
+      setSavedV2(v2);
+      setSavedReimbOn(Boolean(reimbOn));
       setSavedStep((res && res.next_step) || '');
-      invalidate('expenses');
       buzz([14, 60, 14, 60, 30]);
       setStep('done');
     } catch (err) {
       const words = serverWordsOf(err);
       setSaveError(words);
-      if (err instanceof ApiError && err.offline) toast(words, { kind: 'bad', ms: 6500 });
+      if (!v2 || (err instanceof ApiError && err.offline)) toast(words, { kind: 'bad', ms: 6500 });
     }
     setSaving(false);
   };
   const again = () => {
-    setPhoto(null); setReason(''); setExpense(null); setProblem(null); setFound([]); setSaveError(''); setSavedStep('');
-    upload.current = null; unsure.current = false; picked.current = false; suggested.current = []; pickedOwnIds.current = new Set();
+    setPhoto(null); setReason(''); setExpense(null); setSuggestMeta(null); setProblem(null); setFound([]); setSaveError(''); setSavedStep(''); setSavedV2(false); setSavedReimbOn(false);
+    upload.current = null; unsure.current = false; picked.current = Boolean(allowPropJob); suggested.current = []; pickedOwnIds.current = new Set();
     setDest(allowPropJob ? { kind: 'job', id: jobId, via: 'manual_search' } : null);
     setStep('shoot');
   };
 
   if (step === 'done') {
+    const hasJob = Boolean(dest && dest.kind === 'job');
     const stockDiv = dest && dest.kind === 'stock' ? dest.division : '';
     const jobNum = chosen && chosen.job_number ? chosen.job_number : '';
-    const lead = nextStepWords(savedStep, { jobNumber: jobNum || (chosen ? jobTitle(chosen) : ''), stockDivision: stockDiv });
-    return html`<${DoneScreen} bar="Expenses" title="Receipt saved" lead=${lead}
+    const sameRoute = expense.hadJob === hasJob;
+    const checker = sameRoute ? who(expense.routed_to) : 'The office';
+    const title = savedV2 ? 'Receipt saved' : 'Receipt sent';
+    const lead = savedV2
+      ? nextStepWords(savedStep, { jobNumber: jobNum || (chosen ? jobTitle(chosen) : ''), stockDivision: stockDiv, reimbursementOn: savedReimbOn })
+      : f.paid === 'personal_card' && savedReimbOn
+        ? 'Saved. It will be on your next invoice as a reimbursement.'
+        : `${checker} checks it${chosen ? ` against ${jobTitle(chosen)}` : ''}. Nothing more for you to do.`;
+    const showOutsideAppBanner = f.paid === 'personal_card' && !savedReimbOn;
+    return html`<${DoneScreen} bar="Expenses" title=${title} lead=${lead}
       foot=${html`<${Button} block class="big" onClick=${() => back('/pay')}>Done<//>
         <${Button} kind="line" block onClick=${again}>Add another receipt<//>`}>
       <div class="card">
         <${KV} k=${f.vendor.trim()} v=${cash(total)} />
         <${KV} k="Paid with" v=${PAID_WORDS[f.paid]} />
-        <${KV} k=${stockDiv ? 'Stock' : 'Job'} v=${stockDiv ? STOCK_LABEL[stockDiv] : chosen ? jobTitle(chosen) : 'Job'} />
+        <${KV} k=${stockDiv ? 'Stock' : 'Job'} v=${stockDiv ? STOCK_LABEL[stockDiv] : chosen ? jobTitle(chosen) : 'No job'} />
       </div>
+      ${showOutsideAppBanner ? html`<div class="note-banner plain"><span><span class="t-strong">Getting your money back.</span> Once it is approved, the office pays you back. That happens outside this app and is not part of your weekly invoice, so ask the office if it has not come through.</span></div>` : null}
       <button type="button" class="link tap pay-linkrow" onClick=${() => go('/pay/receipts', { replace: true })}>See the receipts you have sent</button>
     <//>`;
   }
@@ -305,23 +395,27 @@ export function Receipt({ jobId, poId }) {
   if (step === 'check') {
     if (bookingsLoading) {
       return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')}
-        foot=${html`<${Button} block class="big" disabled=${true}>Save receipt<//>`}>
+        foot=${html`<${Button} block class="big" disabled=${true}>${v2 ? 'Save receipt' : 'Send receipt'}<//>`}>
         <${SkelRows} n=${4} />
       <//>`;
     }
     if (bookingsFailed) {
       return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')}
-        foot=${html`<${Button} block class="big" disabled=${true}>Save receipt<//>`}>
+        foot=${html`<${Button} block class="big" disabled=${true}>${v2 ? 'Save receipt' : 'Send receipt'}<//>`}>
         <${LoadError} error=${myBookings.error || new Error('Could not load your jobs.')} onRetry=${myBookings.refetch} what="your jobs" />
       <//>`;
     }
     const read = expense.extraction && (expense.extraction.vendor_name || num(expense.extraction.total_amount) != null);
     const yesterday = addDays(today, -1);
     const dateMode = f.date === today ? 'today' : f.date === yesterday ? 'yesterday' : f.date || f.otherDate ? 'other' : null;
-    return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')}
-      foot=${html`<${Button} block class="big" busy=${saving} disabled=${Boolean(missing)} onClick=${save}>Save receipt<//>
-        ${saveError ? html`<p class="t-small t-bad" role="alert">${saveError}</p>`
-          : missing ? html`<p class="t-small">${missing}</p>` : null}`}>
+    const foot = v2
+      ? html`<${Button} block class="big" busy=${saving} disabled=${Boolean(missing)} onClick=${save}>Save receipt<//>
+          ${saveError ? html`<p class="t-small t-bad" role="alert">${saveError}</p>`
+            : missing ? html`<p class="t-small">${missing}</p>` : null}`
+      : html`${saveError ? html`<p class="t-small t-bad" role="alert">${saveError}</p>`
+          : missing ? html`<p class="t-small">${missing}</p>` : null}
+          <${Button} block class="big" busy=${saving} disabled=${Boolean(missing)} onClick=${save}>Send receipt<//>`;
+    return html`<${Page} title="Check the receipt" back="Back" onBack=${() => back('/pay')} foot=${foot}>
       <p class="block t-small pay-intro">${!photo ? 'No photo, so fill in what you paid.' : read ? 'This is what we read off your photo. Fix anything that is wrong.' : 'We could not read the photo. Fill in what you can see on it.'}</p>
       <div class="form pay-gap">
         ${photo ? html`<button type="button" class="card pay-shotrow" onClick=${() => openLightbox([{ url: photo.preview, label: 'Your receipt' }])}><img src=${photo.preview} alt="Your receipt" /><span><span class="t-strong">Your photo is saved</span><span class="t-small pay-noticesub">Tap to look at it</span></span></button>`
@@ -338,17 +432,18 @@ export function Receipt({ jobId, poId }) {
         <${Field} label="How was it paid?"><${Picks} value=${f.paid} options=${PAID_WITH} onChange=${(v) => set('paid', v)} /><//>
         <${Field} label="What was it for?"><${Picks} value=${f.what} options=${WHAT_FOR} onChange=${(v) => set('what', v)} /><//>
         <${Field} label="Which job?">
-          ${options.length || user.office || !user.manager ? html`<div class="picks">
+          ${!v2 || options.length || user.office || !user.manager ? html`<div class="picks">
             ${options.map((o) => html`<button type="button" class="pick" key=${o.job_id} aria-pressed=${String(Boolean(dest && dest.kind === 'job' && dest.id === o.job_id))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'job', id: o.job_id, via: suggested.current[0] && suggested.current[0].job_id === o.job_id ? 'jarvis_top' : suggested.current.some((s) => s.job_id === o.job_id) ? 'jarvis_alt' : 'manual_search' }); }}>${jobTitle(o)}</button>`)}
+            ${!v2 ? html`<button type="button" class="pick" aria-pressed=${String(Boolean(dest && dest.kind === 'no_job'))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'no_job', via: 'general_business' }); }}>No job, general business</button>` : null}
             <button type="button" class="pick" onClick=${findJob}>Another job</button>
           </div>` : html`<p class="t-small">You are not booked on a job yet.</p>`}
           ${chosen ? html`<span class="pay-chosen"><${JobTag} number=${chosen.job_number} /><span>${[chosen.client_name, chosen.reason].filter(Boolean).join(' · ')}</span></span>` : null}
         <//>
-        ${divisions.length ? html`<${Field} label="Not for one job? Pick the stock:">
+        ${v2 ? (divisions.length ? html`<${Field} label="Not for one job? Pick the stock:">
           <div class="picks">
             ${divisions.map(([div, label]) => html`<button type="button" class="pick" key=${div} aria-pressed=${String(Boolean(dest && dest.kind === 'stock' && dest.division === div))} onClick=${() => { picked.current = true; setSaveError(''); buzz(6); setDest({ kind: 'stock', division: div }); }}>${label}</button>`)}
           </div>
-        <//>` : !ownJobs.length ? html`<div class="note-banner plain"><span>No jobs or divisions are set on your account yet. Ask the office to add you first.</span></div>` : null}
+        <//>` : !ownJobs.length ? html`<div class="note-banner plain"><span>No jobs or divisions are set on your account yet. Ask the office to add you first.</span></div>` : null) : null}
       </div>
     <//>`;
   }
@@ -430,12 +525,13 @@ function FindJobSheet({ user, ownJobIds, ownJobs, onPick, onClose }) {
 export function Receipts() {
   const user = useStore((s) => s.user);
   const q = useExpenses();
+  const reimbOn = reimbursementSwitchOn(q.data);
   const bad = (q.error && (!q.data || !q.error.offline)) || (q.data && !Array.isArray(q.data.expenses));
   const rows = mine(q.data && q.data.expenses, user).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  const open = (e) => openOverlay((close) => html`<${ReceiptSheet} expense=${e} onClose=${close} />`);
+  const open = (e) => openOverlay((close) => html`<${ReceiptSheet} expense=${e} reimbOn=${reimbOn} onClose=${close} />`);
   return html`<${Page} title="Expenses" back="Pay" onBack=${() => back('/pay')}
     foot=${html`<${Button} block class="big" onClick=${() => go('/pay/receipt')}>Add a receipt<//>`}>
-    <p class="block t-small pay-intro">Receipts you have sent, newest first. Each one is its own record.</p>
+    <p class="block t-small pay-intro">Receipts you have sent, newest first. Each one is its own record.${reimbOn ? '' : ' What you paid for yourself is paid back separately, not on your invoice.'}</p>
     ${q.loading ? html`<${SkelRows} n=${4} />` : bad ? html`<${LoadError} error=${q.error || new Error('Could not load your receipts.')} onRetry=${q.refetch} what="your receipts" />`
       : !rows.length ? html`<${Empty} title="No receipts yet">When you buy something for work, take a photo of the receipt here and the office takes it from there.<//>`
       : html`<div class="block card pay-gap">${rows.map((e) => { const [status, words] = statusOf(e); return html`<button type="button" class="item pay-inv" key=${e.id} onClick=${() => open(e)}>
@@ -446,14 +542,14 @@ export function Receipts() {
   <//>`;
 }
 
-function ReceiptSheet({ expense: e, onClose }) {
+function ReceiptSheet({ expense: e, reimbOn = false, onClose }) {
   const [badge] = statusOf(e);
   const status = String(e.status || '').toLowerCase();
   const say = status === 'queried' ? e.query_reason : status === 'rejected' ? e.rejection_reason : '';
   const next = status === 'queried' ? 'The office needs something from you before they can approve it. Give them a call.'
     : status === 'rejected' ? 'The office did not accept this one. Call them if you think that is wrong.'
     : status === 'pending_extraction' ? 'We are still reading the photo. Nothing for you to do.'
-    : status === 'approved' || status === 'pushed_to_xero' ? 'Approved. Nothing more for you to do.'
+    : status === 'approved' || status === 'pushed_to_xero' ? (e.payment_method === 'personal_card' && !reimbOn ? 'Approved. The office pays you back outside this app, so ask them if it has not come through.' : 'Approved. Nothing more for you to do.')
     : `${who(e.routed_to)} is checking it. Nothing for you to do.`;
   return html`<${Sheet} title=${e.vendor_name || 'Receipt'} sub=${e.created_at ? 'Sent ' + fmtDate(tsToDate(e.created_at)) : ''} onClose=${onClose}>
     <div class="stack">

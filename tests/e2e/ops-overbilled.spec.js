@@ -3,7 +3,10 @@
 // list_overbilled_job_work_orders?days=<window>, largest gap first, plus the
 // jobs billed in the window with no agreed amount, listed apart. No trade
 // rate, hours or line. A window too wide is said plainly; a failed or refused
-// read says so in words and never draws an empty list.
+// read says so in words and never draws an empty list. The read walks every job
+// billed in the window, so it runs ON DEMAND only (director 16:58): opening the
+// Work Orders tab reads nothing; one press of "Show jobs billed over the agreed
+// amount" reads once.
 // Made-up figures and ZZTEST job numbers only.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
@@ -77,10 +80,43 @@ async function boot(page, plan) {
 }
 
 const overReads = (page) => page.evaluate(() => window.__reads.filter((r) => r.action === 'list_overbilled_job_work_orders').map((r) => r.params));
+const SHOW = 'Show jobs billed over the agreed amount';
+
+// Open the Work Orders tab (no read), then press Show (one read).
+async function openAndShow(page) {
+  await page.evaluate(() => loadWOs());
+  await page.locator('#woOverbilled').getByRole('button', { name: SHOW }).click();
+}
+
+test('opening the Work Orders tab reads nothing; one press reads once; reopening the tab reads nothing again', async ({ page }) => {
+  await boot(page, { 90: 'ok', 30: 'ok' });
+  await page.evaluate(() => loadWOs());
+  const host = page.locator('#woOverbilled');
+  await expect(host.getByRole('button', { name: SHOW })).toBeVisible();
+  await expect(host.locator('[data-overbilled-idle]')).toContainText('Not loaded.');
+  await expect(host.locator('[data-overbilled-row]')).toHaveCount(0);
+  // The other Work Orders reads ran, so the tab really opened.
+  await expect.poll(() => page.evaluate(() => window.__reads.some((r) => r.action === 'list_work_orders'))).toBe(true);
+  // Picking a window before the press reads nothing either.
+  await host.locator('[data-overbilled-window]').selectOption('30');
+  await expect(host.locator('[data-overbilled-window]')).toHaveValue('30');
+  expect(await overReads(page)).toEqual([]);
+
+  await host.getByRole('button', { name: SHOW }).click();
+  await expect(host.locator('[data-overbilled-row]')).toHaveCount(1);
+  expect(await overReads(page)).toEqual([{ days: 30 }]);
+
+  // A second open of the tab goes back to the press, with no read.
+  await page.evaluate(() => loadWOs());
+  await expect(host.getByRole('button', { name: SHOW })).toBeVisible();
+  await expect(host.locator('[data-overbilled-row]')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(await overReads(page)).toEqual([{ days: 30 }]);
+});
 
 test('lists jobs billed over the agreed amount, largest gap first, and opens the job page', async ({ page }) => {
   await boot(page, { 90: 'ok' });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const host = page.locator('#woOverbilled');
   const rows = host.locator('[data-overbilled-row]');
   await expect(rows).toHaveCount(3);
@@ -106,7 +142,7 @@ test('lists jobs billed over the agreed amount, largest gap first, and opens the
 
 test('jobs billed with no agreed amount are listed apart, each with its reason, and open the job', async ({ page }) => {
   await boot(page, { 90: 'ok' });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const apart = page.locator('#woOverbilled [data-overbilled-apart]');
   await expect(apart.locator('h4')).toHaveText('Billed with no agreed amount');
   const rows = apart.locator('[data-overbilled-apart-row]');
@@ -122,7 +158,7 @@ test('jobs billed with no agreed amount are listed apart, each with its reason, 
 
 test('changing the window reads again with that many days', async ({ page }) => {
   await boot(page, { 90: 'ok', 30: 'ok' });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const host = page.locator('#woOverbilled');
   await expect(host.locator('[data-overbilled-row]')).toHaveCount(3);
   await host.locator('[data-overbilled-window]').selectOption('30');
@@ -134,7 +170,7 @@ test('changing the window reads again with that many days', async ({ page }) => 
 
 test('a window too wide says to pick a shorter one, plainly, and a shorter one then lists', async ({ page }) => {
   await boot(page, { 365: 'wide', 90: 'ok' });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const host = page.locator('#woOverbilled');
   await host.locator('[data-overbilled-window]').selectOption('365');
   await expect(host.locator('[data-overbilled-too-wide]')).toHaveText('Too many jobs were billed in the last 365 days to check them all. Pick a shorter window above.');
@@ -147,7 +183,7 @@ test('a window too wide says to pick a shorter one, plainly, and a shorter one t
 
 test('an empty answer says nobody is over, and nobody is without an agreed amount', async ({ page }) => {
   await boot(page, { 90: { ...answer(90), billed_jobs: 7, checked_work_orders: 7, count: 0, total_gap_ex: 0, jobs: [], no_agreed_amount_count: 0, no_agreed_amount: [] } });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const host = page.locator('#woOverbilled');
   await expect(host.locator('[data-overbilled-empty]')).toHaveText('No job billed in the window is over its agreed amount.');
   await expect(host.locator('[data-overbilled-apart-empty]')).toHaveText('Every job billed in the window has an agreed amount.');
@@ -158,10 +194,10 @@ test('an answer without the no-agreed-amount list says that list could not be re
   const a = answer(90);
   delete a.no_agreed_amount;
   await boot(page, { 90: a });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   const host = page.locator('#woOverbilled');
   await expect(host.locator('[data-overbilled-row]')).toHaveCount(3);
-  await expect(host.locator('[data-overbilled-apart-failed]')).toHaveText('This list could not be read. Reopen this tab to try again.');
+  await expect(host.locator('[data-overbilled-apart-failed]')).toHaveText('This list could not be read. Press Read again to try again.');
   await expect(host.locator('[data-overbilled-apart-empty]')).toHaveCount(0);
 });
 
@@ -172,9 +208,9 @@ for (const [name, want] of [
 ]) {
   test(`${name} shows the failed state, never an empty list or $0.00`, async ({ page }) => {
     await boot(page, { 90: want });
-    await page.evaluate(() => loadWOs());
+    await openAndShow(page);
     const host = page.locator('#woOverbilled');
-    await expect(host.locator('[data-overbilled-failed]')).toHaveText('Billed over the agreed amount could not be read. Reopen this tab to try again.');
+    await expect(host.locator('[data-overbilled-failed]')).toHaveText('Billed over the agreed amount could not be read. Press Read again to try again.');
     await expect(host.locator('[data-overbilled-row]')).toHaveCount(0);
     await expect(host.locator('[data-overbilled-empty]')).toHaveCount(0);
     await expect(host.locator('[data-overbilled-apart]')).toHaveCount(0);
@@ -184,7 +220,7 @@ for (const [name, want] of [
 
 test('a 403 says only staff can see the list', async ({ page }) => {
   await boot(page, { 90: 'refused' });
-  await page.evaluate(() => loadWOs());
+  await openAndShow(page);
   await expect(page.locator('#woOverbilled [data-overbilled-failed]')).toHaveText('Only staff can see this list.');
 });
 
@@ -196,6 +232,10 @@ test('screenshots of the list from fixture data', async ({ page }) => {
   await boot(page, { 90: 'ok', 365: 'wide', 180: 'fail' });
   await page.evaluate(() => loadWOs());
   const host = page.locator('#woOverbilled');
+  await expect(host.getByRole('button', { name: SHOW })).toBeVisible();
+  await host.scrollIntoViewIfNeeded();
+  await shot('overbilled-on-tab-open.png');
+  await host.getByRole('button', { name: SHOW }).click();
   await expect(host.locator('[data-overbilled-apart-row]')).toHaveCount(3);
   await host.scrollIntoViewIfNeeded();
   await shot('overbilled-list.png');

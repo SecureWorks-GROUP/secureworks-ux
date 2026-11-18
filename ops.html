@@ -19879,7 +19879,7 @@ function packetJobWorkOrder(data) {
 
 async function loadWOs() {
   if (window.WorkOrdersList) WorkOrdersList.load();
-  if (window.Overbilled) Overbilled.load();
+  if (window.Overbilled) Overbilled.mount();
   if (window.OfficeWoFill) OfficeWoFill.paint();
   var tbody = document.getElementById('woTableBody');
   try {

@@ -1,8 +1,12 @@
 // Financials > Work Orders: Billed over the agreed amount (follow-up 49 item
 // 9(d)). The office's first overcharge review. Read only, needs no switch.
 //
-// Reads:  ops-api list_overbilled_job_work_orders?days=<window> once per open
-//         of the Work Orders tab and once per change of the window
+// Reads:  ops-api list_overbilled_job_work_orders?days=<window> ON DEMAND only
+//         (director 16:58): opening the Work Orders tab paints the window
+//         picker and a "Show jobs billed over the agreed amount" press and
+//         reads nothing, because the read walks every job billed in the window
+//         through the cap sum. One read per press, and once per change of the
+//         window after the list is shown, never before
 //         (secureworks-backend work_order_overbilled.ts). Staff only on the
 //         server (403 otherwise). The server checks the jobs a trade billed in
 //         the last `days` (90 unless picked here) and answers:
@@ -155,7 +159,7 @@ var OverbilledCore = (function () {
     if (err && (err.code === 'overbilled_window_too_wide' || err.status === 422)) {
       return 'Too many jobs were billed in the last ' + days + ' days to check them all. Pick a shorter window above.';
     }
-    return 'Billed over the agreed amount could not be read. Reopen this tab to try again.';
+    return 'Billed over the agreed amount could not be read. Press Read again to try again.';
   }
 
   return {
@@ -170,7 +174,8 @@ var OverbilledCore = (function () {
 var Overbilled = (function () {
   'use strict';
   var C = OverbilledCore;
-  var state = { seq: 0, days: C.DEFAULT_DAYS };
+  var state = { seq: 0, days: C.DEFAULT_DAYS, shown: false };
+  var SHOW_WORDS = 'Show jobs billed over the agreed amount';
 
   function host() { return document.getElementById('woOverbilled'); }
 
@@ -190,6 +195,7 @@ var Overbilled = (function () {
       '#woOverbilled .obl-gap{color:var(--sw-red,#c0392b);font-weight:600}' +
       '#woOverbilled .obl-muted{font-size:12px;color:var(--sw-text-sec,#6b7280)}' +
       '#woOverbilled .obl-job{font-weight:600;white-space:nowrap;color:var(--sw-mid,#293c46)}' +
+      '#woOverbilled .obl-show{font-size:13px;padding:6px 12px;cursor:pointer}' +
       '#woOverbilled .obl-refused{font-size:14px;color:var(--sw-text,#293c46);font-weight:600;padding:16px}';
     document.head.appendChild(s);
   }
@@ -199,7 +205,8 @@ var Overbilled = (function () {
       return '<option value="' + d + '"' + (d === state.days ? ' selected' : '') + '>Last ' + d + ' days</option>';
     }).join('');
     return '<div class="obl-head"><h3>Billed over the agreed amount</h3>' +
-      '<label>Billed in <select class="form-input" data-overbilled-window aria-label="Billed in">' + opts + '</select></label></div>';
+      '<label>Billed in <select class="form-input" data-overbilled-window aria-label="Billed in">' + opts + '</select></label>' +
+      '<button type="button" class="btn btn-secondary obl-show" data-overbilled-show>' + (state.shown ? 'Read again' : SHOW_WORDS) + '</button></div>';
   }
 
   function table(body) {
@@ -213,7 +220,7 @@ var Overbilled = (function () {
   function apartHtml(apart) {
     var body;
     if (apart === null) {
-      body = '<tr><td colspan="2" class="empty-state" data-overbilled-apart-failed>This list could not be read. Reopen this tab to try again.</td></tr>';
+      body = '<tr><td colspan="2" class="empty-state" data-overbilled-apart-failed>This list could not be read. Press Read again to try again.</td></tr>';
     } else if (!apart.length) {
       body = '<tr><td colspan="2" class="empty-state" data-overbilled-apart-empty>Every job billed in the window has an agreed amount.</td></tr>';
     } else {
@@ -225,6 +232,14 @@ var Overbilled = (function () {
       '<div class="data-table-wrap"><table class="data-table" id="oblApartTable">' +
       '<thead><tr><th>Job #</th><th>Why it cannot be checked</th></tr></thead>' +
       '<tbody>' + body + '</tbody></table></div></section>';
+  }
+
+  // Tab open: the picker and the press only. Nothing is read.
+  function paintIdle() {
+    var h = host();
+    if (!h) return;
+    h.innerHTML = headHtml() + '<p class="obl-note" data-overbilled-idle>Not loaded. Pick a window and press ' + SHOW_WORDS +
+      '. It checks every job a trade billed in that window, so it is read only when asked.</p>';
   }
 
   function paintLoading() {
@@ -261,6 +276,8 @@ var Overbilled = (function () {
     if (!h || h.__oblWired) return;
     h.__oblWired = true;
     h.addEventListener('click', function (e) {
+      var show = e.target.closest('[data-overbilled-show]');
+      if (show) { state.shown = true; load(); return; }
       var a = e.target.closest('[data-overbilled-job]');
       if (!a) return;
       e.preventDefault();
@@ -271,8 +288,20 @@ var Overbilled = (function () {
       var sel = e.target.closest && e.target.closest('[data-overbilled-window]');
       if (!sel) return;
       state.days = C.windowDays(sel.value);
-      load();
+      // Before the press a window change only picks; after it, it reads again.
+      if (state.shown) load(); else paintIdle();
     });
+  }
+
+  // Called on every open of the Work Orders tab: paints the press, reads nothing,
+  // and drops any read still in flight from an earlier open.
+  function mount() {
+    if (!host()) return;
+    injectCss();
+    wire();
+    state.seq++;
+    state.shown = false;
+    paintIdle();
   }
 
   async function load() {
@@ -294,7 +323,7 @@ var Overbilled = (function () {
     }
   }
 
-  return { load: load };
+  return { mount: mount, load: load };
 })();
 
 window.OverbilledCore = OverbilledCore;

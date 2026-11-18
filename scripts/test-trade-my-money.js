@@ -141,7 +141,7 @@ const liveStatuses = [
   [{ status: 'pushed_to_xero', xero_bill_status: 'DELETED' }, 'Voided', 'void'],
   [{ status: 'pushed_to_xero', xero_bill_status: 'VOIDED' }, 'Voided', 'void'],
   [{ status: 'approved', xero_bill_status: 'DELETED' }, 'Voided', 'void'],
-  [{ status: 'ops-reject', xero_bill_status: null }, 'Not accepted', 'void'],
+  [{ status: 'ops-reject', xero_bill_status: null }, 'Sent back', 'void'], // worded "Sent back" since #661 (6 Nov)
   // Xero keeps a part-paid bill AUTHORISED; 2 live rows had amount_paid > 0.
   [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58 }, 'Part paid', 'owed'],
 ];

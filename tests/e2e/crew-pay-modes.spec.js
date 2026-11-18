@@ -99,7 +99,7 @@ test('commission is offered only where the server allows it, with inclusive supe
   await expect(page.locator('.pay-cap', { hasText: /^Commission/ })).toContainText('$500.00');
   // Commission carries the same inclusive super as the other work lines.
   await expect(page.locator('.pay-sumrow', { hasText: 'Total (includes super)' })).toContainText('$500.00');
-  await expect(page.locator('.pay-sumrow', { hasText: 'Paid to your super fund' })).toContainText('$53.57');
+  await expect(page.locator('.pay-sumrow', { hasText: 'Super on your pay' })).toContainText('$53.57');
   await expect(page.locator('.pay-sumrow.total')).toContainText('$446.43');
 
   const sent = await send(page);

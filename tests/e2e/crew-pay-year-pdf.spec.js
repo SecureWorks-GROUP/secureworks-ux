@@ -56,6 +56,12 @@ test('a trade saves their own year PDF; the app sends only the year and a not-ye
   expect(text).toContain('ZZTEST-INV-99  ');
   expect(text).toContain('Not yet processed');
   expect(text).toContain('1 invoice not yet processed');
+  // Super is never said to have reached the fund: the office marked this run paid (no stamp held, so no day).
+  expect(text).not.toContain('Paid to your super fund');
+  expect(text).toContain('Super on your pay  ');
+  expect(text).toContain('Your pay  ');
+  expect(text).not.toContain('Paid to you');
+  expect(text).toMatch(/ZZTEST-INV-\d+  \S+  \$[\d.]+  \$[\d.]+  \$[\d.]+  Marked paid by the office\)/);
   await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toHaveText('Saved. Look in your downloads.');
 
   await pickYear(page, 2026);
@@ -63,6 +69,22 @@ test('a trade saves their own year PDF; the app sends only the year and a not-ye
   expect(older.suggestedFilename()).toBe('pay-summary-2026.pdf');
   const calls = await page.evaluate(() => window.__yearPdfCalls);
   expect(calls).toEqual([{ fy: 2027 }, { fy: 2026 }]);
+
+  // With the office's stamp held (run id to stamp), a marked run gives its Perth day; an unmarked run is to be paid.
+  await page.evaluate(() => {
+    const { db } = window.__crewDemo;
+    const h1 = db.invoices.find((i) => i.id === 'inv-h1');
+    const h2 = db.invoices.find((i) => i.id === 'inv-h2');
+    db.paidSuperRuns = new Map([[h1.pay_run_id, '2026-10-31T16:00:00Z']]);
+    h2.invoice_number = 'ZZTEST-INV-98';
+    h1.invoice_number = 'ZZTEST-INV-97';
+  });
+  await pickYear(page, 2027);
+  const [stamped] = await Promise.all([page.waitForEvent('download'), yearButton(page).click()]);
+  const stampedText = fs.readFileSync(await stamped.path(), 'latin1');
+  expect(stampedText).toMatch(/ZZTEST-INV-97 [^)]*Marked paid by the office on 1 Nov 2026\)/);
+  expect(stampedText).toMatch(/ZZTEST-INV-98 [^)]*To be paid to your fund\)/);
+  expect(stampedText).not.toContain('Paid to your super fund');
   if (process.env.YEAR_PDF_SHOT) {
     await page.locator('section', { hasText: 'Year summary for your accountant' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: process.env.YEAR_PDF_SHOT + '/my-pay-year-pdf-saved.png' });
@@ -125,17 +147,22 @@ test('apiBlob over the network: a PDF answer is a Blob, a JSON refusal keeps its
     window.CREW_CONFIG.supabaseUrl = 'https://zztest.example.test';
     store.setState({ demo: false });
     api.configureApi({ getToken: async () => 'zztest-token', authLost: () => {} });
-    const res = {};
+    const res = { caches: [] };
+    const realFetch = window.fetch;
+    window.fetch = (url, init) => { res.caches.push(init && init.cache); return realFetch(url, init); };
     const blob = await api.apiBlob('my_pay_year_summary_pdf', { fy: 2026 });
     res.ok = { type: blob.type, size: blob.size, isBlob: blob instanceof Blob };
     try { await api.apiBlob('my_pay_year_summary_pdf', { fy: 2025 }); res.refused = 'no throw'; } catch (e) { res.refused = { status: e.status, code: e.code, refused: e.refused }; }
     try { await api.apiBlob('my_pay_year_summary_pdf', { fy: 2024 }); res.wrong = 'no throw'; } catch (e) { res.wrong = { code: e.code }; }
+    window.fetch = realFetch;
     return res;
   });
   expect(out.ok.isBlob).toBe(true);
   expect(out.ok.size).toBeGreaterThan(0);
   expect(out.refused).toEqual({ status: 404, code: 'no_invoices_that_year', refused: true });
   expect(out.wrong).toEqual({ code: 'unexpected_file' });
+  // The browser keeps no copy of a pay PDF.
+  expect(out.caches).toEqual(['no-store', 'no-store', 'no-store']);
   expect(seen.auth).toBe('Bearer zztest-token');
   expect(seen.params).toEqual({ action: 'my_pay_year_summary_pdf', fy: '2024' });
 });

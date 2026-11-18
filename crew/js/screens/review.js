@@ -141,15 +141,15 @@ export function Review({ monday: mondayParam }) {
       ${est.count && !moneyUnavailable ? html`<div class="block card pay-sum pay-gap">
         ${inclusive ? html`
           <div class="pay-sumrow"><span>Total (includes super)</span><span>${cash(est.base)}</span></div>
-          <div class="pay-sumrow"><span>Paid to your super fund</span><span>${cash(est.superPaid)}</span></div>
-          <div class="pay-sumrow total"><span>Paid to you</span><span>${cash(est.paidToYou)}</span></div>
+          <div class="pay-sumrow"><span>Super on your pay</span><span>${cash(est.superPaid)}</span></div>
+          <div class="pay-sumrow total"><span>Your pay</span><span>${cash(est.paidToYou)}</span></div>
           ${est.reimb > 0 ? html`<div class="pay-sumrow"><span>Reimbursements</span><span>${cash(est.reimb)}</span></div>` : null}
           ${gstOn ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(est.gst)}</span></div>` : null}
           ${est.takeOff ? html`<div class="pay-sumrow"><span>Repayment</span><span>-${cash(est.takeOff)}</span></div>` : null}
           ${est.intoBank !== est.paidToYou ? html`<div class="pay-sumrow"><span>Into your bank account</span><span>${cash(est.intoBank)}</span></div>` : null}
         ` : html`
         <div class="pay-sumrow"><span>Gross earned${est.hours ? ` · ${hrs(est.hours)}` : ''}</span><span>${cash(est.gross)}</span></div>
-        <div class="pay-sumrow"><span>Paid to your super fund, 6% of ${cash(est.superBase)}</span><span>-${cash(est.superHeld)}</span></div>
+        <div class="pay-sumrow"><span>Super on your pay, 6% of ${cash(est.superBase)}</span><span>-${cash(est.superHeld)}</span></div>
         ${gstOn ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(est.gst)}</span></div>` : null}
         ${deduction && deduction.amount ? html`<div class="pay-sumrow"><span>${deduction.label || 'Weekly repayment'}</span><span>${est.takeOff ? '-' + cash(est.takeOff) : 'Not taken'}</span></div>` : null}
         <div class="pay-sumrow total"><span>You are paid, about</span><span>${cash(est.pay)}</span></div>`}

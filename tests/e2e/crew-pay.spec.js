@@ -38,7 +38,7 @@ test('timesheet first, then one invoice for the pay week', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Review invoice' }).click();
   await expect(page.locator('.pay-cap').first()).toContainText('Hourly');
-  await expect(page.getByText('Paid to you', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your pay', { exact: true })).toBeVisible();
   await expect(page.getByText('An estimate.', { exact: false })).toBeVisible();
   // Expenses and the group work order are shown, but outside what this invoice pays.
   await expect(page.locator('.pay-cap', { hasText: 'Expenses, repaid separately' })).toBeVisible();
@@ -47,7 +47,7 @@ test('timesheet first, then one invoice for the pay week', async ({ page }) => {
   await page.getByRole('button', { name: 'Send invoice' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /Send/ }).click();
   await expect(page.getByRole('heading', { name: 'Invoice sent' })).toBeVisible();
-  await expect(page.locator('.pay-sumrow.total')).toContainText('Paid to you');
+  await expect(page.locator('.pay-sumrow.total')).toContainText('Your pay');
 
   // One invoice a week: the week now reads as sent, and it is under Invoices.
   await page.getByRole('button', { name: 'Done' }).click();
@@ -146,8 +146,8 @@ test('ZZTEST sent invoice uses only server pay rows and optional tax guide', asy
   const rows = page.locator('.pay-sumrow');
   await expect(rows).toHaveCount(4);
   await expect(rows.nth(0)).toHaveText('Total (includes super)$1,120.00');
-  await expect(rows.nth(1)).toHaveText('Paid to your super fund$120.00');
-  await expect(rows.nth(2)).toHaveText('Paid to you$1,000.00');
+  await expect(rows.nth(1)).toHaveText('Super on your pay$120.00');
+  await expect(rows.nth(2)).toHaveText('Your pay$1,000.00');
   await expect(rows.nth(3)).toContainText('Suggested to set aside for tax');
   await expect(rows.nth(3)).toContainText('$200.00');
   await expect(page.getByText('A guide only, not tax advice.')).toBeVisible();
@@ -174,7 +174,7 @@ test('ZZTEST receipt is selected without an amount box and sent as an id outside
   const errors = watchErrors(page);
   await page.goto(crewUrl('#/jobs'));
   await setupReceiptWeek(page);
-  await expect(page.getByText('Paid to you', { exact: true }).locator('..')).toContainText('$500.00');
+  await expect(page.getByText('Your pay', { exact: true }).locator('..')).toContainText('$500.00');
   await page.getByRole('button', { name: 'Add another item' }).click();
   await page.getByRole('button', { name: 'Add a receipt', exact: true }).click();
   const picker = page.getByRole('dialog', { name: 'Reimbursement (receipt)' });
@@ -183,7 +183,7 @@ test('ZZTEST receipt is selected without an amount box and sent as an id outside
   await expect(picker.getByRole('button', { name: /No photo/ })).toBeDisabled();
   await picker.getByRole('button', { name: /Supplier/ }).click();
   await expect(page.locator('.pay-cap').filter({ hasText: 'Reimbursements' })).toContainText('$80.00');
-  await expect(page.getByText('Paid to you', { exact: true }).locator('..')).toContainText('$500.00');
+  await expect(page.getByText('Your pay', { exact: true }).locator('..')).toContainText('$500.00');
   await expect(page.locator('.pay-sumrow').filter({ hasText: 'Into your bank account' })).toContainText('$580.00');
   // Real save and reopen of the demo server's saved weekly draft.
   await expect(page.locator('.pay-note[role=status]')).toContainText('saved to your account', { timeout: 8000 });

@@ -53,9 +53,13 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
   await expect(rows).toHaveCount(8);
   await expect(rows.first()).toContainText('Total (includes super)');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].total_inc_super));
-  await expect(rows.first()).toContainText('Paid to you');
+  // Totals count every processed bill, paid or not yet paid, so they say 'Your pay', never 'Paid to you'.
+  await expect(rows.first()).toContainText('Your pay');
+  await expect(rows.first()).not.toContainText('Paid to you');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].paid_to_you));
-  await expect(rows.first()).toContainText('Paid to your super fund');
+  // Super recorded on invoices, not a fund payment.
+  await expect(rows.first()).toContainText('Super on your pay');
+  await expect(rows.first()).not.toContainText('Paid to your super fund');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].paid_to_super));
   await expect(rows.nth(7)).toContainText(fmtCash(expected.weeks[7].paid_to_you));
 
@@ -100,12 +104,17 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
     await page.setViewportSize(PHONE.viewport);
   }
 
-  // This year and last year card: side by side with both Paid to you and super figures.
+  // This year and last year card: side by side with both pay and super figures.
   const compare = page.locator('.pay-hcompare');
   await expect(compare).toContainText('So far this financial year');
   await expect(compare).toContainText('Same point last year');
   const cols = compare.locator('.pay-hcol');
   await expect(cols).toHaveCount(2);
+  for (const i of [0, 1]) {
+    await expect(cols.nth(i)).toContainText('Your pay');
+    await expect(cols.nth(i)).toContainText('Super on your pay');
+    await expect(cols.nth(i)).not.toContainText('Paid to you');
+  }
   await expect(cols.nth(0)).toContainText(fmtCash(expected.this_year_vs_last.this_fy.paid_to_you));
   await expect(cols.nth(0)).toContainText(fmtCash(expected.this_year_vs_last.this_fy.paid_to_super));
   await expect(cols.nth(1)).toContainText(fmtCash(expected.this_year_vs_last.last_fy_same_point.paid_to_you));
@@ -122,7 +131,12 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
   await expect(superSec).toContainText('Since you started');
   await expect(superSec).toContainText(fmtCash(expected.super.since_start));
   await expect(superSec).toContainText('To be paid to your fund');
-  await expect(superSec).toContainText('Paid to your fund');
+  // The office marked the run's super paid: the screen says so with the day, as the server words it, and never that it reached the fund.
+  const marked = expected.super.by_invoice.filter((i) => i.status === 'marked_paid_by_office');
+  expect(marked.length).toBeGreaterThan(0);
+  for (const inv of marked) expect(inv.words).toMatch(/^Marked paid by the office on \d{1,2} [A-Z][a-z]{2} \d{4}$/);
+  await expect(superSec).toContainText(marked[0].words);
+  await expect(superSec).not.toContainText('Paid to your fund');
   await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
   await expect(page.getByText(/not yet processed/)).toHaveCount(0);
 
@@ -199,7 +213,7 @@ test('ZZTEST empty history, empty rate, 10-invoice Super cap, and per-trade isol
         net_pay: 100
       });
     }
-    db.paidSuperRuns.add('ZZTEST-run-paid');
+    db.paidSuperRuns.set('ZZTEST-run-paid', '2026-07-20T01:00:00Z');
     db.invoices.push({
       id: 'zz-other',
       user_id: 'u-other-trade',
@@ -230,6 +244,8 @@ test('ZZTEST empty history, empty rate, 10-invoice Super cap, and per-trade isol
   await expect(page.locator('main.page')).not.toContainText('ZZTEST-CAP-02');
   await expect(page.locator('main.page')).not.toContainText('ZZTEST-OTHER-99');
   await expect(page.locator('main.page')).not.toContainText('$99.90');
+  await expect(superItems.filter({ hasText: 'ZZTEST-CAP-12' }).locator('.pay-fundstate')).toHaveText('Marked paid by the office on 20 Jul 2026');
+  await expect(superItems.filter({ hasText: 'ZZTEST-CAP-11' }).locator('.pay-fundstate')).toHaveText('To be paid to your fund');
   expect(errors).toEqual([]);
 });
 
@@ -282,6 +298,7 @@ test('ZZTEST bad paths: loading skeleton, failed or incomplete read never render
         months: [{ month: '2026-11', label: 'Nov 2026', total_inc_super: 1120, paid_to_super: 120, paid_to_you: 1000, reimbursements: 0, paid_into_bank: 1000, invoices: 1 }],
         years: [{ fy_label: 'FY 2026/27', total_inc_super: 1120, paid_to_super: 120, paid_to_you: 1000, reimbursements: 0, paid_into_bank: 1000, invoices: 1 }],
         this_year_vs_last: { this_fy: { paid_to_you: 1000, paid_to_super: 120 }, last_fy_same_point: { paid_to_you: 500, paid_to_super: 60 } },
+        // An older ops-api still sends 'paid_to_fund' for the office's mark, with no day.
         super: { this_fy: 120, since_start: 180, not_recorded_count: 0, not_in_xero_count: 0, by_invoice: [{ invoice_id: 'zz-1', invoice_number: 'ZZTEST-RETRY-1', week_start: '2026-11-02', amount: 120, status: 'paid_to_fund' }] },
         tax_set_aside: null,
         rate_history: [{ effective_from: '2026-07-01', hourly_rate: 11.2 }]
@@ -308,7 +325,8 @@ test('ZZTEST bad paths: loading skeleton, failed or incomplete read never render
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(page.locator('.pay-hrow').first()).toContainText('$1,120.00');
   await expect(page.locator('.pay-hsuper').first()).toContainText('ZZTEST-RETRY-1');
-  await expect(page.locator('.pay-hsuper').first()).toContainText('Paid to your fund');
+  await expect(page.locator('.pay-hsuper').first().locator('.pay-fundstate')).toHaveText('Marked paid by the office');
+  await expect(page.locator('main.page')).not.toContainText('Paid to your fund');
   await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
 });
 
@@ -328,7 +346,7 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
   await page.evaluate(async () => {
     const { db } = window.__crewDemo;
     const store = await import('/crew/js/lib/store.js');
-    db.paidSuperRuns.add('ZZTEST-run-paid');
+    db.paidSuperRuns.set('ZZTEST-run-paid', '2026-11-11T17:30:00Z');
     db.invoices.push(
       {
         id: 'zz-mix-cur-2',
@@ -566,7 +584,7 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
     await page.setViewportSize(PHONE.viewport);
   }
 
-  // Super card rows: 'Not yet processed' (no $0, no fund state), 'not recorded' (no $0, no fund state), 'To be paid', 'Paid to your fund'.
+  // Super card rows: 'Not yet processed' (no $0, no fund state), 'not recorded' (no $0, no fund state), 'To be paid', 'Marked paid by the office on <day>'.
   const superItems = page.locator('.pay-hsuper');
   await expect(superItems).toHaveCount(7);
 
@@ -590,7 +608,8 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
   await expect(toBePaidItem.locator('.side')).toHaveText('$12.00');
 
   const paidFundItem = superItems.filter({ hasText: 'ZZTEST-MIX-03' });
-  await expect(paidFundItem).toContainText('Paid to your fund');
+  // The office's stamp 17:30 UTC on 11 Nov is 12 Nov in Perth.
+  await expect(paidFundItem.locator('.pay-fundstate')).toHaveText('Marked paid by the office on 12 Nov 2026');
   await expect(paidFundItem.locator('.side')).toHaveText('$12.00');
 
   // No sideways scroll at 360 wide across Weeks, Months and Years with mixed legacy and not_in_xero rows.
@@ -617,7 +636,7 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
     store.invalidate('payhistory');
   });
   await expect(page.getByText('2 invoices not yet processed', { exact: true })).toBeVisible();
-  await expect(superItems.filter({ hasText: 'ZZTEST-MIX-06' })).toContainText('Paid to your fund');
+  await expect(superItems.filter({ hasText: 'ZZTEST-MIX-06' }).locator('.pay-fundstate')).toHaveText('Marked paid by the office on 12 Nov 2026');
   await expect(superItems.filter({ hasText: 'ZZTEST-MIX-06' }).locator('.side')).toHaveText('$24.00');
 
   // Boundary month (30 Jun to 6 Jul) holding only an older invoice also says 'not recorded' on Weeks, Months and Years.
@@ -665,11 +684,12 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
         since_start: 12,
         not_recorded_count: 0,
         not_in_xero_count: 0,
-        by_invoice: [{ invoice_id: 'zz-clean-1', invoice_number: 'ZZTEST-CLEAN-1', week_start: '2026-11-02', amount: 12, status: 'paid_to_fund' }]
+        by_invoice: [{ invoice_id: 'zz-clean-1', invoice_number: 'ZZTEST-CLEAN-1', week_start: '2026-11-02', amount: 12, status: 'marked_paid_by_office', marked_paid_on: '2026-11-10', words: 'Marked paid by the office on 10 Nov 2026' }]
       }
     });
   });
   await expect(page.locator('.pay-hsuper')).toHaveCount(1);
+  await expect(page.locator('.pay-hsuper .pay-fundstate')).toHaveText('Marked paid by the office on 10 Nov 2026');
   await expect(page.getByText(/Super not recorded on/)).toHaveCount(0);
   await expect(page.getByText(/not yet processed/)).toHaveCount(0);
   await expect(page.getByText('Could not load your pay. Check your signal and try again.')).toHaveCount(0);
@@ -699,7 +719,16 @@ test('ZZTEST mixed legacy, current and not_in_xero: older-only Weeks/Months/Year
     (base) => ({ ...base, super: { ...base.super, not_in_xero_count: '1' } }),
     // Contradictory count 0 while by_invoice carries a not_recorded or not_in_xero row
     (base) => ({ ...base, super: { ...base.super, not_recorded_count: 0, by_invoice: [{ ...base.super.by_invoice[0], status: 'not_recorded', amount: 0 }] } }),
-    (base) => ({ ...base, super: { ...base.super, not_in_xero_count: 0, by_invoice: [{ ...base.super.by_invoice[0], status: 'not_in_xero', amount: 0 }] } })
+    (base) => ({ ...base, super: { ...base.super, not_in_xero_count: 0, by_invoice: [{ ...base.super.by_invoice[0], status: 'not_in_xero', amount: 0 }] } }),
+    // Marked paid by the office with its day missing, empty or not a date
+    (base) => {
+      const { marked_paid_on, ...withoutDay } = base.super.by_invoice[0];
+      return { ...base, super: { ...base.super, by_invoice: [withoutDay] } };
+    },
+    (base) => ({ ...base, super: { ...base.super, by_invoice: [{ ...base.super.by_invoice[0], marked_paid_on: null }] } }),
+    (base) => ({ ...base, super: { ...base.super, by_invoice: [{ ...base.super.by_invoice[0], marked_paid_on: '18 Nov 2026' }] } }),
+    // Marked paid by the office with no amount
+    (base) => ({ ...base, super: { ...base.super, by_invoice: [{ ...base.super.by_invoice[0], amount: null }] } })
   ];
 
   const cleanBase = await page.evaluate(async () => {
@@ -858,4 +887,77 @@ test('ZZTEST a lapsed session clears pay figures but keeps the unsent week and t
   });
   expect(after).toEqual({ queryKeys: [], weekKeys: ['crew:week:2026-11-09'], profileKey: null, clockKept: true, memMoney: undefined });
   expect(errors).toEqual([]);
+});
+
+test('ZZTEST super the office marked paid says so with the Perth day, and an un-mark by the office goes back to to be paid', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto(crewUrl('#/jobs', 'new'));
+  await page.waitForFunction(() => Boolean(window.__crewDemo));
+  await scrubNamesForProof(page);
+  await page.evaluate(async () => {
+    const { db } = window.__crewDemo;
+    const store = await import('/crew/js/lib/store.js');
+    const inv = (n, wk, run) => ({
+      id: `zz-mark-${n}`, user_id: db.me.id, week_start: wk, week_end: wk, invoice_number: `ZZTEST-MARK-${n}`, status: 'paid',
+      gst_on: false, gross_earned: 112, amount_paid: 100, xero_bill_id: `xb-mark-${n}`, pay_run_id: run,
+      pay_view: { basis: 'inclusive_12_112_v1', total_inc_super: 112, paid_to_super: 12, paid_to_you: 100, reimbursements: 0, gst: 0, repayment: null, into_bank: 100, tax_set_aside: null },
+      super_amount: 12, net_pay: 100
+    });
+    db.invoices.push(inv(1, '2026-10-05', 'ZZTEST-run-mark-a'), inv(2, '2026-10-12', 'ZZTEST-run-mark-b'));
+    // 15:59 UTC on 31 Oct is still 31 Oct in Perth; 16:00 UTC is 1 Nov.
+    db.paidSuperRuns.set('ZZTEST-run-mark-a', '2026-10-31T15:59:00Z');
+    db.paidSuperRuns.set('ZZTEST-run-mark-b', '2026-10-31T16:00:00Z');
+    store.clearQueries();
+    location.hash = '#/pay/history';
+  });
+
+  const superItems = page.locator('.pay-hsuper');
+  await expect(superItems).toHaveCount(2);
+  const a = superItems.filter({ hasText: 'ZZTEST-MARK-1' });
+  const b = superItems.filter({ hasText: 'ZZTEST-MARK-2' });
+  await expect(a.locator('.pay-fundstate')).toHaveText('Marked paid by the office on 31 Oct 2026');
+  await expect(b.locator('.pay-fundstate')).toHaveText('Marked paid by the office on 1 Nov 2026');
+  await expect(a.locator('.side')).toHaveText('$12.00');
+  const served = await page.evaluate(() => window.__crewDemo.ops.my_pay_history({ years: 2 }).super.by_invoice);
+  expect(served.map((i) => [i.invoice_number, i.status, i.marked_paid_on, i.words])).toEqual([
+    ['ZZTEST-MARK-2', 'marked_paid_by_office', '2026-11-01', 'Marked paid by the office on 1 Nov 2026'],
+    ['ZZTEST-MARK-1', 'marked_paid_by_office', '2026-10-31', 'Marked paid by the office on 31 Oct 2026']
+  ]);
+  await expect(page.locator('main.page')).not.toContainText('Paid to your fund');
+  if (process.env.CREW_PAY_HISTORY_PROOF) {
+    await superItems.last().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.CREW_PAY_HISTORY_PROOF}/my-pay-super-marked-paid-phone-390.png`, animations: 'disabled' });
+  }
+
+  // The longer words fit at 360 wide with no sideways scroll.
+  await page.setViewportSize({ width: 360, height: 640 });
+  const overflow = await page.evaluate(() => {
+    const main = document.querySelector('main.page');
+    return { doc: document.documentElement.scrollWidth - window.innerWidth, page: main ? main.scrollWidth - main.clientWidth : 0 };
+  });
+  expect(overflow.doc).toBeLessThanOrEqual(0);
+  expect(overflow.page).toBeLessThanOrEqual(0);
+  await page.setViewportSize(PHONE.viewport);
+
+  // The office takes the mark off one run: a fresh read says to be paid again, with no day.
+  await page.evaluate(async () => {
+    const { db } = window.__crewDemo;
+    const store = await import('/crew/js/lib/store.js');
+    db.paidSuperRuns.delete('ZZTEST-run-mark-b');
+    store.invalidate('payhistory');
+  });
+  await expect(b.locator('.pay-fundstate')).toHaveText('To be paid to your fund');
+  await expect(a.locator('.pay-fundstate')).toHaveText('Marked paid by the office on 31 Oct 2026');
+
+  // An unreadable office stamp refuses the read rather than showing a made-up day.
+  await page.evaluate(async () => {
+    const { db } = window.__crewDemo;
+    const store = await import('/crew/js/lib/store.js');
+    db.paidSuperRuns.set('ZZTEST-run-mark-a', 'not a date');
+    store.invalidate('payhistory');
+  });
+  await expect(page.getByText('Could not load your pay. Check your signal and try again.')).toBeVisible();
+  await expect(page.locator('main.page')).not.toContainText('$');
+
+  expect(errors.filter((e) => !/pay_history_unreadable|503/.test(String(e)))).toEqual([]);
 });

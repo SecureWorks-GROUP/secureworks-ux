@@ -18,10 +18,16 @@ const ROW = {
 };
 
 async function boot(page, fetchImpl) {
+  await page.route('**/*', (route) => {
+    const host = new URL(route.request().url()).hostname;
+    return host === '127.0.0.1' || host === 'localhost' ? route.continue() : route.abort();
+  });
   await page.goto('/ops.html');
   // The auth gate hides every body child with display:none !important until
   // sign-in. These specs drive the page functions directly.
   await revealOpsStaticFixture(page);
+  // The module loads after the page; wait for it rather than race it.
+  await page.waitForFunction(() => Boolean(window.OfficeWoFill));
   await page.evaluate((src) => {
     window.__posts = [];
     window.opsFetch = new Function('action', src);
@@ -601,3 +607,252 @@ for (const width of [1280, 820]) {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 }
+
+// FU49 9(a): the sealed quote's labour amount proposed on a draft with no
+// amount, and one office press (confirm_job_work_order_labour) that fills the
+// draft. A named approver still approves. Switch job_work_order_labour_confirm_v1.
+function labourGapRow(n, reason) {
+  return {
+    job_id: `ZZTEST-job-${n}`,
+    job_number: `ZZTEST-${n}`,
+    type: 'fencing',
+    status: 'accepted',
+    reason: reason || 'no_amount',
+    work_order_id: reason === 'no_work_order' ? null : `ZZTEST-wo-${n}`,
+    held_lines: 0,
+    held_amount_ex: 0,
+    held_trades: 0,
+    oldest_held_at: null,
+  };
+}
+
+function labourConfirmRow(n, reason, amount) {
+  return {
+    job_id: `ZZTEST-job-${n}`,
+    job_number: `ZZTEST-${n}`,
+    job_type: 'fencing',
+    job_status: 'accepted',
+    work_order_id: `ZZTEST-wo-${n}`,
+    wo_number: `WO-${n}`,
+    work_order_updated_at: '2026-11-18T01:00:00.000Z',
+    reason,
+    proposal: reason === 'sealed_amount'
+      ? { agreed_labour_ex: amount, job_budget_id: `00000000-0000-4000-8000-000000000${n}`, scope_revision_id: `00000000-0000-4000-9000-000000000${n}` }
+      : null,
+  };
+}
+
+const LABOUR_GAPS = {
+  counts: { no_work_order: 1, no_amount: 5, jobs_with_held_lines: 0 },
+  jobs: [
+    labourGapRow(500, 'no_work_order'),
+    labourGapRow(501),
+    labourGapRow(502),
+    labourGapRow(503),
+    labourGapRow(504),
+    labourGapRow(505),
+  ],
+};
+
+const LABOUR_LIST = {
+  enabled: true,
+  press: 'fill_draft',
+  limit: 50,
+  offset: 0,
+  more: false,
+  jobs: [
+    labourConfirmRow(501, 'sealed_amount', 2450),
+    labourConfirmRow(502, 'no_amount_in_sealed_quote'),
+    labourConfirmRow(503, 'no_sealed_quote'),
+    labourConfirmRow(504, 'revision_differs'),
+    // A sealed_amount row the page cannot read proposes nothing, never $0.00.
+    Object.assign(labourConfirmRow(505, 'sealed_amount', 0), { proposal: { agreed_labour_ex: null, job_budget_id: 'x' } }),
+  ],
+};
+
+async function paintLabour(page, { gaps, labour, roleName }) {
+  await page.waitForFunction(() => Boolean(window.OfficeWoFill));
+  await page.evaluate(({ gaps, labour, roleName }) => {
+    window.__labourReads = [];
+    window.SECUREWORKS_CLOUD = { auth: { getRole: function () { return roleName; } } };
+    window.opsFetch = async function (action, params) {
+      window.__reads.push(action);
+      if (action === 'job_work_order_gaps') return gaps;
+      if (action === 'list_job_work_order_labour_confirm') {
+        window.__labourReads.push(params || null);
+        if (typeof window.__labourImpl === 'function') return window.__labourImpl();
+        return labour;
+      }
+      if (action === 'list_office_job_work_orders') return { enabled: false, work_orders: [] };
+      return {};
+    };
+    return OfficeWoFill.paint();
+  }, { gaps, labour, roleName: roleName || 'ops_manager' });
+}
+
+test('FU49 9a: each draft shows the sealed quote labour, one Fill from sealed quote press, and says a named approver still approves', async ({ page }) => {
+  await bootGaps(page);
+  await paintLabour(page, { gaps: LABOUR_GAPS, labour: LABOUR_LIST });
+  const section = page.locator('[data-office-wo-gaps]');
+  expect(await page.evaluate(() => window.__labourReads)).toEqual([{ limit: 50 }]);
+
+  const r501 = section.locator('[data-office-wo-gap="ZZTEST-job-501"]');
+  await expect(r501.locator('[data-office-wo-labour-amount]')).toHaveText('$2,450.00');
+  await expect(r501).toContainText('Sealed quote labour');
+  await expect(r501).toContainText('proposed');
+  await expect(r501.getByRole('button', { name: 'Fill from sealed quote' })).toBeVisible();
+  await expect(r501).toContainText('Fills the draft only. A named approver still approves it.');
+  // The manual path stays beside it.
+  await expect(r501.getByRole('button', { name: 'Fill the amount' })).toBeVisible();
+
+  const r502 = section.locator('[data-office-wo-gap="ZZTEST-job-502"]');
+  await expect(r502).toContainText('No amount in the sealed quote');
+  await expect(r502.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+  await expect(r502).not.toContainText('$');
+
+  const r503 = section.locator('[data-office-wo-gap="ZZTEST-job-503"]');
+  await expect(r503).toContainText('No sealed quote for this job');
+  await expect(r503.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+
+  const r504 = section.locator('[data-office-wo-gap="ZZTEST-job-504"]');
+  await expect(r504).toContainText('different quote revision, so nothing is proposed');
+  await expect(r504.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+
+  const r505 = section.locator('[data-office-wo-gap="ZZTEST-job-505"]');
+  await expect(r505).toContainText('The sealed quote amount could not be read, so nothing is proposed');
+  await expect(r505.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+  await expect(r505).not.toContainText('$0.00');
+
+  // A job with no work order gets no proposal.
+  await expect(section.locator('[data-office-wo-gap="ZZTEST-job-500"] [data-office-wo-labour]')).toHaveCount(0);
+  await expect(section.locator('[data-office-wo-labour-confirm]')).toHaveCount(1);
+});
+
+test('FU49 9a: the press posts what was shown, repaints, and names the approver step; a second answer reads already filled', async ({ page }) => {
+  await bootGaps(page);
+  await page.evaluate(() => {
+    window.opsPost = async function (action, body) {
+      window.__posts.push({ action, body });
+      window.__labourDone = true;
+      return {
+        state: window.__answerState || 'confirmed',
+        work_order_id: body.work_order_id,
+        job_budget_id: body.job_budget_id,
+        agreed_labour_ex: 2450,
+        confirmed_by: '00000000-0000-4000-a000-000000000001',
+        confirmed_at: '2026-11-18T07:00:00.000Z',
+      };
+    };
+  });
+  const after = { counts: { no_work_order: 1, no_amount: 4, jobs_with_held_lines: 0 }, jobs: LABOUR_GAPS.jobs.filter((j) => j.job_id !== 'ZZTEST-job-501') };
+  await paintLabour(page, { gaps: LABOUR_GAPS, labour: LABOUR_LIST });
+  await page.evaluate((after) => {
+    const base = window.opsFetch;
+    window.opsFetch = async function (action, params) {
+      if (action === 'job_work_order_gaps' && window.__labourDone) return after;
+      return base(action, params);
+    };
+  }, after);
+
+  const section = page.locator('[data-office-wo-gaps]');
+  await section.locator('[data-office-wo-gap="ZZTEST-job-501"]').getByRole('button', { name: 'Fill from sealed quote' }).click();
+  await expect(section.locator('[data-office-wo-labour-confirmed]')).toHaveText(
+    '$2,450.00 on ZZTEST-501 was filled from the sealed quote. A named approver still approves the work order in Work orders to fill.'
+  );
+  const posts = await page.evaluate(() => window.__posts);
+  expect(posts).toEqual([{
+    action: 'confirm_job_work_order_labour',
+    body: { work_order_id: 'ZZTEST-wo-501', job_budget_id: '00000000-0000-4000-8000-000000000501', agreed_labour_ex: 2450 },
+  }]);
+  await expect(section.locator('[data-office-wo-gap="ZZTEST-job-501"]')).toHaveCount(0);
+  // The press never approves and never sends.
+  expect(posts.some((p) => /approve|send/i.test(p.action))).toBe(false);
+
+  // A retry after a lost reply answers the first record: no second fill.
+  await page.evaluate(() => { window.__labourDone = false; window.__answerState = 'already_confirmed'; window.__posts = []; return OfficeWoFill.paint(); });
+  await section.locator('[data-office-wo-gap="ZZTEST-job-501"]').getByRole('button', { name: 'Fill from sealed quote' }).click();
+  await expect(section.locator('[data-office-wo-labour-confirmed]')).toHaveText(
+    '$2,450.00 on ZZTEST-501 was already filled from the sealed quote. A named approver still approves the work order in Work orders to fill.'
+  );
+});
+
+test('FU49 9a: a refusal says what changed and saves nothing; a failed press can be tried again', async ({ page }) => {
+  await bootGaps(page);
+  await paintLabour(page, { gaps: LABOUR_GAPS, labour: LABOUR_LIST });
+  await page.evaluate(() => {
+    window.__failNext = 'proposal_changed';
+    window.opsPost = async function (action, body) {
+      window.__posts.push({ action, body });
+      const e = new Error('The agreed amount was not confirmed.');
+      e.status = window.__failNext === 'proposal_changed' ? 409 : 503;
+      e.code = window.__failNext;
+      throw e;
+    };
+  });
+  const row = page.locator('[data-office-wo-gap="ZZTEST-job-501"]');
+  const btn = row.locator('[data-office-wo-labour-confirm]');
+  await btn.click();
+  await expect(row.locator('[data-office-wo-gap-msg]')).toHaveText(
+    'The sealed quote changed since this list was read. Nothing was saved. Read the list again.'
+  );
+  await expect(btn).toBeDisabled();
+  await expect(page.locator('[data-office-wo-labour-confirmed]')).toHaveCount(0);
+
+  await page.evaluate(() => { window.__failNext = 'labour_confirm_failed'; return OfficeWoFill.paint(); });
+  await row.locator('[data-office-wo-labour-confirm]').click();
+  await expect(row.locator('[data-office-wo-gap-msg]')).toHaveText(
+    'The amount could not be filled. Nothing was saved. Read the list again.'
+  );
+  await expect(row.locator('[data-office-wo-labour-confirm]')).toBeEnabled();
+  await expect(page.locator('[data-office-wo-labour-confirmed]')).toHaveCount(0);
+});
+
+test('FU49 9a: switch off, not deployed, or refused before the switch hides the press and every proposal', async ({ page }) => {
+  await bootGaps(page);
+  for (const impl of [
+    'return { enabled: false, press: "fill_draft", jobs: [], more: false };',
+    'const e = new Error("Unknown action"); e.code = "unknown_action"; e.status = 400; throw e;',
+    'const e = new Error("An authorised operator session is required."); e.status = 403; e.code = "operator_access_required"; throw e;',
+    'return {};',
+  ]) {
+    await paintLabour(page, { gaps: LABOUR_GAPS, labour: null });
+    await page.evaluate((src) => { window.__labourImpl = new Function(src); return OfficeWoFill.paint(); }, impl);
+    const section = page.locator('[data-office-wo-gaps]');
+    await expect(section).toContainText('ZZTEST-501');
+    await expect(section.locator('[data-office-wo-labour]')).toHaveCount(0);
+    await expect(section.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+    await expect(section.locator('[data-office-wo-labour-error]')).toHaveCount(0);
+    await expect(section).not.toContainText('sealed quote');
+    await expect(section.locator('[data-office-wo-gap="ZZTEST-job-501"]').getByRole('button', { name: 'Fill the amount' })).toBeVisible();
+  }
+});
+
+test('FU49 9a: a failed read shows the error state and proposes nothing, never $0.00; a staff role that is not office sees no press', async ({ page }) => {
+  await bootGaps(page);
+  await paintLabour(page, { gaps: LABOUR_GAPS, labour: null });
+  await page.evaluate(() => {
+    window.__labourImpl = function () {
+      const e = new Error('The jobs’ sealed budgets could not be read.');
+      e.status = 503;
+      e.code = 'labour_confirm_budget_unreadable';
+      throw e;
+    };
+    return OfficeWoFill.paint();
+  });
+  const section = page.locator('[data-office-wo-gaps]');
+  await expect(section.locator('[data-office-wo-labour-error]')).toHaveText('The sealed quote amounts could not be read, so none is proposed.');
+  await expect(section.locator('[data-office-wo-labour]')).toHaveCount(0);
+  await expect(section.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+  await expect(section).not.toContainText('$0.00');
+  await expect(section).toContainText('Work orders with no amount: 5');
+
+  // Malformed (no jobs array) is the same error, not an empty list.
+  await page.evaluate(() => { window.__labourImpl = function () { return { enabled: true }; }; return OfficeWoFill.paint(); });
+  await expect(section.locator('[data-office-wo-labour-error]')).toHaveCount(1);
+
+  await paintLabour(page, { gaps: LABOUR_GAPS, labour: LABOUR_LIST, roleName: 'estimator' });
+  await page.evaluate(() => { window.__labourImpl = null; return OfficeWoFill.paint(); });
+  const r501 = section.locator('[data-office-wo-gap="ZZTEST-job-501"]');
+  await expect(r501.locator('[data-office-wo-labour-amount]')).toHaveText('$2,450.00');
+  await expect(r501.locator('[data-office-wo-labour-confirm]')).toHaveCount(0);
+});

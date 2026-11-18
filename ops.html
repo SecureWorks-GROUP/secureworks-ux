@@ -1165,6 +1165,8 @@
     .cal-confirm-backdrop { position: fixed; inset: 0 0 var(--jarvis-bar-height) 0; z-index: 550; background: rgba(0,0,0,0.35); display: none; }
     .cal-confirm-backdrop.open { display: flex; align-items: center; justify-content: center; }
     .cal-confirm-modal { background: var(--sw-card); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); padding: 24px; width: 380px; max-width: calc(100vw - 32px); }
+    .invoice-link-dialog { margin: auto; border: 0; }
+    .invoice-link-dialog::backdrop { background: rgba(0,0,0,0.35); }
     .cal-confirm-modal h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; color: var(--sw-text); }
     .cal-confirm-modal p { font-size: 13px; color: var(--sw-text-sec); line-height: 1.5; margin-bottom: 16px; }
     .cal-confirm-modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
@@ -7494,14 +7496,77 @@ function closeAnnotationPopover() {
   document.removeEventListener('click', _popoverOutsideClick);
 }
 
+// Both annotation renderers use the same decision before retrying an invoice link.
+var pendingInvoiceLinks = new Set();
+
+function invoiceLinkChoice(title, message, cancelLabel, actionLabel) {
+  var dialog = document.createElement('dialog');
+  dialog.className = 'cal-confirm-modal invoice-link-dialog';
+  dialog.setAttribute('aria-label', title);
+  dialog.innerHTML = '<form method="dialog"><h3></h3><p></p><div class="modal-actions">' +
+    '<button class="btn-cancel" value="cancel" autofocus></button>' +
+    '<button class="btn-proceed" value="proceed"></button></div></form>';
+  dialog.querySelector('h3').textContent = title;
+  dialog.querySelector('p').textContent = message;
+  dialog.querySelector('.btn-cancel').textContent = cancelLabel;
+  dialog.querySelector('.btn-proceed').textContent = actionLabel;
+  document.body.appendChild(dialog);
+  return new Promise(function(resolve) {
+    dialog.onclose = function() {
+      dialog.remove();
+      resolve(dialog.returnValue === 'proceed');
+    };
+    dialog.showModal();
+  });
+}
+
+async function postInvoiceLink(body) {
+  if (pendingInvoiceLinks.has(body.annotation_id)) return null;
+  pendingInvoiceLinks.add(body.annotation_id);
+  try {
+    for (;;) {
+      try {
+        var result = await opsPost('resolve_annotation', body);
+        if (result && result.success === true) return result;
+        alert(result && (result.message || result.error) || 'Invoice link was not confirmed.');
+        return null;
+      } catch (err) {
+        var answer = err.body || {};
+        var code = answer.error || answer.code;
+        if (err.status === 409 && code === 'link_would_replace' && !body.confirm_replace &&
+            typeof answer.message === 'string' && answer.message.trim()) {
+          if (!await invoiceLinkChoice('Move invoice?', answer.message, 'Leave it', 'Move it')) return null;
+          body.confirm_replace = true;
+          continue;
+        }
+        if (err.status === 409 && code === 'use_reconcile') {
+          if (await invoiceLinkChoice('Place bill', 'Bills are placed in Reconcile.', 'Close', 'Open Reconcile')) {
+            closeAnnotationPopover();
+            showView('recon');
+          }
+        } else {
+          alert(err.status === 409 && code === 'job_not_live' ? 'That job is not live.' :
+            answer.message || err.message || 'Invoice link was not confirmed.');
+        }
+        return null;
+      }
+    }
+  } finally {
+    pendingInvoiceLinks.delete(body.annotation_id);
+  }
+}
+
 // 5. Resolve annotation
 async function resolveAnnotation(annotationId, responseValue, responseText) {
   try {
-    var resp = await opsPost('resolve_annotation', {
+    var body = {
       annotation_id: annotationId,
       response_value: responseValue,
       response_text: responseText || null,
-    });
+    };
+    var isLink = responseValue === 'link' || String(responseValue).startsWith('link:');
+    var resp = isLink ? await postInvoiceLink(body) : await opsPost('resolve_annotation', body);
+    if (isLink && !resp) return;
 
     // Fatigue prevention: track dismissals, suppress inline after 3 in 30min
     if (responseValue === 'dismiss') {

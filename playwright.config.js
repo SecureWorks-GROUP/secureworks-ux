@@ -26,17 +26,17 @@ module.exports = defineConfig({
     {
       name: 'webkit-desktop',
       use: { ...devices['Desktop Safari'] },
-      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+      testMatch: /(ops-inbox-link-guard|ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
     },
     {
       name: 'webkit-ipad',
       use: { ...devices['iPad (gen 7)'] },
-      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+      testMatch: /(ops-inbox-link-guard|ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
     },
     {
       name: 'webkit-phone',
       use: { ...devices['iPhone 13'] },
-      testMatch: /(ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
+      testMatch: /(ops-inbox-link-guard|ops-reconcile|ops-job-profit-stored-at|crew-receipt|ops-division-stock|ops-job-money-words)[^/]*\.spec\.js$/
     }
   ],
   webServer: externalBaseUrl ? undefined : {

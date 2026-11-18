@@ -232,8 +232,8 @@ export function PayHistory() {
           <div class="pay-hbar" aria-hidden="true"><div class="pay-hbar-fill" style=${`width:${pct}%`} /></div>
           <div class="pay-hnums">
             <div class="pay-hkv"><span>Total (includes super)</span><span class="t-num">${cash(r.total_inc_super)}</span></div>
-            <div class="pay-hkv strong"><span>Paid to you</span><span class="t-num">${cash(r.paid_to_you)}</span></div>
-            <div class="pay-hkv"><span>Paid to your super fund</span>${superUnrecorded ? html`<span class="t-small nowrap">not recorded</span>` : html`<span class="t-num">${cash(r.paid_to_super)}</span>`}</div>
+            <div class="pay-hkv strong"><span>Your pay</span><span class="t-num">${cash(r.paid_to_you)}</span></div>
+            <div class="pay-hkv"><span>Super on your pay</span>${superUnrecorded ? html`<span class="t-small nowrap">not recorded</span>` : html`<span class="t-num">${cash(r.paid_to_super)}</span>`}</div>
           </div>`;
         if (tab === 'weeks') {
           return html`<button type="button" class="pay-hrow tap" key=${key} onClick=${() => go('/pay/week/' + r.week_start)}>${body}</button>`;
@@ -247,13 +247,13 @@ export function PayHistory() {
       <div class="block card pay-hcompare">
         <div class="pay-hcol">
           <h3 class="t-cap">So far this financial year</h3>
-          <div class="pay-hstat"><span>Paid to you</span><b class="t-num">${cash(cmp.this_fy.paid_to_you)}</b></div>
-          <div class="pay-hstat"><span>Paid to your super fund</span>${thisFyUnrecorded ? html`<span class="t-small">not recorded</span>` : html`<b class="t-num">${cash(cmp.this_fy.paid_to_super)}</b>`}</div>
+          <div class="pay-hstat"><span>Your pay</span><b class="t-num">${cash(cmp.this_fy.paid_to_you)}</b></div>
+          <div class="pay-hstat"><span>Super on your pay</span>${thisFyUnrecorded ? html`<span class="t-small">not recorded</span>` : html`<b class="t-num">${cash(cmp.this_fy.paid_to_super)}</b>`}</div>
         </div>
         <div class="pay-hcol">
           <h3 class="t-cap">Same point last year</h3>
-          <div class="pay-hstat"><span>Paid to you</span><b class="t-num">${cash(cmp.last_fy_same_point.paid_to_you)}</b></div>
-          <div class="pay-hstat"><span>Paid to your super fund</span>${lastFyUnrecorded ? html`<span class="t-small">not recorded</span>` : html`<b class="t-num">${cash(cmp.last_fy_same_point.paid_to_super)}</b>`}</div>
+          <div class="pay-hstat"><span>Your pay</span><b class="t-num">${cash(cmp.last_fy_same_point.paid_to_you)}</b></div>
+          <div class="pay-hstat"><span>Super on your pay</span>${lastFyUnrecorded ? html`<span class="t-small">not recorded</span>` : html`<b class="t-num">${cash(cmp.last_fy_same_point.paid_to_super)}</b>`}</div>
         </div>
       </div>
     <//>

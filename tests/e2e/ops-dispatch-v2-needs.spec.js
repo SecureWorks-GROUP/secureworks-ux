@@ -133,6 +133,27 @@ test.describe('Dispatch v2: Needs you now', () => {
     await expect(card(root, 'SWR-930001').locator('.dpc-need-replied')).toHaveText('Accept Lysaght date');
   });
 
+  test('a supplier reply shows under Supplier replied from the board, before the job is opened (items 17 and 5)', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const api = twoJobs(fake);
+    const pipeline = api.pipeline;
+    // The main job's board carries Lysaght's reply (with its open date) and
+    // an acknowledgement from Twinside with no date.
+    api.pipeline = (url, body) => {
+      const out = pipeline(url, body);
+      const rows = out.columns.accepted.map((r) => (r.id !== JOB_ID ? r : Object.assign({}, r, { board: Object.assign({}, r.board, { replies: {
+        flagged: [{ id: 'em-tw', supplier_name: 'Twinside Retaining', received_at: '2026-10-30T01:00:00Z' }, { id: 'em-ly', supplier_name: 'Lysaght', received_at: '2026-10-29T04:58:00Z' }],
+        open_suggestions: [{ id: 'sg-ly', email_id: 'em-ly', order_id: 'ord-ly', supplier_name: 'Lysaght', delivery_date: dayFrom(4) }],
+      } }) })));
+      return Object.assign({}, out, { columns: { accepted: rows } });
+    };
+    const { root, of } = await boot(page, fake, { api });
+    await expect(chip(root, 'Supplier replied')).toHaveText('Supplier replied 1');
+    await expect(card(root, 'SWR-930001').locator('.dpc-need-replied')).toHaveText(['Accept Lysaght date', 'Read Twinside Retaining reply']);
+    // Nothing was read for it: the main job was never opened.
+    expect(of('dispatch_v2_replies').some((c) => c.url.searchParams.get('job_id') === JOB_ID)).toBe(false);
+  });
+
   test('Follow up and Date at risk come from the sent day and the install day', async ({ page }) => {
     // Lysaght sent 29/10 and still at Sent to supplier; the install three
     // days away; Twinside has no date at all.

@@ -133,7 +133,9 @@ export function Group({ jobId }) {
   };
   const invoice = async () => {
     if (!navigator.onLine) { toast('No signal. Send your share when you are back in range.', { kind: 'bad' }); return; }
-    const words = num(g.my_cash_pay) != null ? `${cash(g.my_cash_pay)} is paid to you${num(g.my_super) ? ` and ${cash(g.my_super)} goes into your super` : ''}.` : `Your share is ${cash(g.my_share)}.`;
+    // The words follow the two figures on the card: 'less super' only when the cash figure is below the share.
+    const lessSuper = num(g.my_share) != null && num(g.my_cash_pay) < num(g.my_share) - 0.005;
+    const words = num(g.my_cash_pay) != null ? `${cash(g.my_cash_pay)} is your share${lessSuper ? ' less super' : ''}${num(g.my_super) ? ` and ${cash(g.my_super)} goes into your super` : ''}.` : `Your share is ${cash(g.my_share)}.`;
     if (!(await ask({ title: `Invoice your share for ${title}?`, body: `${words} You send this once and cannot change it after.`, yes: 'Invoice my share' }))) return;
     setBusy('invoice');
     let res = null; let err = null;
@@ -174,7 +176,7 @@ export function Group({ jobId }) {
       </div>
       ${frozen && num(g.my_share) != null ? html`<div class="block card pay-gap">
         <${KV} k="Your share" v=${html`<span class="t-figure">${cash(g.my_share)}</span>`} />
-        ${paidDiffers ? html`<${KV} k="Paid to you" v=${cash(g.my_cash_pay)} />` : null}
+        ${paidDiffers ? html`<${KV} k="Your share less super" v=${cash(g.my_cash_pay)} />` : null}
         ${num(g.my_super) ? html`<${KV} k="Into your super" v=${cash(g.my_super)} />` : null}
       </div>` : null}
     <//>

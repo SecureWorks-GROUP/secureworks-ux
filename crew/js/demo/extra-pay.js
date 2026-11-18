@@ -16,11 +16,33 @@ registerDemo((db, h) => {
   const jobRef = (j) => ({ job_id: j.id, job_number: j.job_number, client_name: j.client_name, site_suburb: j.site_suburb, job_type: j.type });
 
   // ------------------------------------------------------- older invoices
+  const fyYearOf = (iso) => (Number(iso.slice(5, 7)) >= 7 ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
+  const fyStartYear = fyYearOf(today);
+  const lastFyStart = `${fyStartYear - 1}-07-01`;
+  // Runs whose super the office marked paid: run id -> the stamp (ISO), as trade_pay_runs.super_marked_paid_at.
+  db.paidSuperRuns = new Map();
+  db.payRates = !staff && db.persona !== 'new' && !lead ? [
+    { user_id: me.id, effective_from: `${fyStartYear - 1}-07-01`, hourly_rate: 50.4 },
+    { user_id: me.id, effective_from: `${fyStartYear}-07-01`, hourly_rate: 56 },
+    { user_id: 'u-other', effective_from: `${fyStartYear}-07-01`, hourly_rate: 84 }
+  ] : [];
   if (!staff && db.persona !== 'new') {
     const w3 = addDays(mon, -21); const w4 = addDays(mon, -28); const w5 = addDays(mon, -35);
     const day = (wk, n, hrs, extra = {}) => ({ id: db.id('l'), line_date: addDays(wk, n), work_date: addDays(wk, n), start_time: '07:00', finish_time: hrs === 9 ? '16:30' : hrs === 11 ? '18:30' : '15:30', break_minutes: 30, job_number: n < 2 ? 'SWD-26088' : 'SWF-26168', client_name: n < 2 ? 'Marcus Lim' : 'Priya Nair', description: 'Labour', line_type: 'labour', total_hours: hrs, hourly_rate: 55, line_total_ex: hrs * 55, ...extra });
+    const prev = db.invoices.find((i) => i.id === 'inv-prev');
+    if (prev) prev.pay_run_id = 'ZZTEST-run-prev';
+    const rawLy1 = addDays(mon, -371);
+    const ly1 = addDays(rawLy1, 6) < lastFyStart ? mondayOf(lastFyStart) : rawLy1;
+    const rawLy2 = addDays(mon, -385);
+    const ly2 = addDays(rawLy2, 6) < lastFyStart ? addDays(ly1, 7) : rawLy2;
+    const histPaid = (id, wk, num, gross, runId) => {
+      const m = money(gross, { gstOn: me.trade_details.gstRegistered === true });
+      return { id, user_id: me.id, week_start: wk, week_end: addDays(wk, 6), invoice_number: num, status: 'paid', invoice_source: 'hourly', notes: '', ...m,
+        total_hours: round2(gross / 56), xero_bill_id: 'xb-' + id, xero_bill_status: 'PAID', pay_run_id: runId,
+        submitted_at: db.at(addDays(wk, 6), '16:30'), created_at: db.at(addDays(wk, 6), '16:30'), paid_at: db.at(addDays(wk, 11), '09:00'), amount_paid: m.pay_view.into_bank, lines: [] };
+    };
     db.invoices.push(
-      { id: 'inv-adj', user_id: me.id, week_start: w3, week_end: addDays(w3, 6), invoice_number: 'SW-INV-ST-0401', status: 'paid', invoice_source: 'hourly', notes: 'Thursday ran late to finish the oiling.', ...money(1980, { gstOn: false }), total_hours: 36, xero_bill_id: 'xb-a', xero_bill_status: 'PAID',
+      { id: 'inv-adj', user_id: me.id, week_start: w3, week_end: addDays(w3, 6), invoice_number: 'SW-INV-ST-0401', status: 'paid', invoice_source: 'hourly', notes: 'Thursday ran late to finish the oiling.', ...money(1980, { gstOn: false }), total_hours: 36, xero_bill_id: 'xb-a', xero_bill_status: 'PAID', pay_run_id: 'ZZTEST-run-adj',
         xero_adjustments: { total: -86.5, lines: [{ description: 'Fuel card, October', amount: -86.5, account_code: '449', kind: 'deduction' }] }, payable_after_xero: 1774.7, xero_pays: 1774.7,
         submitted_at: db.at(addDays(w3, 6), '16:20'), created_at: db.at(addDays(w3, 6), '16:20'), paid_at: db.at(addDays(w3, 11), '09:00'), amount_paid: 1774.7, lines: [0, 1, 2, 3].map((n) => day(w3, n, 9)) },
       { id: 'inv-back', user_id: me.id, week_start: w4, week_end: addDays(w4, 6), invoice_number: 'SW-INV-ST-0396', status: 'ops-reject', invoice_source: 'hourly', notes: '', ...money(1485, { gstOn: false }), total_hours: 27, xero_bill_id: null,
@@ -28,8 +50,19 @@ registerDemo((db, h) => {
         submitted_at: db.at(addDays(w4, 6), '17:45'), created_at: db.at(addDays(w4, 6), '17:45'), paid_at: null,
         lines: [day(w4, 0, 8), day(w4, 1, 11, { office_review_status: 'rejected', office_review_note: 'Clocked off at 3pm that day.' }), day(w4, 2, 8)] },
       { id: 'inv-draft', user_id: me.id, week_start: w5, week_end: addDays(w5, 6), invoice_number: 'SW-INV-ST-0388', status: 'draft', invoice_source: 'hourly', notes: '', ...money(880, { gstOn: false }), total_hours: 16, xero_bill_id: null,
-        submitted_at: null, created_at: db.at(addDays(w5, 5), '12:10'), paid_at: null, lines: [day(w5, 3, 8), day(w5, 4, 8)] }
+        submitted_at: null, created_at: db.at(addDays(w5, 5), '12:10'), paid_at: null, lines: [day(w5, 3, 8), day(w5, 4, 8)] },
+      histPaid('inv-h1', addDays(mon, -42), 'ZZTEST-INV-05', 1120, 'ZZTEST-run-h1'),
+      histPaid('inv-h2', addDays(mon, -56), 'ZZTEST-INV-04', 896, 'ZZTEST-run-h2'),
+      histPaid('inv-h3', addDays(mon, -70), 'ZZTEST-INV-03', 1120, 'ZZTEST-run-h3'),
+      histPaid('inv-h4', ly1, 'ZZTEST-INV-02', 1120, 'ZZTEST-run-h4'),
+      histPaid('inv-h5', ly2, 'ZZTEST-INV-01', 560, 'ZZTEST-run-h5')
     );
+    // The office marked these runs' super paid on the day each invoice was paid.
+    for (const inv of db.invoices) {
+      if (['ZZTEST-run-prev', 'ZZTEST-run-adj', 'ZZTEST-run-h1', 'ZZTEST-run-h2', 'ZZTEST-run-h3', 'ZZTEST-run-h4', 'ZZTEST-run-h5'].includes(inv.pay_run_id)) {
+        db.paidSuperRuns.set(inv.pay_run_id, inv.paid_at || inv.created_at);
+      }
+    }
   }
 
   // ------------------------------------------------------------- receipts
@@ -170,24 +203,149 @@ registerDemo((db, h) => {
         profile: { name: me.name, abn: me.trade_details.abn, gst_registered: me.trade_details.gstRegistered === true, invoice_type: me.invoice_type, xero_linked: true } };
     },
 
+    my_pay_history(p) {
+      if (!me || !me.id) fail(401, { code: 'login_required' });
+      if (p.years != null && !/^[1-7]$/.test(String(p.years))) fail(400, { code: 'years_invalid' });
+      const years = Number(p.years == null ? 2 : p.years);
+      const nowDay = todayISO();
+      const curFy = fyYearOf(nowDay);
+      const thisFy = `${curFy}-07-01`;
+      const lastFy = `${curFy - 1}-07-01`;
+      const start = `${curFy - years + 1}-07-01`;
+      const priorYear = Number(nowDay.slice(0, 4)) - 1;
+      const lastCutoff = nowDay.endsWith('-02-29') ? `${priorYear}-02-28` : priorYear + nowDay.slice(4);
+      const zero = () => ({ total_inc_super: 0, paid_to_super: 0, paid_to_you: 0, reimbursements: 0, paid_into_bank: 0, invoices: 0 });
+      const add = (dst, src) => { Object.keys(dst).forEach((k) => { dst[k] = round2(dst[k] + src[k]); }); };
+      const put = (map, key, src) => { const cur = map.get(key) || zero(); add(cur, src); map.set(key, cur); };
+      const weeks = new Map(); const months = new Map(); const fyMap = new Map();
+      const thisYear = zero(); const lastYear = zero();
+      const byInvoice = [];
+      let sinceStart = 0; let tax = 0; let notRecorded = 0; let notInXero = 0;
+      const taxPct = db.taxSetAsidePercent == null ? null : Number(db.taxSetAsidePercent);
+      const paidRuns = db.paidSuperRuns || new Map();
+      // As ops-api superMarkedPaidWords: the office's stamp as a Perth (UTC+8) day.
+      const markedPaid = (stamp) => {
+        const ms = Date.parse(stamp);
+        if (!Number.isFinite(ms)) fail(503, { code: 'pay_history_unreadable', error: 'Could not read your pay history. Try again.' });
+        const d = new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
+        return { marked_paid_on: d, words: `Marked paid by the office on ${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` };
+      };
+
+      for (const row of db.invoices) {
+        if (row.user_id !== me.id) continue;
+        if (['draft', 'ops-reject', 'failed'].includes(row.status)) continue;
+        if (['VOIDED', 'DELETED'].includes(String(row.xero_bill_status || '').toUpperCase())) continue;
+        const dayStr = row.week_end || (row.created_at || '').slice(0, 10);
+        if (!dayStr || dayStr > nowDay) continue;
+        if (!('xero_bill_id' in row)) fail(503, { code: 'pay_history_unreadable', error: 'Could not read your pay history. Try again.' });
+        if (!row.xero_bill_id) {
+          notInXero += 1;
+          if (dayStr >= start) {
+            byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: row.week_start || mondayOf(dayStr), amount: 0, status: 'not_in_xero' });
+          }
+          continue;
+        }
+        const noSuper = row.super_amount == null && row.super_basis == null && !row.pay_view;
+        if (noSuper) notRecorded += 1;
+        const legacy = !noSuper && 'super_basis' in row && row.super_basis !== 'inclusive_12_112_v1' && !row.pay_view;
+        const view = row.pay_view || (noSuper || legacy ? null : money(row.gross_earned, { gstOn: row.gst_on }).pay_view);
+        const paidToYou = noSuper ? Number(row.total_inc) : view ? Number(view.paid_to_you) : Number(row.net_pay);
+        const superAmt = noSuper ? 0 : view ? Number(view.paid_to_super) : Number(row.super_amount);
+        sinceStart = round2(sinceStart + superAmt);
+        const comparable = dayStr >= lastFy && dayStr <= lastCutoff;
+        if (dayStr < start && !comparable) continue;
+        const totals = {
+          total_inc_super: view ? Number(view.total_inc_super) : round2(paidToYou + superAmt),
+          paid_to_super: superAmt,
+          paid_to_you: paidToYou,
+          reimbursements: view ? Number(view.reimbursements || 0) : 0,
+          paid_into_bank: Number(row.amount_paid || 0),
+          invoices: 1
+        };
+        if (comparable) add(lastYear, totals);
+        if (dayStr < start) continue;
+        if (dayStr >= thisFy) {
+          add(thisYear, totals);
+          if (taxPct !== null) tax = round2(tax + round2(paidToYou * taxPct / 100));
+        }
+        const wk = row.week_start || mondayOf(dayStr);
+        const ym = dayStr.slice(0, 7);
+        const y = fyYearOf(dayStr);
+        put(weeks, wk, totals);
+        put(months, ym, totals);
+        put(fyMap, `FY ${y}/${String(y + 1).slice(2)}`, totals);
+        const marked = noSuper ? undefined : paidRuns.get(row.pay_run_id);
+        byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: wk, amount: superAmt, status: noSuper ? 'not_recorded' : (marked ? 'marked_paid_by_office' : 'to_be_paid'), ...(marked ? markedPaid(marked) : {}) });
+      }
+      const newest = (map) => [...map].sort(([a], [b]) => b.localeCompare(a));
+      const monthLabel = (ym) => `${MON[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+      return {
+        weeks: newest(weeks).slice(0, 26).map(([week_start, t]) => ({ week_start, ...t })),
+        months: newest(months).slice(0, 24).map(([month, t]) => ({ month, label: monthLabel(month), ...t })),
+        years: newest(fyMap).map(([fy_label, t]) => ({ fy_label, ...t })),
+        this_year_vs_last: { this_fy: thisYear, last_fy_same_point: lastYear },
+        super: {
+          this_fy: thisYear.paid_to_super,
+          since_start: sinceStart,
+          not_recorded_count: notRecorded,
+          not_in_xero_count: notInXero,
+          by_invoice: byInvoice.sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)) || String(b.invoice_id).localeCompare(String(a.invoice_id)))
+        },
+        tax_set_aside: taxPct === null ? null : { percent: taxPct, this_fy_amount: tax },
+        rate_history: (db.payRates || [])
+          .filter((r) => r.user_id === me.id)
+          .sort((a, b) => String(a.effective_from).localeCompare(String(b.effective_from)))
+          .map(({ effective_from, hourly_rate }) => ({ effective_from, hourly_rate: round2(Number(hourly_rate)) }))
+      };
+    },
+
     // ---- receipts
     submit_expense(p, b) {
       if (!b.receipt_photo_url && !b.no_receipt_reason) fail(400, { error: 'A receipt photo or a reason for no receipt is required.' });
+      const capture = {};
+      if (b.capture_version !== undefined) {
+        if (!Number.isSafeInteger(b.capture_version)) fail(400, { error: 'invalid_capture_version', message: 'Use an integer capture version.' });
+        capture.capture_version = b.capture_version;
+      }
+      if (b.stock_division != null) {
+        if (!['patios', 'fencing', 'insurance'].includes(b.stock_division)) fail(400, { error: 'invalid_stock_division', message: 'Pick a listed stock division.' });
+        capture.stock_division = b.stock_division; capture.job_id = null; capture.business_category = 'general_stock';
+      } else if (b.stock_division === null || b.job_id) capture.stock_division = null;
       const read = b.receipt_photo_url ? { ...READS[reads++ % READS.length], receipt_date: today } : null;
       const e = { id: db.id('ex'), submitted_by: me.id, status: 'pending', vendor_name: read ? read.vendor_name : null, receipt_date: read ? read.receipt_date : null, total_amount: read ? read.total_amount : null, gst_amount: read ? read.gst_amount : null, line_items: read ? read.line_items : [],
-        job_id: b.job_id || null, po_id: b.po_id || null, receipt_photo_url: b.receipt_photo_url ? (window.__demoUploads && window.__demoUploads[b.receipt_photo_url]) || tile('Receipt', 40) : null, receipt_storage_path: b.receipt_storage_path || null, receipt_sha256: b.receipt_sha256 || null, no_receipt_reason: b.no_receipt_reason || null,
-        routed_to: b.job_id ? 'shaun' : 'jan', flow: 'unknown', created_at: nowIso() };
+        job_id: b.job_id || null, stock_division: null, po_id: b.po_id || null, payment_method: b.payment_method || null, business_category: b.business_category || null,
+        receipt_photo_url: b.receipt_photo_url ? (window.__demoUploads && window.__demoUploads[b.receipt_photo_url]) || tile('Receipt', 40) : null, receipt_storage_path: b.receipt_storage_path || null, receipt_sha256: b.receipt_sha256 || null, no_receipt_reason: b.no_receipt_reason || null,
+        routed_to: 'office', flow: 'unknown', created_at: nowIso(), ...capture };
+      const nextStep = e.payment_method === 'personal_card' ? 'reimbursed_on_next_invoice' : e.payment_method === 'supplier_invoice' ? 'evidence_for_supplier_bill' : e.payment_method === 'cash' ? 'draft_bill' : e.payment_method === 'company_card' ? (e.job_id ? 'saved_against_job' : e.stock_division || e.business_category === 'general_stock' ? 'saved_to_stock' : null) : null;
       db.expenses.push(e);
-      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow };
+      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow, next_step: nextStep, spend_capture_v2: Boolean(db.flags.spendCaptureV2) };
     },
     update_expense(p, b) {
       const e = db.expenses.find((x) => x.id === b.expense_id); if (!e) fail(404, { error: 'Expense not found' });
       if (e.submitted_by !== me.id && !staff) fail(403, { error: 'Only the person who sent this receipt can change it.' });
+      if (e.xero_bill_id && (b.flow === 'reimbursement' || b.payment_method === 'personal_card')) fail(409, { error: 'expense_already_billed', message: 'This receipt already has a bill in Xero.' });
       if (e.status === 'pushed_to_xero') fail(409, { error: 'This receipt is already with the bookkeeper and cannot be changed.' });
+      const updates = {};
       const fields = ['vendor_name', 'receipt_date', 'total_amount', 'gst_amount', 'line_items', 'job_id', 'flow', 'category', 'payment_method', 'business_category', 'gst_status', 'no_receipt_reason', 'jarvis_job_suggestion', 'field_confidence'].filter((k) => k in b);
-      fields.forEach((k) => { e[k] = b[k]; });
+      fields.forEach((k) => { updates[k] = b[k]; });
+      if (b.capture_version !== undefined) {
+        if (!Number.isSafeInteger(b.capture_version)) fail(400, { error: 'invalid_capture_version', message: 'Use an integer capture version.' });
+        updates.capture_version = b.capture_version;
+      }
+      if (b.stock_division != null) {
+        if (!['patios', 'fencing', 'insurance'].includes(b.stock_division)) fail(400, { error: 'invalid_stock_division', message: 'Pick a listed stock division.' });
+        updates.stock_division = b.stock_division; updates.job_id = null; updates.business_category = 'general_stock';
+      } else if (b.stock_division === null || b.job_id) {
+        if (b.stock_division === null || e.stock_division) updates.stock_division = null;
+      }
+      const next = { ...e, ...updates };
+      if (b.capture_version === 2 && !next.job_id && !next.stock_division && db.flags.spendCaptureV2 === true) {
+        fail(409, { error: 'expense_needs_job_or_division', message: 'Pick the job or the stock this was for.' });
+      }
+      Object.assign(e, updates);
       if (b.payment_method) e.flow = { supplier_invoice: 'supplier_bill', company_card: 'company_expense', cash: 'company_expense', personal_card: 'reimbursement' }[b.payment_method] || 'unknown';
-      return { success: true, expense_id: e.id, updated_fields: fields };
+      const nextStep = e.payment_method === 'personal_card' ? 'reimbursed_on_next_invoice' : e.payment_method === 'supplier_invoice' ? 'evidence_for_supplier_bill' : e.payment_method === 'cash' ? 'draft_bill' : e.payment_method === 'company_card' ? (e.job_id ? 'saved_against_job' : e.stock_division || e.business_category === 'general_stock' ? 'saved_to_stock' : null) : null;
+      return { success: true, expense_id: e.id, updated_fields: Object.keys(updates), next_step: nextStep };
     },
     suggest_job_for_expense() {
       const seen = new Set(); const out = [];
@@ -196,12 +354,12 @@ registerDemo((db, h) => {
       mineRows.filter((a) => a.clocked_on_at && !a.clocked_off_at).forEach((a) => push(a.job_id, 0.95, 'You are clocked on there'));
       mineRows.filter((a) => a.scheduled_date === today).forEach((a) => push(a.job_id, 0.8, 'You are booked there today'));
       mineRows.filter((a) => a.scheduled_date < today && a.scheduled_date >= addDays(today, -6)).sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date)).forEach((a) => push(a.job_id, 0.5, 'You were there this week'));
-      return { suggestions: out, fallback: { label: 'General business (no job)', score: 0.3 }, generated_at: nowIso() };
+      return { suggestions: out, fallback: { label: 'General business (no job)', score: 0.3 }, generated_at: nowIso(), spend_capture_v2: Boolean(db.flags.spendCaptureV2) };
     },
     list_expenses(p) {
       let rows = db.expenses.filter((e) => (!p.job_id || e.job_id === p.job_id) && (!p.status || e.status === p.status));
       rows = rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, Number(p.limit) || 50);
-      return { expenses: rows.map((e) => {
+      return { spend_capture_v2: Boolean(db.flags.spendCaptureV2), expenses: rows.map((e) => {
         if (!db.flags.reimbursements) return { ...e, jobs: jobsJoin(e.job_id) };
         const reason = e.submitted_by !== me.id ? 'reimbursement_not_yours'
           : !['personal_card', 'cash'].includes(e.payment_method) ? 'reimbursement_not_personal_spend'

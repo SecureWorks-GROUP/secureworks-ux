@@ -116,7 +116,7 @@ Ops Dash coverage in the same suite:
 
 - `tests/e2e/ops-crew-line-review.spec.js` — office Approve / Query / Reject on a crew invoice line before the Xero bill. A line with no `office_review_status` (the review flag off) paints no `[data-office-line-review]` and no those buttons. A line that has one posts `review_crew_invoice_line` with `line_id`, `decision` and the optional note. An unknown action removes the controls. The review block has no Send and does not repeat agreed labour. A trade role, and a trade render, show no review controls and no dollar amount.
 - `tests/e2e/group-work-order.spec.js` — group work order. A 401, 403, 404 or any other error paints nothing on the trade card, the public sign page and the office view. Create and Join appear only after the server says the switch is on. The share read is not requested on a job open until then, and the feed stub answers that read with 403 the way the live backend does for a trade. A trade sees `pot_total` and `my_share` only (Total and Your share), never another share, the sign-off token or agreed labour. The client page (`group-sign.html`) takes a drawn signature and the five office ratings and never shows pay. There is no Send control.
-- `tests/e2e/ops-office-wo-queue.spec.js` — Financials > Work Orders "Work orders to fill" (`modules/ops-office-wo-queue.js`). `list_office_job_work_orders` with `enabled: false`, or an unknown action, paints nothing. A 403 or a 500 before the server has said the switch is on also paints nothing. After it has, a later 500 clears the rows and shows "Work orders to fill could not be read." A trade role paints nothing. When the flag is on, a draft shows its labour allowance (or "Needs a labour allowance"), Save allowance posts `fill_job_work_order_allowance`, and Approve posts `approve_office_job_work_order` only after an allowance is set, including 0. There is no Send control.
+- `tests/e2e/ops-office-wo-queue.spec.js` — Financials > Work Orders "Work orders to fill" (`modules/ops-office-wo-queue.js`). `list_office_job_work_orders` with `enabled: false`, or an unknown action, paints nothing. A 403 or a 500 before the server has said the switch is on also paints nothing. After it has, a later 500 clears the rows and shows "Work orders to fill could not be read." A trade role paints nothing. When the flag is on, a draft shows its labour allowance (or "Needs a labour allowance"), Save allowance posts `fill_job_work_order_allowance`, and Approve posts `approve_office_job_work_order` only after an allowance is set, including 0. There is no Send control. FU49 9a: a draft with no amount shows the sealed quote's labour from `list_job_work_order_labour_confirm` with one office-only Fill from sealed quote press (`confirm_job_work_order_labour`); no amount in the sealed quote offers no press; switch off hides it; a failed read is an error line, never $0.00.
 
 ## Why the main suite uses stubs
 
@@ -150,7 +150,7 @@ The public Supabase URL and anon key remain app configuration, not GitHub secret
 
 ```text
 playwright.config.js             Generic runner, local server, traces, screenshots
-.github/workflows/playwright-e2e.yml
+.github/workflows/trade-app-e2e.yml
                                  PR job, browser cache, failure artifacts
 tests/e2e/                       User-visible flow specs
 tests/fixtures/*.json            Recorded, synthetic read models only
@@ -165,7 +165,7 @@ Repo-specific feed action names and roles belong in `tests/fixtures/test.js`, no
 
 ## Copy this pattern to another tool repo
 
-1. Copy `playwright.config.js`, `.github/workflows/playwright-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
+1. Copy `playwright.config.js`, `.github/workflows/trade-app-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
 2. Install `@playwright/test` and copy the four npm scripts from this repo's `package.json`.
 3. Change the served HTML path in the workflow/config only if the tool is not at the repository root.
 4. Replace the personas in `tests/fixtures/test.js` with that tool's minimum roles.

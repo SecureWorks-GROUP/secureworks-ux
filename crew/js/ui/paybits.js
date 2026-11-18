@@ -180,8 +180,8 @@ export function PayRows({ m, totalLabel = 'You are paid', hours, workOrder = fal
     const row = (label, value, total = false, note = '') => html`<div class=${cx('pay-sumrow', total && 'total')}><span>${label}${note ? html`<small class="t-small" style="display:block">${note}</small>` : null}</span><span>${value}</span></div>`;
     return html`<div class="pay-sum">
       ${row(hasWorkOrder ? 'Work order total (includes super)' : 'Total (includes super)', cash(v.total_inc_super))}
-      ${row('Paid to your super fund', cash(v.paid_to_super))}
-      ${row('Paid to you', cash(v.paid_to_you), true)}
+      ${row('Super on your pay', cash(v.paid_to_super))}
+      ${row('Your pay', cash(v.paid_to_you), true)}
       ${v.reimbursements > 0 ? row('Reimbursement (receipt)', cash(v.reimbursements)) : null}
       ${v.gst > 0 ? row('GST', cash(v.gst), false, 'Set this aside for your BAS.') : null}
       ${v.repayment ? row(v.repayment.label, '-' + cash(v.repayment.amount), false, Number.isFinite(num(v.repayment.balance_left)) ? 'Balance left ' + cash(v.repayment.balance_left) : '') : null}
@@ -201,7 +201,7 @@ export function PayRows({ m, totalLabel = 'You are paid', hours, workOrder = fal
     ${num(m.grand_total) != null ? html`<div class="pay-sumrow"><span>Work orders</span><span>${cash(m.grand_total)}</span></div>` : null}
     ${num(m.final_deductions_total) ? html`<div class="pay-sumrow"><span>Adjustments</span><span>-${cash(Math.abs(m.final_deductions_total))}</span></div>` : null}
     ${num(m.gross_earned) != null ? html`<div class="pay-sumrow"><span>Gross earned${h ? ` · ${hrs(h)}` : ''}</span><span>${cash(m.gross_earned)}</span></div>` : null}
-    ${withheld ? html`<div class="pay-sumrow"><span>Paid to your super fund</span><span>-${cash(withheld)}</span></div>` : null}
+    ${withheld ? html`<div class="pay-sumrow"><span>Super on your pay</span><span>-${cash(withheld)}</span></div>` : null}
     ${gst ? html`<div class="pay-sumrow"><span>GST</span><span>${cash(gst)}</span></div>` : null}
     ${ded ? html`<div class="pay-sumrow"><span>${ded.label || 'Weekly repayment'}</span><span>-${cash(ded.amount)}</span></div>` : null}
     ${adj.length && before != null ? html`<div class="pay-sumrow"><span>Before the office changed it</span><span>${cash(before)}</span></div>` : null}

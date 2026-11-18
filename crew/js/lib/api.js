@@ -122,6 +122,39 @@ export async function apiText(action, params) {
   return res.text();
 }
 
+/**
+ * Fetch a file (a PDF the server makes) with the signed-in token, as a Blob.
+ * A refusal arrives as JSON `{ code }` and throws ApiError with that code; an
+ * answer that is not the expected type throws too, so it is never saved. The
+ * browser keeps no copy (`cache: 'no-store'`): it holds one trade's pay, and a
+ * shared phone must not hand it to the next person signed in.
+ */
+export async function apiBlob(action, params, type = 'application/pdf') {
+  if (getState().demo && demoHandler) return demoHandler('ops-blob', action, params || {}, null);
+  if (previewId) throw readOnly();
+  const token = await tokenSource();
+  if (!token) throw new ApiError('Sign in required', { status: 401, code: 'auth_expired' });
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    let res;
+    try { res = await fetch(buildUrl(OPS(), action, params), { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', signal: ctl.signal }); } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      throw new ApiError('No signal', { offline: true });
+    }
+    if (!res.ok) {
+      let b = {};
+      try { b = (await res.json()) || {}; } catch { b = {}; }
+      throw new ApiError(b.error || b.message || res.statusText || 'Request failed', { status: res.status, code: typeof b.code === 'string' ? b.code : '', body: b });
+    }
+    const blob = await res.blob();
+    if (!String(res.headers.get('Content-Type') || '').startsWith(type) || !blob.size) {
+      throw new ApiError('Unexpected answer', { status: 502, code: 'unexpected_file' });
+    }
+    return blob;
+  } finally { clearTimeout(timer); }
+}
+
 /** Upload a blob to the signed storage URL from get_upload_url. */
 export async function putFile(uploadUrl, token, blob, contentType) {
   if (previewId) throw readOnly();

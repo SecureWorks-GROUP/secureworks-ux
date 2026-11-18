@@ -133,7 +133,7 @@ export function Group({ jobId }) {
   };
   const invoice = async () => {
     if (!navigator.onLine) { toast('No signal. Send your share when you are back in range.', { kind: 'bad' }); return; }
-    const words = num(g.my_cash_pay) != null ? `${cash(g.my_cash_pay)} is your share${num(g.my_super) ? ` and ${cash(g.my_super)} goes into your super` : ''}.` : `Your share is ${cash(g.my_share)}.`;
+    const words = num(g.my_cash_pay) != null ? `${cash(g.my_cash_pay)} is your share less super${num(g.my_super) ? ` and ${cash(g.my_super)} goes into your super` : ''}.` : `Your share is ${cash(g.my_share)}.`;
     if (!(await ask({ title: `Invoice your share for ${title}?`, body: `${words} You send this once and cannot change it after.`, yes: 'Invoice my share' }))) return;
     setBusy('invoice');
     let res = null; let err = null;

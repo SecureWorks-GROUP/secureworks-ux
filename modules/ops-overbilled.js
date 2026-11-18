@@ -112,8 +112,7 @@ var OverbilledCore = (function () {
       days: num(data.window_days),
       from: data.window_from ? String(data.window_from) : null,
       billedJobs: num(data.billed_jobs),
-      checked: num(data.checked_work_orders),
-      totalGap: num(data.total_gap_ex)
+      checked: num(data.checked_work_orders)
     };
   }
 
@@ -128,7 +127,7 @@ var OverbilledCore = (function () {
       (r.covered ? ' <span class="obl-muted" data-overbilled-covered>approved changes cover it</span>' : '') + '</td>' +
       '<td class="obl-num">' + money(r.agreed) + '</td>' +
       '<td class="obl-num">' + money(r.billed) + '</td>' +
-      '<td class="obl-num obl-gap" data-overbilled-gap>' + money(r.gap) + '</td>' +
+      '<td class="obl-num ' + (r.covered ? 'obl-gap-covered' : 'obl-gap') + '" data-overbilled-gap>' + money(r.gap) + '</td>' +
       '</tr>';
   }
 
@@ -138,11 +137,24 @@ var OverbilledCore = (function () {
       '<td>' + esc(APART_WORDS[a.why] || 'Cannot be checked') + '</td></tr>';
   }
 
+  // "2 over ($1,200.00), 1 covered by approved changes". A job the approved
+  // changes cover is not counted as over and its gap is not in the total: the
+  // total is the server's gap_ex of each job not covered, added in cents.
+  function headline(rows) {
+    var over = 0, covered = 0, cents = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].covered) { covered++; continue; }
+      over++;
+      cents += Math.round(rows[i].gap * 100);
+    }
+    var words = over + ' over' + (over ? ' (' + money(cents / 100) + ')' : '');
+    if (covered) words += ', ' + covered + ' covered by approved changes';
+    return words;
+  }
+
   function summary(ans) {
-    var n = ans.rows.length;
     var parts = [];
-    parts.push(n === 1 ? '1 job billed over its agreed amount' : n + ' jobs billed over their agreed amount');
-    if (n && ans.totalGap !== null) parts.push(money(ans.totalGap) + ' over in all');
+    parts.push(headline(ans.rows));
     if (ans.billedJobs !== null) parts.push(ans.billedJobs + (ans.billedJobs === 1 ? ' job' : ' jobs') + ' billed in the window');
     if (ans.checked !== null) parts.push(ans.checked + ' with an agreed amount checked');
     return parts.join(' · ');
@@ -165,7 +177,7 @@ var OverbilledCore = (function () {
   return {
     WINDOWS: WINDOWS, DEFAULT_DAYS: DEFAULT_DAYS,
     esc: esc, num: num, money: money, windowDays: windowDays, readAnswer: readAnswer,
-    rowHtml: rowHtml, apartRowHtml: apartRowHtml, summary: summary,
+    rowHtml: rowHtml, apartRowHtml: apartRowHtml, headline: headline, summary: summary,
     windowWords: windowWords, failedWords: failedWords
   };
 })();
@@ -193,6 +205,7 @@ var Overbilled = (function () {
       '#woOverbilled .obl-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '#woOverbilled th.obl-num{text-align:right}' +
       '#woOverbilled .obl-gap{color:var(--sw-red,#c0392b);font-weight:600}' +
+      '#woOverbilled .obl-gap-covered{color:var(--sw-text-sec,#6b7280)}' +
       '#woOverbilled .obl-muted{font-size:12px;color:var(--sw-text-sec,#6b7280)}' +
       '#woOverbilled .obl-job{font-weight:600;white-space:nowrap;color:var(--sw-mid,#293c46)}' +
       '#woOverbilled .obl-show{font-size:13px;padding:6px 12px;cursor:pointer}' +

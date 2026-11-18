@@ -235,6 +235,10 @@
     if (item.cents == null || !item.lines.length || item.lines.some(function (l) { return l.cents == null || l.cents === 0; })) {
       return 'A line on this document has no amount, so it cannot be placed here.';
     }
+    if (item.cents === 0) return 'This document comes to $0.00, so there is nothing to place here.';
+    if (linesCents(item.lines) !== item.cents) {
+      return 'Its lines do not add up to the document\'s amount, so it is not placed from here. Read the list again later.';
+    }
     return null;
   }
 
@@ -248,14 +252,39 @@
     if (!b || b.state !== 'placed' || !b.job_id || (item.suggestion && item.suggestion.job_id)) return null;
     return { job_id: b.job_id, job_number: b.job_number, job_site: b.job_site };
   }
+  // Money is signed cents everywhere: a line's sign is its own (a discount on a bill is
+  // negative, a charge on a credit is positive), never the document's.
+  function linesCents(lines) { return lines.reduce(function (t, l) { return t + (l.cents || 0); }, 0); }
+  function exGst(cents) { return dollars(Math.abs(cents)) + ' ex GST'; }
+  // The document as one figure: a cost, or a credit when its signed total is below zero.
+  function documentWords(cents) { return cents < 0 ? 'the ' + exGst(cents) + ' credit' : exGst(cents); }
+  // One signed amount at one place (a job, or null for not for a job): a cost goes on it,
+  // a credit is taken off it.
+  function partWords(cents, job) {
+    if (job == null) return cents < 0 ? 'take ' + exGst(cents) + ' off overhead (not for a job)' : exGst(cents) + ' not for a job (overhead)';
+    return cents < 0 ? 'take ' + exGst(cents) + ' off ' + job : exGst(cents) + ' on ' + job;
+  }
+  // The document's lines split by their own sign.
+  function signedTotals(item) {
+    var plus = 0, minus = 0;
+    item.lines.forEach(function (l) { if (l.cents > 0) plus += l.cents; else minus += l.cents; });
+    return { plus: plus, minus: minus };
+  }
   function confirmWords(item, pending) {
-    var amt = dollars(Math.abs(item.cents)) + ' ex GST';
-    var on = item.is_credit ? ' off ' : ' on ';
     var carried = carriedCount(item) ? ' ' + carriedWords(carriedCount(item)) : '';
-    if (pending.action === 'place') return item.is_credit ? 'Take ' + amt + ' off ' + jobLabel(pending.job) + ' (a credit).' : 'Put ' + amt + ' on ' + jobLabel(pending.job) + '.' + carried;
-    if (pending.action === 'overhead') return 'Mark ' + (item.is_credit ? 'the ' + amt + ' credit' : amt) + ' as not for a job (overhead).' + carried;
-    var bits = pending.summary.map(function (s) { return dollars(s.cents) + (s.job ? on + (s.job.job_number || 'a job') : ' not for a job'); });
-    return 'Split ' + (item.is_credit ? 'the ' + amt + ' credit' : amt) + ': ' + bits.join(', ') + '.' + carried;
+    var t = signedTotals(item), net = ' (net ' + documentWords(t.plus + t.minus) + ')';
+    if (pending.action === 'place') {
+      var job = jobLabel(pending.job);
+      if (t.plus && t.minus) return 'Put ' + exGst(t.plus) + ' on ' + job + ' and take ' + exGst(t.minus) + ' off it' + net + '.' + carried;
+      return (t.minus ? 'Take ' + exGst(t.minus) + ' off ' + job + ' (a credit).' : 'Put ' + exGst(t.plus) + ' on ' + job + '.') + carried;
+    }
+    if (pending.action === 'overhead') {
+      if (t.plus && t.minus) return 'Mark ' + exGst(t.plus) + ' and a ' + exGst(t.minus) + ' credit as not for a job (overhead)' + net + '.' + carried;
+      return 'Mark ' + documentWords(t.plus + t.minus) + ' as not for a job (overhead).' + carried;
+    }
+    // A split lists exactly the parts partsFor sends, in its order, each by its own sign.
+    var bits = pending.summary.map(function (s) { return s.line + ', ' + partWords(s.cents, s.job); });
+    return 'Split ' + documentWords(item.cents) + ': ' + bits.join('; ') + '.' + carried;
   }
   function carriedWords(n) { return n === 1 ? 'Its credit follows it.' : 'Its ' + n + ' credits follow it.'; }
   function doneWords(pending, item) {
@@ -264,17 +293,18 @@
     if (pending.action === 'overhead') return c + (c ? 'marked' : 'Marked') + ' not for a job by you, just now.';
     return c + (c ? 'split' : 'Split') + ' by you, just now.';
   }
-  // Per job and not for a job, cents summed across the document's lines.
+  // The parts partsFor sends, in its order, as signed cents with where each goes.
   function splitSummary(item) {
-    var at = {}, order = [];
-    item.split.lines.forEach(function (l) {
-      l.parts.forEach(function (p) {
-        var key = p.target === 'job' ? 'job:' + p.job_id : 'overhead';
-        if (!at[key]) { at[key] = { cents: 0, job: p.target === 'job' ? item.split.jobs.filter(function (j) { return j.job_id === p.job_id; })[0] || { job_number: 'a job' } : null }; order.push(key); }
-        at[key].cents += Split.toCents(p.text) || 0;
-      });
+    var names = {};
+    item.split.lines.forEach(function (l) { names[l.line_id] = l.description; });
+    return Split.partsFor(item.split.lines).map(function (part) {
+      var job = part.target === 'job' ? item.split.jobs.filter(function (j) { return j.job_id === part.job_id; })[0] : null;
+      return {
+        cents: Math.round(part.amount_ex * 100),
+        job: part.target === 'job' ? (job && job.job_number) || 'a job' : null,
+        line: names[part.line_id] || 'a line'
+      };
     });
-    return order.map(function (k) { return at[k]; });
   }
 
   // ── Render ──
@@ -288,17 +318,26 @@
       '<input inputmode="decimal" aria-label="Amount of part ' + (i + 1) + '" placeholder="0.00" data-rp-amount value="' + esc(p.text) + '">' +
       (l.parts.length > 1 ? '<button type="button" data-rp="remove_part">Remove</button>' : '') + '</div>';
   }
+  // What is still to place on one line (a size), or how far it is over.
+  function lineLeft(l) { return Split.left(l.cents, l.parts.map(function (p) { return Split.toCents(p.text); })); }
   function leftHtml(l) {
-    var lc = Split.left(l.cents, l.parts.map(function (p) { return Split.toCents(p.text); }));
-    return '<span class="rp-left' + (lc !== 0 ? ' rp-off' : '') + '" data-rp-left>Left ' + dollars(lc) + ' ex GST</span>';
+    var lc = lineLeft(l);
+    return '<span class="rp-left' + (lc !== 0 ? ' rp-off' : '') + '" data-rp-left>' +
+      (lc < 0 ? 'Over by ' + exGst(lc) : 'Left ' + exGst(lc)) + '</span>';
   }
+  // Signed totals, and each line checked on its own: an over on one line never hides an under
+  // on another.
   function footerHtml(item) {
-    var total = 0, alloc = 0;
+    var total = 0, alloc = 0, off = 0;
     item.split.lines.forEach(function (l) {
-      total += Math.abs(l.cents);
-      l.parts.forEach(function (p) { alloc += Split.toCents(p.text) || 0; });
+      var sign = l.cents < 0 ? -1 : 1;
+      total += l.cents;
+      l.parts.forEach(function (p) { alloc += sign * (Split.toCents(p.text) || 0); });
+      if (lineLeft(l) !== 0) off += 1;
     });
-    return (item.is_credit ? 'Credit total ' : 'Lines total ') + dollars(total) + ' ex GST. Allocated ' + dollars(alloc) + ' ex GST. Left ' + dollars(total - alloc) + ' ex GST.';
+    var label = function (c) { return c < 0 ? 'Credit ' + exGst(c) : exGst(c); };
+    return 'Lines total ' + label(total) + '. Allocated ' + label(alloc) + '. ' +
+      (off ? (off === 1 ? '1 line is' : off + ' lines are') + ' not fully placed yet.' : 'Every line is placed.');
   }
   function searchHtml(item, purpose) {
     var s = item.search;
@@ -349,7 +388,7 @@
     }
     if (item.against.length) h += '<h4>Against</h4><ul>' + item.against.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul>';
     h += '<h4>Lines</h4><ul>' + (item.lines.length ? item.lines.map(function (l) {
-      return '<li>' + esc(l.description) + ', ' + esc(amountWords(l.amount_ex, item.is_credit)) + (l.tag ? ' (' + esc(l.tag) + ')' : '') + '</li>';
+      return '<li>' + esc(l.description) + ', ' + esc(amountWords(l.amount_ex, false)) + (l.tag ? ' (' + esc(l.tag) + ')' : '') + '</li>';
     }).join('') : '<li>No lines read.</li>') + '</ul></details>';
     if (item.message) h += '<p class="rp-msg" role="alert">' + esc(item.message) +
       (item.dropped ? ' <button type="button" data-rp="reread">Read the list again</button>' : '') + '</p>';
@@ -373,8 +412,8 @@
     if (item.mode === 'split') {
       h += '<div class="rp-panel" data-rp-split>' + searchHtml(item, 'split');
       item.split.lines.forEach(function (l, li) {
-        h += '<div class="rp-line" data-rp-line="' + li + '"><div class="rp-line-head">' + esc(l.description) + ', ' + esc(amountWords(l.cents / 100, item.is_credit)) + '</div>' +
-          (l.cents < 0 ? '<div class="rp-note">A credit: each part is taken off where it goes.</div>' : '') +
+        h += '<div class="rp-line" data-rp-line="' + li + '"><div class="rp-line-head">' + esc(l.description) + ', ' + esc(amountWords(l.cents / 100, false)) + '</div>' +
+          (l.cents < 0 ? '<div class="rp-note">A credit: each part is taken off where it goes.</div>' : item.is_credit ? '<div class="rp-note">A cost on this credit: each part is added where it goes.</div>' : '') +
           l.parts.map(function (p, i) { return partHtml(item, l, p, i); }).join('') +
           '<div class="rp-line-foot"><button type="button" data-rp="add_part">Add a part</button>' + leftHtml(l) + '</div></div>';
       });
@@ -643,7 +682,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;

@@ -149,9 +149,9 @@ test('a split saves only when the line adds up, then posts exactly its parts', a
   await expect(bill.getByRole('button', { name: 'Save the split' })).toBeDisabled();
   await bill.getByLabel('Amount of part 3').fill('100');
   await expect(bill.locator('[data-rp-left]')).toHaveText('Left $0.00 ex GST');
-  await expect(bill.locator('[data-rp-foot]')).toHaveText('Lines total $1,000.00 ex GST. Allocated $1,000.00 ex GST. Left $0.00 ex GST.');
+  await expect(bill.locator('[data-rp-foot]')).toHaveText('Lines total $1,000.00 ex GST. Allocated $1,000.00 ex GST. Every line is placed.');
   await bill.getByRole('button', { name: 'Save the split' }).click();
-  await expect(bill.locator('[data-rp-confirm]')).toContainText('Split $1,000.00 ex GST: $600.00 on SWF-990001, $300.00 on SWP-990002, $100.00 not for a job.');
+  await expect(bill.locator('[data-rp-confirm]')).toContainText('Split $1,000.00 ex GST: Posts, $600.00 ex GST on SWF-990001; Posts, $300.00 ex GST on SWP-990002; Posts, $100.00 ex GST not for a job (overhead).');
   await bill.getByRole('button', { name: 'Yes, record it' }).click();
   await expect(page.locator('#reconcilePlaceRoot .rp-recent')).toContainText('Split by you, just now.');
   expect((await decidePosts(page))[0].body.parts).toEqual([
@@ -224,4 +224,32 @@ test('a credit with its own card and in its bill credits list shows once under t
   await expect(group.locator('[data-rp-bill-credits]')).toContainText('CN-8, Credit $15.00 ex GST');
   await expect(group.locator('[data-rp-bill-credits]')).not.toContainText('CN-7');
   await expect(group.locator('[data-rp-id="ZZTEST-cn7"]')).toHaveCount(1);
+});
+
+test('a bill with a discount line: each line checked on its own, signed totals, parts read by their sign', async ({ page }) => {
+  const mixed = { ...BILL, amount_ex: 90, lines: [{ line_id: 'L1', description: 'Posts', amount_ex: 100 }, { line_id: 'L2', description: 'Discount', amount_ex: -10 }] };
+  await open(page, { lists: { bills: [mixed] } });
+  const bill = card(page, 'ZZTEST-bill');
+  await bill.getByRole('button', { name: 'Split' }).click();
+  const posts = bill.locator('[data-rp-line="0"]'), discount = bill.locator('[data-rp-line="1"]');
+  await expect(discount.locator('.rp-line-head')).toHaveText('Discount, Credit $10.00 ex GST');
+  await posts.getByLabel('Where part 1 goes').selectOption('job:' + J1);
+  await posts.getByLabel('Amount of part 1').fill('110');
+  await discount.getByLabel('Where part 1 goes').selectOption('job:' + J1);
+  await discount.getByLabel('Amount of part 1').fill('20');
+  await expect(posts.locator('[data-rp-left]')).toHaveText('Over by $10.00 ex GST');
+  await expect(discount.locator('[data-rp-left]')).toHaveText('Over by $10.00 ex GST');
+  await expect(bill.locator('[data-rp-foot]')).toHaveText('Lines total $90.00 ex GST. Allocated $90.00 ex GST. 2 lines are not fully placed yet.');
+  await expect(bill.getByRole('button', { name: 'Save the split' })).toBeDisabled();
+  await posts.getByLabel('Amount of part 1').fill('100');
+  await discount.getByLabel('Amount of part 1').fill('10');
+  await expect(bill.locator('[data-rp-foot]')).toHaveText('Lines total $90.00 ex GST. Allocated $90.00 ex GST. Every line is placed.');
+  await bill.getByRole('button', { name: 'Save the split' }).click();
+  await expect(bill.locator('[data-rp-confirm]')).toContainText('Split $90.00 ex GST: Posts, $100.00 ex GST on SWF-990001; Discount, take $10.00 ex GST off SWF-990001.');
+  await bill.getByRole('button', { name: 'Yes, record it' }).click();
+  await expect(page.locator('#reconcilePlaceRoot .rp-recent')).toContainText('Split by you, just now.');
+  expect((await decidePosts(page))[0].body.parts).toEqual([
+    { line_id: 'L1', target: 'job', amount_ex: 100, job_id: J1 },
+    { line_id: 'L2', target: 'job', amount_ex: -10, job_id: J1 },
+  ]);
 });

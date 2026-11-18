@@ -151,7 +151,7 @@ test('a split posts exactly its parts only when every line adds up', async () =>
   assert.doesNotMatch(f.root.innerHTML, /data-rp-confirm/, 'Left $100.00: no confirm');
   f.api.partEdit('ZZTEST-item-1', 0, 2, 'text', '100');
   await f.api.press('ZZTEST-item-1', 'save_split');
-  assert.match(f.root.innerHTML, /Split \$1,000\.00 ex GST: \$600\.00 on SWF-990001, \$300\.00 on SWP-990002, \$100\.00 not for a job\./);
+  assert.match(f.root.innerHTML, /Split \$1,000\.00 ex GST: Posts, \$600\.00 ex GST on SWF-990001; Posts, \$300\.00 ex GST on SWP-990002; Posts, \$100\.00 ex GST not for a job \(overhead\)\./);
   await f.api.press('ZZTEST-item-1', 'record');
   assert.deepEqual(posts(f)[0].body.parts, [
     { line_id: 'L1', target: 'job', amount_ex: 600, job_id: J1 },
@@ -271,7 +271,7 @@ test('a credit shows as a credit under its bill; deciding the bill carries it', 
   h.api.partEdit('ZZTEST-credit', 0, 0, 'target', 'job:J2'); h.api.partEdit('ZZTEST-credit', 0, 0, 'text', '100.50');
   h.api.partEdit('ZZTEST-credit', 0, 1, 'target', 'overhead'); h.api.partEdit('ZZTEST-credit', 0, 1, 'text', '20');
   await h.api.press('ZZTEST-credit', 'save_split');
-  assert.match(h.root.innerHTML, /Split the \$120\.50 ex GST credit: \$100\.50 off SWP-990002, \$20\.00 not for a job\./);
+  assert.match(h.root.innerHTML, /Split the \$120\.50 ex GST credit: Returned posts, take \$100\.50 ex GST off SWP-990002; Returned posts, take \$20\.00 ex GST off overhead \(not for a job\)\./);
   await h.api.press('ZZTEST-credit', 'record');
   assert.deepEqual(posts(h)[0].body.parts, [
     { line_id: 'C1', target: 'job', amount_ex: -100.5, job_id: 'J2' },
@@ -377,4 +377,90 @@ test('a credit with its own card and in the bill credits list is shown once and 
   assert.equal((g.root.innerHTML.match(/CN-7/g) || []).length, 1);
   await g.api.press('ZZTEST-item-1', 'accept_job');
   assert.match(g.root.innerHTML, /Its credit follows it\./);
+});
+
+// Hold fix (director 01:53): money is signed cents everywhere.
+const mixedBill = () => raw({ amount_ex: 90, lines: [
+  { line_id: 'L1', description: 'Posts', amount_ex: 100 },
+  { line_id: 'L2', description: 'Discount', amount_ex: -10 },
+] });
+
+test('a bill with a discount line sums signed: place, overhead and split each read and send what partsFor sends', async () => {
+  const f = fixture({ bills: [mixedBill()] });
+  await f.api.refresh();
+  assert.equal(P.blockedWhy(P.itemFromList(mixedBill())), null);
+  assert.match(f.root.innerHTML, /Discount, Credit \$10\.00 ex GST/);
+  assert.match(f.root.innerHTML, /Posts, \$100\.00 ex GST/);
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  assert.match(f.root.innerHTML, /Put \$100\.00 ex GST on SWF-990001, 12 Test St and take \$10\.00 ex GST off it \(net \$90\.00 ex GST\)\./);
+  await f.api.press('ZZTEST-item-1', 'back');
+  await f.api.press('ZZTEST-item-1', 'overhead');
+  assert.match(f.root.innerHTML, /Mark \$100\.00 ex GST and a \$10\.00 ex GST credit as not for a job \(overhead\) \(net \$90\.00 ex GST\)\./);
+  await f.api.press('ZZTEST-item-1', 'back');
+  await f.api.press('ZZTEST-item-1', 'split');
+  assert.match(f.root.innerHTML, /Lines total \$90\.00 ex GST\. Allocated \$0\.00 ex GST\. 2 lines are not fully placed yet\./);
+  f.api.partEdit('ZZTEST-item-1', 0, 0, 'target', 'job:' + J1); f.api.partEdit('ZZTEST-item-1', 0, 0, 'text', '100');
+  f.api.partEdit('ZZTEST-item-1', 1, 0, 'target', 'job:' + J1); f.api.partEdit('ZZTEST-item-1', 1, 0, 'text', '10');
+  const it = () => f.api.state().items[0];
+  assert.equal(P.footerHtml(it()), 'Lines total $90.00 ex GST. Allocated $90.00 ex GST. Every line is placed.');
+  assert.doesNotMatch(P.footerHtml(it()), /\$110\.00/);
+  await f.api.press('ZZTEST-item-1', 'save_split');
+  assert.match(f.root.innerHTML, /Split \$90\.00 ex GST: Posts, \$100\.00 ex GST on SWF-990001; Discount, take \$10\.00 ex GST off SWF-990001\./);
+  await f.api.press('ZZTEST-item-1', 'record');
+  assert.deepEqual(posts(f)[0].body.parts, [
+    { line_id: 'L1', target: 'job', amount_ex: 100, job_id: J1 },
+    { line_id: 'L2', target: 'job', amount_ex: -10, job_id: J1 },
+  ]);
+});
+
+test('an over on one line and an under on another never read as all placed', async () => {
+  const f = fixture({ bills: [raw({ amount_ex: 150, lines: [
+    { line_id: 'L1', description: 'Posts', amount_ex: 100 }, { line_id: 'L2', description: 'Rails', amount_ex: 50 },
+  ] })] });
+  await f.api.refresh();
+  await f.api.press('ZZTEST-item-1', 'split');
+  f.api.partEdit('ZZTEST-item-1', 0, 0, 'target', 'job:' + J1); f.api.partEdit('ZZTEST-item-1', 0, 0, 'text', '110');
+  f.api.partEdit('ZZTEST-item-1', 1, 0, 'target', 'job:' + J1); f.api.partEdit('ZZTEST-item-1', 1, 0, 'text', '40');
+  const lines = f.api.state().items[0].split.lines;
+  assert.match(P.leftHtml(lines[0]), />Over by \$10\.00 ex GST</);
+  assert.match(P.leftHtml(lines[1]), />Left \$10\.00 ex GST</);
+  const foot = P.footerHtml(f.api.state().items[0]);
+  assert.equal(foot, 'Lines total $150.00 ex GST. Allocated $150.00 ex GST. 2 lines are not fully placed yet.');
+  await f.api.press('ZZTEST-item-1', 'save_split');
+  assert.equal(posts(f).length, 0);
+});
+
+test('a credit with a positive line reads that line as a cost, in its own sign', async () => {
+  const mixedCredit = raw({ id: 'ZZTEST-credit', kind: 'credit', kind_words: 'Credit', amount_ex: -95, suggestion: null,
+    lines: [{ line_id: 'C1', description: 'Returned posts', amount_ex: -100 }, { line_id: 'C2', description: 'Restocking fee', amount_ex: 5 }],
+    bill: null });
+  const f = fixture({ bills: [mixedCredit] });
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /Restocking fee, \$5\.00 ex GST/);
+  assert.match(f.root.innerHTML, /Returned posts, Credit \$100\.00 ex GST/);
+  await f.api.press('ZZTEST-credit', 'split');
+  assert.match(f.root.innerHTML, /A cost on this credit: each part is added where it goes\./);
+  assert.match(f.root.innerHTML, /Lines total Credit \$95\.00 ex GST\./);
+  await f.api.press('ZZTEST-credit', 'search', 'SWP');
+  await f.api.press('ZZTEST-credit', 'pick', 0);
+  f.api.partEdit('ZZTEST-credit', 0, 0, 'target', 'job:J2'); f.api.partEdit('ZZTEST-credit', 0, 0, 'text', '100');
+  f.api.partEdit('ZZTEST-credit', 1, 0, 'target', 'overhead'); f.api.partEdit('ZZTEST-credit', 1, 0, 'text', '5');
+  assert.match(P.footerHtml(f.api.state().items[0]), /Allocated Credit \$95\.00 ex GST\. Every line is placed\./);
+  await f.api.press('ZZTEST-credit', 'save_split');
+  assert.match(f.root.innerHTML, /Split the \$95\.00 ex GST credit: Returned posts, take \$100\.00 ex GST off SWP-990002; Restocking fee, \$5\.00 ex GST not for a job \(overhead\)\./);
+  await f.api.press('ZZTEST-credit', 'record');
+  assert.deepEqual(posts(f)[0].body.parts, [
+    { line_id: 'C1', target: 'job', amount_ex: -100, job_id: 'J2' },
+    { line_id: 'C2', target: 'overhead', amount_ex: 5 },
+  ]);
+  const g = fixture({ bills: [mixedCredit] });
+  await g.api.refresh();
+  await g.api.press('ZZTEST-credit', 'overhead');
+  assert.match(g.root.innerHTML, /Mark \$5\.00 ex GST and a \$100\.00 ex GST credit as not for a job \(overhead\) \(net the \$95\.00 ex GST credit\)\./);
+});
+
+test('a document is refused when its lines do not add up to its amount, or it comes to 0.00', () => {
+  assert.match(P.blockedWhy(P.itemFromList(raw({ amount_ex: 1100 }))), /lines do not add up to the document's amount/);
+  assert.match(P.blockedWhy(P.itemFromList(raw({ amount_ex: 0, lines: [{ line_id: 'L1', amount_ex: 10 }, { line_id: 'L2', amount_ex: -10 }] }))), /comes to \$0\.00/);
+  assert.equal(P.blockedWhy(P.itemFromList(raw())), null);
 });

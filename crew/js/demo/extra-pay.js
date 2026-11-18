@@ -173,21 +173,50 @@ registerDemo((db, h) => {
     // ---- receipts
     submit_expense(p, b) {
       if (!b.receipt_photo_url && !b.no_receipt_reason) fail(400, { error: 'A receipt photo or a reason for no receipt is required.' });
+      const capture = {};
+      if (b.capture_version !== undefined) {
+        if (!Number.isSafeInteger(b.capture_version)) fail(400, { error: 'invalid_capture_version', message: 'Use an integer capture version.' });
+        capture.capture_version = b.capture_version;
+      }
+      if (b.stock_division != null) {
+        if (!['patios', 'fencing', 'insurance'].includes(b.stock_division)) fail(400, { error: 'invalid_stock_division', message: 'Pick a listed stock division.' });
+        capture.stock_division = b.stock_division; capture.job_id = null; capture.business_category = 'general_stock';
+      } else if (b.stock_division === null || b.job_id) capture.stock_division = null;
       const read = b.receipt_photo_url ? { ...READS[reads++ % READS.length], receipt_date: today } : null;
       const e = { id: db.id('ex'), submitted_by: me.id, status: 'pending', vendor_name: read ? read.vendor_name : null, receipt_date: read ? read.receipt_date : null, total_amount: read ? read.total_amount : null, gst_amount: read ? read.gst_amount : null, line_items: read ? read.line_items : [],
-        job_id: b.job_id || null, po_id: b.po_id || null, receipt_photo_url: b.receipt_photo_url ? (window.__demoUploads && window.__demoUploads[b.receipt_photo_url]) || tile('Receipt', 40) : null, receipt_storage_path: b.receipt_storage_path || null, receipt_sha256: b.receipt_sha256 || null, no_receipt_reason: b.no_receipt_reason || null,
-        routed_to: b.job_id ? 'shaun' : 'jan', flow: 'unknown', created_at: nowIso() };
+        job_id: b.job_id || null, stock_division: null, po_id: b.po_id || null, payment_method: b.payment_method || null, business_category: b.business_category || null,
+        receipt_photo_url: b.receipt_photo_url ? (window.__demoUploads && window.__demoUploads[b.receipt_photo_url]) || tile('Receipt', 40) : null, receipt_storage_path: b.receipt_storage_path || null, receipt_sha256: b.receipt_sha256 || null, no_receipt_reason: b.no_receipt_reason || null,
+        routed_to: 'office', flow: 'unknown', created_at: nowIso(), ...capture };
+      const nextStep = e.payment_method === 'personal_card' ? 'reimbursed_on_next_invoice' : e.payment_method === 'supplier_invoice' ? 'evidence_for_supplier_bill' : e.payment_method === 'cash' ? 'draft_bill' : e.payment_method === 'company_card' ? (e.job_id ? 'saved_against_job' : e.stock_division || e.business_category === 'general_stock' ? 'saved_to_stock' : null) : null;
       db.expenses.push(e);
-      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow };
+      return { expense_id: e.id, extraction: read, status: e.status, routed_to: e.routed_to, flow: e.flow, next_step: nextStep };
     },
     update_expense(p, b) {
       const e = db.expenses.find((x) => x.id === b.expense_id); if (!e) fail(404, { error: 'Expense not found' });
       if (e.submitted_by !== me.id && !staff) fail(403, { error: 'Only the person who sent this receipt can change it.' });
+      if (e.xero_bill_id && (b.flow === 'reimbursement' || b.payment_method === 'personal_card')) fail(409, { error: 'expense_already_billed', message: 'This receipt already has a bill in Xero.' });
       if (e.status === 'pushed_to_xero') fail(409, { error: 'This receipt is already with the bookkeeper and cannot be changed.' });
+      const updates = {};
       const fields = ['vendor_name', 'receipt_date', 'total_amount', 'gst_amount', 'line_items', 'job_id', 'flow', 'category', 'payment_method', 'business_category', 'gst_status', 'no_receipt_reason', 'jarvis_job_suggestion', 'field_confidence'].filter((k) => k in b);
-      fields.forEach((k) => { e[k] = b[k]; });
+      fields.forEach((k) => { updates[k] = b[k]; });
+      if (b.capture_version !== undefined) {
+        if (!Number.isSafeInteger(b.capture_version)) fail(400, { error: 'invalid_capture_version', message: 'Use an integer capture version.' });
+        updates.capture_version = b.capture_version;
+      }
+      if (b.stock_division != null) {
+        if (!['patios', 'fencing', 'insurance'].includes(b.stock_division)) fail(400, { error: 'invalid_stock_division', message: 'Pick a listed stock division.' });
+        updates.stock_division = b.stock_division; updates.job_id = null; updates.business_category = 'general_stock';
+      } else if (b.stock_division === null || b.job_id) {
+        if (b.stock_division === null || e.stock_division) updates.stock_division = null;
+      }
+      const next = { ...e, ...updates };
+      if (b.capture_version === 2 && !next.job_id && !next.stock_division && db.flags.spendCaptureV2 !== false) {
+        fail(409, { error: 'expense_needs_job_or_division', message: 'Pick the job or the stock this was for.' });
+      }
+      Object.assign(e, updates);
       if (b.payment_method) e.flow = { supplier_invoice: 'supplier_bill', company_card: 'company_expense', cash: 'company_expense', personal_card: 'reimbursement' }[b.payment_method] || 'unknown';
-      return { success: true, expense_id: e.id, updated_fields: fields };
+      const nextStep = e.payment_method === 'personal_card' ? 'reimbursed_on_next_invoice' : e.payment_method === 'supplier_invoice' ? 'evidence_for_supplier_bill' : e.payment_method === 'cash' ? 'draft_bill' : e.payment_method === 'company_card' ? (e.job_id ? 'saved_against_job' : e.stock_division || e.business_category === 'general_stock' ? 'saved_to_stock' : null) : null;
+      return { success: true, expense_id: e.id, updated_fields: Object.keys(updates), next_step: nextStep };
     },
     suggest_job_for_expense() {
       const seen = new Set(); const out = [];

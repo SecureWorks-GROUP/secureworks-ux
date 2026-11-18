@@ -129,5 +129,5 @@ export function createDb(persona) {
   const availability = [];
   const groups = !working ? [] : [{ group_id: 'g-dunc', job_id: 'j-dunc', job_number: 'SWP-26339', client_name: 'Graham Rees', site_suburb: 'Duncraig', job_type: 'patio', pay_basis: 'all_in_12_v2', awaiting: 'needs_hours', pot_total: null, my_share: null, client_signed: false, crew_hours: [{ name: 'Israel Vaka', me: false, hours: 7.5, approved: true }, { name: me.name, me: true, hours: 0, approved: false }], crew_status: [], discovery: { state: 'member' }, entries: [] }];
 
-  return { me, persona, org: ORG, jobs, job, assignments, logged, media, notes, purchaseOrders, documents, quotePacks, jobWorkOrders, invoices, expenses, availability, groups, others: OTHERS, rate: persona === 'lead' ? 0 : 55, id, at, flags: { companyView: true, selfBooking: true, rateEditable: true }, now };
+  return { me, persona, org: ORG, jobs, job, assignments, logged, media, notes, purchaseOrders, documents, quotePacks, jobWorkOrders, invoices, expenses, availability, groups, others: OTHERS, rate: persona === 'lead' ? 0 : 55, id, at, flags: { companyView: true, selfBooking: true, rateEditable: true, spendCaptureV2: true }, now };
 }

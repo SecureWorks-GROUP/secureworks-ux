@@ -122,3 +122,52 @@ test('an answer that does not confirm approval is not shown as approved', async 
   await f.api.press('ZZTEST-r1', 'confirm');
   assert.doesNotMatch(f.root.innerHTML, /Approved on job/);
 });
+
+test('the page reads only when Matching opens, on login and on Reload: no timer', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const src = fs.readFileSync(require.resolve('../../modules/ops-receipt-confirm.js'), 'utf8');
+  const reads = [];
+  const handlers = {};
+  let observer = null;
+  const classes = new Set();
+  const view = { classList: { contains: (c) => classes.has(c) } };
+  const root = { hidden: true, innerHTML: '', addEventListener() {} };
+  const timers = [];
+  const window = {
+    SECUREWORKS_CLOUD: {
+      auth: { isLoggedIn: () => true, getRole: () => 'ops_manager', getUser: () => ({ id: 'ZZTEST-office' }) },
+      on: (name, fn) => { handlers[name] = fn; },
+    },
+    opsFetch: async (action, params) => { reads.push(params.status); return { expenses: [] }; },
+    opsPost: async () => ({}),
+  };
+  const document = {
+    readyState: 'complete',
+    getElementById: (id) => (id === 'viewRecon' ? view : id === 'receiptConfirmRoot' ? root : null),
+    createElement: () => ({}),
+    head: { appendChild() {} },
+    addEventListener: (name) => { throw new Error('unexpected document listener ' + name); },
+  };
+  const ctx = {
+    window, document,
+    MutationObserver: function (fn) { observer = fn; this.observe = () => {}; },
+    setInterval: (...a) => { timers.push(a); return 1; },
+    setTimeout: (...a) => { timers.push(a); return 1; },
+    clearInterval() {}, Promise, Date, Number, String, Array, Object, isFinite, JSON,
+  };
+  vm.runInNewContext(src, ctx);
+  const settle = () => new Promise((r) => setImmediate(r));
+  await settle();
+  assert.equal(reads.length, 0, 'nothing read while Matching is closed');
+  classes.add('active'); observer(); await settle();
+  assert.deepEqual(reads, ['pending', 'queried'], 'opening Matching reads once');
+  observer(); observer(); await settle();
+  assert.equal(reads.length, 2, 'other class changes while open read nothing');
+  handlers['auth:login'](); await settle();
+  assert.equal(reads.length, 4, 'login reads again');
+  classes.delete('active'); observer(); await settle();
+  classes.add('active'); observer(); await settle();
+  assert.equal(reads.length, 6, 'reopening Matching reads again');
+  assert.equal(timers.length, 0, 'no timer is ever set');
+});

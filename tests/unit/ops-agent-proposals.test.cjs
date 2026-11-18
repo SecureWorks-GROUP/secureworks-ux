@@ -91,3 +91,25 @@ test('a refreshed office edit is shown, parameters stay hidden, and terminal ref
     assert.doesNotMatch(r.root.innerHTML, /data-ap="carry"|data-ap="decline"/);
   }
 });
+
+test('a fresh pending read restores the count and controls after a refusal, and uses the listed job number', async () => {
+  const proposals = [{ id: 'proposal', summary: 'Review work order', job_id: 'job', job_number: 'ZZTEST-402' }];
+  const f = fixture(proposals);
+  await f.api.refresh();
+  await f.api.press('proposal', 'carry');
+  f.host.post = async () => { throw Object.assign(new Error('refused'), {
+    status: 502, body: { changed: false, error: 'refused', message: 'Review the <updated> work order.' }
+  }); };
+  await f.api.press('proposal', 'yes');
+  assert.match(f.root.innerHTML, /Review the &lt;updated&gt; work order\./);
+  assert.doesNotMatch(f.root.innerHTML, /data-ap="carry"/);
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /aria-label="1 pending"/);
+  assert.match(f.root.innerHTML, /data-ap="carry"/);
+  assert.match(f.root.innerHTML, /Job ZZTEST-402/);
+  assert.doesNotMatch(f.root.innerHTML, /&lt;updated&gt;/);
+  assert.ok(f.calls.every(c => c.action === 'list_agent_proposals'));
+  proposals.length = 0;
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /Nothing is waiting for a press/);
+});

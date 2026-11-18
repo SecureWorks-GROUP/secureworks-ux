@@ -23,6 +23,7 @@ const lazy = {
   timesheet: () => import('./screens/timesheet.js').then((m) => m.Timesheet),
   review: () => import('./screens/review.js').then((m) => m.Review),
   invoices: () => import('./screens/invoices.js').then((m) => m.Invoices),
+  payhistory: () => import('./screens/payhistory.js').then((m) => m.PayHistory),
   invoice: () => import('./screens/invoice.js').then((m) => m.Invoice),
   receipt: () => import('./screens/receipt.js').then((m) => m.Receipt),
   receipts: () => import('./screens/receipt.js').then((m) => m.Receipts),
@@ -77,6 +78,7 @@ function pick(route) {
     if (b === 'week' && d === 'invoice') return html`<${Lazy} key=${route.key} name="review" monday=${c} />`;
     if (b === 'week') return html`<${Lazy} key=${route.key} name="timesheet" monday=${c} />`;
     if (b === 'invoice' && c) return html`<${Lazy} key=${route.key} name="invoice" invoiceId=${c} />`;
+    if (b === 'history') return html`<${Lazy} key=${route.key} name="payhistory" />`;
     if (b === 'invoices' || b === 'money') return html`<${Lazy} key=${route.key} name="invoices" />`;
     if (b === 'receipt') return html`<${Lazy} key=${route.key} name="receipt" jobId=${route.query.job} poId=${route.query.po} />`;
     if (b === 'receipts') return html`<${Lazy} key=${route.key} name="receipts" />`;
@@ -121,7 +123,7 @@ function App() {
   // Coming back to the app after a while: quietly check for changes.
   useEffect(() => {
     let away = 0;
-    const fn = () => { if (document.hidden) { away = Date.now(); return; } if (away && Date.now() - away > 30000) { invalidate('myjobs'); invalidate('hours'); invalidate('job:'); invalidate('invoices'); } };
+    const fn = () => { if (document.hidden) { away = Date.now(); return; } if (away && Date.now() - away > 30000) { invalidate('myjobs'); invalidate('hours'); invalidate('job:'); invalidate('invoices'); invalidate('payhistory'); } };
     document.addEventListener('visibilitychange', fn);
     return () => document.removeEventListener('visibilitychange', fn);
   }, []);
@@ -150,7 +152,7 @@ async function boot() {
   const forced = window.CREW_CONFIG.forceDemo;
   if (params.has('demo') || forced) {
     const demo = await import('./demo/server.js');
-    await Promise.all([import('./demo/extra-pay.js'), import('./demo/extra-reports.js'), import('./demo/extra-manager.js')]);
+    await Promise.all([import('./demo/extra-pay.js'), import('./demo/extra-reports.js'), import('./demo/extra-manager.js'), import('./demo/extra-yearpdf.js')]);
     if (params.get('now')) setNow(new Date(params.get('now')));
     const persona = params.get('demo') || local.get('demoPersona', '') || (forced === true ? 'crew' : forced) || 'crew';
     local.set('demoPersona', persona);

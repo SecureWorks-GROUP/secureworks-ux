@@ -339,6 +339,11 @@ export function createDemoServer(persona) {
   const handler = async (kind, action, params, body) => {
     await wait(140 + Math.random() * 220);
     if (kind === 'ops-text') return `<!doctype html><meta charset="utf-8"><body style="font:16px/1.5 system-ui;padding:24px;color:#223"><h2>Quote (no prices)</h2><p>The customer's quote, with every price left out.</p><ul>${((db.quotePacks[params.jobId] || [])[0] || { quote_lines: [] }).quote_lines.map((l) => `<li>${l.description} (${l.quantity} ${l.unit})</li>`).join('')}</ul></body>`;
+    // A file answer (a Blob) is handed back as it is, never through JSON.
+    if (kind === 'ops-blob') {
+      if (!ops[action]) fail(403, { error: 'An authorised operator session is required.', code: 'operator_access_required' });
+      return ops[action](params || {}, null);
+    }
     const table = kind === 'ghl' ? ghl : ops;
     const fn = table[action];
     if (!fn) fail(403, { error: 'An authorised operator session is required.', code: 'operator_access_required' });

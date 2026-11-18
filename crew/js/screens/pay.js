@@ -21,6 +21,7 @@ export function loadDraft(monday) {
   return { ...d, edits: d.edits || {}, added: d.added || [], lumps: d.lumps || [], gst: d.gst == null ? null : d.gst, notes: d.notes || '' };
 }
 export function useMoney() { return useQuery('money', () => api('my_money', { months: 12 }), { persist: true, ttl: 60000 }); }
+export const usePayHistory = () => useQuery('payhistory', () => api('my_pay_history', { years: 2 }), { ttl: 60000 });
 export function useExpenses() { return useQuery('expenses', () => api('list_expenses', { limit: 100 }), { persist: true, ttl: 60000 }); }
 export function useGroups() { return useQuery('groups', () => api('my_group_work_orders', null, null, { keepSession: true }), { ttl: 120000 }); }
 /**
@@ -115,6 +116,7 @@ export function Pay() {
 
     <${Section} label="Records">
       <div class="block card">
+        <${KV} nav k="My pay over time" v="Open" onClick=${() => go('/pay/history')} />
         <${KV} nav k="Earnings" v=${month && month.gross_earned != null ? html`<span class="t-num">${/^\d{4}-\d{2}$/.test(month.month || '') ? fmtMonth(month.month + '-01').split(' ')[0] : 'This month'} to date ${cash(month.gross_earned)}</span>` : ''} onClick=${() => go('/pay/invoices')} />
         <${KV} nav k="Expenses" v=${waiting ? `${waiting} waiting` : 'Add a receipt'} onClick=${() => go('/pay/receipts')} />
         ${user.perMetre ? html`<${KV} nav k="Work orders" v=${wos.data ? `${openWos} open` : ''} onClick=${() => go('/pay/work-orders')} />` : null}

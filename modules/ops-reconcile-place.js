@@ -102,6 +102,10 @@
   function listErrorWords(err) {
     if (droppedConnection(err)) return 'The connection dropped while reading the list. Nothing is shown as placed. Read the list again.';
     if (err && err.status === 403) return serverWords(err) || 'You do not have permission to see this list.';
+    var code = err && err.body && (err.body.code || err.body.error);
+    if (code === 'reconcile_list_too_many_lines' || (err && err.status === 422)) {
+      return 'This list has more cost lines on one page than it can show at once. Nothing is shown as placed. Tell the office lead.';
+    }
     if (err && (err.status === 404 || (err.status === 400 && /unknown action/i.test(String(err.message || ''))))) {
       return 'The cost line list is not on the server yet.';
     }
@@ -109,24 +113,48 @@
   }
 
   // ── The list answer (ops-api reconcile_list, spec P2-03.6). Its shape lives here only. ──
-  // A credit names the bill it is against (assumed field: bill). Its state is one of
-  // waiting (an open item on this list), placed, split, overhead, division_stock, or
-  // not_loaded (the bill has no cost lines yet). bill null means not against any bill.
+  // A credit names the bills it follows (backend #1675): `bills` [{document_id, document_number,
+  // item_id, state, job_id, job_number, job_site, division}] and `bill` (the one bill, null when
+  // against none, {several: true} when it follows more than one). A state is waiting (the bill
+  // waits for a decision; item_id its open item, or null), placed, split, overhead,
+  // division_stock, or not_loaded (the bill has no cost lines yet).
   var BILL_STATES = { waiting: 1, placed: 1, split: 1, overhead: 1, division_stock: 1, not_loaded: 1 };
   function billFromList(b) {
     if (b === null) return { none: true };
     if (!b || typeof b !== 'object') return null; // not said
+    if (b.several === true) return { several: true };
     return {
       document_number: str(b.document_number), item_id: str(b.item_id), state: BILL_STATES[b.state] ? b.state : '',
       job_id: str(b.job_id), job_number: str(b.job_number), job_site: str(b.job_site), division: str(b.division)
     };
+  }
+  // Several bills: every bill read from `bills`; null when the list said several but listed none.
+  function billsFromList(raw) {
+    if (!raw.bill || raw.bill.several !== true) return null;
+    var list = Array.isArray(raw.bills) ? raw.bills.filter(function (b) { return b && typeof b === 'object'; }).map(billFromList) : [];
+    return list.length > 1 ? list : null;
+  }
+  function shared(item) { return !!(item.is_credit && item.bill && item.bill.several); }
+  function billNumber(b) { return b.document_number || '(number not read)'; }
+  function billStateWords(b) {
+    if (b.state === 'not_loaded') return 'waiting for its bill to load';
+    if (b.state === 'waiting') return 'still waiting for a decision';
+    if (b.state === 'placed') return 'on ' + jobLabel(b);
+    if (b.state === 'split') return 'split across jobs';
+    if (b.state === 'overhead') return 'not for a job';
+    if (b.state === 'division_stock') return (DIVISIONS[b.division] || 'division') + ' stock';
+    return 'its state was not read';
   }
   function billWords(item) {
     var b = item.bill;
     if (!item.is_credit) return '';
     if (!b) return 'The bill this credit is against was not read.';
     if (b.none) return 'Not against a bill.';
-    var name = 'Against bill ' + (b.document_number || '(number not read)');
+    if (b.several) {
+      if (!item.bills) return 'Shared by several bills, but the list did not name them.';
+      return 'Shared by ' + item.bills.length + ' bills: ' + item.bills.map(function (x) { return billNumber(x) + ' (' + billStateWords(x) + ')'; }).join(', ') + '.';
+    }
+    var name = 'Against bill ' + billNumber(b);
     if (b.state === 'not_loaded') return name + ': waiting for its bill to load.';
     if (b.state === 'waiting') return name + ': the bill is still waiting for a decision.';
     if (b.state === 'placed') return name + ': the bill is on ' + jobLabel(b) + '.';
@@ -152,7 +180,8 @@
       clues: Array.isArray(raw.clues) ? raw.clues : [], against: Array.isArray(raw.against) ? raw.against : [],
       lines: lines, held: raw.held && typeof raw.held === 'object' ? raw.held : null,
       is_credit: raw.kind === 'credit' || (Split.lineCents(raw.amount_ex) || 0) < 0,
-      bill: billFromList(raw.bill)
+      bill: billFromList(raw.bill),
+      bills: billsFromList(raw)
     };
   }
   // A document can be placed here only with its hash, every line read and an amount on each.
@@ -162,6 +191,10 @@
       return 'This credit waits for its bill to load into the cost lines. It is placed with its bill once the bill is here.';
     }
     if (item.is_credit && !item.bill) return 'The bill this credit is against was not read, so it is not placed from here.';
+    if (shared(item) && !item.bills) return 'The list did not name the bills this credit is shared by, so it is not placed from here.';
+    if (shared(item) && item.bills.some(function (x) { return x.state === 'not_loaded'; })) {
+      return 'This credit waits for one of its bills to load into the cost lines. It is placed once every bill is here.';
+    }
     if (!item.shown_hash) return 'This one cannot be placed here: the list did not say what it was shown with.';
     if (item.cents == null || !item.lines.length || item.lines.some(function (l) { return l.cents == null || l.cents === 0; })) {
       return 'A line on this document has no amount, so it cannot be placed here.';
@@ -250,10 +283,17 @@
     return h;
   }
   // A bill with its credits under it, or one card on its own.
+  // A credit shared by several bills is shown in full under the first of its bills on this list,
+  // and as a marked line under each other one (one set of controls, never two).
   function groupHtml(item) {
     if (!item.credits || !item.credits.length) return cardHtml(item);
     return '<section class="rp-group" data-rp-group="' + esc(item.id) + '">' + cardHtml(item) +
-      '<div class="rp-credits" aria-label="Credits against this bill">' + item.credits.map(cardHtml).join('') + '</div></section>';
+      '<div class="rp-credits" aria-label="Credits against this bill">' + item.credits.map(function (c) {
+        if (c.under === item.id) return cardHtml(c);
+        return '<p class="rp-card rp-shared-ref" data-rp-shared="' + esc(c.id) + '"><span class="rp-tag">Credit, shared</span> ' +
+          esc([c.party, c.document_number].filter(Boolean).join(' ')) + ', ' + esc(amountWords(c.amount_ex, true)) + '. Shown in full under bill ' +
+          esc(c.under_number || 'its first bill') + '.</p>';
+      }).join('') + '</div></section>';
   }
   function cardHtml(item) {
     var dis = item.busy ? ' disabled' : '';
@@ -262,7 +302,9 @@
       '<div class="rp-meta"><span>' + esc(dateWords(item.document_date)) + '</span>' + (waitWords(item.waiting_days) ? '<span>' + esc(waitWords(item.waiting_days)) + '</span>' : '') +
       (item.reason_words ? '<span>' + esc(item.reason_words) + '</span>' : '') + '</div>' +
       (item.is_credit ? '<div class="rp-credit" data-rp-credit><span class="rp-tag">Credit</span> Takes cost off where it is put. ' + esc(billWords(item)) + '</div>' : '') +
-      (item.is_credit && item.bill && item.bill.state === 'waiting' ? '<p class="rp-note" data-rp-bill-waiting>Decide the bill and this credit follows it. Placing it alone fixes it here.</p>' : '') +
+      (item.under && !shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Decide the bill and this credit follows it. Placing it alone fixes it here.</p>' : '') +
+      (item.under && shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Shared: decide its bills and this credit follows them. Placing it alone fixes it here.</p>' : '') +
+      (item.is_credit && shared(item) ? '<p class="rp-note" data-rp-shared-mark><span class="rp-tag">Shared</span> This credit follows more than one bill.</p>' : '') +
       (item.credits && item.credits.length ? '<p class="rp-note" data-rp-carries>' + esc(billCarriesWords(item.credits.length)) + '</p>' : '') +
       '<div class="rp-sug" data-rp-sug>' + esc(suggestionWords(item)) + '</div>';
     h += '<details class="rp-why"><summary>Why, and the lines</summary>';
@@ -322,6 +364,7 @@
       '<p class="rp-lede">Bills, credits, receipts and card or bank lines the system could not place on its own. Put each on a job, split it, or mark it not for a job.</p>';
     h += recentHtml(state.recent);
     if (state.phase === 'loading') return h + '<p role="status">Reading the list.</p></div>';
+    if (state.phase === 'off') return h + '<p class="rp-note" data-rp-off>The cost line list is not switched on yet. Nothing here is placed until it is.</p></div>';
     if (state.phase === 'error') return h + '<p class="rp-msg" role="alert">' + esc(state.error) + '</p><button type="button" data-rp="reread">Read the list again</button></div>';
     if (state.more) h += '<p class="rp-note" data-rp-more>The list did not say it was complete, so more may be waiting. Read the list again after placing these.</p>';
     if (!state.items.length) return h + '<p>Nothing to place.</p></div>';
@@ -336,6 +379,7 @@
       var params = { tab: tab, limit: READ_LIMIT };
       if (after) params.after = after;
       var res = await host.read('reconcile_list', params);
+      if (res && res.enabled === false) return { off: true, items: [], more: false };
       if (!res || !Array.isArray(res.items)) throw new Error('Missing items');
       items = items.concat(res.items);
       var next = typeof res.next === 'string' && res.next ? res.next : null;
@@ -353,8 +397,14 @@
     var byId = {};
     items.forEach(function (i) { byId[i.id] = i; i.credits = []; i.under = null; });
     items.forEach(function (i) {
-      var bill = i.is_credit && i.bill && i.bill.item_id && byId[i.bill.item_id];
-      if (bill && bill !== i && !bill.is_credit) { i.under = bill.id; bill.credits.push(i); }
+      if (!i.is_credit || !i.bill) return;
+      var own = shared(i) ? (i.bills || []) : [i.bill];
+      own.forEach(function (b) {
+        var bill = b.item_id && byId[b.item_id];
+        if (!bill || bill === i || bill.is_credit || bill.credits.indexOf(i) >= 0) return;
+        if (!i.under) { i.under = bill.id; i.under_number = bill.document_number || billNumber(b); }
+        bill.credits.push(i);
+      });
     });
     return items;
   }
@@ -376,6 +426,11 @@
       state = { phase: 'loading', items: [], more: false, error: '', recent: recent }; paint();
       try {
         var tabs = await Promise.all(TABS.map(function (tab) { return readTab(host, tab); }));
+        if (tabs.some(function (t) { return t.off; })) {
+          if (gen !== generation || who !== host.identity()) return;
+          state = { phase: 'off', items: [], more: false, error: '', recent: recent };
+          return paint();
+        }
         var seen = {}, items = [], more = false;
         tabs.forEach(function (t) {
           if (t.more) more = true;
@@ -550,7 +605,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, billWords: billWords, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, billWords: billWords, shared: shared, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -604,7 +659,7 @@
       '.rp-line-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}.rp-left{font-size:14px;font-weight:600}.rp-off{color:#b42318}' +
       '.rp-foot{font-size:14px;margin:12px 0 0}.rp-msg{margin:10px 0 0;padding:10px;border-radius:8px;background:#fdecec;color:#8a1c1c;font-size:13px}' +
       '.rp-recent{margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#eef8f1;color:#1d5b33;font-size:14px}.rp-recent h3{font-size:14px;margin:0 0 4px}.rp-recent ul{margin:0;padding-left:18px}.rp-recent .rp-note{margin:6px 0 0}' +
-      '.rp-group{margin-bottom:10px}.rp-group>.rp-card{margin-bottom:0}.rp-credits{margin:0 0 0 18px;padding:8px 0 0 12px;border-left:3px solid #c9dcf7}.rp-credits .rp-card{margin-bottom:8px}' +
+      '.rp-shared-ref{font-size:13px;color:var(--sw-text-sec,#4a5560)}.rp-group{margin-bottom:10px}.rp-group>.rp-card{margin-bottom:0}.rp-credits{margin:0 0 0 18px;padding:8px 0 0 12px;border-left:3px solid #c9dcf7}.rp-credits .rp-card{margin-bottom:8px}' +
       '@media(max-width:599px){.rp-acts button{flex:1 1 100%}}';
     document.head.appendChild(style);
     api.mount(root);

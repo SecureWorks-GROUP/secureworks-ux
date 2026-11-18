@@ -1,6 +1,6 @@
 // Cost lines to place (modules/ops-reconcile-place.js, P2-03.10/11 place, split and not for a job).
 // Offline: opsFetch, opsPost and the signed-in office person are replaced in the page.
-// Made-up ZZTEST jobs, suppliers and amounts only.
+// Made-up ZZTEST jobs, suppliers and amounts only. Items follow backend #1675's reconcile_list answer.
 const { test, expect } = require('@playwright/test');
 const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
@@ -17,11 +17,12 @@ const CREDIT = {
   id: 'ZZTEST-credit', kind: 'credit', card: 'cost', kind_words: 'Credit', party: 'ZZTEST Supplier', document_number: 'CN-7',
   document_date: '2026-11-05', amount_ex: -120.5, waiting_days: 1, shown_hash: 'hash-credit', reason_words: 'No suggestion',
   suggestion: null, clues: [], against: [], lines: [{ line_id: 'C1', description: 'Returned posts', amount_ex: -120.5 }], held: null,
-  bill: { document_number: 'ZZ-100', item_id: 'ZZTEST-bill', state: 'waiting' },
+  bill: { document_id: 'doc-100', document_number: 'ZZ-100', item_id: 'ZZTEST-bill', state: 'waiting', job_id: null, job_number: null, job_site: null, division: null },
 };
+CREDIT.bills = [CREDIT.bill];
 const WAITING_CREDIT = {
   ...CREDIT, id: 'ZZTEST-credit-2', document_number: 'CN-8', amount_ex: -40, shown_hash: 'hash-credit-2',
-  lines: [{ line_id: 'C2', description: 'Short delivery', amount_ex: -40 }], bill: { document_number: 'ZZ-300', state: 'not_loaded' },
+  lines: [{ line_id: 'C2', description: 'Short delivery', amount_ex: -40 }], bill: { document_id: 'doc-300', document_number: 'ZZ-300', item_id: null, state: 'not_loaded', job_id: null, job_number: null, job_site: null, division: null },
 };
 const MESSAGE = { id: 'ZZTEST-msg', kind: 'message', card: 'message', kind_words: 'Message' };
 
@@ -38,7 +39,10 @@ async function open(page, { url = '/ops.html?reconcile_place=1', lists = { bills
     });
     window.opsFetch = (action, params) => {
       window.__reads.push({ action, params });
-      if (action === 'reconcile_list') return Promise.resolve(JSON.parse(JSON.stringify({ enabled: true, items: lists[params.tab] || [] })));
+      if (action === 'reconcile_list') {
+        if (lists.off) return Promise.resolve({ ok: true, enabled: false });
+        return Promise.resolve(JSON.parse(JSON.stringify({ ok: true, enabled: true, tab: params.tab, items: lists[params.tab] || [], counts: { bills: (lists.bills || []).length, card_bank: 0, receipts: 0 }, next: null })));
+      }
       if (action === 'search_jobs') return Promise.resolve({ results: [{ id: J2, job_number: 'SWP-990002', client_name: 'Client B', site_suburb: 'ZZTEST East' }] });
       return Promise.resolve({ items: [] });
     };
@@ -172,4 +176,27 @@ test('the page never scrolls sideways with the split panel open', async ({ page 
   await open(page);
   await card(page, 'ZZTEST-bill').getByRole('button', { name: 'Split' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+});
+
+test('switched off on the server reads as switched off, not as an error', async ({ page }) => {
+  await open(page, { lists: { off: true } });
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-off]')).toHaveText('The cost line list is not switched on yet. Nothing here is placed until it is.');
+  await expect(page.locator('#reconcilePlaceRoot .rp-msg')).toHaveCount(0);
+});
+
+test('a credit shared by two bills shows in full under the first and marked under the second', async ({ page }) => {
+  const bill2 = { ...BILL, id: 'ZZTEST-bill-2', document_number: 'ZZ-200', shown_hash: 'hash-bill-2', amount_ex: 500, lines: [{ line_id: 'L2', description: 'Rails', amount_ex: 500 }] };
+  const shared = {
+    ...CREDIT, id: 'ZZTEST-shared', document_number: 'CN-9', amount_ex: -50, shown_hash: 'hash-shared',
+    lines: [{ line_id: 'C9', description: 'Rebate', amount_ex: -50 }], bill: { several: true },
+    bills: [{ ...CREDIT.bill }, { ...CREDIT.bill, document_id: 'doc-200', document_number: 'ZZ-200', item_id: 'ZZTEST-bill-2' }],
+  };
+  await open(page, { lists: { bills: [BILL, bill2, shared] } });
+  const first = page.locator('#reconcilePlaceRoot [data-rp-group="ZZTEST-bill"]');
+  const second = page.locator('#reconcilePlaceRoot [data-rp-group="ZZTEST-bill-2"]');
+  await expect(first.locator('[data-rp-id="ZZTEST-shared"] [data-rp-credit]')).toContainText('Shared by 2 bills: ZZ-100 (still waiting for a decision), ZZ-200 (still waiting for a decision).');
+  await expect(first.locator('[data-rp-id="ZZTEST-shared"] [data-rp-shared-mark]')).toContainText('This credit follows more than one bill.');
+  await expect(second.locator('[data-rp-shared="ZZTEST-shared"]')).toContainText('Credit, shared ZZTEST Supplier CN-9, Credit $50.00 ex GST. Shown in full under bill ZZ-100.');
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-id="ZZTEST-shared"]')).toHaveCount(1);
+  await expect(page.locator('#reconcilePlaceRoot .rp-count')).toHaveText('3 waiting');
 });

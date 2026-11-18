@@ -278,3 +278,45 @@ test('a credit shows as a credit under its bill; deciding the bill carries it', 
     { line_id: 'C1', target: 'overhead', amount_ex: -20 },
   ]);
 });
+
+test('backend #1675: switched off reads as off, the line-limit refusal is plain words', async () => {
+  const f = fixture();
+  f.host.read = async (action, params) => { f.calls.push({ action, params }); return { ok: true, enabled: false }; };
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /The cost line list is not switched on yet\./);
+  assert.doesNotMatch(f.root.innerHTML, /could not be read|Nothing to place/);
+  const g = fixture();
+  g.host.read = async () => { throw Object.assign(new Error('x'), { status: 422, body: { ok: false, error: 'reconcile_list_too_many_lines', code: 'reconcile_list_too_many_lines', message: 'This page holds more cost lines than one read may show. Nothing is shown as placed. Read a smaller page.' } }); };
+  await g.api.refresh();
+  assert.match(g.root.innerHTML, /more cost lines on one page than it can show at once\. Nothing is shown as placed\. Tell the office lead\./);
+  assert.doesNotMatch(g.root.innerHTML, /reconcile_list_too_many_lines|Nothing to place/);
+});
+
+test('backend #1675: a credit shared by several bills shows in full under the first and marked under each other', async () => {
+  const b = (id, n, state, extra = {}) => ({ document_id: 'doc-' + n, document_number: n, item_id: id, state, job_id: null, job_number: null, job_site: null, division: null, ...extra });
+  const bill2 = raw({ id: 'ZZTEST-item-2', document_number: 'ZZ-2', shown_hash: 'hash-2' });
+  const sharedCredit = raw({ id: 'ZZTEST-credit', kind: 'credit', kind_words: 'Credit', document_number: 'CN-9', amount_ex: -50, suggestion: null,
+    lines: [{ line_id: 'C1', description: 'Rebate', amount_ex: -50, state: 'needs_person' }],
+    bill: { several: true }, bills: [b('ZZTEST-item-1', 'ZZ-1', 'waiting'), b('ZZTEST-item-2', 'ZZ-2', 'waiting')] });
+  const f = fixture({ bills: [raw(), bill2, sharedCredit] });
+  await f.api.refresh();
+  const html = f.root.innerHTML;
+  assert.equal((html.match(/data-rp-id="ZZTEST-credit"/g) || []).length, 1, 'one set of controls');
+  assert.equal((html.match(/data-rp-shared="ZZTEST-credit"/g) || []).length, 1, 'a marked line under the second bill');
+  assert.ok(html.indexOf('data-rp-group="ZZTEST-item-1"') < html.indexOf('data-rp-id="ZZTEST-credit"'));
+  assert.ok(html.indexOf('data-rp-group="ZZTEST-item-2"') < html.indexOf('data-rp-shared="ZZTEST-credit"'));
+  assert.match(html, /Shared by 2 bills: ZZ-1 \(still waiting for a decision\), ZZ-2 \(still waiting for a decision\)\./);
+  assert.match(html, /Shared: decide its bills and this credit follows them\. Placing it alone fixes it here\./);
+  assert.match(html, /Credit, shared<\/span> ZZTEST Supplier CN-9, Credit \$50\.00 ex GST\. Shown in full under bill ZZ-1\./);
+  assert.equal((html.match(/Deciding this bill carries its credit below with it\./g) || []).length, 2);
+  await f.api.press('ZZTEST-credit', 'overhead');
+  await f.api.press('ZZTEST-credit', 'record');
+  assert.equal(posts(f)[0].body.item_id, 'ZZTEST-credit');
+  // One of its bills not loaded: the credit waits, no buttons.
+  const w = fixture({ bills: [raw({ ...sharedCredit, bills: [b('ZZTEST-item-1', 'ZZ-1', 'waiting'), b(null, 'ZZ-3', 'not_loaded')] })] });
+  await w.api.refresh();
+  assert.match(w.root.innerHTML, /This credit waits for one of its bills to load/);
+  assert.doesNotMatch(w.root.innerHTML, /data-rp="(another|split|overhead)"/);
+  // Several, but none named: not placed.
+  assert.match(P.blockedWhy(P.itemFromList({ ...sharedCredit, bills: [] })), /did not name the bills/);
+});

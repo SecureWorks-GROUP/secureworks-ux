@@ -189,6 +189,136 @@ var OfficeWoFillCore = (function () {
     return prevSum > nextSum ? prevSum - nextSum : 0;
   }
 
+  // <labour-confirm> FU49 9(a): list_job_work_order_labour_confirm and the
+  // one office press confirm_job_work_order_labour (switch
+  // job_work_order_labour_confirm_v1). The proposal is the sealed quote's
+  // labour amount as the server read it; this page never works one out.
+  var OFFICE_ROLES = { admin: 1, owner: 1, ops_manager: 1 };
+  var LABOUR_REASONS = {
+    sealed_amount: 1,
+    no_amount_in_sealed_quote: 1,
+    no_sealed_quote: 1,
+    revision_differs: 1
+  };
+
+  function isOfficeRole(role) {
+    return !!OFFICE_ROLES[String(role || '').toLowerCase()];
+  }
+
+  // The confirm read: 'off' (switch off, not deployed, refused before the
+  // switch, or any answer that does not say enabled), 'error' (a read that
+  // failed for another reason), or 'on' with rows keyed by work order id.
+  // A sealed_amount row without a readable amount and budget proposes
+  // nothing and is marked unreadable, never $0.00.
+  function parseLabourConfirm(res, err) {
+    if (err) {
+      if (isOff(null, err)) return { state: 'off' };
+      var status = Number(err.status);
+      if (status === 401 || status === 403) return { state: 'off' };
+      return { state: 'error' };
+    }
+    if (!res || typeof res !== 'object' || res.enabled !== true) return { state: 'off' };
+    if (!Array.isArray(res.jobs)) return { state: 'error' };
+    var byWo = {};
+    res.jobs.forEach(function (raw) {
+      if (!raw || typeof raw !== 'object' || !raw.work_order_id) return;
+      var reason = LABOUR_REASONS[raw.reason] ? raw.reason : 'unreadable';
+      var proposal = null;
+      if (reason === 'sealed_amount') {
+        var p = raw.proposal;
+        var amt = p && typeof p === 'object' ? validNum(p.agreed_labour_ex) : null;
+        if (amt === null || amt < 0 || !p.job_budget_id) {
+          reason = 'unreadable';
+        } else {
+          proposal = {
+            agreed_labour_ex: Math.round(amt * 100) / 100,
+            job_budget_id: String(p.job_budget_id)
+          };
+        }
+      }
+      byWo[String(raw.work_order_id)] = {
+        work_order_id: String(raw.work_order_id),
+        job_number: raw.job_number || '',
+        reason: reason,
+        proposal: proposal
+      };
+    });
+    return { state: 'on', byWo: byWo, more: res.more === true };
+  }
+
+  function confirmBody(row) {
+    return {
+      work_order_id: row.work_order_id,
+      job_budget_id: row.proposal.job_budget_id,
+      agreed_labour_ex: row.proposal.agreed_labour_ex
+    };
+  }
+
+  var CONFIRM_REFUSALS = {
+    labour_confirm_off: 'Filling from the sealed quote is switched off. Nothing was saved.',
+    proposal_changed: 'The sealed quote changed since this list was read. Nothing was saved. Read the list again.',
+    work_order_has_amount: 'This work order already has an amount. Nothing was saved.',
+    work_order_not_draft: 'This work order is no longer a draft. Nothing was saved.',
+    work_order_not_found: 'This work order was not found. Nothing was saved.',
+    job_not_open: 'This job is no longer open. Nothing was saved.',
+    no_sealed_budget: 'This job has no sealed quote. Nothing was saved.',
+    no_amount_in_sealed_quote: 'No amount in the sealed quote. Nothing was saved.',
+    revision_differs: 'The draft came from a different quote revision. Nothing was saved.',
+    signed_in_person_required: 'Only a signed-in office person can fill this. Nothing was saved.',
+    operator_access_required: 'Only a signed-in office person can fill this. Nothing was saved.'
+  };
+
+  function confirmRefusalWords(err) {
+    var code = err && (err.code || (err.body && err.body.code));
+    return CONFIRM_REFUSALS[code] || 'The amount could not be filled. Nothing was saved. Read the list again.';
+  }
+
+  // Only a generic failure leaves the press open for another try; a named
+  // refusal means the record changed, so the press stays shut.
+  function confirmRetryable(err) {
+    var code = err && (err.code || (err.body && err.body.code));
+    return !CONFIRM_REFUSALS[code];
+  }
+
+  function confirmedNote(res, jobNumber) {
+    if (!res || (res.state !== 'confirmed' && res.state !== 'already_confirmed')) return null;
+    var amt = validNum(res.agreed_labour_ex);
+    var what = amt === null ? 'The agreed amount' : money(amt);
+    var on = jobNumber ? ' on ' + jobNumber : '';
+    var lead = res.state === 'already_confirmed'
+      ? what + on + ' was already filled from the sealed quote.'
+      : what + on + ' was filled from the sealed quote.';
+    return lead + ' A named approver still approves the work order in Work orders to fill.';
+  }
+
+  function labourRowHtml(lc, gapRow, canPress) {
+    if (!lc || lc.state !== 'on' || !gapRow || gapRow.reason !== 'no_amount' || !gapRow.work_order_id) return '';
+    var row = lc.byWo[String(gapRow.work_order_id)];
+    if (!row) return '';
+    var h = '<div class="owc" data-office-wo-labour="' + esc(row.reason) + '">';
+    if (row.reason === 'sealed_amount') {
+      h += '<div class="owc-line"><span class="owc-label">Sealed quote labour</span> ' +
+        '<b data-office-wo-labour-amount>' + esc(money(row.proposal.agreed_labour_ex)) + '</b> <span class="owc-tag">proposed</span></div>';
+      if (canPress) {
+        h += '<div class="owc-act"><button type="button" class="btn btn-primary btn-sm" data-office-wo-labour-confirm' +
+          ' data-job-budget-id="' + esc(row.proposal.job_budget_id) + '"' +
+          ' data-agreed-labour-ex="' + esc(String(row.proposal.agreed_labour_ex)) + '">Fill from sealed quote</button>' +
+          '<span class="owc-note">Fills the draft only. A named approver still approves it.</span></div>';
+      }
+    } else if (row.reason === 'no_amount_in_sealed_quote') {
+      h += '<div class="owc-line owc-none">No amount in the sealed quote</div>';
+    } else if (row.reason === 'no_sealed_quote') {
+      h += '<div class="owc-line owc-none">No sealed quote for this job</div>';
+    } else if (row.reason === 'revision_differs') {
+      h += '<div class="owc-line owc-none">The draft came from a different quote revision, so nothing is proposed</div>';
+    } else {
+      h += '<div class="owc-line owc-none">The sealed quote amount could not be read, so nothing is proposed</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+  // </labour-confirm>
+
   function gapsLoadingHtml() {
     return '<section class="owf owg" data-office-wo-gaps aria-label="Needs a work order">' +
       '<div class="owf-title">Needs a work order</div>' +
@@ -218,6 +348,13 @@ var OfficeWoFillCore = (function () {
     if (opts.released && opts.released > 0) {
       h += '<div class="owg-released" role="status" data-office-wo-gaps-released>Work order approved</div>';
     }
+    if (opts.confirmed) {
+      h += '<div class="owg-released" role="status" data-office-wo-labour-confirmed>' + esc(opts.confirmed) + '</div>';
+    }
+    var lc = opts.labour || null;
+    if (lc && lc.state === 'error' && parsed.jobs.some(function (r) { return r.reason === 'no_amount'; })) {
+      h += '<div class="owg-error" data-office-wo-labour-error role="alert">The sealed quote amounts could not be read, so none is proposed.</div>';
+    }
     if (!parsed.jobs.length) {
       h += '<div class="owf-empty" data-office-wo-gaps-empty>Every live job has a work order with an amount.</div></section>';
       return h;
@@ -233,6 +370,7 @@ var OfficeWoFillCore = (function () {
       if (note) {
         h += '<div class="owg-waiting" data-office-wo-gap-waiting>' + esc(note) + '</div>';
       }
+      h += labourRowHtml(lc, row, opts.canPress === true);
       h += '</div><div class="owg-actions">';
       if (row.reason === 'no_work_order') {
         h += '<button type="button" class="btn btn-secondary btn-sm" data-office-wo-gap-open>Open a work order</button>';
@@ -291,6 +429,13 @@ var OfficeWoFillCore = (function () {
     gapReasonWords: gapReasonWords,
     waitingNote: waitingNote,
     releasedLinesCount: releasedLinesCount,
+    isOfficeRole: isOfficeRole,
+    parseLabourConfirm: parseLabourConfirm,
+    confirmBody: confirmBody,
+    confirmRefusalWords: confirmRefusalWords,
+    confirmRetryable: confirmRetryable,
+    confirmedNote: confirmedNote,
+    labourRowHtml: labourRowHtml,
     gapsLoadingHtml: gapsLoadingHtml,
     gapsErrorHtml: gapsErrorHtml,
     gapsHtml: gapsHtml,
@@ -305,6 +450,7 @@ var OfficeWoFillCore = (function () {
   var switchOn = false;
   var lastGaps = null;
   var gapsSeq = 0;
+  var lastConfirmed = null;
 
   function noteSwitch(res) {
     if (res && (res.enabled === true || (res.enabled !== false && Array.isArray(res.work_orders)))) {
@@ -407,7 +553,45 @@ var OfficeWoFillCore = (function () {
     }
   }
 
+  async function onLabourConfirm(btn) {
+    var gapRow = btn.closest('[data-office-wo-gap]');
+    if (!gapRow || btn.disabled || typeof opsPost !== 'function') return;
+    if (!C.isOfficeRole(role())) return;
+    var amount = Number(btn.getAttribute('data-agreed-labour-ex'));
+    var budgetId = btn.getAttribute('data-job-budget-id') || '';
+    var woId = gapRow.getAttribute('data-work-order-id') || '';
+    if (!woId || !budgetId || !isFinite(amount)) return;
+    var jobNumber = (gapRow.querySelector('.owg-id b') || {}).textContent || '';
+    btn.disabled = true;
+    showGapMsg(gapRow, '');
+    var res;
+    try {
+      res = await opsPost('confirm_job_work_order_labour', C.confirmBody({
+        work_order_id: woId,
+        proposal: { job_budget_id: budgetId, agreed_labour_ex: amount }
+      }));
+    } catch (e) {
+      if (C.confirmRetryable(e)) btn.disabled = false;
+      showGapMsg(gapRow, C.confirmRefusalWords(e));
+      return;
+    }
+    var note = C.confirmedNote(res, jobNumber);
+    if (!note) {
+      btn.disabled = false;
+      showGapMsg(gapRow, C.confirmRefusalWords(null));
+      return;
+    }
+    lastConfirmed = note;
+    await paint();
+    refreshLoadedWorkOrdersList();
+  }
+
   async function onGapsClick(ev) {
+    var confirmBtn = ev.target.closest('[data-office-wo-labour-confirm]');
+    if (confirmBtn) {
+      await onLabourConfirm(confirmBtn);
+      return;
+    }
     var retryBtn = ev.target.closest('[data-office-wo-gaps-retry]');
     if (retryBtn) {
       await paintGaps(null);
@@ -514,7 +698,12 @@ var OfficeWoFillCore = (function () {
         '.owg-released{margin:0 0 10px;padding:8px 10px;border-radius:6px;background:#ecfdf5;border:1px solid #10b981;color:#065f46;font-size:12px;font-weight:600}' +
         '.owg-loading{font-size:12px;color:#334155;padding:4px 0}' +
         '.owg-error{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:8px 10px;border-radius:6px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-size:12px}' +
-        '.owg-actions{display:flex;align-items:center;gap:8px}';
+        '.owg-actions{display:flex;align-items:center;gap:8px}' +
+        '.owc{margin-top:6px;font-size:12px;color:var(--sw-text,#1f2937)}' +
+        '.owc-label{color:#334155}.owc-tag{font-size:11px;padding:1px 6px;border-radius:4px;background:#eff6ff;color:#1e40af;font-weight:600}' +
+        '.owc-none{color:#475569;font-style:italic}' +
+        '.owc-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px}' +
+        '.owc-note{color:#475569}';
       document.head.appendChild(style);
     }
   }
@@ -523,9 +712,18 @@ var OfficeWoFillCore = (function () {
     var el = gapsHost();
     if (!el) return;
     var seq = ++gapsSeq;
+    var confirmed = lastConfirmed;
+    lastConfirmed = null;
     el.innerHTML = C.gapsLoadingHtml();
+    // The sealed quote proposals are read beside the gaps; their failure
+    // never hides the gaps, and the gaps' failure is the section's error.
+    var labourRead = Promise.resolve()
+      .then(function () { return opsFetch('list_job_work_order_labour_confirm', { limit: 50 }); })
+      .then(function (r) { return C.parseLabourConfirm(r, null); },
+        function (e) { return C.parseLabourConfirm(null, e || {}); });
     try {
       var res = await opsFetch('job_work_order_gaps');
+      var labour = await labourRead;
       if (seq !== gapsSeq) return;
       var curEl = gapsHost();
       if (!curEl) return;
@@ -537,7 +735,12 @@ var OfficeWoFillCore = (function () {
       }
       var released = C.releasedLinesCount(releaseCheck, parsed);
       lastGaps = parsed;
-      curEl.innerHTML = C.gapsHtml(parsed, { released: released });
+      curEl.innerHTML = C.gapsHtml(parsed, {
+        released: released,
+        labour: labour,
+        canPress: C.isOfficeRole(role()),
+        confirmed: confirmed
+      });
     } catch (e) {
       if (seq !== gapsSeq) return;
       lastGaps = null;

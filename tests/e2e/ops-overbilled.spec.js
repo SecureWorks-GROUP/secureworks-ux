@@ -126,10 +126,19 @@ test('lists jobs billed over the agreed amount, largest gap first, and opens the
   await expect(rows.nth(2).locator('[data-overbilled-covered]')).toBeVisible();
   const note = host.locator('[data-overbilled-note]');
   await expect(note).toContainText('last 90 days (since 2026-08-20)');
-  await expect(note).toContainText('3 jobs billed over their agreed amount');
-  await expect(note).toContainText('$1,290.00 over in all');
+  // ZZTEST-2 is covered by approved changes: not counted as over, its $90.00 not in the total.
+  await expect(note).toContainText('2 over ($1,200.00), 1 covered by approved changes');
+  await expect(note).not.toContainText('$1,290.00');
   await expect(note).toContainText('15 jobs billed in the window');
   await expect(host.locator('#oblTable thead th')).toHaveText(['Job #', 'Agreed', 'Billed', 'Gap']);
+  // An uncovered gap is red; a covered gap is grey, not red.
+  const colour = (row) => row.locator('[data-overbilled-gap]').evaluate((el) => getComputedStyle(el).color);
+  const red = await page.evaluate(() => { const s = document.createElement('span'); s.style.color = 'var(--sw-red)'; document.body.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c; });
+  expect(await colour(rows.nth(0))).toBe(red);
+  expect(await colour(rows.nth(1))).toBe(red);
+  expect(await colour(rows.nth(2))).not.toBe(red);
+  await expect(rows.nth(2).locator('.obl-gap-covered')).toHaveCount(1);
+  await expect(rows.nth(2).locator('.obl-gap')).toHaveCount(0);
   await expect(host.locator('[data-overbilled-window]')).toHaveValue('90');
   // Job-level only: no rate, hours or invoice words on the list.
   await expect(host).not.toContainText(/\brate\b|hours|invoice/i);
@@ -138,6 +147,23 @@ test('lists jobs billed over the agreed amount, largest gap first, and opens the
   expect(await page.evaluate(() => window.__opened)).toEqual(['job-c']);
   expect(await overReads(page)).toEqual([{ days: 90 }]);
   expect(await page.evaluate(() => window.__posts)).toEqual([]);
+});
+
+// The headline's counts: a covered job is never counted as over, and its gap
+// is never in the total.
+const HEADLINES = [
+  { name: 'none listed', rows: [], want: '0 over' },
+  { name: 'one over', rows: [{ gap: 1000, covered: false }], want: '1 over ($1,000.00)' },
+  { name: 'one covered only', rows: [{ gap: 90, covered: true }], want: '0 over, 1 covered by approved changes' },
+  { name: 'two over, one covered', rows: [{ gap: 1000, covered: false }, { gap: 200, covered: false }, { gap: 90, covered: true }], want: '2 over ($1,200.00), 1 covered by approved changes' },
+  { name: 'one over, two covered', rows: [{ gap: 50.1, covered: false }, { gap: 300, covered: true }, { gap: 20, covered: true }], want: '1 over ($50.10), 2 covered by approved changes' },
+  { name: 'cents add exactly', rows: [{ gap: 0.1, covered: false }, { gap: 0.2, covered: false }], want: '2 over ($0.30)' },
+];
+
+test('headline label table: over counts and total leave covered jobs out', async ({ page }) => {
+  await boot(page, { 90: 'ok' });
+  const got = await page.evaluate((cases) => cases.map((c) => window.OverbilledCore.headline(c.rows)), HEADLINES);
+  expect(got).toEqual(HEADLINES.map((c) => c.want));
 });
 
 test('jobs billed with no agreed amount are listed apart, each with its reason, and open the job', async ({ page }) => {

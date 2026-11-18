@@ -136,7 +136,11 @@
 // P1-10.6: the weekly pay run screen (read only). The Financials "Pay run" sub
 // tab calls PayRun.open(host, tabButton). It reads ops-api pay_run and shows the
 // server's figures as they come: nothing is added up or worked out here. It
-// never writes. The pay settings section (above) is NOT mounted here yet: its
+// never writes, and it has no approve, stamp or push control (P1-10.7 is
+// separate). The tab is for the pay run approvers only, and the server's
+// approver list is the only gate: PayRun.probe() reads pay_run once after sign
+// in, shows the tab when it answers, hides it on a refusal (403), and on any
+// other failure keeps what this browser last saw (sw_payrun_seen). The pay settings section (above) is NOT mounted here yet: its
 // save path has open faults to fix first (scope-director followups-17nov.md,
 // Follow-up 31), and mounting it is one line in open(). Loading this file
 // alone performs no read or write.
@@ -150,7 +154,19 @@
     ['nothing_lost', 'Nothing a trade sent is lost'],
     ['crew_accepted', 'Nobody paid on a job whose crew did not accept them']
   ];
-  var host, section, tab, data = null, state = 'idle', week = null, readNumber = 0;
+  var host, section, tab, data = null, state = 'idle', week = null, readNumber = 0, refusal = '';
+  var probing = null, probeAnswered = false;
+  function seen(value) {
+    try {
+      if (value === undefined) return localStorage.getItem('sw_payrun_seen');
+      if (value === null) localStorage.removeItem('sw_payrun_seen'); else localStorage.setItem('sw_payrun_seen', value);
+    } catch (_) {}
+    return null;
+  }
+  function reveal(on) {
+    document.querySelectorAll('[data-payrun-nav]').forEach(function (el) { el.style.display = on ? '' : 'none'; });
+  }
+  function refused(err) { return !!err && (err.status === 401 || err.status === 403); }
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
       return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -201,6 +217,10 @@
     if (!section) return;
     var top = '<p class="pr-top">Invoices in by Sunday night. Approve and upload the bank file on Wednesday. Paid on Friday.</p>';
     if (state === 'loading') { section.innerHTML = '<h3>Pay run</h3>' + weekBar() + top + '<p role="status">Reading the pay run...</p>'; return; }
+    if (state === 'refused') {
+      section.innerHTML = '<h3>Pay run</h3><p role="alert" class="pr-error">' + esc(refusal || 'Only a pay run approver can read the pay run.') + '</p>';
+      return;
+    }
     if (state === 'error' || !data) {
       section.innerHTML = '<h3>Pay run</h3>' + weekBar() + top +
         '<p role="alert" class="pr-error">The pay run could not be read, so nothing is shown. Try again.</p>' +
@@ -263,11 +283,36 @@
       if (request !== readNumber) return;
       if (!readable(answer)) throw new Error('Unreadable pay run');
       data = answer; week = answer.week_start; state = 'ready';
-    } catch (_) {
+    } catch (err) {
       if (request !== readNumber) return;
       data = null; state = 'error';
+      if (refused(err)) {
+        // Not on the approver list (or signed out): no figures, no retry, and the tab goes.
+        state = 'refused';
+        refusal = err.body && typeof err.body.message === 'string' ? err.body.message : '';
+        probeAnswered = true; seen(null); reveal(false);
+      }
     }
     draw();
+  }
+  // One pay_run read after sign in decides whether this person sees the tab.
+  // Only a whole, readable answer shows it; nothing from it is drawn here.
+  function probe() {
+    if (!probeAnswered) reveal(seen() === '1');
+    if (typeof window.opsFetch !== 'function') return Promise.resolve(seen() === '1');
+    if (probing) return probing;
+    probing = (async function () {
+      try {
+        var answer = await window.opsFetch('pay_run');
+        if (readable(answer)) { probeAnswered = true; seen('1'); reveal(true); return true; }
+      } catch (err) {
+        if (refused(err)) { probeAnswered = true; seen(null); reveal(false); return false; }
+      }
+      // Any other failure: keep what this browser last saw.
+      return seen() === '1';
+    })();
+    probing.then(function () { probing = null; });
+    return probing;
   }
   function open(hostEl, tabButton) {
     if (!hostEl) throw new Error('A Pay run host is required');
@@ -291,5 +336,7 @@
     }
     return read();
   }
-  window.PayRun = { open: open, read: read };
+  window.PayRun = { open: open, read: read, probe: probe };
+  // Loaded after sign in: probe now. Loaded before: ops.html calls probe() at start.
+  if (window._opsAppStarted) probe();
 })();

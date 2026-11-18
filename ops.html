@@ -5046,7 +5046,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
         <button class="sub-tab" onclick="showSubTab('billrecon')" data-sub="billrecon">Bill Reconciliation</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
-        <button class="sub-tab" onclick="showSubTab('payrun')" data-sub="payrun">Pay run</button>
+        <button class="sub-tab" onclick="showSubTab('payrun')" data-sub="payrun" data-payrun-nav style="display:none;">Pay run</button>
         <!-- The Finance Health sub-tab is hidden (Captain 2026-10-06). Its panel,
              loader and ops-api action stay. -->
         <button class="sub-tab" onclick="showSubTab('jobprofit')" data-sub="jobprofit" style="display:none;" title="Owner, admins and office staff: job profitability, expected vs actual cost, money timeline">Job profit</button>
@@ -5224,7 +5224,7 @@ __swOpsStampAssets([
       </div>
       </div>
 
-      <!-- Pay run (modules/ops-pay-run.js): the weekly pay run, read only, with the pay settings at its foot. -->
+      <!-- Pay run (modules/ops-pay-run.js): the weekly pay run, read only, for the pay run approvers only (PayRun.probe). -->
       <div id="subPayrun" class="sub-view"><div id="payRunHost"></div></div>
 
       <!-- Trade Bills -->
@@ -32978,6 +32978,8 @@ function initApp() {
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
   // Matching / Needs a person (TP-11): on by default for whoever the server lets read it; ?recon=0 turns it off.
   if (typeof reconProbeVisibility === 'function') reconProbeVisibility();
+  // Pay run: shown only to the pay run approvers; the server's pay_run answer decides.
+  if (window.PayRun && PayRun.probe) PayRun.probe();
   // Like Matching, the staff-only endpoint decides who may see the tab. Off by default.
   if (weeklyCheckEnabled() && window.WeeklyCheck) WeeklyCheck.mount(document.getElementById('weeklyCheckRoot'));
   // Today is hidden and no longer loads the alert digest, so fetch it here

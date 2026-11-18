@@ -125,7 +125,9 @@ export async function apiText(action, params) {
 /**
  * Fetch a file (a PDF the server makes) with the signed-in token, as a Blob.
  * A refusal arrives as JSON `{ code }` and throws ApiError with that code; an
- * answer that is not the expected type throws too, so it is never saved.
+ * answer that is not the expected type throws too, so it is never saved. The
+ * browser keeps no copy (`cache: 'no-store'`): it holds one trade's pay, and a
+ * shared phone must not hand it to the next person signed in.
  */
 export async function apiBlob(action, params, type = 'application/pdf') {
   if (getState().demo && demoHandler) return demoHandler('ops-blob', action, params || {}, null);
@@ -136,7 +138,7 @@ export async function apiBlob(action, params, type = 'application/pdf') {
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
     let res;
-    try { res = await fetch(buildUrl(OPS(), action, params), { headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal }); } catch (e) {
+    try { res = await fetch(buildUrl(OPS(), action, params), { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', signal: ctl.signal }); } catch (e) {
       if (e && e.name === 'AbortError') throw e;
       throw new ApiError('No signal', { offline: true });
     }

@@ -15,7 +15,6 @@
   var TABS = ['bills', 'card_bank', 'receipts']; // the tabs whose items can be cost documents
   var READ_LIMIT = 100;
   var MAX_PAGES = 20; // per tab: 2,000 items, far above the waiting list, then a plain notice
-  var UNDO_READY = false; // reconcile_undo is not on backend main yet (#1611): no Undo button until it is
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // The split helper (modules/ops-reconcile-split.js), loaded first on the page.
   var Split = {};
@@ -98,6 +97,23 @@
     if (err.status === 403) return 'You cannot record this. Sign in again as office staff.';
     if (err.status === 409) return 'This could not be recorded. The list has been read again, please choose again.';
     return 'This could not be recorded. Read the list again before choosing again.';
+  }
+  // Undo (backend #1682, reconcile_undo): the same door rules and words as decide.
+  function undoRefusalWords(err) {
+    if (droppedConnection(err)) return 'The connection dropped before an answer came back. This may or may not have been undone. Read the list again before trying again.';
+    var words = serverWords(err);
+    if (words) return words;
+    if (err.status === 403) return 'You cannot undo this. Sign in again as office staff.';
+    if (err.status === 409) return 'This could not be undone. The list has been read again.';
+    return 'This could not be undone. Read the list again before trying again.';
+  }
+  // Only the newest decision on an item can be undone: an entry with a newer one on the same
+  // item (nearer the top), an undone entry or one without its decision id shows no Undo.
+  function canUndo(recent, i) {
+    var d = recent[i];
+    if (!d || !d.decision_id || d.undone || d.busy) return false;
+    for (var k = 0; k < i; k++) if (recent[k].item_id === d.item_id) return false;
+    return true;
   }
   function listErrorWords(err) {
     if (droppedConnection(err)) return 'The connection dropped while reading the list. Nothing is shown as placed. Read the list again.';
@@ -425,9 +441,19 @@
   }
   function recentHtml(recent) {
     if (!recent || !recent.length) return '';
-    return '<div class="rp-recent" role="status"><h3>Recorded</h3><ul>' + recent.map(function (d) {
-      return '<li data-rp-decision="' + esc(d.decision_id) + '">' + esc(d.words) + '</li>';
-    }).join('') + '</ul><p class="rp-note">' + (UNDO_READY ? '' : 'To reverse one, ask the office lead.') + '</p></div>';
+    return '<div class="rp-recent" role="status"><h3>Recorded</h3><ul>' + recent.map(function (d, i) {
+      var h = '<li data-rp-decision="' + esc(d.decision_id) + '">' + esc(d.words);
+      if (d.undone) h += ' <strong>Undone by you, just now. It is back on the list.</strong>';
+      if (d.confirm && canUndo(recent, i)) {
+        h += '<div class="rp-confirm">Undo this? It puts the item back on the list as it was before.' +
+          '<div class="rp-acts"><button type="button" class="rp-yes" data-rp="undo_yes">Yes, undo it</button><button type="button" data-rp="undo_back">Keep it</button></div></div>';
+      } else if (canUndo(recent, i)) {
+        h += ' <button type="button" data-rp="undo">Undo</button>';
+      }
+      if (d.busy) h += ' <span role="status">Undoing.</span>';
+      if (d.message) h += '<p class="rp-msg" role="alert">' + esc(d.message) + (d.dropped ? ' <button type="button" data-rp="reread">Read the list again</button>' : '') + '</p>';
+      return h + '</li>';
+    }).join('') + '</ul><p class="rp-note">Only the newest decision on an item can be undone here.</p></div>';
   }
   function render(state) {
     var open = state.items.length;
@@ -558,7 +584,7 @@
           item.message = 'The answer did not confirm this was recorded. Read the list again before choosing again.';
           reread = true;
         } else {
-          // Recorded: keep the decision id (Undo will use it), then read the list again so the
+          // Recorded: keep the decision id (Undo sends it), then read the list again so the
           // item and any credits that followed it drop off.
           recent.unshift({ decision_id: res.decision_id, item_id: item.id, words: doneWords(p, item) });
           if (recent.length > 10) recent.length = 10;
@@ -579,6 +605,38 @@
         var again = find(item.id);
         if (again) { again.message = keep; paint(); }
       }
+    }
+    async function undo(decisionId, what) {
+      if (!active()) { paint(); return; }
+      var i = -1;
+      recent.forEach(function (d, k) { if (i < 0 && String(d.decision_id) === String(decisionId)) i = k; });
+      var d = recent[i];
+      if (!d) return;
+      d.message = null; d.dropped = false;
+      if (what === 'undo_back') { d.confirm = false; return paint(); }
+      if (!canUndo(recent, i)) return paint();
+      if (what === 'undo') { d.confirm = true; return paint(); }
+      if (what !== 'undo_yes' || !d.confirm) return;
+      var who = owner;
+      d.confirm = false; d.busy = true; paint();
+      try {
+        var res = await host.post('reconcile_undo', { decision_id: d.decision_id });
+        d.busy = false;
+        if (!res || typeof res !== 'object' || res.undone !== true) {
+          d.message = 'The answer did not confirm this was undone. Read the list again before trying again.';
+          d.dropped = true;
+          return paint();
+        }
+        d.undone = true;
+        d.undo_decision_id = res.decision_id == null ? null : res.decision_id;
+      } catch (err) {
+        d.busy = false;
+        d.message = undoRefusalWords(err);
+        d.dropped = droppedConnection(err);
+        if (!(err && err.status === 409)) return paint();
+      }
+      if (who !== host.identity()) return refresh();
+      return refresh();
     }
     async function press(id, what, arg) {
       if (!active()) { paint(); return; }
@@ -656,6 +714,8 @@
         if (!b || !root.contains(b) || b.disabled || b.type === 'submit') return;
         var card = b.closest('[data-rp-id]'), id = card && card.getAttribute('data-rp-id');
         var what = b.getAttribute('data-rp');
+        var decided = b.closest('[data-rp-decision]');
+        if (decided && /^undo/.test(what)) return undo(decided.getAttribute('data-rp-decision'), what);
         var line = b.closest('[data-rp-line]'), part = b.closest('[data-rp-part]');
         if (what === 'add_part' || what === 'remove_part') return partCount(id, Number(line && line.getAttribute('data-rp-line')), Number(part && part.getAttribute('data-rp-part')), what === 'add_part');
         press(id, what, b.hasAttribute('data-rp-i') ? Number(b.getAttribute('data-rp-i')) : undefined);
@@ -676,13 +736,13 @@
       root.addEventListener('change', edit);
       paint();
     }
-    return { mount: mount, refresh: refresh, press: press, partEdit: partEdit, partCount: partCount, state: function () { return state; } };
+    return { mount: mount, refresh: refresh, press: press, undo: undo, partEdit: partEdit, partCount: partCount, state: function () { return state; } };
   }
 
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    blockedWhy: blockedWhy, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;

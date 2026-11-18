@@ -48,6 +48,7 @@ async function open(page, { url = '/ops.html?reconcile_place=1', lists = { bills
     };
     window.opsPost = (action, body) => {
       window.__posts.push({ action, body });
+      if (action === 'reconcile_undo') return Promise.resolve({ ok: true, undone: true, decision_id: 'ZZTEST-undo', restored_item_id: 'ZZTEST-bill' });
       if (action !== 'reconcile_decide') return Promise.resolve({});
       if (decide && decide.dropped) return Promise.reject(new TypeError('Load failed'));
       if (decide) return Promise.reject(Object.assign(new Error(decide.body.error), decide));
@@ -82,9 +83,8 @@ test('lists cost items from the three cost tabs, never a message, and places the
   await bill.getByRole('button', { name: 'Yes, record it' }).click();
   const recent = page.locator('#reconcilePlaceRoot .rp-recent');
   await expect(recent).toContainText('Put on SWF-990001 by you, just now.');
-  await expect(recent).toContainText('To reverse one, ask the office lead.');
   await expect(recent.locator('[data-rp-decision="ZZTEST-decision"]')).toHaveCount(1);
-  await expect(page.locator('#reconcilePlaceRoot').getByRole('button', { name: /Undo/ })).toHaveCount(0);
+  await expect(recent.getByRole('button', { name: 'Undo' })).toHaveCount(1);
   expect((await page.evaluate(() => window.__reads)).filter((r) => r.action === 'reconcile_list').length).toBe(6);
   expect(await decidePosts(page)).toEqual([{ action: 'reconcile_decide', body: { item_id: 'ZZTEST-bill', shown_hash: 'hash-bill', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: true } }]);
 });
@@ -252,4 +252,21 @@ test('a bill with a discount line: each line checked on its own, signed totals, 
     { line_id: 'L1', target: 'job', amount_ex: 100, job_id: J1 },
     { line_id: 'L2', target: 'job', amount_ex: -10, job_id: J1 },
   ]);
+});
+
+test('undo a recorded decision: asks first, sends the decision id, reads the list again', async ({ page }) => {
+  await open(page, { lists: { bills: [BILL] } });
+  const bill = page.locator('#reconcilePlaceRoot [data-rp-id="ZZTEST-bill"]');
+  await bill.getByRole('button', { name: 'Put on SWF-990001' }).click();
+  await bill.getByRole('button', { name: 'Yes, record it' }).click();
+  const recent = page.locator('#reconcilePlaceRoot .rp-recent');
+  await recent.getByRole('button', { name: 'Undo' }).click();
+  await expect(recent).toContainText('Undo this? It puts the item back on the list as it was before.');
+  expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([]);
+  const reads = (await page.evaluate(() => window.__reads)).length;
+  await recent.getByRole('button', { name: 'Yes, undo it' }).click();
+  await expect(recent).toContainText('Undone by you, just now. It is back on the list.');
+  await expect(recent.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+  expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([{ action: 'reconcile_undo', body: { decision_id: 'ZZTEST-decision' } }]);
+  expect((await page.evaluate(() => window.__reads)).length - reads).toBe(3);
 });

@@ -101,8 +101,8 @@ test('put on the suggested job asks first, then sends the six fields once', asyn
   assert.deepEqual(posts(f), [{ action: 'reconcile_decide', body: { item_id: 'ZZTEST-item-1', shown_hash: 'hash-1', action: 'place', parts: [{ job_id: J1 }], note: null, accepted_suggestion: true } }]);
   assert.match(f.root.innerHTML, /Put on SWF-990001 by you, just now\./);
   assert.match(f.root.innerHTML, /data-rp-decision="ZZTEST-d1"/, 'the decision id is kept');
-  assert.match(f.root.innerHTML, /To reverse one, ask the office lead\./);
-  assert.doesNotMatch(f.root.innerHTML, /Undo/, 'no Undo button until reconcile_undo is on main');
+  assert.match(f.root.innerHTML, /data-rp="undo">Undo</, 'Undo shows on a decision the screen holds an id for');
+  assert.doesNotMatch(f.root.innerHTML, /ask the office lead/);
   assert.equal(f.calls.filter((c) => c.action === 'reconcile_list').length, 6, 'the list is read again after a recorded decision');
   await f.api.press('ZZTEST-item-1', 'record');
   assert.equal(posts(f).length, 1, 'a recorded card is never sent again without a new choice');
@@ -463,4 +463,78 @@ test('a document is refused when its lines do not add up to its amount, or it co
   assert.match(P.blockedWhy(P.itemFromList(raw({ amount_ex: 1100 }))), /lines do not add up to the document's amount/);
   assert.match(P.blockedWhy(P.itemFromList(raw({ amount_ex: 0, lines: [{ line_id: 'L1', amount_ex: 10 }, { line_id: 'L2', amount_ex: -10 }] }))), /comes to \$0\.00/);
   assert.equal(P.blockedWhy(P.itemFromList(raw())), null);
+});
+
+// Undo (backend #1682): POST reconcile_undo { decision_id } -> { ok, undone: true, decision_id, restored_item_id }.
+async function decided(undoAnswer) {
+  const f = fixture();
+  await f.api.refresh();
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  await f.api.press('ZZTEST-item-1', 'record');
+  f.host.post = async (action, body) => {
+    f.calls.push({ action, body });
+    if (undoAnswer instanceof Error) throw undoAnswer;
+    return undoAnswer;
+  };
+  return f;
+}
+const undoPosts = (f) => f.calls.filter((c) => c.action === 'reconcile_undo');
+const listReads = (f) => f.calls.filter((c) => c.action === 'reconcile_list').length;
+
+test('undo asks first, sends only the decision id once, then reads the list again', async () => {
+  const f = await decided({ ok: true, undone: true, decision_id: 'ZZTEST-d2', restored_item_id: 'ZZTEST-item-1' });
+  const before = listReads(f);
+  await f.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.equal(undoPosts(f).length, 0, 'no undo without the first press');
+  await f.api.undo('ZZTEST-d1', 'undo');
+  assert.equal(undoPosts(f).length, 0, 'the first press only asks');
+  assert.match(f.root.innerHTML, /Undo this\? It puts the item back on the list as it was before\./);
+  await f.api.undo('ZZTEST-d1', 'undo_back');
+  assert.doesNotMatch(f.root.innerHTML, /Undo this\?/);
+  await f.api.undo('ZZTEST-d1', 'undo');
+  await f.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.deepEqual(undoPosts(f), [{ action: 'reconcile_undo', body: { decision_id: 'ZZTEST-d1' } }]);
+  assert.match(f.root.innerHTML, /Undone by you, just now\. It is back on the list\./);
+  assert.doesNotMatch(f.root.innerHTML, /data-rp="undo"/, 'an undone decision has no Undo');
+  assert.equal(listReads(f) - before, 3, 'the list is read again (three tabs)');
+  await f.api.undo('ZZTEST-d1', 'undo');
+  await f.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.equal(undoPosts(f).length, 1, 'never sent twice');
+});
+
+test('only the newest decision on an item shows Undo; an entry without an id shows none', () => {
+  const recent = [{ decision_id: 'd3', item_id: 'A' }, { decision_id: 'd2', item_id: 'B' }, { decision_id: 'd1', item_id: 'A' }, { decision_id: null, item_id: 'C' }, { decision_id: 'd0', item_id: 'D', undone: true }];
+  assert.deepEqual(recent.map((_, i) => P.canUndo(recent, i)), [true, true, false, false, false]);
+});
+
+test('an undo refusal shows the server words and reads the list again; 403 keeps its words', async () => {
+  const words = 'Only the newest decision on this item can be undone. The list has been read again.';
+  const f = await decided(Object.assign(new Error('x'), { status: 409, body: { ok: false, error: 'reconcile_not_latest', code: 'reconcile_not_latest', message: words, userMessage: words } }));
+  const before = listReads(f);
+  await f.api.undo('ZZTEST-d1', 'undo');
+  await f.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.ok(f.root.innerHTML.includes(words));
+  assert.doesNotMatch(f.root.innerHTML, /reconcile_not_latest|Undone by you/);
+  assert.equal(listReads(f) - before, 3);
+  const g = await decided(Object.assign(new Error('x'), { status: 403, body: { ok: false, error: 'operator_access_required', message: 'Only admin, owner or ops manager can decide Reconcile items.' } }));
+  await g.api.undo('ZZTEST-d1', 'undo');
+  await g.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.match(g.root.innerHTML, /Only admin, owner or ops manager can decide Reconcile items\./);
+  assert.match(g.root.innerHTML, /data-rp="undo">Undo</, 'a refused undo can be pressed again');
+});
+
+test('a dropped or unclear undo never says undone and offers a re-read', async () => {
+  const f = await decided(new TypeError('Load failed'));
+  await f.api.undo('ZZTEST-d1', 'undo');
+  await f.api.undo('ZZTEST-d1', 'undo_yes');
+  assert.match(f.root.innerHTML, /This may or may not have been undone\. Read the list again before trying again\./);
+  assert.match(f.root.innerHTML, /data-rp="reread"/);
+  assert.doesNotMatch(f.root.innerHTML, /Undone by you/);
+  for (const unclear of [{}, { ok: true }, { undone: 'true' }, null]) {
+    const g = await decided(unclear);
+    await g.api.undo('ZZTEST-d1', 'undo');
+    await g.api.undo('ZZTEST-d1', 'undo_yes');
+    assert.match(g.root.innerHTML, /did not confirm this was undone/, JSON.stringify(unclear));
+    assert.doesNotMatch(g.root.innerHTML, /Undone by you/);
+  }
 });

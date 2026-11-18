@@ -327,7 +327,11 @@ var JobOverviewV2Core = (function () {
       .map(function (l) { return l.replace(/[\u0000-\u001f\u007f]/g, ' ').trim(); }).filter(Boolean);
     if (!lines.length) return null;
     var incomplete = typeof b.incomplete_line === 'string' && b.incomplete_line.trim() ? b.incomplete_line.trim() : null;
-    return { lines: lines, complete: b.complete === true, incomplete: incomplete, source: str(b.source) };
+    // A stored snapshot has an instant with an explicit offset. A live book has no stamp.
+    var at = typeof b.computed_at === 'string' && /(?:Z|[+-]\d{2}:?\d{2}|[+-]\d{2})$/i.test(b.computed_at) &&
+      /[T ]\d{2}:\d{2}/.test(b.computed_at) ? pt(b.computed_at) : null;
+    return { lines: lines, complete: b.complete === true, incomplete: incomplete, source: str(b.source),
+      asAt: at ? 'as at ' + dateWords(at, null, true) + ' ' + at.y + ', ' + clock(at) + ' Perth time' : '' };
   }
   // Paragraphs of a section: blank lines split them.
   function paragraphs(v) {
@@ -1837,9 +1841,10 @@ var JobOverviewV2 = (function () {
   function storyBookHtml(m) {
     var b = m.book;
     if (!b) return '';
+    var asAt = b.asAt ? ' <span class="ov2-im">' + esc(b.asAt) + '</span>' : '';
     return '<div class="ov2-story-block ov2-book" id="ov2Book" aria-label="Money, from the books"><h3>Money, from the books</h3>' +
       '<ul class="ov2-book-lines">' + b.lines.map(function (l) {
-        return '<li' + (b.incomplete && l === b.incomplete ? ' class="ov2-book-gap"' : '') + '>' + esc(l) + '</li>';
+        return '<li' + (b.incomplete && l === b.incomplete ? ' class="ov2-book-gap"' : '') + '>' + esc(l) + asAt + '</li>';
       }).join('') + '</ul>' +
       '<p class="ov2-im">' + esc(b.source === 'job_profit' ? 'From Job Profit, the same figures as its screen.' : 'Job Profit has no record of this job.') + '</p></div>';
   }

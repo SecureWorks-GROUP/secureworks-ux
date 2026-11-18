@@ -296,7 +296,10 @@ async function opsPost(action, body) {
   }).then(function(resp) {
     if (!resp.ok) {
       return resp.json().catch(function() { return {}; }).then(function(err) {
-        throw new Error(err.error || 'API error: ' + resp.status);
+        var error = new Error(err.error || 'API error: ' + resp.status);
+        error.status = resp.status;
+        error.body = err;
+        throw error;
       });
     }
     return resp.json();
@@ -442,11 +445,14 @@ function closeAnnotationPopover() {
 // 5. Resolve annotation
 async function resolveAnnotation(annotationId, responseValue, responseText) {
   try {
-    var resp = await opsPost('resolve_annotation', {
+    var body = {
       annotation_id: annotationId,
       response_value: responseValue,
       response_text: responseText || null,
-    });
+    };
+    var isLink = responseValue === 'link' || String(responseValue).startsWith('link:');
+    var resp = isLink ? await postInvoiceLink(body) : await opsPost('resolve_annotation', body);
+    if (isLink && !resp) return;
 
     // Fatigue prevention: track dismissals, suppress inline after 3 in 30min
     if (responseValue === 'dismiss') {

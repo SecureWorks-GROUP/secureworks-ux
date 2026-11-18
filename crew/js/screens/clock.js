@@ -132,8 +132,11 @@ function ClockOffSheet({ clock, onClose, onDone }) {
       : forgotten && !(suggestion && suggestion.finish_time) ? 30
       : Number.isFinite(usual) && usual >= 0 ? usual
       : now().getTime() - Date.parse(clock.since) > 5 * 60 * 60 * 1000 ? 30 : 0;
-    return { enabled: Boolean(hours), forgotten, brk,
-      finish: forgotten ? (suggestion && suggestion.finish_time) || (tsToDate(fallbackEnd) === tsToDate(clock.since) ? tsToHM(fallbackEnd) : '23:55') : roundHM(nowHM()) };
+    // With no server suggestion the finish is eight hours after clock on, but
+    // a finish cannot fall on the next day, so a late start stops at 23:55.
+    const capped = forgotten && !(suggestion && suggestion.finish_time) && tsToDate(fallbackEnd) !== tsToDate(clock.since);
+    return { enabled: Boolean(hours), forgotten, brk, capped,
+      finish: forgotten ? (suggestion && suggestion.finish_time) || (capped ? '23:55' : tsToHM(fallbackEnd)) : roundHM(nowHM()) };
   });
   const workDate = defaults.forgotten ? tsToDate(clock.since) : today;
   const day = fmtDayYear(workDate);
@@ -223,7 +226,7 @@ function ClockOffSheet({ clock, onClose, onDone }) {
           ${brk === 'other' ? html`<label class="frow"><span>Break in minutes</span><input class="input" type="number" inputmode="numeric" min="0" max="600" value=${other} onInput=${(e) => setOther(e.currentTarget.value)} /></label>` : null}
           <div class="frow total"><span>Hours</span><span class=${ok ? 't-figure' : 't-small'}>${ok ? fmtHrs(hours) : brk == null ? 'Choose your break' : 'Check the times'}</span></div>
         </div>
-        <p class="t-small clockoff-note">${defaults.forgotten ? 'Suggested finish. Change it if it is wrong.' : sameDay ? `The clock recorded ${recorded}. Check the times before you save.` : 'You clocked on before today. Put in the start time you worked today.'}</p>
+        <p class="t-small clockoff-note">${defaults.capped ? `Suggested finish is ${fmtClock('23:55')}, the end of that day, because eight hours after you clocked on runs past midnight. Change it if it is wrong.` : defaults.forgotten ? 'Suggested finish. Change it if it is wrong.' : sameDay ? `The clock recorded ${recorded}. Check the times before you save.` : 'You clocked on before today. Put in the start time you worked today.'}</p>
       </section>
 
       ${canFinish ? html`<section>

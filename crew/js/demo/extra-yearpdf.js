@@ -3,7 +3,22 @@
 // text PDF Blob. An invoice with no Xero bill is "Not yet processed" and adds
 // nothing to a total. `db.yearPdfRefuse = { status, code }` makes the next
 // answers refuse, for the bad-path checks. Made-up figures only.
+// Super is never said to have reached the fund: a row says the office marked it
+// paid (its Perth day when the demo holds the office's stamp), or that it is to
+// be paid, as My pay does (secureworks-backend #1639).
 import { registerDemo, fail } from './server.js';
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// db.paidSuperRuns: a Set of run ids, or a Map of run id to the office's stamp (ISO).
+function superState(paidRuns, runId) {
+  const runs = paidRuns || new Set();
+  if (!runId || !runs.has(runId)) return 'To be paid to your fund';
+  const ms = runs instanceof Map ? Date.parse(runs.get(runId)) : NaN;
+  if (!Number.isFinite(ms)) return 'Marked paid by the office';
+  const d = new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
+  return `Marked paid by the office on ${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+}
 
 function pdfBlob(lines) {
   const esc = (s) => String(s).replace(/[\\()]/g, (c) => '\\' + c).replace(/[^\x20-\x7e]/g, '?');
@@ -47,13 +62,13 @@ registerDemo((db, h) => ({
       if (!r.xero_bill_id) { pending += 1; return `${r.invoice_number}  ${r.week_start}  Not yet processed`; }
       const v = r.pay_view || h.money(r.gross_earned, { gstOn: r.gst_on }).pay_view;
       total += Number(v.total_inc_super); sup += Number(v.paid_to_super); you += Number(v.paid_to_you);
-      return `${r.invoice_number}  ${r.week_start}  ${m(v.total_inc_super)}  ${m(v.paid_to_super)}  ${m(v.paid_to_you)}`;
+      return `${r.invoice_number}  ${r.week_start}  ${m(v.total_inc_super)}  ${m(v.paid_to_super)}  ${m(v.paid_to_you)}  ${superState(db.paidSuperRuns, r.pay_run_id)}`;
     });
     return pdfBlob([
       `Pay summary, 1 July ${Number(fy) - 1} to 30 June ${fy}`, me.name || 'Trade', '',
-      `Total (includes super)  ${m(total)}`, `Paid to your super fund  ${m(sup)}`, `Paid to you  ${m(you)}`,
+      `Total (includes super)  ${m(total)}`, `Super  ${m(sup)}`, `Paid to you  ${m(you)}`,
       ...(pending ? [`${pending} invoice${pending === 1 ? '' : 's'} not yet processed`] : []), '',
-      'Invoice number  Week starting  Total  Super  Paid to you', ...table, '',
+      'Invoice number  Week starting  Total  Super  Paid to you  Super state', ...table, '',
       'Built from your SecureWorks invoices. A summary, not tax advice. Give it to your accountant.'
     ]);
   }

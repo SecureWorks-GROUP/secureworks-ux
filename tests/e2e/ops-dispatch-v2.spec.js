@@ -616,6 +616,74 @@ test.describe('Dispatch v2 supplier replies', () => {
     expect(of('dispatch_v2_replies_reject_guess').map((c) => c.body.email_id)).toEqual(['em-h']);
   });
 
+  test('every reply not dismissed has Dismiss; one press, or Dismiss all, takes it out of Supplier replied (items 17 and 5)', async ({ page }) => {
+    // An acknowledgement with no date, two more replies, and one dismissed earlier by someone.
+    const gone = {};
+    const flag = (m) => Object.assign(m, gone[m.id]
+      ? { flagged: false, dismissed_at: `${PERTH_YEAR}-10-22T02:00:00+00:00`, dismissed_by_email: 'ops@example.test', dismissed_source: 'button' }
+      : m.dismissed_at ? { flagged: false } : { flagged: true, dismissed_at: null, dismissed_by_email: null, dismissed_source: null });
+    const list = () => [
+      EMAIL({ id: 'em-a', supplier_name: 'R&R Fencing', subject: 'Order received', snippet: 'Thanks for your order, we will be in touch.' }),
+      EMAIL({ id: 'em-b', supplier_name: 'Stratco', received_at: `${PERTH_YEAR}-10-21T02:00:00+00:00`, snippet: 'Which colour did you want?' }),
+      EMAIL({ id: 'em-c', supplier_name: 'Stratco', received_at: `${PERTH_YEAR}-10-21T03:00:00+00:00`, snippet: 'Also, the length?' }),
+      EMAIL({ id: 'em-d', supplier_name: 'CMI', received_at: `${PERTH_YEAR}-10-20T03:00:00+00:00`, dismissed_at: `${PERTH_YEAR}-10-20T05:00:00+00:00`, dismissed_by_email: 'nithin@example.test', dismissed_source: 'button' }),
+    ].map(flag);
+    const { root, of } = await boot(page, {
+      dispatch_v2_replies: (url) => (url.searchParams.get('job_id') !== 'job-f1' ? REPLIES([], [], { job_id: url.searchParams.get('job_id') }) : REPLIES(list(), [])),
+      dispatch_v2_replies_dismiss: (url, body) => {
+        const ids = body.email_ids || [body.email_id];
+        ids.forEach((id) => { gone[id] = true; });
+        return { ok: true, dismissed: list().filter((m) => ids.includes(m.id)), already_dismissed: [] };
+      },
+    });
+    const rep = root.locator('[data-dpc-region="mail"]');
+    await expect(root.locator('.dpc-sugnote')).toContainText('3 supplier replies to read.');
+    await expect(rep.locator('.dpc-mail-list .dpc-mail-drafttag')).toHaveText(['Not dismissed', 'Not dismissed', 'Not dismissed']);
+    // One dismissed earlier says who and when, with no button.
+    await rep.locator('[data-dpc-mail-key="r:em-d"]').click();
+    await expect(rep.locator('[data-dpc-rep="em-d"] .dpc-rep-why')).toContainText('Dismissed by nithin@example.test');
+    await expect(rep.locator('[data-dpc-rep="em-d"] [data-dpc-rep-dismiss]')).toHaveCount(0);
+    // Dismiss on the acknowledgement.
+    await rep.locator('[data-dpc-mail-key="r:em-a"]').click();
+    const a = rep.locator('[data-dpc-rep="em-a"]');
+    await expect(a.locator('.dpc-rep-read')).toContainText('Shows under Supplier replied until someone dismisses it.');
+    await a.locator('[data-dpc-rep-dismiss]').click();
+    await expect(a).toContainText('Dismissed. It no longer shows under Supplier replied.');
+    await expect(a.locator('[data-dpc-rep-dismiss]')).toHaveCount(0);
+    await expect(root.locator('.dpc-sugnote')).toContainText('2 supplier replies to read.');
+    expect(of('dispatch_v2_replies_dismiss').map((c) => c.body.email_id)).toEqual(['em-a']);
+    // Dismiss all on the two left.
+    const all = rep.locator('[data-dpc-rep-dismiss-all]');
+    await expect(all).toHaveText('Dismiss all (2)');
+    await all.click();
+    await expect(rep).toContainText('Dismissed 2 replies. They no longer show under Supplier replied.');
+    await expect(rep.locator('[data-dpc-rep-dismiss-all]')).toHaveCount(0);
+    await expect(rep.locator('.dpc-mail-list .dpc-mail-drafttag')).toHaveCount(0);
+    await expect(root.locator('.dpc-sugnote')).toHaveCount(0);
+    expect(of('dispatch_v2_replies_dismiss')[1].body.email_ids.sort()).toEqual(['em-b', 'em-c']);
+    expect(await rep.innerText()).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  test('a Dismiss that fails says so and can be pressed again', async ({ page }) => {
+    let down = true;
+    let done = false;
+    const { root, of } = await boot(page, {
+      dispatch_v2_replies: (url) => REPLIES(url.searchParams.get('job_id') !== 'job-f1' ? [] : [EMAIL({ id: 'em-a', snippet: 'Thanks.', flagged: !done })], []),
+      dispatch_v2_replies_dismiss: () => {
+        if (down) return { status: 500, body: { error: 'e2e' } };
+        done = true;
+        return { ok: true, dismissed: [EMAIL({ id: 'em-a', flagged: false })], already_dismissed: [] };
+      },
+    });
+    const a = root.locator('[data-dpc-region="mail"] [data-dpc-rep="em-a"]');
+    await a.locator('[data-dpc-rep-dismiss]').click();
+    await expect(a.locator('[role="alert"]')).toContainText('Not dismissed.');
+    down = false;
+    await a.locator('[data-dpc-rep-retry]').click();
+    await expect(a).toContainText('Dismissed. It no longer shows under Supplier replied.');
+    expect(of('dispatch_v2_replies_dismiss')).toHaveLength(2);
+  });
+
   test('no email and a failed read each say so', async ({ page }) => {
     let down = true;
     const { root } = await boot(page, { dispatch_v2_replies: () => (down ? { status: 500, body: { error: 'e2e' } } : REPLIES([], [], { scan: { enabled: false } })) });
@@ -638,8 +706,8 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_replies_assign: (url, body) => { emails = emails.filter((m) => m.id !== body.email_id); return { ok: true, job_number: body.job_id === 'job-p1' ? 'SWP-910002' : 'SWR-910003' }; },
       dispatch_v2_replies_hide: (url, body) => { emails = emails.filter((m) => m.id !== body.email_id); return { ok: true }; },
     });
-    const btn = root.locator('[data-dpc-tray-toggle]');
-    await expect(btn).toHaveText('Unmatched supplier emails 3');
+    const btn = root.locator('[data-dpc-needs="emails"]');
+    await expect(btn).toHaveText('Emails to sort 3');
     await btn.click();
     const tray = root.locator('[data-dpc-region="tray"]');
     await expect(tray.locator('h3')).toHaveText('Unmatched supplier emails');
@@ -653,7 +721,7 @@ test.describe('Dispatch v2 supplier replies', () => {
     await expect(tray).toContainText('Hide this email from the tray? It stays in admin@.');
     await tray.locator('[data-dpc-tray-hide-go="tu-3"]').click();
     await expect(tray).toContainText('Nothing to sort. Every supplier email is on a job.');
-    await expect(btn).toHaveText('Unmatched supplier emails 0');
+    await expect(btn).toHaveText('Emails to sort 0');
     expect(of('dispatch_v2_replies_assign').map((c) => [c.body.email_id, c.body.job_id, c.body.order_id || null])).toEqual([['tu-1', 'job-p1', 'ord-9'], ['tu-2', 'job-r1', null]]);
     expect(of('dispatch_v2_replies_hide').map((c) => c.body.email_id)).toEqual(['tu-3']);
   });
@@ -667,8 +735,8 @@ test.describe('Dispatch v2 supplier replies', () => {
       dispatch_v2_replies_unmatched: () => ({ ok: true, include_other: false, emails, counts: { needs_confirmation: emails.filter((m) => m.state === 'needs_confirmation').length, unmatched_order_desk: emails.filter((m) => m.state === 'unmatched').length, unmatched_other: 0 } }),
       dispatch_v2_replies_clear: (url, body) => { emails = emails.filter((m) => !body.email_ids.includes(m.id)); return { ok: true, cleared: body.email_ids.length, skipped: 0 }; },
     });
-    const btn = root.locator('[data-dpc-tray-toggle]');
-    await expect(btn).toHaveText('Unmatched supplier emails 2');
+    const btn = root.locator('[data-dpc-needs="emails"]');
+    await expect(btn).toHaveText('Emails to sort 2');
     await btn.click();
     const tray = root.locator('[data-dpc-region="tray"]');
     await expect(tray.locator('[data-dpc-tray-item]')).toHaveCount(2);
@@ -683,7 +751,7 @@ test.describe('Dispatch v2 supplier replies', () => {
     await expect(tray).toContainText('Cleared 2 emails from this list.');
     await expect(tray).toContainText('Nothing to sort. Every supplier email is on a job.');
     await expect(tray.locator('[data-dpc-tray-clear]')).toHaveCount(0);
-    await expect(btn).toHaveText('Unmatched supplier emails 0');
+    await expect(btn).toHaveText('Emails to sort 0');
     expect(of('dispatch_v2_replies_clear').map((c) => c.body.email_ids)).toEqual([['tc-1', 'tc-2']]);
   });
 });
@@ -736,7 +804,7 @@ test('at 390 the list, rail, Arrival line, replies and tray have no sideways scr
     dispatch_v2_replies_unmatched: () => ({ ok: true, emails: [EMAIL({ id: 'tu-1', state: 'unmatched', rung: null, job_id: null })], counts: { needs_confirmation: 0, unmatched_order_desk: 1 } }),
   }, { viewport: { width: 390, height: 844 } });
   await expect(root.locator('.dpc-job')).toHaveCount(3);
-  await root.locator('[data-dpc-tray-toggle]').click();
+  await root.locator('[data-dpc-needs="emails"]').click();
   await expect(root.locator('[data-dpc-tray-item]')).toHaveCount(1);
   await root.locator('[data-dpc-region="tape"] [data-dpc-stage="awaiting_supplier"]').click();
   await expect(root.locator('.dpc-tape-confirm')).toBeVisible();

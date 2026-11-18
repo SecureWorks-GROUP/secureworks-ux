@@ -36,8 +36,9 @@
   // </ops-asset-cache-bust>
   // <dispatch-version> Which Dispatch screen this browser loads: v2 (the
   // default, modules/ops-dispatch.*) or v1 kept as it was (modules/ops-dispatch-v1.*).
-  // The switch on the Dispatch tab, or ?dispatch_version=v1 / v2 in the address,
+  // ?dispatch_version=v1 / v2 in the address (or Switch to v2 on the v1 screen)
   // picks one and this browser remembers it. Both run on the same back end.
+  // Since 18 Nov 2026 the v2 screen has no switch back (Read now sits there).
   window.__swDispatchVersion = (function () {
     var KEY = 'sw_dispatch_version', pick = null;
     try {
@@ -5046,6 +5047,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
         <button class="sub-tab" onclick="showSubTab('billrecon')" data-sub="billrecon">Bill Reconciliation</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
+        <button class="sub-tab" onclick="showSubTab('payrun')" data-sub="payrun" data-payrun-nav style="display:none;">Pay run</button>
         <!-- The Finance Health sub-tab is hidden (Captain 2026-10-06). Its panel,
              loader and ops-api action stay. -->
         <button class="sub-tab" onclick="showSubTab('jobprofit')" data-sub="jobprofit" style="display:none;" title="Owner, admins and office staff: job profitability, expected vs actual cost, money timeline">Job profit</button>
@@ -5142,6 +5144,7 @@ __swOpsStampAssets([
 
       <!-- Work Orders -->
       <div id="subWorkorders" class="sub-view">
+        <div id="officeWoGaps" data-office-wo-gaps-host></div>
         <!-- Every job work order, listed like Quotes and Invoices
              (modules/ops-work-orders-list.js, // <work-orders-list-core>);
              a row opens the job's work order, Set amount goes to the fill queue below. -->
@@ -5222,6 +5225,9 @@ __swOpsStampAssets([
         <div id="matReconBody"><div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div></div>
       </div>
       </div>
+
+      <!-- Pay run (modules/ops-pay-run.js): the weekly pay run, read only, for the pay run approvers only (PayRun.probe). -->
+      <div id="subPayrun" class="sub-view"><div id="payRunHost"></div></div>
 
       <!-- Trade Bills -->
       <div id="subTradebills" class="sub-view">
@@ -5321,14 +5327,23 @@ __swOpsStampAssets([
          LIVE purchase order board that used to be the Materials view (Captain
          ruling); it reads and writes real POs through loadMaterials(). -->
     <div id="viewDispatch" class="view">
-      <!-- <dispatch-version> The v1 / v2 switch: this browser only, reloads the page. -->
+      <!-- <dispatch-version> v2 shows Read now (item 19, 18 Nov 2026:
+           modules/dispatch-read-now.js reads Outlook, matches supplier replies
+           and reloads Dispatch, no page refresh). v1 keeps Switch to v2. v1
+           is reached only by ?dispatch_version=v1 in the address (this
+           browser only, reloads the page). -->
       <div id="dispatchVersionBar" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; font-size:11px; color:var(--sw-text-sec); margin-bottom:6px;"></div>
       <script>
       (function () {
         var bar = document.getElementById('dispatchVersionBar');
         var v1 = window.__swDispatchVersion === 'v1';
-        bar.innerHTML = '<span data-dispatch-version="' + (v1 ? 'v1' : 'v2') + '">' + (v1 ? 'Dispatch v1 (the old screen)' : 'Dispatch v2') + '</span>' +
-          '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-switch="' + (v1 ? 'v2' : 'v1') + '">' + (v1 ? 'Switch to v2' : 'Switch back to v1') + '</button>';
+        if (!v1) {
+          bar.innerHTML = '<span data-dispatch-read-line role="status" aria-live="polite"></span>' +
+            '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-read-now>Read now</button>';
+          return;
+        }
+        bar.innerHTML = '<span data-dispatch-version="v1">Dispatch v1 (the old screen)</span>' +
+          '<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" data-dispatch-switch="v2">Switch to v2</button>';
         bar.querySelector('[data-dispatch-switch]').addEventListener('click', function () {
           if (!window.swSetDispatchVersion(this.getAttribute('data-dispatch-switch'))) alert('This browser blocks saved settings, so the switch cannot be kept. Add ?dispatch_version=' + this.getAttribute('data-dispatch-switch') + ' to the address instead.');
         });
@@ -5555,6 +5570,11 @@ __swOpsStampAssets([
     <div class="form-group">
       <label class="form-label">New Rate ($/hr)</label>
       <input type="number" class="form-input" id="rateModalInput" min="0" step="0.50" placeholder="e.g. 45.00">
+    </div>
+    <div id="rateHistorySection" hidden>
+      <p style="font-size:13px;line-height:1.45;margin:0 0 10px;">The office sets rates. Trades cannot type their own rate: every hour is paid at the rate here.</p>
+      <button type="button" class="btn btn-secondary" id="showRateHistory">History</button>
+      <div id="rateHistoryRows" style="max-height:30vh;overflow:auto"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('rateModal')">Cancel</button>
@@ -6502,7 +6522,7 @@ __swOpsStampAssets([
   // The Materials panel's label layout (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-materials-layout.js?v=1'},
   // Dispatch's Needs you now bar: what each job needs (pure functions; only v2 uses it).
-  {t:'js', u:'modules/dispatch-needs-you.js?v=3'},
+  {t:'js', u:'modules/dispatch-needs-you.js?v=4'},
   // Dispatch's Make email: a line or a photo makes an email (pure functions; only v2 uses it).
   {t:'js', u:'modules/dispatch-make-email.js?v=2'},
   // Dispatch's photos AND files on a supplier box, 16 Nov 2026 (pure functions; only v2 uses it).
@@ -6513,8 +6533,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/dispatch-book-install.js?v=1'},
   // Dispatch's tray files (item 16 part 1): the files on an Unmatched supplier email.
   {t:'js', u:'modules/dispatch-tray-files.js?v=1'},
+  // Dispatch's Read now button (item 19, 18 Nov 2026; only v2 shows it).
+  {t:'js', u:'modules/dispatch-read-now.js?v=1'},
   // <dispatch-version>
-  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=18'}
+  window.__swDispatchVersion === 'v1' ? {t:'js', u:'modules/ops-dispatch-v1.js?v=1'} : {t:'js', u:'modules/ops-dispatch.js?v=20'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
@@ -6533,7 +6555,7 @@ __swOpsStampAssets([
   {t:'js', u:'shared/client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-client-signoff.js?v=20261106'},
   {t:'js', u:'modules/ops-group-work-order.js?v=client-confirmation-20261106'},
-  {t:'js', u:'modules/ops-office-wo-queue.js?v=2'},
+  {t:'js', u:'modules/ops-office-wo-queue.js?v=3'},
   {t:'js', u:'modules/ops-work-orders-list.js?v=1'},
   {t:'js', u:'modules/ops-trade-repayments.js?v=1'}
 ]);
@@ -19241,6 +19263,10 @@ function showSubTab(tab) {
   if (tab === 'billrecon') { loadMaterialsRecon(); if (window.BillsAi) BillsAi.load(); }
   if (tab === 'quotes') loadQuotes();
   if (tab === 'tradebills') loadTradeBills();
+  if (tab === 'payrun') {
+    if (window.PayRun) PayRun.open(document.getElementById('payRunHost'), btn);
+    else document.getElementById('payRunHost').textContent = 'The pay run screen did not load. Reload the page and try again.';
+  }
   if (tab === 'financehealth') loadFinanceHealth();
   if (tab === 'jobprofit') loadJobProfit();
 }
@@ -21405,6 +21431,7 @@ async function loadTradeBills() {
   } catch (e) {
     if (seq !== _tradeBillsLoadSeq) return;
     console.error('loadTradeBills error:', e);
+    if (rateHistoryEnabled) renderTradeRatesPanel([]);
     renderTradeBillLoadError(e);
   }
   await repayments;
@@ -21656,8 +21683,106 @@ function rejectTradeInvoice(invoiceId) {
   });
 }
 
+var rateHistoryEnabled = new URLSearchParams(location.search).get('rate_history') === '1';
+
+function rateDate(value, timestamp) {
+  if (!value) return '';
+  var date = new Date(timestamp ? value : value + 'T00:00:00+08:00');
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString('en-AU', {
+    timeZone: 'Australia/Perth', day: 'numeric', month: 'short', year: 'numeric'
+  }) : '';
+}
+
+function rateSetter(row) {
+  if (row.set_by_kind === 'not_recorded') return 'Set before this was recorded';
+  if (row.set_by_kind !== 'office') return 'Rate details unavailable';
+  var who = row.set_by_name || 'office staff';
+  var date = rateDate(row.set_at, true);
+  return 'Set by ' + who + (date ? ' on ' + date : ' (date unavailable)');
+}
+
+async function readRateHistory(userId) {
+  var result = await opsFetch('trade_rate_history', { user_id: userId });
+  if (!userId || !Array.isArray(result?.rates) || result.rates.some(row => row?.user_id !== userId)) {
+    throw new Error('Invalid rate history');
+  }
+  return result.rates;
+}
+
+function rateMoney(value) {
+  return value != null && String(value).trim() && Number.isFinite(Number(value))
+    ? '$' + Number(value).toFixed(2) + '/hr' : 'Rate unavailable';
+}
+
+function renderRatesWithSetter(panel, rates) {
+  panel.replaceChildren();
+  var list = document.createElement('div');
+  list.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+  panel.append(list);
+  rates.forEach(async function(rate) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-secondary';
+    button.style.cssText = 'display:block;text-align:left;white-space:normal';
+    var name = rate.users?.name || 'Unknown';
+    button.textContent = name + ' · ' + rateMoney(rate.hourly_rate);
+    button.disabled = !rate.user_id || rate.hourly_rate == null || !(Number(rate.hourly_rate) > 0) || !Number.isFinite(Number(rate.hourly_rate));
+    button.onclick = () => openRateModal(rate.user_id, name, rate.hourly_rate);
+    var note = document.createElement('small');
+    note.style.cssText = 'display:block;font-weight:400;margin-top:4px';
+    button.append(note);
+    list.append(button);
+    if (rate.set_by_kind !== 'office' || button.disabled) {
+      note.textContent = rateSetter(rate);
+      return;
+    }
+    note.textContent = 'Reading set date…';
+    try {
+      var history = await readRateHistory(rate.user_id);
+      var matches = history.filter(row => row.effective_from === rate.effective_from &&
+        Number(row.hourly_rate) === Number(rate.hourly_rate) &&
+        row.set_by_kind === rate.set_by_kind && row.set_by_name === rate.set_by_name);
+      note.textContent = rateSetter(matches.length === 1 ? matches[0] : rate);
+    } catch {
+      note.textContent = rateSetter(rate);
+    }
+  });
+}
+
+function resetRateHistory(userId) {
+  var host = document.getElementById('rateHistoryRows');
+  host.replaceChildren();
+  var trigger = document.getElementById('showRateHistory');
+  trigger.onclick = async function() {
+    var body = document.createElement('div');
+    body.setAttribute('role', 'status');
+    host.replaceChildren(body);
+    body.textContent = 'Loading rate history…';
+    try {
+      var rows = await readRateHistory(userId);
+      body.textContent = rows.length ? '' : 'No earlier rates.';
+      rows.forEach(function(row) {
+        var item = document.createElement('p');
+        item.style.cssText = 'padding:8px 0;border-bottom:1px solid var(--sw-border);font-size:13px;line-height:1.45';
+        var until = row.effective_to === null ? 'open ended' : rateDate(row.effective_to) || 'unknown';
+        item.textContent = rateMoney(row.hourly_rate) + ' · From ' + (rateDate(row.effective_from) || 'unknown') +
+          ' · To ' + until;
+        var setter = document.createElement('small');
+        setter.style.display = 'block';
+        setter.textContent = rateSetter(row);
+        item.append(setter);
+        body.append(item);
+      });
+    } catch {
+      body.textContent = 'The history could not be read. Try again.';
+    }
+  };
+  document.getElementById('rateHistorySection').hidden = false;
+}
+
 function renderTradeRatesPanel(rates) {
   var panel = document.getElementById('tradeRatesPanel');
+  if (rateHistoryEnabled) return renderRatesWithSetter(panel, rates);
   if (!rates.length) {
     panel.innerHTML = '';
     return;
@@ -21680,6 +21805,7 @@ var _rateModalUserId = null;
 var _rateModalName = '';
 
 function openRateModal(userId, name, currentRate) {
+  if (rateHistoryEnabled) resetRateHistory(userId);
   _rateModalUserId = userId;
   _rateModalName = name;
   document.getElementById('rateModalTitle').textContent = 'Set Rate — ' + name;
@@ -27285,56 +27411,73 @@ async function saveWOToFiles(jobId) {
   }
 }
 
+// <labour-recon-card> Reads the fields ops-api labour_reconciliation really
+// sends: labour_budget, total_hours, total_labour_cost, remainder, trades[],
+// rate_assumed and rate_missing. A missing figure reads Unknown, never 0; a
+// failed read says so. A budget of 0 is no budget, so no remainder is drawn.
+function labourReconShifts(n) { return n + (n === 1 ? ' shift' : ' shifts'); }
+function labourReconCount(v) {
+  var n = moneyOrNull(v);
+  return n != null && n > 0 ? Math.round(n) : 0;
+}
+function labourReconHtml(recon) {
+  var budget = moneyOrNull(recon.labour_budget);
+  var hoursLogged = moneyOrNull(recon.total_hours);
+  var labourCost = moneyOrNull(recon.total_labour_cost);
+  var remainder = budget != null && budget > 0 ? moneyOrNull(recon.remainder) : null;
+  var trades = Array.isArray(recon.trades) ? recon.trades : [];
+  var assumed = labourReconCount(recon.rate_assumed);
+  var missing = labourReconCount(recon.rate_missing);
+
+  var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Labour Reconciliation</div>';
+
+  // Summary cards row
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;">';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Budget</div>';
+  html += '<div data-labour-budget style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-mid);">' + (budget === 0 ? 'None' : fmt$(budget)) + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Hours Logged</div>';
+  html += '<div data-labour-hours style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);">' + (hoursLogged == null ? 'Unknown' : hoursLogged.toFixed(1) + 'h') + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Cost</div>';
+  html += '<div data-labour-cost style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-red);">' + fmt$(labourCost) + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Remainder</div>';
+  html += '<div data-labour-remainder style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder == null ? 'var(--sw-text-sec)' : remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + (budget === 0 ? 'No budget' : fmt$(remainder)) + '</div></div>';
+  html += '</div>';
+
+  // Trades table
+  if (trades.length > 0) {
+    html += '<table class="data-table" style="font-size:12px;width:100%;"><thead><tr><th>Trade</th><th style="text-align:right">Hours</th><th style="text-align:right">Rate</th><th style="text-align:right">Cost</th></tr></thead><tbody>';
+    trades.forEach(function(t) {
+      var tHours = moneyOrNull(t.hours);
+      html += '<tr><td>' + escapeHtml(t.name || '') + '</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (tHours == null ? 'Unknown' : tHours.toFixed(1)) + '</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.rate)) + '/h</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.cost)) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  } else if (budget === 0 && hoursLogged === 0 && !missing) {
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);">No labour data recorded yet</div>';
+  }
+  if (assumed) html += '<div data-labour-rate-assumed style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;">Rate assumed on ' + labourReconShifts(assumed) + '</div>';
+  if (missing) html += '<div data-labour-rate-missing style="font-size:12px;color:var(--sw-amber, #B45309);margin-top:6px;">' + labourReconShifts(missing) + ' with no rate, left out</div>';
+  return html;
+}
+
 async function loadLabourReconciliation(jobId) {
   var container = document.getElementById('jdLabourRecon');
   if (!container) return;
   try {
     var data = await opsFetch('labour_reconciliation', { job_id: jobId });
-    var recon = data.reconciliation || data;
-    var budget = moneyOrNull(recon.labour_budget);
-    var hoursLogged = recon.hours_logged || 0;
-    var labourCost = moneyOrNull(recon.labour_cost);
-    var remainder = budget == null || labourCost == null ? null : budget - labourCost;
-    var trades = recon.trades || [];
-
-    var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Labour Reconciliation</div>';
-
-    // Summary cards row
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;">';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Budget</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-mid);">' + fmt$(budget) + '</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Hours Logged</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);">' + hoursLogged.toFixed(1) + 'h</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Cost</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-red);">' + fmt$(labourCost) + '</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Remainder</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder == null ? 'var(--sw-text-sec)' : remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + fmt$(remainder) + '</div></div>';
-    html += '</div>';
-
-    // Trades table
-    if (trades.length > 0) {
-      html += '<table class="data-table" style="font-size:12px;width:100%;"><thead><tr><th>Trade</th><th style="text-align:right">Hours</th><th style="text-align:right">Rate</th><th style="text-align:right">Cost</th></tr></thead><tbody>';
-      trades.forEach(function(t) {
-        html += '<tr><td>' + escapeHtml(t.name || '') + '</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (t.hours || 0).toFixed(1) + '</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.rate)) + '/h</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.cost)) + '</td></tr>';
-      });
-      html += '</tbody></table>';
-    } else if (budget === 0 && hoursLogged === 0) {
-      html += '<div style="font-size:12px;color:var(--sw-text-sec);">No labour data recorded yet</div>';
-    }
-
-    container.innerHTML = html;
+    container.innerHTML = labourReconHtml((data && data.reconciliation) || data || {});
   } catch(e) {
     container.innerHTML = '<div style="font-size:12px;color:var(--sw-text-sec);">Labour data unavailable</div>';
-    console.error('Labour reconciliation error:', e);
+    console.error('Labour reconciliation error:', e && e.message);
   }
 }
+// </labour-recon-card>
 
 // ── Dispatch Cards: interactive material ordering hub ──
 function renderDispatchCards(job, pos) {
@@ -32970,6 +33113,8 @@ function initApp() {
   if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
   // Matching / Needs a person (TP-11): on by default for whoever the server lets read it; ?recon=0 turns it off.
   if (typeof reconProbeVisibility === 'function') reconProbeVisibility();
+  // Pay run: shown only to the pay run approvers; the server's pay_run answer decides.
+  if (window.PayRun && PayRun.probe) PayRun.probe();
   // Like Matching, the staff-only endpoint decides who may see the tab. Off by default.
   if (weeklyCheckEnabled() && window.WeeklyCheck) WeeklyCheck.mount(document.getElementById('weeklyCheckRoot'));
   // Today is hidden and no longer loads the alert digest, so fetch it here
@@ -33032,6 +33177,12 @@ if (document.readyState === 'loading') {
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-debt-workshop.js?v=1'}
+]);
+</script>
+<!-- The weekly pay run and pay settings (modules/ops-pay-run.js) -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-pay-run.js?v=1'}
 ]);
 </script>
 <!-- AI bill placement in Bills to place (modules/ops-bills-ai.js) -->

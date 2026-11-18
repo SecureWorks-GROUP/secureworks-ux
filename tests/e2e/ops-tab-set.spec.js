@@ -137,6 +137,85 @@ test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Financ
   await expect.poll(() => apiCalls.includes('materials_recon_queue')).toBe(true);
 });
 
+// P1-10.6: the Pay run sub tab is for the pay run approvers only. The server's
+// pay_run answer is the only gate: one read after sign in shows the tab when it
+// answers, a 403 hides it, and any other failure keeps what this browser last
+// saw. The screen is read only. Made-up roles and amounts only.
+function zzPayRun() {
+  const codes = ['pay_equals_job_cost', 'nobody_above_work_order', 'super_is_12_over_112',
+    'no_paid_line_without_work_order', 'nothing_lost', 'crew_accepted'];
+  const row = (n, trade, extra = {}) => ({ invoice_id: `ZZTEST-id-${n}`, invoice_number: `ZZTEST-INV-${n}`, kind: 'standard',
+    trade_name: trade, user_id: `ZZTEST-user-${n}`, week_start: '2026-11-09', total_inc_super: 1120, paid_to_you: 1000,
+    super_amount: 120, reimbursements: 0, gst: 0, into_bank: 1000, verdict: 'clean', stops: [], xero_bill_id: null, pushed: false, ...extra });
+  return {
+    ok: true, week_start: '2026-11-09', cut_off: '2026-11-15T23:59:59+08:00', stage: 'before_xero', run: null, can_approve: true,
+    counts: { clean: 2, stopped: 1, late: 0 },
+    totals: { total_inc_super: 2240, paid_to_you: 2000, super: 240, gst: 0, reimbursements: 0, into_bank: 2000 },
+    held: { lines_waiting: 1, amount_ex: 80, by_reason: [{ reason: 'ZZTEST', lines: 1, amount_ex: 80 }] },
+    invoices: [
+      row(3, 'Repair crew', { verdict: 'stopped', total_inc_super: null, paid_to_you: null, super_amount: null, into_bank: null,
+        stops: [{ code: 'money_unreadable', words: "This invoice's pay figures do not add up. Check it by hand." }] }),
+      row(1, 'Fencing crew'), row(2, 'Patio crew')
+    ],
+    late_invoices: [],
+    super_by_person: [{ user_id: 'ZZTEST-user-1', trade_name: 'Fencing crew', super_amount: 120 },
+      { user_id: 'ZZTEST-user-2', trade_name: 'Patio crew', super_amount: 120 }],
+    standing: codes.map((code) => ({ code, pass: true, checked: 2, failed: 0, skipped: 0 })),
+    run_blocked: false, run_blocked_words: null, clean_ids_hash: 'ZZTEST'
+  };
+}
+
+test('Pay run: an approver sees the tab and the week as the server sent it, read only, no approve or push control', async ({ page }, testInfo) => {
+  const posts = [];
+  page.on('request', (r) => { if (r.method() !== 'GET' && /ops-api/.test(r.url())) posts.push(r.url()); });
+  const { apiCalls } = await bootOps(page, { responses: { pay_run: zzPayRun() } });
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials .sub-tab[data-sub="payrun"]')).toBeVisible();
+  await page.locator('#viewFinancials .sub-tab[data-sub="payrun"]').click();
+  await expect(page.locator('#subPayrun')).toHaveClass(/active/);
+  const run = page.locator('#subPayrun [data-pay-run]');
+  await expect(run.locator('[data-week-label]')).toHaveText('Week of Mon 9 Nov 2026');
+  await expect(run.locator('[data-counts]')).toContainText('To pay $2,000.00');
+  await expect(run.locator('tr[data-verdict="stopped"]')).toContainText('Not read');
+  await expect(run.locator('[data-standing] li')).toHaveCount(6);
+  // Only the week steps are buttons: nothing to approve, stamp, push or send.
+  await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
+  expect(apiCalls).not.toContain('trade_pay_settings');
+  expect(posts).toEqual([]);
+  if (process.env.ZZ_PAYRUN_SHOT) {
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.screenshot({ path: path.join(process.env.ZZ_PAYRUN_SHOT, `ZZTEST-ops-pay-run-approver-${width}.png`), fullPage: true });
+    }
+  }
+});
+
+test('Pay run: a person the server refuses (403) never sees the tab', async ({ page }) => {
+  const { apiCalls } = await bootOps(page, { failures: { pay_run: 403 } });
+  await expect.poll(() => apiCalls.filter((a) => a === 'pay_run').length).toBe(1);
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials .sub-tab[data-sub="payrun"]')).toBeHidden();
+  await expect(page.locator('#subPayrun')).not.toHaveClass(/active/);
+});
+
+test('Pay run: an unreadable answer never shows the tab to someone the browser has not seen as an approver', async ({ page }) => {
+  const { apiCalls } = await bootOps(page);
+  await expect.poll(() => apiCalls.filter((a) => a === 'pay_run').length).toBe(1);
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials .sub-tab[data-sub="payrun"]')).toBeHidden();
+});
+
+test('Pay run: a known approver whose read fails sees the error words, never zeros', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('sw_payrun_seen', '1'); });
+  const { apiCalls } = await bootOps(page, { failures: { pay_run: 503 } });
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await page.locator('#viewFinancials .sub-tab[data-sub="payrun"]').click();
+  await expect(page.locator('#subPayrun [data-pay-run] [role="alert"]')).toHaveText('The pay run could not be read, so nothing is shown. Try again.');
+  await expect(page.locator('#subPayrun')).not.toContainText('$0.00');
+  await expect(page.locator('#subPayrun [data-pay-run] table')).toHaveCount(0);
+  expect(apiCalls.filter((a) => a === 'pay_run').length).toBeGreaterThanOrEqual(2);
+});
+
 // ── Dispatch, slice 1 (modules/ops-dispatch.js) ──────────────────────────────
 // Stubbed jobs only: invented numbers, no real client. Dates are built from the
 // current Perth year so the install wording never date-rots.

@@ -133,6 +133,27 @@ test.describe('Dispatch v2: Needs you now', () => {
     await expect(card(root, 'SWR-930001').locator('.dpc-need-replied')).toHaveText('Accept Lysaght date');
   });
 
+  test('a supplier reply shows under Supplier replied from the board, before the job is opened (items 17 and 5)', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    const api = twoJobs(fake);
+    const pipeline = api.pipeline;
+    // The main job's board carries Lysaght's reply (with its open date) and
+    // an acknowledgement from Twinside with no date.
+    api.pipeline = (url, body) => {
+      const out = pipeline(url, body);
+      const rows = out.columns.accepted.map((r) => (r.id !== JOB_ID ? r : Object.assign({}, r, { board: Object.assign({}, r.board, { replies: {
+        flagged: [{ id: 'em-tw', supplier_name: 'Twinside Retaining', received_at: '2026-10-30T01:00:00Z' }, { id: 'em-ly', supplier_name: 'Lysaght', received_at: '2026-10-29T04:58:00Z' }],
+        open_suggestions: [{ id: 'sg-ly', email_id: 'em-ly', order_id: 'ord-ly', supplier_name: 'Lysaght', delivery_date: dayFrom(4) }],
+      } }) })));
+      return Object.assign({}, out, { columns: { accepted: rows } });
+    };
+    const { root, of } = await boot(page, fake, { api });
+    await expect(chip(root, 'Supplier replied')).toHaveText('Supplier replied 1');
+    await expect(card(root, 'SWR-930001').locator('.dpc-need-replied')).toHaveText(['Accept Lysaght date', 'Read Twinside Retaining reply']);
+    // Nothing was read for it: the main job was never opened.
+    expect(of('dispatch_v2_replies').some((c) => c.url.searchParams.get('job_id') === JOB_ID)).toBe(false);
+  });
+
   test('Follow up and Date at risk come from the sent day and the install day', async ({ page }) => {
     // Lysaght sent 29/10 and still at Sent to supplier; the install three
     // days away; Twinside has no date at all.
@@ -156,12 +177,38 @@ test.describe('Dispatch v2: Needs you now', () => {
     await expect(page.locator('.header-nav [data-view="dispatch"] .dpc-tab-n')).toHaveCount(0);
   });
 
-  test('a tray that could not be read hides Emails to sort rather than show 0', async ({ page }) => {
+  // Item 20 (18 Nov 2026): the chip is the one way into the tray, so a tray
+  // that could not be read shows ? (never 0) and still opens it to retry.
+  test('a tray that could not be read shows Emails to sort ? and still opens the tray to retry', async ({ page }) => {
     const fake = fakePayment({ onAccount: true });
     const api = twoJobs(fake);
     api.dispatch_v2_replies_unmatched = () => ({ status: 500, body: { error: 'e2e' } });
     const { root } = await boot(page, fake, { api });
     await expect(chip(root, 'To pay')).toHaveText('To pay 1');
-    await expect(chip(root, 'Emails to sort')).toHaveCount(0);
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort ?');
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toContainText('Could not load the unmatched supplier emails.');
+    await expect(chip(root, 'Emails to sort')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('Emails to sort is the only way into the tray, and shuts it again even once it is empty', async ({ page }) => {
+    const fake = fakePayment({ onAccount: true });
+    let left = 1;
+    const api = twoJobs(fake);
+    api.dispatch_v2_replies_unmatched = () => ({ ok: true, include_other: false, emails: [], counts: { needs_confirmation: 0, unmatched_order_desk: left, unmatched_other: 0 } });
+    const { root } = await boot(page, fake, { api });
+    await expect(root.locator('[data-dpc-tray-toggle]')).toHaveCount(0);
+    await expect(root).not.toContainText('Unmatched supplier emails');
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort 1');
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toBeVisible();
+    // The tray read again (here by its own tick box) now has nothing left.
+    left = 0;
+    await root.locator('[data-dpc-region="tray"] [data-dpc-tray-other]').check();
+    await expect(chip(root, 'Emails to sort')).toHaveText('Emails to sort 0');
+    await expect(chip(root, 'Emails to sort')).toBeEnabled();
+    await chip(root, 'Emails to sort').click();
+    await expect(root.locator('[data-dpc-region="tray"]')).toBeHidden();
+    await expect(chip(root, 'Emails to sort')).toBeDisabled();
   });
 });

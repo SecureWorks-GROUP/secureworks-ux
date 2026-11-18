@@ -11,9 +11,15 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  // Only a real number or numeric text is an amount; null, a boolean or blank is not read.
   function money(value) {
-    var n = Number(value);
+    var ok = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '');
+    var n = ok ? Number(value) : NaN;
     return isFinite(n) ? '$' + n.toFixed(2) : 'Amount not read';
+  }
+  function jobNumber(row) {
+    var n = row && row.jobs && row.jobs.job_number;
+    return typeof n === 'string' && n.trim() ? n.trim() : 'number not available';
   }
   // Marked and not yet confirmed: the same rule as the server's expenseHeldNotBooked.
   function waiting(row) {
@@ -37,9 +43,9 @@
       '<p class="rc-lede">The person who sent each of these is not booked on its job. Check the job before approving.</p>';
     if (phase === 'loading') h += '<p role="status">Loading</p>';
     else if (phase === 'error') h += '<p role="alert">Could not load the receipts. Nothing is shown as waiting until they load.</p><button type="button" data-rc="retry">Try again</button>';
-    else if (!rows.length) h += '<p>No receipt is waiting for a confirm.</p>';
+    else if (!rows.length && !more) h += '<p>No receipt is waiting for a confirm.</p>';
     else rows.forEach(function (r) {
-      var job = (r.jobs && r.jobs.job_number) || 'number not available';
+      var job = jobNumber(r);
       h += '<article class="rc-row" data-rc-id="' + esc(r.id) + '"><div class="rc-text">' +
         '<div class="rc-mark" data-rc-mark>Not booked on this job</div>' +
         '<div class="rc-summary">' + esc(r.vendor_name || 'Supplier not read') + ', ' + esc(money(r.total_amount)) + '</div>' +
@@ -64,7 +70,7 @@
       h += '</article>';
     });
     if (phase === 'list' && rows.some(function (r) { return r.finished; })) h += '<button type="button" data-rc="retry">Reload the list</button>';
-    if (phase === 'list' && more) h += '<p class="rc-lede" role="status">More receipts may be waiting than this list shows. Clear these, then reload.</p>';
+    if (phase === 'list' && more) h += '<p class="rc-lede" role="status">More receipts may be waiting than this list shows: the office list holds more than 200 receipts.</p>';
     return h + '</div>';
   }
   function create(host) {
@@ -73,7 +79,7 @@
     function paint() {
       if (!root) return;
       // Hidden only when the office has nothing to do here; an error always shows.
-      root.hidden = !active() || (phase === 'list' && !rows.length) || phase === 'loading';
+      root.hidden = !active() || (phase === 'list' && !rows.length && !more) || phase === 'loading';
       root.innerHTML = root.hidden ? '' : render(rows, phase, more);
     }
     async function refresh() {
@@ -127,7 +133,7 @@
         var res = await host.post('approve_expense', body);
         var want = body.intent || 'approved';
         if (!res || res.success !== true || res.status !== want) throw Object.assign(new Error('Unconfirmed'), { body: res });
-        row.message = want === 'approved' ? 'Approved on job ' + ((row.jobs && row.jobs.job_number) || '') + '.' : want === 'queried' ? 'Question sent.' : 'Sent back.';
+        row.message = want === 'approved' ? 'Approved on job ' + jobNumber(row) + '.' : want === 'queried' ? 'Question sent.' : 'Sent back.';
         row.finished = true;
       } catch (err) {
         // Nothing is retried on its own: a refusal or an unknown answer waits for a reload.
@@ -154,7 +160,7 @@
     }
     return { mount: mount, refresh: refresh, press: press };
   }
-  if (typeof module !== 'undefined') module.exports = { create: create, render: render, failure: failure, waiting: waiting };
+  if (typeof module !== 'undefined') module.exports = { create: create, render: render, failure: failure, waiting: waiting, money: money };
   if (typeof window === 'undefined') return;
   var host = {
     identity: function () {

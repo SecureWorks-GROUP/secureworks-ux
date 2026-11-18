@@ -2,7 +2,7 @@
 // on its job. Made-up ZZTEST ids and amounts only.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { create, waiting } = require('../../modules/ops-receipt-confirm.js');
+const { create, waiting, money } = require('../../modules/ops-receipt-confirm.js');
 
 const marked = (extra = {}) => ({
   id: 'ZZTEST-r1', status: 'pending', unbooked_job_id: 'ZZTEST-job', job_id: 'ZZTEST-job',
@@ -170,4 +170,30 @@ test('the page reads only when Matching opens, on login and on Reload: no timer'
   classes.add('active'); observer(); await settle();
   assert.equal(reads.length, 6, 'reopening Matching reads again');
   assert.equal(timers.length, 0, 'no timer is ever set');
+});
+
+test('an amount not read never shows as $0.00; a missing job number is named', async () => {
+  assert.deepEqual(
+    [null, undefined, true, false, '', '  ', 'abc', {}, 0, '0', 12.5, '80'].map(money),
+    ['Amount not read', 'Amount not read', 'Amount not read', 'Amount not read', 'Amount not read', 'Amount not read',
+      'Amount not read', 'Amount not read', '$0.00', '$0.00', '$12.50', '$80.00'],
+  );
+  const f = fixture({ pending: [marked({ total_amount: null, jobs: { job_number: null } })], queried: [] });
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /ZZTEST supplier, Amount not read/);
+  assert.doesNotMatch(f.root.innerHTML, /\$0\.00/);
+  assert.match(f.root.innerHTML, /Job number not available/);
+  await f.api.press('ZZTEST-r1', 'approve');
+  assert.match(f.root.innerHTML, /Yes, approve on job number not available/);
+  await f.api.press('ZZTEST-r1', 'confirm');
+  assert.match(f.root.innerHTML, /Approved on job number not available\./);
+});
+
+test('a full page of unmarked receipts shows the overflow notice, never a hidden box', async () => {
+  const plain = Array.from({ length: 200 }, (_, i) => marked({ id: 'ZZTEST-p' + i, unbooked_job_id: null }));
+  const f = fixture({ pending: plain, queried: [] });
+  await f.api.refresh();
+  assert.equal(f.root.hidden, false);
+  assert.match(f.root.innerHTML, /More receipts may be waiting than this list shows/);
+  assert.doesNotMatch(f.root.innerHTML, /No receipt is waiting/);
 });

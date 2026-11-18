@@ -40,3 +40,27 @@ test('after Put on job: saved, already on the job, and not saved', () => {
   assert.match(TF.doneWords({ documents: { read: 'failed', saved: [], skipped: [] } }), /could not be saved to the job/);
   assert.equal(TF.doneWords({ documents: { read: 'ok', saved: [], skipped: [] } }), '');
 });
+
+// Item 16b: what was read on the email's PDFs, and the Could be words.
+test('16b: no pdf_read (an ops-api from before 16b) or nothing to read draws no line', () => {
+  assert.equal(TF.pdfLine({ id: 'e1' }), '');
+  assert.equal(TF.pdfLine({ id: 'e1', pdf_read: null }), '');
+  assert.equal(TF.pdfLine({ id: 'e1', pdf_read: { state: 'none', line: null } }), '');
+  assert.equal(TF.pdfLine({ id: 'e1', pdf_read: { state: 'odd', line: 'x' } }), '');
+  assert.equal(TF.pdfLine(null), '');
+});
+
+test('16b: the read line shows what was printed, escaped', () => {
+  const h = TF.pdfLine({ id: 'e1', pdf_read: { state: 'read', line: 'Read from the PDF: 13 Woodall Ct, High Wycombe, Ref SWP-26100' } });
+  assert.match(h, /^<p class="dpc-tf-read dpc-tf-read-read">Read from the PDF: 13 Woodall Ct, High Wycombe, Ref SWP-26100<\/p>$/);
+  assert.doesNotMatch(TF.pdfLine({ id: 'e1', pdf_read: { state: 'read', line: '<b>x</b>' } }), /<b>/);
+  assert.match(TF.pdfLine({ id: 'e1', pdf_read: { state: 'reading', line: 'Reading the PDF to suggest a job (can take an hour or so)' } }), /dpc-tf-read-reading/);
+  assert.match(TF.pdfLine({ id: 'e1', pdf_read: { state: 'cannot_read', line: 'The PDF could not be read' } }), /could not be read/);
+});
+
+test('16b: a job from the PDF says so on its button; the others read as before', () => {
+  assert.equal(TF.candidateLabel({ job_id: 'j', job_number: 'SWP-26595', reason: 'Read from the PDF: Ref SWP-26595', from_pdf: true }), 'SWP-26595, from the PDF');
+  assert.equal(TF.candidateLabel({ job_id: 'j', job_number: 'SWF-261506', reason: 'Open order from this supplier' }), 'SWF-261506, Open order from this supplier');
+  assert.equal(TF.candidateLabel({ job_id: 'j' }), 'Job');
+  assert.equal(TF.candidateLabel(null), '');
+});

@@ -4790,6 +4790,19 @@
     return global.OpsDispatchTrayFiles && typeof global.OpsDispatchTrayFiles.html === 'function' ? global.OpsDispatchTrayFiles.html(m) : '';
   }
 
+  // Item 16b: the "Read from the PDF" line and the Could be words, from
+  // modules/dispatch-tray-files.js. Without that file: no line, and the
+  // buttons read as before.
+  function trayPdfLineHtml(m) {
+    var tf = global.OpsDispatchTrayFiles;
+    return tf && typeof tf.pdfLine === 'function' ? tf.pdfLine(m) : '';
+  }
+  function trayCandLabel(c) {
+    var tf = global.OpsDispatchTrayFiles;
+    if (tf && typeof tf.candidateLabel === 'function') return tf.candidateLabel(c);
+    return (text(c.job_number) || 'Job') + (text(c.reason) ? ', ' + text(c.reason) : '');
+  }
+
   function trayItemHtml(t, m) {
     var busy = t.busy[m.id];
     var off = busy ? ' disabled' : '';
@@ -4800,6 +4813,7 @@
     if (text(m.subject)) h += '<p class="dpc-rep-subj">' + esc(text(m.subject)) + '</p>';
     if (text(m.snippet)) h += '<p class="dpc-rep-snip">' + esc(text(m.snippet)) + '</p>';
     h += trayFilesHtml(m);
+    h += trayPdfLineHtml(m);
     if (text(m.delivery_label)) h += '<p class="dpc-rep-why">Delivery date in the email: ' + esc(text(m.delivery_label)) + '</p>';
     if (guess) {
       h += '<div class="dpc-rep-ask"><span class="dpc-grow">Best guess: ' + esc(text(m.job_number) || 'a job') + (text(m.match_reason) ? '. ' + esc(text(m.match_reason)) + '.' : '.') + '</span>' +
@@ -4810,8 +4824,8 @@
     var cands = Array.isArray(m.candidates) ? m.candidates.filter(function (c) { return isObj(c) && c.job_id; }) : [];
     if (cands.length) {
       h += '<div class="dpc-tray-cands"><span>Could be:</span>' + cands.map(function (c) {
-        return '<button type="button" data-dpc-tray-assign="' + esc(m.id) + '" data-job="' + esc(c.job_id) + '" data-order="' + esc(c.order_id || '') + '"' + off + '>' +
-          esc((text(c.job_number) || 'Job') + (text(c.reason) ? ', ' + text(c.reason) : '')) + '</button>';
+        return '<button type="button"' + (c.from_pdf === true ? ' class="dpc-tray-cand-pdf"' : '') + ' data-dpc-tray-assign="' + esc(m.id) + '" data-job="' + esc(c.job_id) + '" data-order="' + esc(c.order_id || '') + '"' + off + '>' +
+          esc(trayCandLabel(c)) + '</button>';
       }).join('') + '</div>';
     }
     var jobs = trayJobs();

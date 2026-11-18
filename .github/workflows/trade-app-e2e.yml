@@ -1,3 +1,5 @@
+# Was playwright-e2e.yml, switched off in the Actions settings on 30 Oct 2026.
+# A new path is a new workflow, so it runs again. Not a required check.
 name: Trade App E2E
 
 on:

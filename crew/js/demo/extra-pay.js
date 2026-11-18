@@ -253,7 +253,7 @@ registerDemo((db, h) => {
         put(weeks, wk, totals);
         put(months, ym, totals);
         put(fyMap, `FY ${y}/${String(y + 1).slice(2)}`, totals);
-        byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: wk, amount: superAmt, status: paidRuns.has(row.pay_run_id) ? 'paid_to_fund' : 'to_be_paid' });
+        byInvoice.push({ invoice_id: row.id, invoice_number: row.invoice_number || null, week_start: wk, amount: superAmt, status: noSuper ? 'not_recorded' : (paidRuns.has(row.pay_run_id) ? 'paid_to_fund' : 'to_be_paid') });
       }
       const newest = (map) => [...map].sort(([a], [b]) => b.localeCompare(a));
       const monthLabel = (ym) => `${MON[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
@@ -265,7 +265,7 @@ registerDemo((db, h) => {
         super: {
           this_fy: thisYear.paid_to_super,
           since_start: sinceStart,
-          ...(notRecorded > 0 ? { not_recorded_invoices: notRecorded } : {}),
+          not_recorded_count: notRecorded,
           by_invoice: byInvoice.sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)) || String(b.invoice_id).localeCompare(String(a.invoice_id)))
         },
         tax_set_aside: taxPct === null ? null : { percent: taxPct, this_fy_amount: tax },

@@ -15,39 +15,24 @@ const TABS = [
   ['years', 'Years']
 ];
 
-const NOT_RECORDED_KEYS = [
-  'not_recorded_invoices',
-  'not_recorded_count',
-  'not_recorded',
-  'super_not_recorded_invoices',
-  'super_not_recorded_count',
-  'super_not_recorded',
-  'unrecorded_invoices',
-  'unrecorded_count',
-  'figures_incomplete'
-];
-
 function isAmount(v) {
-  const n = num(v);
-  return n !== null && Number.isFinite(n) && n >= 0;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0;
 }
 
-function readOptionalCount(obj) {
-  if (!obj || typeof obj !== 'object') return { present: false, valid: true, count: 0 };
-  for (const key of NOT_RECORDED_KEYS) {
-    if (obj[key] !== undefined && obj[key] !== null) {
-      const n = num(obj[key]);
-      const ok = n !== null && Number.isInteger(n) && n >= 0;
-      return { present: true, valid: ok, count: ok ? n : 0 };
-    }
-  }
-  return { present: false, valid: true, count: 0 };
+function isCount(v) {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+function validSuperInvoice(r) {
+  if (!r || typeof r !== 'object') return false;
+  if (r.status === 'not_recorded') return r.amount === 0;
+  if (r.status === 'paid_to_fund' || r.status === 'to_be_paid') return isAmount(r.amount);
+  return false;
 }
 
 export function superNotRecordedCount(d) {
-  const fromSuper = readOptionalCount(d && d.super);
-  if (fromSuper.present) return fromSuper.count;
-  return readOptionalCount(d).count;
+  const n = d && d.super && d.super.not_recorded_count;
+  return isCount(n) ? n : 0;
 }
 
 function validTotals(t) {
@@ -65,9 +50,10 @@ export function validPayHistory(d) {
   if (!isAmount(cmp.this_fy.paid_to_you) || !isAmount(cmp.this_fy.paid_to_super) ||
       !isAmount(cmp.last_fy_same_point.paid_to_you) || !isAmount(cmp.last_fy_same_point.paid_to_super)) return false;
   const sup = d.super;
-  if (!sup || typeof sup !== 'object' || !isAmount(sup.this_fy) || !isAmount(sup.since_start) || !Array.isArray(sup.by_invoice)) return false;
-  if (!sup.by_invoice.every((r) => r && isAmount(r.amount) && (r.status === 'paid_to_fund' || r.status === 'to_be_paid'))) return false;
-  if (!readOptionalCount(sup).valid || !readOptionalCount(d).valid) return false;
+  if (!sup || typeof sup !== 'object' || !isAmount(sup.this_fy) || !isAmount(sup.since_start) ||
+      !isCount(sup.not_recorded_count) || !Array.isArray(sup.by_invoice)) return false;
+  if (!sup.by_invoice.every(validSuperInvoice)) return false;
+  if (sup.not_recorded_count < sup.by_invoice.filter((r) => r.status === 'not_recorded').length) return false;
   if (!d.rate_history.every((r) => r && isISODate(r.effective_from) && isAmount(r.hourly_rate))) return false;
   return true;
 }
@@ -176,9 +162,11 @@ export function PayHistory() {
           <span class="main">
             <b>${isISODate(inv.week_start) ? weekWords(inv.week_start) : inv.invoice_number || 'Invoice'}</b>
             ${inv.invoice_number && isISODate(inv.week_start) ? html`<span class="sub t-num">${inv.invoice_number}</span>` : null}
-            <span class=${cx('sub pay-fundstate', inv.status === 'paid_to_fund' && 'ok')}>${inv.status === 'paid_to_fund' ? 'Paid to your fund' : 'To be paid to your fund'}</span>
+            ${inv.status === 'not_recorded' ? null : html`<span class=${cx('sub pay-fundstate', inv.status === 'paid_to_fund' && 'ok')}>${inv.status === 'paid_to_fund' ? 'Paid to your fund' : 'To be paid to your fund'}</span>`}
           </span>
-          <span class="side"><span class="pay-figure">${cash(inv.amount)}</span></span>
+          <span class="side">${inv.status === 'not_recorded'
+            ? html`<span class="t-small nowrap">not recorded</span>`
+            : html`<span class="pay-figure">${cash(inv.amount)}</span>`}</span>
         </div>`)}
       </div>
       ${unrecorded > 0 ? html`<p class="block t-small pay-note">Super not recorded on ${plural(unrecorded, 'invoice')}</p>` : null}

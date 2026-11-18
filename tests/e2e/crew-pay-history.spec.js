@@ -53,9 +53,13 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
   await expect(rows).toHaveCount(8);
   await expect(rows.first()).toContainText('Total (includes super)');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].total_inc_super));
-  await expect(rows.first()).toContainText('Paid to you');
+  // Totals count every processed bill, paid or not yet paid, so they say 'Your pay', never 'Paid to you'.
+  await expect(rows.first()).toContainText('Your pay');
+  await expect(rows.first()).not.toContainText('Paid to you');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].paid_to_you));
-  await expect(rows.first()).toContainText('Paid to your super fund');
+  // Super recorded on invoices, not a fund payment.
+  await expect(rows.first()).toContainText('Super on your pay');
+  await expect(rows.first()).not.toContainText('Paid to your super fund');
   await expect(rows.first()).toContainText(fmtCash(expected.weeks[0].paid_to_super));
   await expect(rows.nth(7)).toContainText(fmtCash(expected.weeks[7].paid_to_you));
 
@@ -100,12 +104,17 @@ test('Pay links to My pay, three tabs render demo totals, year card shows both y
     await page.setViewportSize(PHONE.viewport);
   }
 
-  // This year and last year card: side by side with both Paid to you and super figures.
+  // This year and last year card: side by side with both pay and super figures.
   const compare = page.locator('.pay-hcompare');
   await expect(compare).toContainText('So far this financial year');
   await expect(compare).toContainText('Same point last year');
   const cols = compare.locator('.pay-hcol');
   await expect(cols).toHaveCount(2);
+  for (const i of [0, 1]) {
+    await expect(cols.nth(i)).toContainText('Your pay');
+    await expect(cols.nth(i)).toContainText('Super on your pay');
+    await expect(cols.nth(i)).not.toContainText('Paid to you');
+  }
   await expect(cols.nth(0)).toContainText(fmtCash(expected.this_year_vs_last.this_fy.paid_to_you));
   await expect(cols.nth(0)).toContainText(fmtCash(expected.this_year_vs_last.this_fy.paid_to_super));
   await expect(cols.nth(1)).toContainText(fmtCash(expected.this_year_vs_last.last_fy_same_point.paid_to_you));

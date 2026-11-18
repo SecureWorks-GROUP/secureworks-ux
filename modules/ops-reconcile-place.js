@@ -142,6 +142,7 @@
       var cents = Split.lineCents(c.amount_ex);
       return {
         document_number: str(c.document_number), cents: cents == null ? null : Math.abs(cents),
+        line_ids: (Array.isArray(c.lines) ? c.lines : []).map(function (l) { return l && str(l.line_id); }).filter(Boolean),
         lines: (Array.isArray(c.lines) ? c.lines : []).filter(function (l) { return l && typeof l === 'object'; }).map(function (l) {
           var lc = Split.lineCents(l.amount_ex);
           return { description: str(l.description) || 'Line', cents: lc == null ? null : Math.abs(lc) };
@@ -160,7 +161,12 @@
           '</li>';
       }).join('') + '</ul></div>';
   }
+  // Distinct credit documents a bill carries: its credit cards plus the read-only entries that are
+  // not one of those cards (nest drops an entry sharing a line with a card).
   function carriedCount(item) { return (item.credits ? item.credits.length : 0) + (item.bill_credits ? item.bill_credits.length : 0); }
+  function sameDocument(entry, card) {
+    return entry.line_ids.some(function (id) { return card.line_ids.indexOf(id) >= 0; });
+  }
   function shared(item) { return !!(item.is_credit && item.bill && item.bill.several); }
   function billNumber(b) { return b.document_number || '(number not read)'; }
   function billStateWords(b) {
@@ -209,7 +215,9 @@
       is_credit: raw.kind === 'credit' || (Split.lineCents(raw.amount_ex) || 0) < 0,
       bill: billFromList(raw.bill),
       bills: billsFromList(raw),
-      bill_credits: raw.kind === 'credit' ? [] : billCreditsFromList(raw.credits)
+      bill_credits: raw.kind === 'credit' ? [] : billCreditsFromList(raw.credits),
+      // Every line id the list sent, held or not: how a credit card is matched to a bill's credits entry.
+      line_ids: (Array.isArray(raw.lines) ? raw.lines : []).map(function (l) { return l && str(l.line_id); }).filter(Boolean)
     };
   }
   // A document can be placed here only with its hash, every line read and an amount on each.
@@ -427,6 +435,13 @@
         if (!bill || bill === i || bill.is_credit || bill.credits.indexOf(i) >= 0) return;
         if (!i.under) { i.under = bill.id; i.under_number = bill.document_number || billNumber(b); }
         bill.credits.push(i);
+      });
+    });
+    // A credit with its own card is shown once: the card, never also the read-only entry.
+    items.forEach(function (bill) {
+      if (!bill.credits.length || !bill.bill_credits || !bill.bill_credits.length) return;
+      bill.bill_credits = bill.bill_credits.filter(function (entry) {
+        return !bill.credits.some(function (card) { return sameDocument(entry, card); });
       });
     });
     return items;

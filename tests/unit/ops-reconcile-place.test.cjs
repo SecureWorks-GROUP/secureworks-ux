@@ -352,3 +352,29 @@ test('the list is complete when its last page has no next, even when a tab count
   await f.api.refresh();
   assert.doesNotMatch(f.root.innerHTML, /more may be waiting/);
 });
+
+test('a credit with its own card and in the bill credits list is shown once and counted once', async () => {
+  const card = raw({ id: 'ZZTEST-credit', kind: 'credit', kind_words: 'Credit', document_number: 'CN-7', amount_ex: -80, suggestion: null,
+    lines: [{ line_id: 'C7', description: 'Returned rails', amount_ex: -80, state: 'needs_person' }],
+    bill: { document_id: 'doc-1', document_number: 'ZZ-1', item_id: 'ZZTEST-item-1', state: 'waiting', job_id: null, job_number: null, job_site: null, division: null } });
+  card.bills = [card.bill];
+  const bill = raw({ credits: [
+    { document_id: 'doc-cn7', document_number: 'CN-7', is_credit: true, amount_ex: 80, lines: [{ line_id: 'C7', description: 'Returned rails', amount_ex: 80, state: 'needs_person' }] },
+    { document_id: 'doc-cn8', document_number: 'CN-8', is_credit: true, amount_ex: 15, lines: [{ line_id: 'C8', description: 'Freight', amount_ex: 15, state: 'placed' }] },
+  ] });
+  const f = fixture({ bills: [bill, card] });
+  await f.api.refresh();
+  const html = f.root.innerHTML;
+  assert.equal((html.match(/CN-7/g) || []).length, 1, 'CN-7 once: its own card');
+  assert.equal((html.match(/data-rp-id="ZZTEST-credit"/g) || []).length, 1);
+  assert.match(html, /CN-8, Credit \$15\.00 ex GST/);
+  assert.equal((html.match(/Deciding this bill carries these credits/g) || []).length, 1);
+  await f.api.press('ZZTEST-item-1', 'accept_job');
+  assert.match(f.root.innerHTML, /Its 2 credits follow it\./, 'two distinct credits, not three');
+  // The same credit as its card and its entry alone: one credit.
+  const g = fixture({ bills: [raw({ credits: [bill.credits[0]] }), card] });
+  await g.api.refresh();
+  assert.equal((g.root.innerHTML.match(/CN-7/g) || []).length, 1);
+  await g.api.press('ZZTEST-item-1', 'accept_job');
+  assert.match(g.root.innerHTML, /Its credit follows it\./);
+});

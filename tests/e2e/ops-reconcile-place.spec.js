@@ -211,3 +211,17 @@ test('a bill shows the credits that follow it, read only, each a credit ex GST (
   await expect(block.locator('button')).toHaveCount(0);
   await expect(page.locator('#reconcilePlaceRoot .rp-count')).toHaveText('1 waiting');
 });
+
+test('a credit with its own card and in its bill credits list shows once under the bill', async ({ page }) => {
+  const own = { ...CREDIT, id: 'ZZTEST-cn7', document_number: 'CN-7', shown_hash: 'hash-cn7', amount_ex: -80, lines: [{ line_id: 'C7', description: 'Returned rails', amount_ex: -80 }] };
+  const bill = { ...BILL, credits: [
+    { document_id: 'doc-cn7', document_number: 'CN-7', is_credit: true, amount_ex: 80, lines: [{ line_id: 'C7', description: 'Returned rails', amount_ex: 80, state: 'needs_person' }] },
+    { document_id: 'doc-cn8', document_number: 'CN-8', is_credit: true, amount_ex: 15, lines: [{ line_id: 'C8', description: 'Freight', amount_ex: 15, state: 'placed' }] },
+  ] };
+  await open(page, { lists: { bills: [bill, own] } });
+  const group = page.locator('#reconcilePlaceRoot [data-rp-group="ZZTEST-bill"]');
+  await expect(group.getByText('CN-7', { exact: false })).toHaveCount(1);
+  await expect(group.locator('[data-rp-bill-credits]')).toContainText('CN-8, Credit $15.00 ex GST');
+  await expect(group.locator('[data-rp-bill-credits]')).not.toContainText('CN-7');
+  await expect(group.locator('[data-rp-id="ZZTEST-cn7"]')).toHaveCount(1);
+});

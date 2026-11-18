@@ -1,0 +1,124 @@
+{
+  "_source": "Key for key the return blocks of ops-api tradeLabourBudget and labourReconciliation at secureworks-backend pull request 1624 (head 683edfc6). Roles for names, made-up amounts.",
+  "trade_labour_budget": {
+    "clean": {
+      "labour_budget": 1800,
+      "rate_assumed": 0,
+      "rate_missing": 0,
+      "total_hours": 16,
+      "total_cost": 640,
+      "remainder": 1160,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 10, "rate": 40, "cost": 400 },
+        { "user_id": "trade-b", "name": "Crew", "hours": 6, "rate": 40, "cost": 240 }
+      ]
+    },
+    "assumed_and_missing": {
+      "labour_budget": 1800,
+      "rate_assumed": 2,
+      "rate_missing": 1,
+      "total_hours": 10,
+      "total_cost": 400,
+      "remainder": 1400,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 10, "rate": 40, "cost": 400 }
+      ]
+    },
+    "all_missing": {
+      "labour_budget": 1800,
+      "rate_assumed": 0,
+      "rate_missing": 2,
+      "total_hours": 0,
+      "total_cost": 0,
+      "remainder": 1800,
+      "trades": []
+    },
+    "no_budget": {
+      "labour_budget": 0,
+      "rate_assumed": 1,
+      "rate_missing": 0,
+      "total_hours": 6,
+      "total_cost": 240,
+      "remainder": -240,
+      "trades": [
+        { "user_id": "trade-b", "name": "Crew", "hours": 6, "rate": 40, "cost": 240 }
+      ]
+    },
+    "before_rate_counts": {
+      "labour_budget": 1800,
+      "total_hours": 16,
+      "total_cost": 640,
+      "remainder": 1160,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 16, "rate": 40, "cost": 640 }
+      ]
+    }
+  },
+  "labour_reconciliation": {
+    "clean": {
+      "job_id": "e2e-job-1",
+      "job_number": "E2E-JOB-001",
+      "labour_budget": 1800,
+      "rate_assumed": 0,
+      "rate_missing": 0,
+      "quoted_labour": 0,
+      "total_po_costs": 2600,
+      "total_hours": 16,
+      "total_labour_cost": 640,
+      "invoiced_labour_cost": 0,
+      "remainder": 1160,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 10, "rate": 40, "cost": 400 },
+        { "user_id": "trade-b", "name": "Crew", "hours": 6, "rate": 40, "cost": 240 }
+      ],
+      "invoices": []
+    },
+    "assumed_and_missing": {
+      "job_id": "e2e-job-1",
+      "job_number": "E2E-JOB-001",
+      "labour_budget": 1800,
+      "rate_assumed": 2,
+      "rate_missing": 1,
+      "quoted_labour": 0,
+      "total_po_costs": 2600,
+      "total_hours": 10,
+      "total_labour_cost": 400,
+      "invoiced_labour_cost": 0,
+      "remainder": 1400,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 10, "rate": 40, "cost": 400 }
+      ],
+      "invoices": []
+    },
+    "all_missing": {
+      "job_id": "e2e-job-1",
+      "job_number": "E2E-JOB-001",
+      "labour_budget": 0,
+      "rate_assumed": 0,
+      "rate_missing": 1,
+      "quoted_labour": 0,
+      "total_po_costs": 0,
+      "total_hours": 0,
+      "total_labour_cost": 0,
+      "invoiced_labour_cost": 0,
+      "remainder": 0,
+      "trades": [],
+      "invoices": []
+    },
+    "before_rate_counts": {
+      "job_id": "e2e-job-1",
+      "job_number": "E2E-JOB-001",
+      "labour_budget": 1800,
+      "quoted_labour": 0,
+      "total_po_costs": 2600,
+      "total_hours": 16,
+      "total_labour_cost": 640,
+      "invoiced_labour_cost": 0,
+      "remainder": 1160,
+      "trades": [
+        { "user_id": "trade-a", "name": "Lead installer", "hours": 16, "rate": 40, "cost": 640 }
+      ],
+      "invoices": []
+    }
+  }
+}

@@ -27410,56 +27410,73 @@ async function saveWOToFiles(jobId) {
   }
 }
 
+// <labour-recon-card> Reads the fields ops-api labour_reconciliation really
+// sends: labour_budget, total_hours, total_labour_cost, remainder, trades[],
+// rate_assumed and rate_missing. A missing figure reads Unknown, never 0; a
+// failed read says so. A budget of 0 is no budget, so no remainder is drawn.
+function labourReconShifts(n) { return n + (n === 1 ? ' shift' : ' shifts'); }
+function labourReconCount(v) {
+  var n = moneyOrNull(v);
+  return n != null && n > 0 ? Math.round(n) : 0;
+}
+function labourReconHtml(recon) {
+  var budget = moneyOrNull(recon.labour_budget);
+  var hoursLogged = moneyOrNull(recon.total_hours);
+  var labourCost = moneyOrNull(recon.total_labour_cost);
+  var remainder = budget != null && budget > 0 ? moneyOrNull(recon.remainder) : null;
+  var trades = Array.isArray(recon.trades) ? recon.trades : [];
+  var assumed = labourReconCount(recon.rate_assumed);
+  var missing = labourReconCount(recon.rate_missing);
+
+  var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Labour Reconciliation</div>';
+
+  // Summary cards row
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;">';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Budget</div>';
+  html += '<div data-labour-budget style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-mid);">' + (budget === 0 ? 'None' : fmt$(budget)) + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Hours Logged</div>';
+  html += '<div data-labour-hours style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);">' + (hoursLogged == null ? 'Unknown' : hoursLogged.toFixed(1) + 'h') + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Cost</div>';
+  html += '<div data-labour-cost style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-red);">' + fmt$(labourCost) + '</div></div>';
+  html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">Remainder</div>';
+  html += '<div data-labour-remainder style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder == null ? 'var(--sw-text-sec)' : remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + (budget === 0 ? 'No budget' : fmt$(remainder)) + '</div></div>';
+  html += '</div>';
+
+  // Trades table
+  if (trades.length > 0) {
+    html += '<table class="data-table" style="font-size:12px;width:100%;"><thead><tr><th>Trade</th><th style="text-align:right">Hours</th><th style="text-align:right">Rate</th><th style="text-align:right">Cost</th></tr></thead><tbody>';
+    trades.forEach(function(t) {
+      var tHours = moneyOrNull(t.hours);
+      html += '<tr><td>' + escapeHtml(t.name || '') + '</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (tHours == null ? 'Unknown' : tHours.toFixed(1)) + '</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.rate)) + '/h</td>';
+      html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.cost)) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  } else if (budget === 0 && hoursLogged === 0 && !missing) {
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);">No labour data recorded yet</div>';
+  }
+  if (assumed) html += '<div data-labour-rate-assumed style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;">Rate assumed on ' + labourReconShifts(assumed) + '</div>';
+  if (missing) html += '<div data-labour-rate-missing style="font-size:12px;color:var(--sw-amber, #B45309);margin-top:6px;">' + labourReconShifts(missing) + ' with no rate, left out</div>';
+  return html;
+}
+
 async function loadLabourReconciliation(jobId) {
   var container = document.getElementById('jdLabourRecon');
   if (!container) return;
   try {
     var data = await opsFetch('labour_reconciliation', { job_id: jobId });
-    var recon = data.reconciliation || data;
-    var budget = moneyOrNull(recon.labour_budget);
-    var hoursLogged = recon.hours_logged || 0;
-    var labourCost = moneyOrNull(recon.labour_cost);
-    var remainder = budget == null || labourCost == null ? null : budget - labourCost;
-    var trades = recon.trades || [];
-
-    var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Labour Reconciliation</div>';
-
-    // Summary cards row
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;">';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Budget</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-mid);">' + fmt$(budget) + '</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Hours Logged</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);">' + hoursLogged.toFixed(1) + 'h</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Labour Cost</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:var(--sw-red);">' + fmt$(labourCost) + '</div></div>';
-    html += '<div style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:8px;padding:10px;text-align:center;">';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Remainder</div>';
-    html += '<div style="font-size:16px;font-weight:700;font-family:var(--sw-font-num);color:' + (remainder == null ? 'var(--sw-text-sec)' : remainder >= 0 ? 'var(--sw-green)' : 'var(--sw-red)') + ';">' + fmt$(remainder) + '</div></div>';
-    html += '</div>';
-
-    // Trades table
-    if (trades.length > 0) {
-      html += '<table class="data-table" style="font-size:12px;width:100%;"><thead><tr><th>Trade</th><th style="text-align:right">Hours</th><th style="text-align:right">Rate</th><th style="text-align:right">Cost</th></tr></thead><tbody>';
-      trades.forEach(function(t) {
-        html += '<tr><td>' + escapeHtml(t.name || '') + '</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + (t.hours || 0).toFixed(1) + '</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.rate)) + '/h</td>';
-        html += '<td style="text-align:right;font-family:var(--sw-font-num);">' + fmt$(moneyOrNull(t.cost)) + '</td></tr>';
-      });
-      html += '</tbody></table>';
-    } else if (budget === 0 && hoursLogged === 0) {
-      html += '<div style="font-size:12px;color:var(--sw-text-sec);">No labour data recorded yet</div>';
-    }
-
-    container.innerHTML = html;
+    container.innerHTML = labourReconHtml((data && data.reconciliation) || data || {});
   } catch(e) {
     container.innerHTML = '<div style="font-size:12px;color:var(--sw-text-sec);">Labour data unavailable</div>';
-    console.error('Labour reconciliation error:', e);
+    console.error('Labour reconciliation error:', e && e.message);
   }
 }
+// </labour-recon-card>
 
 // ── Dispatch Cards: interactive material ordering hub ──
 function renderDispatchCards(job, pos) {

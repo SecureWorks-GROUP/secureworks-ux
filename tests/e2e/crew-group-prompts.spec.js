@@ -24,7 +24,8 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
     const mkJob = (g) => ({
       id: g.job_id,
       type: 'patio',
-      status: 'in_progress',
+      status: g.job_status || 'scheduled',
+      archived: Boolean(g.job_archived),
       job_number: g.job_number,
       client_name: g.client_name || 'Customer',
       site_address: '',
@@ -55,6 +56,7 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
 
     const liveGroups = cfg.groups.map((g) => ({ ...g }));
     window.__zzGroups = liveGroups;
+    window.__zzGroupReads = 0;
 
     ops.my_jobs = () => ({
       today: asgRows.filter((a) => a.scheduled_date === today),
@@ -65,6 +67,7 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
       unscheduled: asgRows.filter((a) => !a.scheduled_date)
     });
     ops.my_group_work_orders = () => {
+      window.__zzGroupReads += 1;
       if (!cfg.enabled) return { enabled: false, group_job_ids: [], groups: [], payable_routes: [] };
       return {
         enabled: true,
@@ -261,5 +264,107 @@ test('ZZTEST switch off (group_work_order_v1 disabled) shows zero prompts on Hom
   await expect(page.getByRole('heading', { name: 'Pay', exact: true })).toBeVisible();
   await expect(page.locator('[data-group-prompts]')).toHaveCount(0);
   await expect(page.locator('.kvrow', { hasText: 'Group work orders' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('ZZTEST old worked job with a booking ahead still prompts, while purely future-only stays quiet', async ({ page }) => {
+  const errors = watchErrors(page);
+  await installGroupFixture(page, {
+    enabled: true,
+    groups: [
+      // Worked >30d ago (old bookings dropped by my_jobs) with a future return visit booked: job is already in progress.
+      { group_id: 'zz-g-ret', job_id: 'zz-j-ret', job_number: 'ZZTEST-401', site_suburb: 'ZZTEST Return', job_status: 'in_progress', awaiting: 'needs_hours', needs_hours: true, client_signed: false },
+      // Worked >30d ago with a future visit booked, and another crew member already entered hours on the group.
+      { group_id: 'zz-g-crew', job_id: 'zz-j-crew', job_number: 'ZZTEST-402', site_suburb: 'ZZTEST Crew Started', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Crew', me: false, hours: 8, approved: true }, { name: 'Trade', me: true, hours: 0, approved: false }] },
+      // Purely future-only job: pre-start status, only future booking, zero crew hours, unsigned.
+      { group_id: 'zz-g-pure', job_id: 'zz-j-pure', job_number: 'ZZTEST-403', site_suburb: 'ZZTEST Pure Future', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Trade', me: true, hours: 0, approved: false }] }
+    ],
+    bookings: [
+      { job_id: 'zz-j-ret', dayOffset: 4, status: 'confirmed' },
+      { job_id: 'zz-j-crew', dayOffset: 5, status: 'confirmed' },
+      { job_id: 'zz-j-pure', dayOffset: 6, status: 'confirmed' }
+    ]
+  });
+
+  for (const hash of ['#/today', '#/pay']) {
+    await page.evaluate((h) => { location.hash = h; }, hash);
+    const box = page.locator('[data-group-prompts]');
+    await expect(box).toBeVisible();
+    await expect(box.locator('button.item .main > b')).toHaveText([
+      'Add your days on ZZTEST Crew Started',
+      'Add your days on ZZTEST Return'
+    ]);
+    await expect(box).not.toContainText('ZZTEST Pure Future');
+  }
+  expect(errors).toEqual([]);
+});
+
+test('ZZTEST locked group with zero or missing share does not prompt', async ({ page }) => {
+  const errors = watchErrors(page);
+  await installGroupFixture(page, {
+    enabled: true,
+    groups: [
+      { group_id: 'zz-g-zero', job_id: 'zz-j-zero', job_number: 'ZZTEST-501', site_suburb: 'ZZTEST Zero Share', awaiting: 'frozen', needs_hours: false, client_signed: true, my_share: 0 },
+      { group_id: 'zz-g-null', job_id: 'zz-j-null', job_number: 'ZZTEST-502', site_suburb: 'ZZTEST Null Share', awaiting: 'frozen', needs_hours: false, client_signed: true, my_share: null },
+      { group_id: 'zz-g-paid', job_id: 'zz-j-pos', job_number: 'ZZTEST-503', site_suburb: 'ZZTEST Paid Share', awaiting: 'frozen', needs_hours: false, client_signed: true, my_share: 450 }
+    ],
+    bookings: []
+  });
+
+  for (const hash of ['#/today', '#/pay']) {
+    await page.evaluate((h) => { location.hash = h; }, hash);
+    const box = page.locator('[data-group-prompts]');
+    await expect(box).toBeVisible();
+    await expect(box.locator('button.item .main > b')).toHaveText(['Invoice my share']);
+    await expect(box).toContainText('ZZTEST Paid Share');
+    await expect(box).not.toContainText('ZZTEST Zero Share');
+    await expect(box).not.toContainText('ZZTEST Null Share');
+  }
+
+  // Records -> Group work orders counts only the positive-share group as "to do", and never tells $0 share to invoice.
+  const recordRow = page.locator('.kvrow', { hasText: 'Group work orders' });
+  await expect(recordRow).toContainText('1 to do');
+  await recordRow.click();
+  const sheet = page.getByRole('dialog', { name: 'Group work orders' });
+  await expect(sheet.locator('button.item', { hasText: 'ZZTEST Zero Share' })).toContainText('Shares are locked in');
+  await expect(sheet.locator('button.item', { hasText: 'ZZTEST Null Share' })).toContainText('Shares are locked in');
+  await expect(sheet.locator('button.item', { hasText: 'ZZTEST Paid Share' })).toContainText('Invoice my share');
+  expect(errors).toEqual([]);
+});
+
+test('ZZTEST Home caches my_group_work_orders for 10 minutes instead of 2', async ({ page }) => {
+  const errors = watchErrors(page);
+  await installGroupFixture(page, {
+    enabled: true,
+    groups: [
+      { group_id: 'zz-g-ttl', job_id: 'zz-j-ttl', job_number: 'ZZTEST-601', site_suburb: 'ZZTEST Cache', awaiting: 'needs_hours', needs_hours: true }
+    ],
+    bookings: [{ job_id: 'zz-j-ttl', dayOffset: -1, status: 'completed' }]
+  });
+
+  await page.evaluate(() => { location.hash = '#/today'; });
+  await expect(page.locator('[data-group-prompts]')).toContainText('Add your days on ZZTEST Cache');
+  expect(await page.evaluate(() => window.__zzGroupReads)).toBe(1);
+
+  // Advance clock 5 minutes (>2 min old TTL, <10 min new Home TTL): revisiting Home reuses cache.
+  await page.evaluate(() => {
+    const realNow = Date.now.bind(Date);
+    window.__zzNowShift = 5 * 60 * 1000;
+    Date.now = () => realNow() + window.__zzNowShift;
+    location.hash = '#/jobs';
+  });
+  await expect(page.getByRole('heading', { name: 'Jobs' })).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/today'; });
+  await expect(page.locator('[data-group-prompts]')).toContainText('Add your days on ZZTEST Cache');
+  expect(await page.evaluate(() => window.__zzGroupReads)).toBe(1);
+
+  // Advance clock past 10 minutes (11 min total): revisiting Home refreshes once.
+  await page.evaluate(() => {
+    window.__zzNowShift = 11 * 60 * 1000;
+    location.hash = '#/jobs';
+  });
+  await expect(page.getByRole('heading', { name: 'Jobs' })).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/today'; });
+  await expect.poll(() => page.evaluate(() => window.__zzGroupReads)).toBe(2);
   expect(errors).toEqual([]);
 });

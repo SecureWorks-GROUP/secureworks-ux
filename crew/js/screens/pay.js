@@ -6,7 +6,9 @@ import { useQuery, useStore, local } from '../lib/store.js';
 import { go } from '../lib/router.js';
 import { todayISO, mondayOf, addDays, fmtWeek, fmtDate, fmtMonth, tsToDate } from '../lib/dates.js';
 import { invoiceForWeek, sentBackForWeek, invoicePays, buildLines, isLiveInvoice, groupRouteJobs } from '../lib/invoice.js';
-import { Page, Section, KV, StatusBadge, JobLine, Button, Sheet, SkelRows, LoadError, openOverlay } from '../ui/kit.js';
+import { useMyBookings } from '../lib/data.js';
+import { bookingState } from '../lib/model.js';
+import { Page, Section, KV, StatusBadge, Badge, JobLine, Button, Sheet, SkelRows, LoadError, openOverlay } from '../ui/kit.js';
 import { cash, hrs, plural, sheetRows, sheetSummary, groupDays, InvoiceBadge } from '../ui/paybits.js';
 import { useCharges, needsCheck } from './charges.js';
 
@@ -51,6 +53,7 @@ export function Pay() {
   const money = useMoney();
   const expenses = useExpenses();
   const groups = useGroups();
+  const { bookings, loading: bookingsLoading, data: bookingsData } = useMyBookings();
   const wos = useQuery(user.perMetre ? 'wos' : null, () => api('my_work_orders', { mode: 'mine' }), { ttl: 60000 });
   const groupWeek = useGroupWeek(hours.data);
 
@@ -70,7 +73,8 @@ export function Pay() {
 
   const lastCount = lastHours.data ? (lastHours.data.assignments || []).filter((a) => a.invoice_mode !== 'group_work_order').length : 0;
   const lastOwing = !lastInv && lastCount > 0;
-  const groupList = (groups.data && groups.data.enabled !== false && groups.data.groups) || [];
+  const groupList = (groups.data && groups.data.enabled === true && Array.isArray(groups.data.groups) && groups.data.groups) || [];
+  const bookingsPending = bookingsLoading && !bookingsData;
   const sentRows = list.filter((i) => isLiveInvoice(i) || String(i.status) === 'ops-reject').slice(0, 3);
   const toCheck = ((charges.data && charges.data.charges) || []).filter(needsCheck).length;
   const waiting = ((expenses.data && expenses.data.expenses) || []).filter((e) => e.submitted_by === user.id && ['pending', 'pending_extraction', 'queried'].includes(String(e.status || '').toLowerCase())).length;
@@ -84,9 +88,11 @@ export function Pay() {
   const sheetWords = thisInv ? 'On the invoice you sent' : !sheet ? '' : !sheet.count ? 'Nothing recorded yet' : `${sheet.daysDone} of ${plural(sheet.days, 'day')} done · ${hrs(sheet.hours)}`;
   const sheetStatus = thisInv ? 'sent' : !sheet || !sheet.count ? 'draft' : sheet.todo ? 'needs_times' : 'complete';
   const openGroups = () => (groupList.length === 1 ? go('/pay/group/' + groupList[0].job_id) : openOverlay((close) => html`<${GroupsSheet} groups=${groupList} onClose=${close} />`));
-  const toDo = groupList.filter((g) => ['needs_hours', 'ready', 'frozen'].includes(g.awaiting) && !g.submitted).length;
+  const toDo = useMemo(() => groupPromptsFor(groups.data, bookings, { today, bookingsPending }).length, [groups.data, bookings, today, bookingsPending]);
 
   return html`<${Page} root title="Pay" right=${basis ? html`<span class="t-num">${basis}</span>` : null}>
+    <${GroupPrompts} groupsData=${groups.data} bookings=${bookings} bookingsPending=${bookingsPending} />
+
     <div class="block card pad pay-weekcard">
       <h2 class="t-cap">Pay week ${fmtWeek(monday)}</h2>
       <div class="pay-steps">
@@ -137,13 +143,82 @@ function GroupsSheet({ groups, onClose }) {
 export function groupWords(g) {
   const a = g.awaiting;
   if (g.submitted) return 'Your share is invoiced';
-  if (a === 'needs_hours') return 'Add your hours';
+  if (a === 'needs_join') return 'Join the group';
+  if (a === 'needs_hours') return 'Add your days';
   if (a === 'awaiting_signoff') return 'Waiting for the customer to sign';
   if (a === 'awaiting_others') return 'Waiting on the rest of the crew';
   if (a === 'awaiting_rate') return 'Waiting on the office';
-  if (a === 'ready') return 'Ready to lock in';
-  if (a === 'frozen') return 'Your share is ready to invoice';
+  if (a === 'ready') return 'Lock in the shares';
+  if (a === 'frozen') return 'Invoice my share';
   return (g.discovery && g.discovery.message) || 'Open to see what is next';
+}
+
+const GROUP_PROMPT_ORDER = { needs_join: 0, needs_hours: 1, ready: 2, frozen: 3 };
+
+/** Plain job label for a group row, matching GroupsSheet and the Group screen. */
+export function groupJobName(g) {
+  return (g && (g.site_suburb || g.client_name || g.job_number)) || 'this job';
+}
+
+/** Plain prompt title for an open group waiting on this trade, built from groupWords. */
+export function groupPromptText(g) {
+  if (!g || g.submitted) return '';
+  const a = g.awaiting;
+  if (!(a in GROUP_PROMPT_ORDER)) return '';
+  const step = groupWords(g);
+  if (a === 'needs_join' || a === 'needs_hours') return `${step} on ${groupJobName(g)}`;
+  return step;
+}
+
+/** True when my_jobs shows only upcoming or unscheduled bookings for this job (not worked yet). */
+export function isFutureOnlyGroup(jobId, bookings, today = todayISO()) {
+  const own = (bookings || []).filter((b) => b && b.mine !== false && String(b.jobId) === String(jobId));
+  if (!own.length) return false;
+  return own.every((b) => bookingState(b) === 'booked' && (!b.date || b.date > today));
+}
+
+/**
+ * Actionable open group work orders for this trade, ordered by step:
+ * Join -> Add your days -> Lock in the shares -> Invoice my share.
+ * Future-only jobs stay quiet via my_jobs; switch off (enabled !== true) returns [].
+ */
+export function groupPromptsFor(groupsData, bookings, { today = todayISO(), bookingsPending = false } = {}) {
+  if (!groupsData || groupsData.enabled !== true) return [];
+  const list = Array.isArray(groupsData.groups) ? groupsData.groups : [];
+  return list
+    .filter((g) => {
+      if (!g || !g.job_id || g.submitted) return false;
+      const a = g.awaiting;
+      if (!(a in GROUP_PROMPT_ORDER)) return false;
+      if (a === 'needs_join' || a === 'needs_hours') {
+        if (bookingsPending) return false;
+        if (isFutureOnlyGroup(g.job_id, bookings, today)) return false;
+      }
+      return true;
+    })
+    .map((g) => ({ group: g, awaiting: g.awaiting, title: groupPromptText(g), jobName: groupJobName(g), order: GROUP_PROMPT_ORDER[g.awaiting] }))
+    .sort((x, y) => x.order - y.order || x.jobName.localeCompare(y.jobName));
+}
+
+/** Plain prompts on Home and Pay for every open group work order waiting on this trade. */
+export function GroupPrompts({ groupsData, bookings, bookingsPending = false }) {
+  const today = todayISO();
+  const items = useMemo(
+    () => groupPromptsFor(groupsData, bookings, { today, bookingsPending }),
+    [groupsData, bookings, today, bookingsPending]
+  );
+  if (!items.length) return null;
+  return html`<${Section} label="Group work orders" right=${html`<span class="t-small t-strong nums">${items.length}</span>`}>
+    <div class="block card" data-group-prompts>
+      ${items.map(({ group: g, awaiting, title, jobName }) => html`<button type="button" class="item" key=${g.group_id || g.job_id} onClick=${() => go('/pay/group/' + g.job_id)}>
+        <span class="main">
+          <b>${title}</b>
+          <${JobLine} job=${g}>${awaiting === 'ready' || awaiting === 'frozen' ? jobName : 'Group work order'}<//>
+        </span>
+        <span class="side"><${Badge} kind="warn">To do<//></span>
+      </button>`)}
+    </div>
+  <//>`;
 }
 
 /** One invoice in a list: the pay week, its number and date, its state and what it pays. */

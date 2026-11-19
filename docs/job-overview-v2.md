@@ -4,11 +4,12 @@ The job page Overview of the ops dashboard (`ops.html`, route `#job/<job number>
 
 ## The switch
 
-Off by default, so nothing changes for anyone until it is switched on.
+Off by default while the server switch `job_overview_v2` is off, so nothing changes for anyone until it is switched on.
 
-- `ops.html?overview=v2` (or `=1`) turns it on for that page load; `?overview=classic` (or `=0`) turns it off. The URL wins over the browser setting both ways.
-- Otherwise `localStorage.sw_overview_v2 = '1'` keeps it on in that browser.
-- Staff (signed in, role not a trade role) see a small **Try the new Overview** link at the top right of the classic Overview and **Back to classic** on the new one. The link saves the choice in `sw_overview_v2`, takes `?overview=` out of the address (the `#job/...` part stays) and repaints.
+- When `ops-api` `job_detail` returns `job_overview_v2_enabled: true` (server switch `job_overview_v2`, seeded off), staff (signed in, role not a trade role) open Job Overview v2 by default with no browser flag. When `job_overview_v2_enabled` is absent or false, the classic Overview remains the default.
+- `ops.html?overview=v2` (or `=1`) turns it on for that page load; `?overview=classic` (or `=0`) turns it off. The URL wins over both the browser setting and the server switch.
+- Otherwise an explicit browser choice (`localStorage.sw_overview_v2 = '1'` or `'0'`) wins over the server switch.
+- Staff (signed in, role not a trade role) see a small **Back to classic** link at the top right of the new Overview and **Try the new Overview** on the classic one. The link saves the choice in `sw_overview_v2`, takes `?overview=` out of the address (the `#job/...` part stays) and repaints.
 - Make-safe jobs always keep their own MakeSafe detail.
 
 `renderOverviewView` (ops.html) asks `JobOverviewV2.render(data)` first, right after the make-safe branch (`// <job-overview-v2-switch>`), and paints the classic Overview when it returns false. `render()` returns false when the switch is off, for a make-safe, and on any error, so the page never breaks. After the classic Overview paints, `JobOverviewV2.afterClassic(data)` adds the staff link and nothing else.

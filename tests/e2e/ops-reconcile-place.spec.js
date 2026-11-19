@@ -26,15 +26,15 @@ const WAITING_CREDIT = {
 };
 const MESSAGE = { id: 'ZZTEST-msg', kind: 'message', card: 'message', kind_words: 'Message' };
 
-async function open(page, { url = '/ops.html?reconcile_place=1', lists = { bills: [BILL, CREDIT, WAITING_CREDIT, MESSAGE] }, decide = null } = {}) {
+async function open(page, { url = '/ops.html?reconcile_place=1', role = 'ops_manager', lists = { bills: [BILL, CREDIT, WAITING_CREDIT, MESSAGE] }, decide = null } = {}) {
   await page.goto(url);
   await revealOpsStaticFixture(page);
-  await page.evaluate(({ lists, decide, J2 }) => {
+  await page.evaluate(({ role, lists, decide, J2 }) => {
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
     window.__reads = []; window.__posts = [];
     window.SECUREWORKS_CLOUD = Object.assign({}, window.SECUREWORKS_CLOUD, {
-      auth: { isLoggedIn: () => true, getRole: () => 'ops_manager', getUser: () => ({ id: 'ZZTEST-office' }) },
+      auth: { isLoggedIn: () => true, getRole: () => role, getUser: () => ({ id: 'ZZTEST-office' }) },
       on() {},
     });
     window.opsFetch = (action, params) => {
@@ -56,16 +56,61 @@ async function open(page, { url = '/ops.html?reconcile_place=1', lists = { bills
       return Promise.resolve({ decision_id: 'ZZTEST-decision', item_status: 'decided' });
     };
     showView('recon');
-  }, { lists, decide, J2 });
+  }, { role, lists, decide, J2 });
   await expect(page.locator('#viewRecon')).toBeVisible();
 }
 const decidePosts = (page) => page.evaluate(() => window.__posts.filter((p) => p.action === 'reconcile_decide'));
 const card = (page, id) => page.locator(`#reconcilePlaceRoot [data-rp-id="${id}"]`);
 
-test('off by default: no element and no reconcile_list read', async ({ page }) => {
-  await open(page, { url: '/ops.html' });
-  await expect(page.locator('#reconcilePlaceRoot')).toHaveCount(0);
+test('default with no browser flag: hidden when server switch is off, shown for admin, owner and ops_manager when on, never read for other roles', async ({ page }) => {
+  // Server switch off (reconcile_list_v1 = false): hidden and empty, old screen unchanged.
+  await open(page, { url: '/ops.html', role: 'ops_manager', lists: { off: true } });
+  await expect.poll(async () => (await page.evaluate(() => window.__reads)).filter((r) => r.action === 'reconcile_list').length).toBe(1);
+  await expect(page.locator('#reconcilePlaceRoot')).toBeHidden();
+  expect(await page.locator('#reconcilePlaceRoot').innerHTML()).toBe('');
+
+  // Other roles keep today's default: no reconcile_list read even when server switch is on.
+  for (const role of ['sales', 'trade', 'installer']) {
+    await open(page, { url: '/ops.html', role });
+    await expect(page.locator('#reconcilePlaceRoot')).toBeHidden();
+    expect((await page.evaluate(() => window.__reads)).filter((r) => r.action === 'reconcile_list')).toEqual([]);
+  }
+
+  // Explicit ?reconcile_place=0 keeps it off with no read even for default roles.
+  await open(page, { url: '/ops.html?reconcile_place=0', role: 'owner' });
+  await expect(page.locator('#reconcilePlaceRoot')).toBeHidden();
   expect((await page.evaluate(() => window.__reads)).filter((r) => r.action === 'reconcile_list')).toEqual([]);
+
+  // Default ON for admin, owner and ops_manager when server switch is on, with no browser flag.
+  for (const role of ['admin', 'owner', 'ops_manager']) {
+    await open(page, { url: '/ops.html', role });
+    await expect(page.locator('#reconcilePlaceRoot h2')).toContainText('Cost lines to place');
+    await expect(card(page, 'ZZTEST-bill')).toBeVisible();
+  }
+});
+
+test('old bill screen is reachable in one click, and Cost lines to place can be switched back in one click', async ({ page }) => {
+  await open(page, { url: '/ops.html', role: 'ops_manager' });
+  await expect(card(page, 'ZZTEST-bill')).toBeVisible();
+
+  // One click hides Cost lines to place so the old Matching screen is back on top.
+  await page.locator('#reconcilePlaceRoot').getByRole('button', { name: 'Old bill screen' }).click();
+  await expect(card(page, 'ZZTEST-bill')).toHaveCount(0);
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-old-bar]')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('sw_reconcile_place'))).toBe('0');
+  await expect(page.locator('#reconRoot')).toBeVisible();
+
+  // One click from the bar opens Financials > Bill Reconciliation.
+  await page.locator('#reconcilePlaceRoot').getByRole('button', { name: 'Open Bill Reconciliation' }).click();
+  await expect(page.locator('#viewFinancials')).toBeVisible();
+  await expect(page.locator('#matReconPanel')).toBeVisible();
+
+  // Returning to Matching still shows the bar, and one click brings Cost lines to place back.
+  await page.evaluate(() => showView('recon'));
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-old-bar]')).toBeVisible();
+  await page.locator('#reconcilePlaceRoot').getByRole('button', { name: 'Use Cost lines to place' }).click();
+  await expect(card(page, 'ZZTEST-bill')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('sw_reconcile_place'))).toBeNull();
 });
 
 test('lists cost items from the three cost tabs, never a message, and places the suggested job after a confirm', async ({ page }) => {

@@ -7,8 +7,11 @@
 //
 // A credit is shown under its bill: deciding the bill carries the credit with it. After every
 // recorded decision the list is read again, so credits that followed their bill drop off.
-// The switch ships OFF: ?reconcile_place=1 (or localStorage sw_reconcile_place = '1') turns it
-// on, ?reconcile_place=0 turns it off, the URL winning. Off means no request and no element.
+// The cost screen is the default for admin, owner and ops_manager behind the server switch
+// reconcile_list_v1 (ops-api reconcile_list answers { enabled: false } while it is off, so
+// nothing renders and the old screen stays unchanged). Every other role keeps today's default.
+// ?reconcile_place=0 (or localStorage sw_reconcile_place = '0') keeps the old screen;
+// ?reconcile_place=1 (or sw_reconcile_place = '1') forces preview mode, the URL winning.
 // The list is read when Matching opens, on login, after a decision and on Read again. No timer.
 (function () {
   'use strict';
@@ -33,14 +36,26 @@
   function str(v) { return typeof v === 'string' ? v.trim() : ''; }
 
   // ── The switch ──
-  function switchOn(search, stored) {
+  var DEFAULT_ROLES = ['admin', 'owner', 'ops_manager'];
+  function isDefaultRole(role) {
+    return DEFAULT_ROLES.indexOf(String(role || '').toLowerCase()) >= 0;
+  }
+  // 'on': explicit ?reconcile_place=1/on or localStorage sw_reconcile_place = '1'.
+  // 'off': explicit ?reconcile_place=0/off, sw_reconcile_place = '0', or a non-default role.
+  // 'server': default for admin, owner and ops_manager; shows only when reconcile_list_v1 is on.
+  function switchMode(search, stored, role) {
     var m = /[?&]reconcile_place=([^&#]*)/.exec(String(search || ''));
     if (m) {
       var v = m[1].toLowerCase();
-      if (v === '1' || v === 'on') return true;
-      if (v === '0' || v === 'off') return false;
+      if (v === '1' || v === 'on') return 'on';
+      if (v === '0' || v === 'off') return 'off';
     }
-    return stored === '1';
+    if (stored === '1') return 'on';
+    if (stored === '0') return 'off';
+    return isDefaultRole(role) ? 'server' : 'off';
+  }
+  function switchOn(search, stored, role) {
+    return switchMode(search, stored, role) !== 'off';
   }
 
   // ── Words ──
@@ -486,9 +501,14 @@
     }).join('') + '</ul><p class="rp-note">Only the newest decision on an item can be undone here.</p></div>';
   }
   function render(state) {
+    if (state.phase === 'old_screen') {
+      return '<div class="rp-old-bar" data-rp-old-bar><span>Using the old bill screen.</span><div class="rp-head-acts">' +
+        (state.canOpenBillRecon ? '<button type="button" data-rp="open_bill_recon">Open Bill Reconciliation</button>' : '') +
+        '<button type="button" data-rp="use_new">Use Cost lines to place</button></div></div>';
+    }
     var open = state.items.length;
     var h = '<div class="rp-wrap"><div class="rp-head"><h2>Cost lines to place' + (state.phase === 'list' && open ? ' <span class="rp-count">' + open + ' waiting</span>' : '') +
-      '</h2><button type="button" data-rp="reread"' + (state.phase === 'loading' ? ' disabled' : '') + '>Read again</button></div>' +
+      '</h2><div class="rp-head-acts"><button type="button" data-rp="use_old">Old bill screen</button><button type="button" data-rp="reread"' + (state.phase === 'loading' ? ' disabled' : '') + '>Read again</button></div></div>' +
       '<p class="rp-lede">Bills, credits, receipts and card or bank lines the system could not place on its own. Put each on a job, split it, or mark it not for a job.</p>';
     h += recentHtml(state.recent);
     if (state.phase === 'loading') return h + '<p role="status">Reading the list.</p></div>';
@@ -502,13 +522,14 @@
 
   // Every page of one tab. The list's next cursor is `next` (assumed); it pages until the list
   // has no more, or MAX_PAGES. `more` is true only when the list did not say it was complete.
-  async function readTab(host, tab) {
+  async function readTab(host, tab, requireEnabled) {
     var items = [], after = null;
     for (var page = 0; page < MAX_PAGES; page++) {
       var params = { tab: tab, limit: READ_LIMIT };
       if (after) params.after = after;
       var res = await host.read('reconcile_list', params);
       if (res && res.enabled === false) return { off: true, items: [], more: false };
+      if (requireEnabled && (!res || res.enabled !== true)) return { off: true, items: [], more: false };
       if (!res || !Array.isArray(res.items)) throw new Error('Missing items');
       items = items.concat(res.items);
       var next = typeof res.next === 'string' && res.next ? res.next : null;
@@ -545,23 +566,52 @@
 
   // ── State and presses ──
   function create(host) {
-    var root = null, state = { phase: 'loading', items: [], more: false, error: '', recent: [] }, generation = 0, owner = null, recent = [];
+    var root = null, state = { phase: 'loading', items: [], more: false, error: '', recent: [] }, generation = 0, owner = null, recent = [], serverOn = false, optedOut = false;
+    function mode() { return typeof host.mode === 'function' ? host.mode() : 'on'; }
+    function showOldBar() { return optedOut || (typeof host.showOldBar === 'function' && !!host.showOldBar()); }
+    function canOpenBillRecon() {
+      if (typeof host.canOpenBillRecon === 'function') return !!host.canOpenBillRecon();
+      return typeof host.openBillRecon === 'function';
+    }
     function active() { return !!(root && host.visible() && host.identity()); }
+    function shouldHide() {
+      if (!host.identity()) return true;
+      if (state.phase === 'old_screen') return !showOldBar();
+      var m = mode();
+      if (m === 'off') return true;
+      if (m === 'server' && !serverOn) return true;
+      return false;
+    }
     function paint() {
       if (!root) return;
-      root.hidden = !host.identity();
+      root.hidden = shouldHide();
       root.innerHTML = root.hidden ? '' : render(state);
     }
     async function refresh() {
       var who = host.identity();
-      if (!active()) { generation++; owner = null; recent = []; state = { phase: 'loading', items: [], more: false, error: '', recent: recent }; paint(); return; }
-      if (owner !== who) { owner = who; recent = []; }
+      var m = mode();
+      if (!active()) {
+        generation++; owner = null; recent = []; serverOn = false; optedOut = false;
+        state = { phase: 'loading', items: [], more: false, error: '', recent: recent };
+        paint(); return;
+      }
+      if (owner !== who) { owner = who; recent = []; serverOn = false; optedOut = false; }
+      if (m === 'off') {
+        generation++;
+        state = showOldBar()
+          ? { phase: 'old_screen', items: [], more: false, error: '', recent: recent, canOpenBillRecon: canOpenBillRecon() }
+          : { phase: 'off', items: [], more: false, error: '', recent: recent };
+        paint(); return;
+      }
       var gen = ++generation;
+      var requireEnabled = m === 'server';
       state = { phase: 'loading', items: [], more: false, error: '', recent: recent }; paint();
       try {
-        var tabs = await Promise.all(TABS.map(function (tab) { return readTab(host, tab); }));
+        var first = await readTab(host, TABS[0], requireEnabled);
+        var tabs = first.off ? [first] : [first].concat(await Promise.all(TABS.slice(1).map(function (tab) { return readTab(host, tab, requireEnabled); })));
         if (tabs.some(function (t) { return t.off; })) {
           if (gen !== generation || who !== host.identity()) return;
+          serverOn = false;
           state = { phase: 'off', items: [], more: false, error: '', recent: recent };
           return paint();
         }
@@ -574,6 +624,7 @@
           });
         });
         if (gen !== generation || who !== host.identity()) return;
+        serverOn = true;
         state = { phase: 'list', items: nest(items), more: more, error: '', recent: recent };
       } catch (err) {
         if (gen !== generation || who !== host.identity()) return;
@@ -676,6 +727,22 @@
     async function press(id, what, arg) {
       if (!active()) { paint(); return; }
       if (what === 'reread') return refresh();
+      if (what === 'use_old') {
+        optedOut = true;
+        if (typeof host.setOldScreen === 'function') host.setOldScreen(true);
+        generation++;
+        state = { phase: 'old_screen', items: [], more: false, error: '', recent: recent, canOpenBillRecon: canOpenBillRecon() };
+        return paint();
+      }
+      if (what === 'use_new') {
+        optedOut = false;
+        if (typeof host.setOldScreen === 'function') host.setOldScreen(false);
+        return refresh();
+      }
+      if (what === 'open_bill_recon') {
+        if (typeof host.openBillRecon === 'function') host.openBillRecon();
+        return;
+      }
       var item = find(id);
       if (!item || item.busy || blockedWhy(item)) return;
       var s = item.suggestion;
@@ -775,7 +842,7 @@
   }
 
   var core = {
-    switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
+    isDefaultRole: isDefaultRole, switchMode: switchMode, switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
     blockedWhy: blockedWhy, undoWords: undoWords, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
@@ -783,15 +850,52 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   // ── The page ──
-  var stored = null;
-  try { stored = localStorage.getItem('sw_reconcile_place'); } catch (e) { /* off */ }
-  if (!switchOn(window.location ? window.location.search : '', stored)) return; // off: no request, no element
+  var FLAG_KEY = 'sw_reconcile_place';
+  function readStored() { try { return localStorage.getItem(FLAG_KEY); } catch (e) { return null; } }
+  function writeStored(v) {
+    try {
+      if (v == null) localStorage.removeItem(FLAG_KEY);
+      else localStorage.setItem(FLAG_KEY, v);
+    } catch (e) { /* storage blocked */ }
+  }
+  function stripUrlFlag() {
+    try {
+      var url = new URL(window.location.href);
+      if (url.searchParams.has('reconcile_place')) {
+        url.searchParams.delete('reconcile_place');
+        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+      }
+    } catch (e) { /* keep URL */ }
+  }
+  function currentRole() {
+    var auth = window.SECUREWORKS_CLOUD && window.SECUREWORKS_CLOUD.auth;
+    return auth && auth.isLoggedIn() ? auth.getRole() : null;
+  }
+  function urlParam() {
+    var m = /[?&]reconcile_place=([^&#]*)/.exec(String(window.location ? window.location.search : ''));
+    return m ? m[1].toLowerCase() : '';
+  }
   var host = {
     identity: function () {
       var auth = window.SECUREWORKS_CLOUD && window.SECUREWORKS_CLOUD.auth;
-      if (!auth || !auth.isLoggedIn() || ['admin', 'owner', 'ops_manager'].indexOf(auth.getRole()) < 0) return null;
+      if (!auth || !auth.isLoggedIn() || !isDefaultRole(auth.getRole())) return null;
       var user = auth.getUser(); return user && user.id;
     },
+    mode: function () {
+      return switchMode(window.location ? window.location.search : '', readStored(), currentRole());
+    },
+    showOldBar: function () {
+      var p = urlParam();
+      if (p === '0' || p === 'off') return false;
+      return readStored() === '0' && isDefaultRole(currentRole());
+    },
+    setOldScreen: function (off) {
+      stripUrlFlag();
+      if (off) writeStored('0');
+      else writeStored(isDefaultRole(currentRole()) ? null : '1');
+    },
+    canOpenBillRecon: function () { return typeof window.jpOpenBillsToPlace === 'function'; },
+    openBillRecon: function () { if (typeof window.jpOpenBillsToPlace === 'function') window.jpOpenBillsToPlace(); },
     visible: function () {
       var view = document.getElementById('viewRecon');
       return !!(view && view.classList.contains('active'));
@@ -814,7 +918,10 @@
     view.insertBefore(root, view.firstChild);
     var style = document.createElement('style');
     style.textContent = '.rp-wrap{max-width:880px;margin:0 auto;padding:16px 16px 24px;border-bottom:1px solid var(--sw-border,#ddd)}' +
-      '.rp-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.rp-head h2{font-size:20px;margin:0}' +
+      '.rp-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.rp-head h2{font-size:20px;margin:0}.rp-head-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}' +
+      '.rp-old-bar{max-width:880px;margin:0 auto;padding:10px 16px;border-bottom:1px solid var(--sw-border,#ddd);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--sw-text-sec,#4a5560)}' +
+      '.rp-old-bar button{font:inherit;font-size:13px;border:1px solid var(--sw-border,#bbb);border-radius:8px;padding:8px 12px;background:var(--sw-card,#fff);color:var(--sw-text,#222);cursor:pointer;min-height:44px}' +
+      '.rp-old-bar :focus-visible{outline:2px solid #1f5fbf;outline-offset:3px}' +
       '.rp-count{font-size:12px;padding:3px 8px;background:#fff4e5;color:#8a4b00;border-radius:12px;font-weight:600}' +
       '.rp-lede,.rp-meta,.rp-note{color:var(--sw-text-sec,#4a5560);font-size:13px}.rp-lede{margin:4px 0 16px}' +
       '.rp-card{background:var(--sw-card,#fff);border:1px solid var(--sw-border,#e3e3e3);border-radius:10px;padding:12px 14px;margin-bottom:10px;overflow-wrap:anywhere}' +

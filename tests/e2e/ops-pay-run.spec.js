@@ -284,3 +284,236 @@ test('pay run: the week steps by 7 days from the shown week, a slower earlier re
   await expect(run.locator('[data-empty]')).toBeVisible();
   expect((await page.evaluate(() => ZZRUN.reads)).map(r => r.params && r.params.week_start)).toEqual([null, '2026-11-09', '2026-11-23']);
 });
+
+// F1 pay run buttons: gated on pay_run.enabled === true and approver role; warnings never block.
+async function openRunWithWrites(page, answer, { role = 'owner', onPost = null } = {}) {
+  const css = fs.readFileSync(path.join(root, 'ops.html'), 'utf8').match(/<style[^>]*>([\s\S]*?)<\/style>/i)[1];
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/ZZTEST-pay-run-actions') return route.fulfill({ contentType: 'text/html', body:
+      `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body><main style="max-width:1100px;margin:auto;padding:20px"><button id="payTab">Pay run</button><div id="payRunHost"></div></main><script src="/modules/ops-pay-run.js"></script></body></html>` });
+    if (url.pathname === '/modules/ops-pay-run.js') return route.fulfill({ path: path.join(root, 'modules/ops-pay-run.js'), contentType: 'text/javascript' });
+    return route.abort();
+  });
+  await page.goto('/ZZTEST-pay-run-actions');
+  await page.evaluate(({ answer, role, onPostSrc }) => {
+    window.SECUREWORKS_CLOUD = { auth: { isLoggedIn: () => true, getRole: () => role, getUser: () => ({ id: 'ZZTEST-approver' }) } };
+    window.ZZRUN = { answer, reads: [], writes: [], postReply: null };
+    const handler = onPostSrc ? eval('(' + onPostSrc + ')') : null;
+    window.opsFetch = async (action, params) => {
+      ZZRUN.reads.push({ action, params: params || null });
+      if (action !== 'pay_run') throw new Error('Unexpected read ' + action);
+      return structuredClone(ZZRUN.answer);
+    };
+    window.opsPost = async (action, body) => {
+      ZZRUN.writes.push({ action, body });
+      if (ZZRUN.postReply) {
+        const next = typeof ZZRUN.postReply === 'function' ? ZZRUN.postReply(action, body) : ZZRUN.postReply;
+        ZZRUN.postReply = null;
+        if (next && next.__reject) throw Object.assign(new Error(next.message || 'refused'), next);
+        return next;
+      }
+      if (handler) return handler(action, body, ZZRUN);
+      return { ok: true };
+    };
+    return PayRun.open(document.getElementById('payRunHost'), document.getElementById('payTab'));
+  }, { answer, role, onPostSrc: onPost ? onPost.toString() : null });
+}
+
+test('pay run actions: hidden when enabled is false or absent (no warnings either), and hidden for non-approver roles', async ({ page }) => {
+  // enabled absent (today's server), even when invoice carries notes: renders exact today's screen, no warnings, no write buttons.
+  const withNotes = payRunAnswer({
+    invoices: [
+      invoice(4, 'Repair crew', { verdict: 'stopped', stops: [{ code: 'no_times', words: 'ZZTEST stop.' }] }),
+      invoice(1, 'Fencing crew', { notes: [{ code: 'hourly_no_agreed_amount', words: 'ZZTEST warning: job work order has no agreed amount.' }] })
+    ]
+  });
+  await openRunWithWrites(page, withNotes, { role: 'owner' });
+  const run = page.locator('[data-pay-run]');
+  await expect(run.locator('[data-pay-run-actions]')).toHaveCount(0);
+  await expect(run.locator('[data-notes]')).toHaveCount(0);
+  await expect(run).not.toContainText('ZZTEST warning');
+  await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
+
+  // enabled false also hides warnings and write buttons.
+  await openRunWithWrites(page, { ...withNotes, enabled: false }, { role: 'owner' });
+  await expect(run.locator('[data-pay-run-actions]')).toHaveCount(0);
+  await expect(run.locator('[data-notes]')).toHaveCount(0);
+  await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
+
+  // Non-approver role gets no write buttons even when enabled is true.
+  await openRunWithWrites(page, payRunAnswer({ enabled: true }), { role: 'sales' });
+  await expect(run.locator('[data-pay-run-actions]')).toHaveCount(0);
+  await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
+
+  // Blocked week with enabled true still shows no Approve button.
+  await openRunWithWrites(page, payRunAnswer({ enabled: true, run_blocked: true, run_blocked_words: 'ZZTEST: blocked.' }), { role: 'owner' });
+  await expect(run.getByRole('button', { name: /approve/i })).toHaveCount(0);
+});
+
+test('pay run actions: work-order warning shows on a clean row and never blocks Approve or Push', async ({ page }) => {
+  const warnedInvoice = invoice(1, 'Fencing crew', {
+    notes: [{ code: 'hourly_no_agreed_amount', words: 'ZZTEST warning: job work order has no agreed amount.' }]
+  });
+  const initial = payRunAnswer({
+    enabled: true,
+    counts: { clean: 2, stopped: 1, late: 0 },
+    invoices: [
+      invoice(4, 'Repair crew', { verdict: 'stopped', stops: [{ code: 'no_times', words: 'ZZTEST stop.' }] }),
+      warnedInvoice,
+      invoice(2, 'Patio crew')
+    ]
+  });
+  await openRunWithWrites(page, initial, {
+    role: 'owner',
+    onPost: (action, body, state) => {
+      if (action === 'approve_pay_run') {
+        state.answer = {
+          ...state.answer,
+          run: { id: 'ZZTEST-run-1', week_start: '2026-11-16', status: 'approved', approved_at: '2026-11-19T08:00:00Z' }
+        };
+        return { ok: true, week_start: body.week_start, run: { run_id: 'ZZTEST-run-1', week_start: body.week_start } };
+      }
+      if (action === 'push_pay_run_invoice') {
+        state.answer = {
+          ...state.answer,
+          invoices: state.answer.invoices.map(i => i.invoice_id === body.invoice_id ? { ...i, pushed: true, xero_bill_id: 'ZZTEST-XERO-1' } : i)
+        };
+        return { ok: true, run_id: body.run_id, invoice_id: body.invoice_id, xero_bill_id: 'ZZTEST-XERO-1' };
+      }
+      return { ok: true };
+    }
+  });
+  const run = page.locator('[data-pay-run]');
+  const row1 = run.locator('[data-invoice="ZZTEST-INV-1"]');
+  await expect(row1.locator('[data-notes]')).toContainText('Warning');
+  await expect(row1.locator('[data-notes]')).toContainText('ZZTEST warning: job work order has no agreed amount.');
+  await expect(row1.locator('.pr-clean')).toHaveText('Clean');
+
+  // Two-press Approve: warns about the work-order warning but does not block.
+  await run.getByRole('button', { name: 'Approve pay run' }).click();
+  await expect(run.locator('[data-pr-warn-summary]')).toContainText('1 clean invoice carries a work-order warning. Approving still pays them.');
+  expect(await page.evaluate(() => ZZRUN.writes)).toEqual([]);
+  await run.getByRole('button', { name: 'Yes, approve pay run' }).click();
+  await expect(run.locator('[data-pr-notice]')).toHaveText('Pay run approved.');
+  await expect(run.locator('[data-run-status]')).toContainText('Pay run approved');
+
+  // Push the clean invoice with the work-order warning: confirm names invoice, trade, week and figure; never blocked.
+  await row1.getByRole('button', { name: 'Push to Xero' }).click();
+  await expect(row1.locator('[data-pr-confirm="push"]')).toContainText('Push ZZTEST-INV-1 (Fencing crew, week of Mon 16 Nov 2026, $1,000.00 into bank) to Xero as a draft bill?');
+  await row1.getByRole('button', { name: 'Yes, push draft bill' }).click();
+  await expect(run.locator('[data-pr-notice]')).toHaveText('Pushed ZZTEST-INV-1 to Xero as a draft bill.');
+  await expect(row1.locator('[data-pushed]')).toHaveText('Pushed to Xero');
+  await expect(row1.getByRole('button', { name: 'Push to Xero' })).toHaveCount(0);
+
+  expect(await page.evaluate(() => ZZRUN.writes)).toEqual([
+    { action: 'approve_pay_run', body: { week_start: '2026-11-16', expected_clean_ids_hash: 'ZZTEST' } },
+    { action: 'push_pay_run_invoice', body: { run_id: 'ZZTEST-run-1', invoice_id: 'ZZTEST-id-1' } }
+  ]);
+  for (const width of [1280, 820, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+});
+
+test('pay run actions: release requires a reason, surfaces server 409 words, and mark super paid stamps pushed runs', async ({ page }) => {
+  const approvedRun = payRunAnswer({
+    enabled: true,
+    run: { id: 'ZZTEST-run-2', week_start: '2026-11-16', status: 'approved', approved_at: '2026-11-19T08:00:00Z' },
+    counts: { clean: 2, stopped: 0, late: 0 },
+    invoices: [
+      invoice(1, 'Fencing crew', { pushed: true, xero_bill_id: 'ZZTEST-BILL-1' }),
+      invoice(2, 'Patio crew', { pushed: false })
+    ]
+  });
+  await openRunWithWrites(page, approvedRun, {
+    role: 'bookkeeper',
+    onPost: (action, body, state) => {
+      if (action === 'release_pay_run_invoice') {
+        state.answer = {
+          ...state.answer,
+          run: { ...state.answer.run, status: 'pushed' },
+          invoices: state.answer.invoices.map(i => i.invoice_id === body.invoice_id
+            ? { ...i, verdict: 'stopped', stops: [{ code: 'released_from_run', words: 'Taken out of this run and sent back to review.' }] }
+            : i)
+        };
+        return { ok: true, run_status: 'pushed' };
+      }
+      if (action === 'mark_pay_run_super_paid') {
+        return { ok: true, run_id: body.run_id, super_marked_paid_at: '2026-11-19T09:00:00Z' };
+      }
+      return { ok: true };
+    }
+  });
+  const run = page.locator('[data-pay-run]');
+  const row2 = run.locator('[data-invoice="ZZTEST-INV-2"]');
+
+  // Mark super paid is hidden while run is still approved (not pushed).
+  await expect(run.getByRole('button', { name: 'Mark super paid' })).toHaveCount(0);
+
+  // Release: 409 server words shown (never bare code) and re-reads.
+  await page.evaluate(() => {
+    ZZRUN.postReply = { __reject: true, status: 409, body: { error: 'pay_run_xero_check_found_in_xero', message: 'The Xero check found this invoice in Xero, so it stays in the run.' } };
+  });
+  await row2.getByRole('button', { name: 'Release from run' }).click();
+  await row2.locator('input[name="reason"]').fill('ZZTEST repayment changed');
+  await row2.getByRole('button', { name: 'Yes, release from run' }).click();
+  await expect(run.locator('[data-pr-error]')).toHaveText('The Xero check found this invoice in Xero, so it stays in the run.');
+  await expect(run).not.toContainText('pay_run_xero_check_found_in_xero');
+
+  // Release succeeds -> run moves to pushed -> Mark super paid appears.
+  await row2.getByRole('button', { name: 'Release from run' }).click();
+  await row2.locator('input[name="reason"]').fill('ZZTEST checked and cleared');
+  await row2.getByRole('button', { name: 'Yes, release from run' }).click();
+  await expect(run.locator('[data-pr-notice]')).toHaveText('Released ZZTEST-INV-2 back to review.');
+  await expect(run.locator('[data-run-status]')).toContainText('Pay run pushed to Xero');
+  await expect(row2.getByRole('button', { name: 'Release from run' })).toHaveCount(0);
+
+  // Mark super paid: two-press confirm, remembers stamp even when backend pay_run omits super_marked_paid_at.
+  await run.getByRole('button', { name: 'Mark super paid' }).click();
+  await run.getByRole('button', { name: 'Yes, mark super paid' }).click();
+  await expect(run.locator('[data-pr-notice]')).toHaveText('Super marked paid.');
+  await expect(run.locator('[data-run-status]')).toContainText('Super marked paid on 19 Nov 2026');
+  await expect(run.getByRole('button', { name: 'Mark super paid' })).toHaveCount(0);
+
+  expect(await page.evaluate(() => ZZRUN.writes)).toEqual([
+    { action: 'release_pay_run_invoice', body: { run_id: 'ZZTEST-run-2', invoice_id: 'ZZTEST-id-2', reason: 'ZZTEST repayment changed' } },
+    { action: 'release_pay_run_invoice', body: { run_id: 'ZZTEST-run-2', invoice_id: 'ZZTEST-id-2', reason: 'ZZTEST checked and cleared' } },
+    { action: 'mark_pay_run_super_paid', body: { run_id: 'ZZTEST-run-2' } }
+  ]);
+
+  // When backend pay_run already includes run.super_marked_paid_at, shows stamp and no button on load.
+  await openRunWithWrites(page, payRunAnswer({
+    enabled: true,
+    run: { id: 'ZZTEST-run-3', week_start: '2026-11-16', status: 'pushed', super_marked_paid_at: '2026-11-18T16:30:00Z' },
+    counts: { clean: 1, stopped: 0, late: 0 },
+    invoices: [invoice(1, 'Fencing crew', { pushed: true })]
+  }), { role: 'owner' });
+  await expect(run.locator('[data-run-status]')).toContainText('Super marked paid on 19 Nov 2026');
+  await expect(run.getByRole('button', { name: 'Mark super paid' })).toHaveCount(0);
+});
+
+test('pay run actions: a read during an in-flight write re-enables buttons when the write finishes', async ({ page }) => {
+  await openRunWithWrites(page, payRunAnswer({ enabled: true }), { role: 'owner' });
+  const run = page.locator('[data-pay-run]');
+
+  // Hold opsPost open while a concurrent PayRun.read() completes, then resolve (and also verify rejection).
+  await page.evaluate(() => {
+    window.__releaseWrite = null;
+    window.opsPost = () => new Promise((resolve, reject) => { window.__releaseWrite = { resolve, reject }; });
+  });
+  await run.getByRole('button', { name: 'Approve pay run' }).click();
+  await run.getByRole('button', { name: 'Yes, approve pay run' }).click();
+  await page.evaluate(() => PayRun.read());
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeDisabled();
+  await page.evaluate(() => window.__releaseWrite.resolve({ ok: true }));
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeEnabled();
+  await expect(run.getByRole('button', { name: 'Previous week' })).toBeEnabled();
+
+  await run.getByRole('button', { name: 'Approve pay run' }).click();
+  await run.getByRole('button', { name: 'Yes, approve pay run' }).click();
+  await page.evaluate(() => PayRun.read());
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeDisabled();
+  await page.evaluate(() => window.__releaseWrite.reject(Object.assign(new Error('fail'), { status: 500 })));
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeEnabled();
+});

@@ -238,3 +238,40 @@ test('job page: a second tap while saving sends nothing', async () => {
   resolve({ ok: true, group_id: 'group' });
   await settle();
 });
+
+test('needs_hours: own days missing says Add your days; own days in counts only other missing crew', async () => {
+  const ownMissing = {
+    ...member,
+    group_id: 'ZZTEST-own', job_id: 'ZZTEST-job-own', job_number: 'ZZTEST-OWN',
+    awaiting: 'needs_hours', client_signed: false,
+    crew_hours: [
+      { name: 'ZZTEST Me', me: true, hours: 0 },
+      { name: 'ZZTEST Mate', me: false, hours: 0 },
+    ],
+  };
+  const h1 = harness({ my_group_work_orders: () => Promise.resolve({ groups: [ownMissing] }) });
+  h1.g.load();
+  await settle();
+  const html1 = h1.g.html([]);
+  assert.match(html1, /data-group-pill[^>]*>Add your days</);
+  assert.match(html1, /data-group-acceptance>Add your days</);
+  assert.doesNotMatch(html1, /Waiting on/);
+
+  const othersMissing = {
+    ...member,
+    group_id: 'ZZTEST-others', job_id: 'ZZTEST-job-others', job_number: 'ZZTEST-OTHERS',
+    awaiting: 'needs_hours', client_signed: false,
+    crew_hours: [
+      { name: 'ZZTEST Me', me: true, hours: 8 },
+      { name: 'ZZTEST Mate 1', me: false, hours: 0 },
+      { name: 'ZZTEST Mate 2', me: false, hours: 0 },
+    ],
+  };
+  const h2 = harness({ my_group_work_orders: () => Promise.resolve({ groups: [othersMissing] }) });
+  h2.g.load();
+  await settle();
+  const html2 = h2.g.html([]);
+  assert.match(html2, /data-group-pill[^>]*>Waiting on crew</);
+  assert.match(html2, /data-group-acceptance>Waiting on 2 crew to add their days</);
+  assert.doesNotMatch(html2, /Add your days/);
+});

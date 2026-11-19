@@ -70,10 +70,14 @@
   function signoffOk(g) {
     return g.awaiting !== 'awaiting_signoff';
   }
+  function missingOwnDays(g) {
+    return crewHours(g).some(function(c) { return c.me && !(Number(c.hours) > 0); });
+  }
   function missingHoursCount(g) {
-    return crewHours(g).filter(function(c) { return !(Number(c.hours) > 0); }).length;
+    return crewHours(g).filter(function(c) { return !c.me && !(Number(c.hours) > 0); }).length;
   }
   function needsHoursWords(g) {
+    if (missingOwnDays(g)) return 'Add your days';
     var n = missingHoursCount(g);
     return n > 0 ? 'Waiting on ' + n + ' crew to add their days' : 'Waiting on your crew to add their days';
   }
@@ -241,6 +245,7 @@
     if (notHappy(g) && !signoffOk(g)) return pill('Office to sort out','wait','data-group-pill');
     if (myTurn(g)) return pill('Confirm hours','wait','data-group-pill');
     if (!signoffOk(g)) return pill('Needs sign-off','wait','data-group-pill');
+    if ((g.awaiting === 'needs_hours' || g.awaiting === 'awaiting_others') && missingOwnDays(g)) return pill('Add your days','wait','data-group-pill');
     if (g.awaiting === 'needs_hours' || g.awaiting === 'awaiting_others' || !hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
     if (g.awaiting === 'frozen') return pill('Ready to invoice','ok','data-group-pill');
     if (g.awaiting === 'ready') return pill('Ready to finalise','info','data-group-pill');

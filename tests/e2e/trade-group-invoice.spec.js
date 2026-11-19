@@ -225,12 +225,14 @@ test('needs_hours with client_signed false never says Needs sign-off and shows w
   const zzJobB = 'bbbb0004-0000-4000-8000-000000000004';
   const zzGroupC = 'aaaa0005-0000-4000-8000-000000000005';
   const zzJobC = 'bbbb0005-0000-4000-8000-000000000005';
+  const zzGroupD = 'aaaa0006-0000-4000-8000-000000000006';
+  const zzJobD = 'bbbb0006-0000-4000-8000-000000000006';
   await page.route('**/functions/v1/ops-api?**', async route => {
     const req = route.request(), action = new URL(req.url()).searchParams.get('action');
     const reply = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (action === 'my_group_work_orders') {
       return reply({
-        enabled: true, group_job_ids: [zzJobA, zzJobB, zzJobC],
+        enabled: true, group_job_ids: [zzJobA, zzJobB, zzJobC, zzJobD],
         groups: [
           {
             group_id: zzGroupA, job_id: zzJobA, job_number: 'ZZTEST-GRP-3', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
@@ -253,6 +255,16 @@ test('needs_hours with client_signed false never says Needs sign-off and shows w
             pot_total: 1000, needs_hours: false, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
             client_signed: false, client_not_happy: true, client_signoff: null, awaiting: 'ready',
             projected_my_share: 500, projected_my_budget: 560, projected_cash_pay: 500, projected_super: 60,
+          },
+          {
+            group_id: zzGroupD, job_id: zzJobD, job_number: 'ZZTEST-GRP-6', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+            pot_total: 1000, needs_hours: true, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+            client_signed: false, client_signoff: null, awaiting: 'needs_hours',
+            crew_hours: [
+              { name: 'ZZTEST One', me: true, hours: 0, approved: false },
+              { name: 'ZZTEST Two', me: false, hours: 0, approved: false },
+              { name: 'ZZTEST Three', me: false, hours: 8, approved: true },
+            ],
           },
         ],
       });
@@ -280,4 +292,10 @@ test('needs_hours with client_signed false never says Needs sign-off and shows w
   await expect(cardC.locator('[data-group-signed="not-happy"]')).toContainText('The office will sort it out with the client.');
   await expect(cardC.locator('[data-group-signed="not-happy"]')).not.toContainText('stays locked');
   await expect(cardC.getByRole('button', { name: 'Finalise group shares', exact: true })).toBeVisible();
+
+  const cardD = page.locator(`[data-invoice-group="${zzGroupD}"]`);
+  await expect(cardD.locator('[data-group-pill]')).toHaveText('Add your days');
+  await expect(cardD.locator('[data-group-acceptance]')).toHaveText('Add your days');
+  await expect(cardD).not.toContainText('Waiting on');
+  await expect(cardD).not.toContainText('Needs sign-off');
 });

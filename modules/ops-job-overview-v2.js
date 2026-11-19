@@ -1534,7 +1534,7 @@ var JobOverviewV2 = (function () {
   var TIMEOUT_MS = 60 * 1000;     // job_overview is abandoned after a minute
   var FLAG_KEY = 'sw_overview_v2';
   var FILTER_KEY = 'sw_ov2_conv_filter';
-  var TRADE_ROLES = ['installer', 'lead_installer', 'crew', 'trade', 'subcontractor'];
+  var OFFICE_ROLES = ['admin', 'owner', 'ops_manager', 'estimator', 'sales', 'scoper', 'bookkeeper'];
   var cache = {};      // job id -> { status: ok | notdeployed | error, data, at, error, promise }
   var uiState = {};    // job id -> what the viewer opened, typed or asked, kept across re-renders
   var override = null; // the toggle's choice for this page, in case browser storage is blocked
@@ -2719,13 +2719,13 @@ var JobOverviewV2 = (function () {
     afterClassic: afterClassic,
     toggle: toggle,
     reload: function (force) { var j = currentJob(); if (j) { load(String(j.id), force !== false); } },
-    // Staff only: a signed-in user whose role is not a trade role. Tests override this.
+    // Office staff only: explicit allow list of office roles. Tests may override this.
     isStaffViewer: function () {
       try {
         var c = window.SECUREWORKS_CLOUD;
         if (!c || !c.auth || typeof c.auth.isLoggedIn !== 'function' || !c.auth.isLoggedIn()) return false;
-        var role = typeof c.auth.getRole === 'function' ? String(c.auth.getRole() || '').toLowerCase() : '';
-        return TRADE_ROLES.indexOf(role) < 0;
+        var role = typeof c.auth.getRole === 'function' ? String(c.auth.getRole() || '').trim().toLowerCase() : '';
+        return OFFICE_ROLES.indexOf(role) >= 0;
       } catch (e) { return false; }
     },
     core: C,

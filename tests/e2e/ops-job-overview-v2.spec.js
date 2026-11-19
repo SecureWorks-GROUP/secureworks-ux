@@ -697,3 +697,21 @@ test('server switch on: ?overview=classic wins, non-staff stays classic, and mak
   await expect(page.locator('#ov2Root')).toHaveCount(0);
   expect(await overviewFetches(page)).toBe(0);
 });
+
+test('isStaffViewer allows only explicit office roles and denies empty, unknown and trade roles', async ({ page }) => {
+  await boot(page, { url: '/ops.html', staff: false });
+  const results = await page.evaluate(() => {
+    const check = (loggedIn, role) => {
+      window.SECUREWORKS_CLOUD = { auth: { isLoggedIn: () => loggedIn, getRole: () => role } };
+      return window.JobOverviewV2.isStaffViewer();
+    };
+    return {
+      allowed: ['admin', 'owner', 'ops_manager', 'estimator', 'sales', 'scoper', 'bookkeeper', 'ADMIN'].map((r) => check(true, r)),
+      denied: ['', null, undefined, 'installer', 'lead_installer', 'crew', 'trade', 'subcontractor', 'client', 'unknown_role'].map((r) => check(true, r)),
+      signedOut: check(false, 'admin'),
+    };
+  });
+  expect(results.allowed).toEqual([true, true, true, true, true, true, true, true]);
+  expect(results.denied).toEqual([false, false, false, false, false, false, false, false, false, false]);
+  expect(results.signedOut).toBe(false);
+});

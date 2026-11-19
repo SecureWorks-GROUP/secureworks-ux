@@ -96,3 +96,6 @@ jobs:
 
       - name: Test CEO live alerts reuses signed-in client
         run: node --test tests/unit/ceo-alerts-client.test.cjs
+
+      - name: Test who is behind and office day entry
+        run: node --test tests/unit/ops-pay-behind.test.cjs tests/unit/group-office-entry.test.cjs

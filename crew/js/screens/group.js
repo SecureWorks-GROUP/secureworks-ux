@@ -6,6 +6,7 @@ import { api, ApiError, friendly } from '../lib/api.js';
 import { useQuery, useStore, local, invalidate, primeQuery } from '../lib/store.js';
 import { go, back } from '../lib/router.js';
 import { todayISO, mondayOf, addDays, weekDays, fmtDay, fmtDow, fmtDom, hoursBetween, tsToDate } from '../lib/dates.js';
+import { officeEntryOf, canDisputeOfficeEntry, reasonOk } from '../lib/office-entry.js';
 import { jobTitle, jobAddress } from '../lib/model.js';
 import { useJob, jobStub } from '../lib/data.js';
 import { Page, Section, KV, JobLine, Button, Sheet, Field, Picks, Toggle, TimeInput, BREAKS, SkelRows, Empty, LoadError, IconButton, toast, ask, openOverlay, buzz } from '../ui/kit.js';
@@ -157,6 +158,30 @@ export function Group({ jobId }) {
     local.del(unsureKey); setUnsure(null);
   };
 
+  const office = officeEntryOf(g, meRow);
+  const officeWhen = (at) => {
+    if (!at) return '';
+    const day = String(at).includes('T') ? tsToDate(at) : String(at).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}/.test(day) ? fmtDay(day) : '';
+  };
+  const sendDispute = async (reason) => {
+    setBusy('dispute');
+    try {
+      const res = await api('dispute_office_group_hours', null, { group_id: gid, reason });
+      if (res && res.ok === false) throw new ApiError(res.userMessage || res.error || 'Not saved', { status: 409, code: res.code, body: res });
+      refresh(res);
+      buzz(10);
+      toast('Dispute sent. The office will look at these hours.', { kind: 'ok' });
+      setBusy('');
+      return res || {};
+    } catch (err) {
+      setBusy('');
+      const code = (err.body && err.body.code) || err.code || '';
+      toast(code === 'group_office_day_entry_disabled' ? 'Disputes are switched off right now. Ask the office.' : friendly(err), { kind: 'bad', ms: 6500 });
+      shareQ.refetch();
+      return null;
+    }
+  };
   const paidDiffers = num(g.my_cash_pay) != null && num(g.my_share) != null && Math.abs(g.my_cash_pay - g.my_share) > 0.005;
   const notHappy = !signed && (g.client_not_happy === true || (signoff && signoff.happy === false));
   const next = nextWords({ awaiting, signed, submitted, release, blocked, myHours, notHappy });
@@ -180,6 +205,17 @@ export function Group({ jobId }) {
         ${num(g.my_super) ? html`<${KV} k="Into your super" v=${cash(g.my_super)} />` : null}
       </div>` : null}
     <//>
+
+    ${office.entered ? html`<${Section} label="Entered by the office">
+      <div class="block card pad" data-office-entry>
+        <b>The office entered these days</b>
+        <p class="t-small">${office.reason || 'No reason was recorded.'}</p>
+        ${officeWhen(office.at) ? html`<p class="t-small">Entered ${officeWhen(office.at)}.</p>` : null}
+        ${office.dates.length ? html`<p class="t-small">${office.dates.map((d) => officeWhen(d) || d).join(', ')}</p>` : null}
+        ${office.disputed ? html`<p data-office-disputed><b>Disputed, waiting on office</b></p>${office.disputeReason ? html`<p class="t-small">${office.disputeReason}</p>` : null}` : null}
+        ${canDisputeOfficeEntry(office, { submitted, frozen, groupId: gid }) ? html`<div><${Button} kind="line" onClick=${() => openOverlay((close) => html`<${DisputeSheet} onClose=${close} onSend=${sendDispute} />`)}>Dispute these hours<//></div>` : null}
+      </div>
+    <//>` : null}
 
     ${blocked ? html`<div class="block note-banner pay-gap"><span><span class="t-strong">Do not send your share again.</span> We could not tell if it went through. The office needs to check first.
         <span class="pay-linkpair"><button type="button" class="link tap" onClick=${() => { shareQ.refetch(); listQ.refetch(); toast('Checked again.'); }}>Check again</button><button type="button" class="link tap" onClick=${sendAgainAnyway}>The office said to resend</button></span></span></div>` : null}
@@ -248,6 +284,26 @@ function nextWords({ awaiting, signed, submitted, release, blocked, myHours, not
   if (awaiting === 'ready') return ['Lock in the shares', 'Hours are in and the customer has signed. Lock it in to set your share.'];
   if (awaiting === 'frozen') return ['Invoice your share', 'The shares are set. Send yours and you are done.'];
   return ['Group work order', 'Open each step below to see where it is up to.'];
+}
+
+function DisputeSheet({ onClose, onSend }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const ok = reasonOk(reason);
+  const save = async (shut) => {
+    if (!ok) { setNote('Say why these hours are wrong (3 to 500 characters).'); return; }
+    setBusy(true);
+    const res = await onSend(reason.trim());
+    if (res) shut();
+    else { setBusy(false); setNote('That did not send. Try again.'); }
+  };
+  return html`<${Sheet} title="Dispute these hours" sub="Tell the office what is wrong with the days they entered." onClose=${onClose}
+    foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!ok} onClick=${() => save(shut)}>Send dispute<//>`}>
+    <${Field} label="Why are these hours wrong?" error=${note}>
+      <textarea class="input" maxlength="500" value=${reason} onInput=${(e) => { setReason(e.currentTarget.value); setNote(''); }} />
+    <//>
+  <//>`;
 }
 
 // ------------------------------------------------------------- add a day

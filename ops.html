@@ -5229,7 +5229,7 @@ __swOpsStampAssets([
       </div>
 
       <!-- Pay run (modules/ops-pay-run.js): the weekly pay run, read only, for the pay run approvers only (PayRun.probe). -->
-      <div id="subPayrun" class="sub-view"><div id="payRunHost"></div></div>
+      <div id="subPayrun" class="sub-view"><div id="payRunHost"></div><div id="payBehindHost"></div></div>
 
       <!-- Trade Bills -->
       <div id="subTradebills" class="sub-view">
@@ -19277,6 +19277,7 @@ function showSubTab(tab) {
   if (tab === 'payrun') {
     if (window.PayRun) PayRun.open(document.getElementById('payRunHost'), btn);
     else document.getElementById('payRunHost').textContent = 'The pay run screen did not load. Reload the page and try again.';
+    if (window.PayBehind) PayBehind.mountPayBehindPanel(document.getElementById('payBehindHost'));
   }
   if (tab === 'financehealth') loadFinanceHealth();
   if (tab === 'jobprofit') loadJobProfit();
@@ -33195,6 +33196,12 @@ __swOpsStampAssets([
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-pay-run.js?v=2'}
+]);
+</script>
+<!-- Who is behind, and office entry of a missing crew day (modules/ops-pay-behind.js) -->
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-pay-behind.js?v=1'}
 ]);
 </script>
 <!-- AI bill placement in Bills to place (modules/ops-bills-ai.js) -->

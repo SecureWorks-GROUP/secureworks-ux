@@ -629,3 +629,20 @@ test('the Undo confirm names the document, the amount ex GST and the job, for pl
   assert.equal(await undoText(sp), 'Undo this? Bill ZZTEST Supplier ZZ-1, recorded as: Split $1,000.00 ex GST: Posts, $600.00 ex GST on SWF-990001; Posts, $400.00 ex GST on SWP-990002. Undoing puts it back on the list as it was before.');
   assert.equal(P.undoWords({ document: '', recorded: 'Put $5.00 ex GST on SWF-990001.' }), 'Undo this? Recorded as: Put $5.00 ex GST on SWF-990001. Undoing puts it back on the list as it was before.');
 });
+
+test('F3d: a bill with a Xero bill id links to it in a new tab; no id, a bad id or a credit links nowhere', () => {
+  const X = 'aaaaaaaa-0000-4000-8000-00000000zz01'.replace('zz', '00');
+  const bill = P.itemFromList(raw({ xero_invoice_id: X }));
+  assert.equal(bill.xero_invoice_id, X);
+  const link = P.xeroLinkHtml(bill);
+  assert.match(link, new RegExp('href="https://go\\.xero\\.com/AccountsPayable/View\\.aspx\\?InvoiceID=' + X + '"'));
+  assert.match(link, /target="_blank"/);
+  assert.match(link, /rel="noopener noreferrer"/);
+  assert.match(link, />Open in Xero</);
+  assert.equal(P.xeroLinkHtml(P.itemFromList(raw())), '');
+  assert.equal(P.xeroLinkHtml(P.itemFromList(raw({ xero_invoice_id: 'ZZTEST-not-a-xero-id' }))), '');
+  assert.equal(P.xeroLinkHtml(P.itemFromList(raw({ xero_invoice_id: '"><script>' }))), '');
+  assert.equal(P.xeroLinkHtml(P.itemFromList(raw({ kind: 'credit', amount_ex: -50, xero_invoice_id: X }))), '');
+  // document_id is not a proven Xero bill id, so it never makes a link.
+  assert.equal(P.xeroLinkHtml(P.itemFromList(raw({ document_id: X }))), '');
+});

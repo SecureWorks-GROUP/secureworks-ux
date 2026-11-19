@@ -14,6 +14,7 @@
   'use strict';
   var TABS = ['bills', 'card_bank', 'receipts']; // the tabs whose items can be cost documents
   var READ_LIMIT = 100;
+  var XERO_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var MAX_PAGES = 20; // per tab: 2,000 items, far above the waiting list, then a plain notice
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // The split helper (modules/ops-reconcile-split.js), loaded first on the page.
@@ -231,6 +232,8 @@
       document_number: str(raw.document_number), document_date: raw.document_date, amount_ex: raw.amount_ex,
       cents: Split.lineCents(raw.amount_ex), waiting_days: raw.waiting_days, shown_hash: str(raw.shown_hash),
       reason_words: str(raw.reason_words),
+      // F3d: the Xero bill's own id, when the list sends one. A credit note opens elsewhere in Xero, so only a bill links.
+      xero_invoice_id: raw.kind !== 'credit' && (Split.lineCents(raw.amount_ex) || 0) >= 0 && XERO_ID.test(str(raw.xero_invoice_id)) ? str(raw.xero_invoice_id) : '',
       suggestion: sug ? { outcome: str(sug.outcome), job_id: str(sug.job_id), job_number: str(sug.job_number), job_site: str(sug.job_site), division: str(sug.division) } : null,
       clues: Array.isArray(raw.clues) ? raw.clues : [], against: Array.isArray(raw.against) ? raw.against : [],
       lines: lines, set_aside: listed.filter(notCounted).length, held: raw.held && typeof raw.held === 'object' ? raw.held : null,
@@ -412,12 +415,17 @@
     return (n === 1 ? '1 line on this document is' : n + ' lines on this document are') +
       ' not counted (set aside, for example as a duplicate). ' + (n === 1 ? 'It is' : 'They are') + ' not placed here and not in the amounts below.';
   }
+  function xeroLinkHtml(item) {
+    if (!item.xero_invoice_id) return '';
+    return '<a class="rp-xero" data-rp-xero href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + encodeURIComponent(item.xero_invoice_id) +
+      '" target="_blank" rel="noopener noreferrer">Open in Xero</a>';
+  }
   function cardHtml(item) {
     var dis = item.busy ? ' disabled' : '';
     var h = '<article class="rp-card" data-rp-id="' + esc(item.id) + '"><div class="rp-top"><span>' + esc(item.kind_words) + ' ' + esc(item.party) +
       (item.document_number ? ' ' + esc(item.document_number) : '') + '</span><span class="rp-amt">' + esc(amountWords(item.amount_ex, item.is_credit)) + '</span></div>' +
       '<div class="rp-meta"><span>' + esc(dateWords(item.document_date)) + '</span>' + (waitWords(item.waiting_days) ? '<span>' + esc(waitWords(item.waiting_days)) + '</span>' : '') +
-      (item.reason_words ? '<span>' + esc(item.reason_words) + '</span>' : '') + '</div>' +
+      (item.reason_words ? '<span>' + esc(item.reason_words) + '</span>' : '') + xeroLinkHtml(item) + '</div>' +
       (item.is_credit ? '<div class="rp-credit" data-rp-credit><span class="rp-tag">Credit</span> Takes cost off where it is put. ' + esc(billWords(item)) + '</div>' : '') +
       (item.under && !shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Decide the bill and this credit follows it. Placing it alone fixes it here.</p>' : '') +
       (item.under && shared(item) ? '<p class="rp-note" data-rp-bill-waiting>Shared: decide its bills and this credit follows them. Placing it alone fixes it here.</p>' : '') +
@@ -777,7 +785,7 @@
   var core = {
     switchOn: switchOn, dollars: dollars, amountWords: amountWords, dateWords: dateWords, waitWords: waitWords,
     suggestionWords: suggestionWords, refusalWords: refusalWords, listErrorWords: listErrorWords, itemFromList: itemFromList,
-    blockedWhy: blockedWhy, undoWords: undoWords, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
+    xeroLinkHtml: xeroLinkHtml, blockedWhy: blockedWhy, undoWords: undoWords, setAsideWords: setAsideWords, canUndo: canUndo, undoRefusalWords: undoRefusalWords, splitSummary: splitSummary, footerHtml: footerHtml, leftHtml: leftHtml, linesCents: linesCents, billWords: billWords, shared: shared, billCreditsFromList: billCreditsFromList, readTab: readTab, nest: nest, decideBody: decideBody, confirmWords: confirmWords, render: render, create: create
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -818,7 +826,7 @@
       '.rp-count{font-size:12px;padding:3px 8px;background:#fff4e5;color:#8a4b00;border-radius:12px;font-weight:600}' +
       '.rp-lede,.rp-meta,.rp-note{color:var(--sw-text-sec,#4a5560);font-size:13px}.rp-lede{margin:4px 0 16px}' +
       '.rp-card{background:var(--sw-card,#fff);border:1px solid var(--sw-border,#e3e3e3);border-radius:10px;padding:12px 14px;margin-bottom:10px;overflow-wrap:anywhere}' +
-      '.rp-top{display:flex;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;font-weight:600}.rp-meta{display:flex;gap:4px 12px;flex-wrap:wrap;margin-top:2px}' +
+      '.rp-xero{color:var(--sw-blue,#1f5fbf);font-weight:600}.rp-top{display:flex;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;font-weight:600}.rp-meta{display:flex;gap:4px 12px;flex-wrap:wrap;margin-top:2px}' +
       '.rp-sug{font-size:14px;margin-top:6px}.rp-credit{font-size:14px;margin-top:6px}.rp-tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;background:#e7f1ff;color:#1f4f99;margin-right:4px}.rp-why{font-size:13px;margin-top:6px}.rp-why h4{font-size:13px;margin:8px 0 2px}.rp-why ul{margin:0;padding-left:18px}' +
       '.rp-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.rp-wrap button,.rp-wrap select,.rp-wrap input{font:inherit;font-size:14px;border:1px solid var(--sw-border,#bbb);border-radius:8px;padding:8px 12px;background:var(--sw-card,#fff);color:var(--sw-text,#222);max-width:100%;box-sizing:border-box}' +
       '.rp-wrap button{cursor:pointer;min-height:44px}.rp-wrap button:disabled{opacity:.5;cursor:default}.rp-wrap :focus-visible{outline:2px solid #1f5fbf;outline-offset:3px}' +

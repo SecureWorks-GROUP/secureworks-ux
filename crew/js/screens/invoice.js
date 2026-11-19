@@ -8,6 +8,7 @@ import { fmtDow, fmtDom, fmtDate, fmtDayLong, mondayOf, tsToDate } from '../lib/
 import { invoicePays } from '../lib/invoice.js';
 import { Page, Button, Badge, SkelRows, Empty, LoadError, toast, ask } from '../ui/kit.js';
 import { PayRows, PayGroup, PayLine, InvoiceBadge, superNote, whenWords, weekWords, cash, hrs, num } from '../ui/paybits.js';
+import { heldWords, heldState, isHeldInvoice, isFollowOn, heldCounts } from '../lib/held.js';
 
 const LINE_KIND = {
   reimbursement: 'Reimbursement (receipt)', travel: 'Travel', materials: 'Materials', equipment: 'Equipment', commission: 'Commission', 'work order': 'Work order', work_order: 'Work order',
@@ -75,6 +76,8 @@ export function Invoice({ invoiceId }) {
   const payLabel = paid ? 'You were paid' : draft ? 'This draft adds up to' : sentBack || voided ? 'It added up to' : 'You are paid';
 
   const sorted = [...lines].sort((a, b) => lineDay(a).localeCompare(lineDay(b)));
+  // A send's lines that wait on the office (trade_line_hold_v1). Their own screen; never a pay figure.
+  if (isHeldInvoice(inv)) return html`<${HeldInvoice} inv=${inv} lines=${sorted} what=${what} backWord=${backWord} goBack=${goBack} />`;
   const reopen = () => (week ? go('/pay/week/' + mondayOf(week)) : go('/pay/work-orders'));
   const remove = async () => {
     if (!(await ask({ title: 'Delete this draft?', body: 'It was never sent, so nothing is lost at the office. You can start the invoice again any time.', yes: 'Delete draft', danger: true }))) return;
@@ -97,6 +100,7 @@ export function Invoice({ invoiceId }) {
     right=${html`<${InvoiceBadge} inv=${inv} />`}>
     <div class="pay-who t-num">${[what, inv.invoice_number].filter(Boolean).join(' · ')}</div>
     <div class=${'block note-banner pay-gap0 ' + (sentBack || voided ? 'bad' : paid ? 'ok' : 'plain')}><span>${figures ? where : 'The office system did not send the figures for this one. Ask the office for them. ' + where}</span></div>
+    ${isFollowOn(inv) ? html`<div class="block note-banner plain pay-gap" data-held-follow-on><span>The office approved these lines after you sent your week. They are paid on this invoice.</span></div>` : null}
     ${sentBack || inv.office_note ? html`<div class=${'block note-banner pay-gap ' + (sentBack ? 'bad' : 'plain')}><span><span class="t-strong">From the office</span><span class="pay-noticesub">${inv.office_note || 'Check each line, fix what is wrong and send it again.'}</span></span></div>` : null}
 
     <div class="pay-rows pay-gap">
@@ -120,6 +124,24 @@ export function Invoice({ invoiceId }) {
   <//>`;
 }
 
+function HeldInvoice({ inv, lines, what, backWord, goBack }) {
+  const c = heldCounts(inv);
+  const waiting = lines.filter((l) => heldState(l) === 'waiting');
+  const notApproved = lines.filter((l) => heldState(l) === 'not_approved');
+  const lead = c.waiting ? 'These lines are waiting on the office. They are not in your pay until the office approves them.'
+    : c.notApproved ? 'The office did not approve these lines, so they are not paid.'
+    : 'The office has decided every line. Approved lines are paid on their own invoice in your invoices.';
+  return html`<${Page} title="With the office" back=${backWord} onBack=${goBack} flush>
+    <div class="pay-who t-num">${[what, inv.invoice_number].filter(Boolean).join(' · ')}</div>
+    <div class=${'block note-banner pay-gap0 ' + (c.waiting ? 'plain' : c.notApproved ? 'bad' : 'ok')} data-held-invoice><span>${lead}</span></div>
+    <div class="pay-rows pay-gap">
+      ${waiting.length ? html`<${PayGroup} label="Waiting on office">${waiting.map((l) => html`<${LineItem} key=${l.id} line=${l} held />`)}<//>` : null}
+      ${notApproved.length ? html`<${PayGroup} label="Not approved">${notApproved.map((l) => html`<${LineItem} key=${l.id} line=${l} held />`)}<//>` : null}
+    </div>
+    <p class="block t-small pay-note">Amounts are before GST and super. Only your own lines are shown.</p>
+  <//>`;
+}
+
 function reviewOf(l) {
   const s = String(l.office_review_status || '').toLowerCase();
   if (['awaiting', 'held', 'pending', 'queried'].includes(s)) return 'checking';
@@ -127,7 +149,7 @@ function reviewOf(l) {
   return '';
 }
 
-function LineItem({ line: l }) {
+function LineItem({ line: l, held = false }) {
   const labour = isLabour(l);
   const kind = labour ? '' : LINE_KIND[typeOf(l)] || 'Other';
   const desc = l.description && !/^labour$/i.test(l.description.trim()) && l.description.trim() !== kind ? l.description.trim() : '';
@@ -138,8 +160,13 @@ function LineItem({ line: l }) {
   const day = lineDay(l);
   const priced = labour && num(l.total_hours) ? `${hrs(l.total_hours)}${rate ? ' at ' + cash(rate) : ''}` : !labour && num(l.quantity) > 1 ? `${l.quantity} ${l.unit || ''}`.trim() : '';
   const detail = [day ? `${fmtDow(day)} ${fmtDom(day)}` : '', sameStart ? '' : kind.toLowerCase(), priced].filter(Boolean).join(' · ');
-  const notes = [labour ? whenWords(l) : '', desc, l.external_ref || '', review && l.office_review_note ? 'Office: ' + l.office_review_note : ''].filter(Boolean);
-  const badge = review === 'checking' ? html`<${Badge} kind="warn">Office is checking this line<//>` : review === 'no' ? html`<${Badge} kind="bad">Not accepted by the office<//>` : leadAsked ? html`<${Badge} kind="warn">The job lead asked about this line<//>` : null;
+  // A held line (hold_reason set) says why it waits, and what the office changed or decided. Absent fields add nothing.
+  const state = l.hold_reason ? heldState(l) : '';
+  const changed = state === 'approved' && l.office_change_reason ? 'The office changed this line: ' + l.office_change_reason : '';
+  const sentWas = state === 'approved' && num(l.sent_amount_ex) != null && num(l.line_total_ex) != null && Math.abs(l.sent_amount_ex - l.line_total_ex) > 0.005 ? 'You sent ' + cash(l.sent_amount_ex) : '';
+  const notes = [labour ? whenWords(l) : '', desc, l.external_ref || '', state === 'waiting' ? heldWords(l.hold_reason) : '', review && l.office_review_note ? 'Office: ' + l.office_review_note : '', changed, sentWas].filter(Boolean);
+  const badge = held && review === 'checking' ? html`<${Badge} kind="warn">Waiting on office<//>` : held && review === 'no' ? html`<${Badge} kind="bad">Not approved<//>`
+    : review === 'checking' ? html`<${Badge} kind="warn">Office is checking this line<//>` : review === 'no' ? html`<${Badge} kind="bad">Not accepted by the office<//>` : leadAsked ? html`<${Badge} kind="warn">The job lead asked about this line<//>` : null;
   return html`<${PayLine} title=${typeOf(l) === 'reimbursement' ? kind : l.site_suburb || l.client_name || l.job_number || kind || 'Line'} number=${l.job_number} detail=${detail}
     note=${notes.length ? notes.join(' · ') : ''} badge=${badge ? html`<span class="pay-linebadge">${badge}</span>` : null} amount=${num(l.line_total_ex) != null ? cash(l.line_total_ex) : ''} />`;
 }

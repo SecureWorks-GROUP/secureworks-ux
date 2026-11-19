@@ -13,6 +13,8 @@ import { Page, Button, StatusBadge, Field, Toggle, SkelRows, LoadError, toast, a
 import { cash, hrs, plural, weekWords, PayGroup, PayLine, PayRows, DoneScreen, superNote, num } from '../ui/paybits.js';
 import { useWeek, openAddOther } from './timesheet.js';
 import { useExpenses, groupWords } from './pay.js';
+import { allHeld, sendHeldLines } from '../lib/held.js';
+import { SendSplit, SendHeldLines, rememberHeldSend } from '../ui/held.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const dayWords = (d) => (d ? `${fmtDow(d)} ${fmtDom(d)}` : '');
@@ -52,6 +54,7 @@ export function Review({ monday: mondayParam }) {
       if (!res || (res.success !== true && res.ok !== true)) throw new ApiError((res && (res.userMessage || res.error)) || 'The invoice was not saved.', { status: 422, code: res && res.code, body: res });
       done.current = true;
       w.sent();
+      rememberHeldSend(user && user.id, res, monday);
       invalidate('invoices'); invalidate('hours'); invalidate('money');
       buzz([14, 60, 14, 60, 30]);
       setResult({ ...res, receiptFacts: receiptSendFacts(lines, res) });
@@ -186,11 +189,16 @@ function Sent({ res, monday, workOrder }) {
   const xeroLater = res.code === 'XERO_PUSH_FAILED';
   const dedNote = res.recurring_deduction_week && res.recurring_deduction_week.note;
   const figures = Boolean(res.pay_view) || num(res.trade_payable) != null || num(res.gross_earned) != null;
-  return html`<${DoneScreen} bar="Invoice" title="Invoice sent"
-    lead=${held ? 'The office is checking a line on it. You are paid once they approve it.' : xeroLater ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}
+  // Held lines (trade_line_hold_v1): absent from today's answers, so these add nothing then.
+  const everyLineHeld = allHeld(res);
+  const someHeld = !everyLineHeld && sendHeldLines(res).length > 0;
+  return html`<${DoneScreen} bar="Invoice" title=${everyLineHeld ? 'Sent to the office' : 'Invoice sent'}
+    lead=${everyLineHeld ? 'Every line is waiting on the office, so nothing is in this week\'s pay yet. You are paid for each line once they approve it.' : someHeld ? 'Some lines are waiting on the office. The rest is in your pay.' : held ? 'The office is checking a line on it. You are paid once they approve it.' : xeroLater ? 'It is saved. The office will finish sending it to the bookkeeper. You do not need to do anything.' : 'It is with the bookkeeper. You are paid on the usual pay run.'}
     foot=${html`<${Button} block class="big" onClick=${() => go('/pay', { replace: true })}>Done<//>
       ${res.invoice_id ? html`<${Button} kind="line" block onClick=${() => go('/pay/invoice/' + res.invoice_id, { replace: true })}>View invoice<//>` : null}`}>
-    ${figures ? html`<div class="card"><${PayRows} workOrder=${workOrder} m=${{ ...res, trade_payable: res.trade_payable != null ? res.trade_payable : res.amount_payable != null ? res.amount_payable : res.net_pay }} /></div>` : html`<p class="t-small">The office system did not send the figures back. Open the invoice to see them.</p>`}
+    <${SendSplit} res=${res} />
+    ${everyLineHeld ? null : figures ? html`<div class="card"><${PayRows} workOrder=${workOrder} m=${{ ...res, trade_payable: res.trade_payable != null ? res.trade_payable : res.amount_payable != null ? res.amount_payable : res.net_pay }} /></div>` : html`<p class="t-small">The office system did not send the figures back. Open the invoice to see them.</p>`}
+    <${SendHeldLines} res=${res} />
     ${superNote(res) ? html`<p class="t-small">${superNote(res)}</p>` : null}
     ${dedNote ? html`<p class="t-small">${dedNote}</p>` : null}
     ${(res.receiptFacts?.skipped || []).map((words) => html`<p class="t-small" role="status">${words}</p>`)}

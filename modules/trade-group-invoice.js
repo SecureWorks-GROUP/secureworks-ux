@@ -65,7 +65,15 @@
     return crew.length > 0 && crew.every(function(c) { return approvedRow(g, c); });
   }
   function signed(g) { return g.client_signed === true; }
-  function unlocked(g) { return signed(g) && hoursOk(g); }
+  // Follow the server's awaiting (matching crew/js/screens/group.js): 'ready' or 'frozen'
+  // unlocks Finalise and Submit even when client_signed is false (sign-off switch off);
+  // 'awaiting_signoff' waits for the client signature.
+  function signoffOk(g) {
+    if (g.awaiting === 'awaiting_signoff') return false;
+    if (g.awaiting === 'ready' || g.awaiting === 'frozen') return true;
+    return signed(g);
+  }
+  function unlocked(g) { return signoffOk(g) && hoursOk(g); }
   function myTurn(g) { return !g.submitted && asksApproval(g) && g.my_hours_approved !== true && g.awaiting !== 'needs_hours' && g.awaiting !== 'needs_join'; }
   function selectable(g) { return !g.submitted && !allInBasis(g) && g.awaiting === 'frozen' && unlocked(g) && Number(g.my_share) > 0; }
   function signoff(g) {
@@ -226,9 +234,9 @@
     if (removed(g)) return pill('Removed by office','no','data-group-pill');
     if (notMember(g)) return pill('Office to check','no','data-group-pill');
     if (g.awaiting === 'needs_join') return pill('Join to invoice','info','data-group-pill');
-    if (notHappy(g)) return pill('Office to sort out','wait','data-group-pill');
+    if (notHappy(g) && g.awaiting !== 'ready' && g.awaiting !== 'frozen') return pill('Office to sort out','wait','data-group-pill');
     if (myTurn(g)) return pill('Confirm hours','wait','data-group-pill');
-    if (!signed(g) && g.awaiting !== 'needs_hours') return pill('Needs sign-off','wait','data-group-pill');
+    if (!signoffOk(g) && g.awaiting !== 'needs_hours') return pill('Needs sign-off','wait','data-group-pill');
     if (!hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
     if (g.awaiting === 'frozen') return pill('Ready to invoice','ok','data-group-pill');
     if (g.awaiting === 'ready') return pill('Ready to finalise','info','data-group-pill');
@@ -343,7 +351,7 @@
       return '<div class="gw-unhappy" data-group-signed="not-happy"><b>Client not happy with the work</b>'
         + '<div class="gw-sub">The office will sort it out with the client. Your share stays locked until then.</div></div>';
     }
-    return '<div class="gw-line" data-group-signed="no"><span>Not signed yet</span>'+pill('Waiting','no')+'</div>'
+    return '<div class="gw-line" data-group-signed="no"><span>Not signed yet</span>'+pill(signoffOk(g) ? 'Optional' : 'Waiting','no')+'</div>'
       + '<button type="button" class="btn btn-secondary gw-btn" data-group-sign-open="'+esc(g.group_id)+'" onclick="GroupWorkOrderInvoice.openSign(this.getAttribute(\'data-group-sign-open\'))">Hand phone to client to sign</button>'
       + '<div class="gw-sub gw-hint">Client can’t sign? The office can sign off instead.</div>';
   }
@@ -358,8 +366,8 @@
     }
     if (!unlocked(g)) {
       if (notHappy(g)) return '<div class="gw-locked" data-group-locked>Locked while the office sorts it out with the client.</div>';
-      var text = !signed(g) && !hoursOk(g) ? 'Unlocks when the crew’s hours are confirmed and the client has signed.'
-        : !signed(g) ? 'Unlocks when the client has signed.' : 'Unlocks when the crew’s hours are confirmed.';
+      var text = !signoffOk(g) && !hoursOk(g) ? 'Unlocks when the crew’s hours are confirmed and the client has signed.'
+        : !signoffOk(g) ? 'Unlocks when the client has signed.' : 'Unlocks when the crew’s hours are confirmed.';
       return '<div class="gw-locked" data-group-locked>'+text+'</div>';
     }
     if (g.awaiting === 'frozen' && Number(g.my_share) > 0) {

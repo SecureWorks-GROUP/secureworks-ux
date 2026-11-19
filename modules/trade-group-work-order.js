@@ -79,7 +79,7 @@
     if (submitted[groupId]) { showMsg(el, submitted[groupId]); return; }
     var controls = document.createElement('div');
     var twelve = res.pay_basis === 'all_in_12_v2';
-    if (res.awaiting === 'ready' && res.client_signed === true) {
+    if (res.awaiting === 'ready') {
       var pot = res.pot_total;
       var poolLabel = typeof pot === 'number' && Number.isFinite(pot) && pot >= 0
         ? 'Crew total for this job: $' + pot.toFixed(2) + ' before GST. '
@@ -124,7 +124,7 @@
     if (action === 'freeze' || action === 'invoice') {
       var share = el._groupShare;
       if (el._groupBusy || !share || share.group_share_office_review_required !== true || submitted[share.group_id]) return;
-      if (action === 'freeze' && (share.awaiting !== 'ready' || share.client_signed !== true)) return;
+      if (action === 'freeze' && share.awaiting !== 'ready') return;
       if (action === 'invoice' && (share.awaiting !== 'frozen' || !(Number(share.my_share) > 0))) return;
       el._groupBusy = true;
       btn.disabled = true;

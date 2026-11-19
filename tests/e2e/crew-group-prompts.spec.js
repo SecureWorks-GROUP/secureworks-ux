@@ -7,7 +7,7 @@ const { crewUrl, watchErrors, PHONE } = require('../helpers/crew');
 
 test.use(PHONE);
 
-async function installGroupFixture(page, { enabled = true, groups = [], bookings = [] } = {}) {
+async function installGroupFixture(page, { enabled = true, groups = [], bookings = [], hoursGroupRoutes = [] } = {}) {
   await page.goto(crewUrl('#/jobs'));
   await page.waitForFunction(() => Boolean(window.__crewDemo));
   await page.evaluate(async (cfg) => {
@@ -50,6 +50,9 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
       role: 'installer',
       clocked_on_at: b.clockOn ? `${today}T07:00:00+08:00` : null,
       clocked_off_at: b.clockOff ? `${today}T15:00:00+08:00` : null,
+      started_at: b.startedAt ? `${today}T07:00:00+08:00` : null,
+      completed_at: b.completedAt ? `${today}T15:00:00+08:00` : null,
+      arrived_at: b.arrivedAt ? `${today}T07:00:00+08:00` : null,
       hours_worked: b.hours || null,
       jobs: jobMap.get(b.job_id)
     }));
@@ -57,6 +60,20 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
     const liveGroups = cfg.groups.map((g) => ({ ...g }));
     window.__zzGroups = liveGroups;
     window.__zzGroupReads = 0;
+
+    const realHours = ops.my_hours;
+    ops.my_hours = (p) => {
+      const base = realHours(p);
+      if (!cfg.hoursGroupRoutes || !cfg.hoursGroupRoutes.length) return base;
+      const extra = cfg.hoursGroupRoutes.map((r) => ({
+        job_id: r.job_id,
+        job_number: r.job_number || 'ZZTEST-000',
+        client_name: 'Customer',
+        site_suburb: r.site_suburb || 'ZZTEST',
+        booked_dates: (r.dayOffsets || []).map(toDate).filter(Boolean)
+      }));
+      return { ...base, group_route_jobs: [...(base.group_route_jobs || []), ...extra] };
+    };
 
     ops.my_jobs = () => ({
       today: asgRows.filter((a) => a.scheduled_date === today),
@@ -128,7 +145,8 @@ async function installGroupFixture(page, { enabled = true, groups = [], bookings
     store.invalidate('myjobs');
     store.invalidate('groups');
     store.invalidate('group:');
-  }, { enabled, groups, bookings });
+    store.invalidate('hours:');
+  }, { enabled, groups, bookings, hoursGroupRoutes });
 }
 
 test('ZZTEST Home and Pay show open group prompts in step order and keep future-only and non-actionable groups quiet', async ({ page }) => {
@@ -366,5 +384,45 @@ test('ZZTEST Home caches my_group_work_orders for 10 minutes instead of 2', asyn
   await expect(page.getByRole('heading', { name: 'Jobs' })).toBeVisible();
   await page.evaluate(() => { location.hash = '#/today'; });
   await expect.poll(() => page.evaluate(() => window.__zzGroupReads)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('ZZTEST scheduled-status job with worked days prompts, while future-only scheduled job stays quiet', async ({ page }) => {
+  const errors = watchErrors(page);
+  await installGroupFixture(page, {
+    enabled: true,
+    groups: [
+      // Status never moved past 'scheduled', worked 2 days ago and also has a future booking ahead.
+      { group_id: 'zz-g-spast', job_id: 'zz-j-spast', job_number: 'ZZTEST-701', site_suburb: 'ZZTEST Sched Past', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Trade', me: true, hours: 0, approved: false }] },
+      // Status never moved past 'scheduled', booking carries started_at / hours_worked evidence.
+      { group_id: 'zz-g-sstart', job_id: 'zz-j-sstart', job_number: 'ZZTEST-702', site_suburb: 'ZZTEST Sched Started', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Trade', me: true, hours: 0, approved: false }] },
+      // Status never moved past 'scheduled', my_jobs only has a future booking while my_hours carries a worked booked_date <= today.
+      { group_id: 'zz-g-shrs', job_id: 'zz-j-shrs', job_number: 'ZZTEST-703', site_suburb: 'ZZTEST Sched Hours', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Trade', me: true, hours: 0, approved: false }] },
+      // Purely future-only scheduled job: no worked days anywhere.
+      { group_id: 'zz-g-sfut', job_id: 'zz-j-sfut', job_number: 'ZZTEST-704', site_suburb: 'ZZTEST Sched Future', job_status: 'scheduled', awaiting: 'needs_hours', needs_hours: true, client_signed: false, crew_hours: [{ name: 'Trade', me: true, hours: 0, approved: false }] }
+    ],
+    bookings: [
+      { job_id: 'zz-j-spast', dayOffset: -2, status: 'confirmed' },
+      { job_id: 'zz-j-spast', dayOffset: 4, status: 'confirmed' },
+      { job_id: 'zz-j-sstart', dayOffset: 3, status: 'confirmed', startedAt: true, hours: 4 },
+      { job_id: 'zz-j-shrs', dayOffset: 5, status: 'confirmed' },
+      { job_id: 'zz-j-sfut', dayOffset: 6, status: 'confirmed' }
+    ],
+    hoursGroupRoutes: [
+      { job_id: 'zz-j-shrs', job_number: 'ZZTEST-703', site_suburb: 'ZZTEST Sched Hours', dayOffsets: [-1] }
+    ]
+  });
+
+  for (const hash of ['#/today', '#/pay']) {
+    await page.evaluate((h) => { location.hash = h; }, hash);
+    const box = page.locator('[data-group-prompts]');
+    await expect(box).toBeVisible();
+    await expect(box.locator('button.item .main > b')).toHaveText([
+      'Add your days on ZZTEST Sched Hours',
+      'Add your days on ZZTEST Sched Past',
+      'Add your days on ZZTEST Sched Started'
+    ]);
+    await expect(box).not.toContainText('ZZTEST Sched Future');
+  }
   expect(errors).toEqual([]);
 });

@@ -88,10 +88,11 @@ export function Pay() {
   const sheetWords = thisInv ? 'On the invoice you sent' : !sheet ? '' : !sheet.count ? 'Nothing recorded yet' : `${sheet.daysDone} of ${plural(sheet.days, 'day')} done · ${hrs(sheet.hours)}`;
   const sheetStatus = thisInv ? 'sent' : !sheet || !sheet.count ? 'draft' : sheet.todo ? 'needs_times' : 'complete';
   const openGroups = () => (groupList.length === 1 ? go('/pay/group/' + groupList[0].job_id) : openOverlay((close) => html`<${GroupsSheet} groups=${groupList} onClose=${close} />`));
-  const toDo = useMemo(() => groupPromptsFor(groups.data, bookings, { today, bookingsPending }).length, [groups.data, bookings, today, bookingsPending]);
+  const hoursList = useMemo(() => [hours.data, lastHours.data].filter(Boolean), [hours.data, lastHours.data]);
+  const toDo = useMemo(() => groupPromptsFor(groups.data, bookings, { today, bookingsPending, hoursList }).length, [groups.data, bookings, today, bookingsPending, hoursList]);
 
   return html`<${Page} root title="Pay" right=${basis ? html`<span class="t-num">${basis}</span>` : null}>
-    <${GroupPrompts} groupsData=${groups.data} bookings=${bookings} bookingsPending=${bookingsPending} />
+    <${GroupPrompts} groupsData=${groups.data} bookings=${bookings} bookingsPending=${bookingsPending} hoursList=${hoursList} />
 
     <div class="block card pad pay-weekcard">
       <h2 class="t-cap">Pay week ${fmtWeek(monday)}</h2>
@@ -172,26 +173,60 @@ export function groupPromptText(g) {
   return step;
 }
 
+/** True when a my_jobs booking carries server evidence of a worked day, even if job.status is still 'scheduled'. */
+export function bookingHasWorkedDay(b, today = todayISO()) {
+  if (!b) return false;
+  if (bookingState(b) !== 'booked') return true;
+  if (b.status === 'in_progress') return true;
+  if (Number(b.hours) > 0) return true;
+  if (b.startedAt || b.completedAt || b.arrivedAt) return true;
+  if (b.date && b.date <= today) return true;
+  if (b.end && b.end <= today) return true;
+  return false;
+}
+
+/** True when any loaded my_hours payload carries a worked day (<= today) for this group job. */
+function hoursHasWorkedDay(jobId, hoursList, today) {
+  const id = String(jobId);
+  for (const h of hoursList || []) {
+    if (!h) continue;
+    for (const g of h.group_route_jobs || []) {
+      if (!g || String(g.job_id) !== id) continue;
+      if ((g.booked_dates || []).some((d) => d && String(d).slice(0, 10) <= today)) return true;
+    }
+    for (const a of h.assignments || []) {
+      const aJobId = (a && a.jobs && a.jobs.id) || (a && a.job_id);
+      if (!a || String(aJobId) !== id) continue;
+      const day = String(a.scheduled_date || '').slice(0, 10);
+      if (day && day <= today) return true;
+      if (Number(a.hours_worked) > 0 || a.clocked_on_at || a.clocked_off_at || a.started_at || a.completed_at || a.logged_time_entry) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * True only when the job is purely future-only (not started yet): my_jobs has
- * only upcoming or unscheduled bookings on a pre-start job, no crew hours are
- * logged on the group, the customer has not signed off, and there are no
- * server-suggested worked days. A job worked >30 days ago that also has a
- * follow-up booking ahead stays prompted.
+ * only unstarted upcoming or unscheduled bookings on a pre-start job, my_hours
+ * has no worked day on it, no crew hours are logged on the group, the customer
+ * has not signed off, and there are no server-suggested worked days. Any job
+ * with worked days still prompts even if jobs.status never moved past 'scheduled'.
  */
-export function isFutureOnlyGroup(groupOrJobId, bookings, today = todayISO()) {
+export function isFutureOnlyGroup(groupOrJobId, bookings, today = todayISO(), hoursList = null) {
   const g = groupOrJobId && typeof groupOrJobId === 'object' ? groupOrJobId : null;
   const jobId = g ? g.job_id : groupOrJobId;
   if (g) {
     if (Array.isArray(g.crew_hours) && g.crew_hours.some((c) => Number(c && c.hours) > 0)) return false;
     if (g.client_signed === true || Boolean(g.client_signoff)) return false;
     if (g.claim && Array.isArray(g.claim.my_suggested_days) && g.claim.my_suggested_days.length > 0) return false;
+    if (g.release && Number(g.release.invoiced) > 0) return false;
+    if (Array.isArray(g.crew_status) && g.crew_status.some((c) => c && c.state && c.state !== 'not_invoiced' && c.state !== 'no_share')) return false;
   }
+  if (hoursHasWorkedDay(jobId, hoursList, today)) return false;
   const own = (bookings || []).filter((b) => b && b.mine !== false && String(b.jobId) === String(jobId));
   if (!own.length) return false;
+  if (own.some((b) => bookingHasWorkedDay(b, today))) return false;
   return own.every((b) => {
-    if (bookingState(b) !== 'booked') return false;
-    if (b.date && b.date <= today) return false;
     const job = b.job || {};
     if (job.archived === true) return false;
     return PRE_START_JOB_STATUSES.has(String(job.status || '').toLowerCase());
@@ -204,7 +239,7 @@ export function isFutureOnlyGroup(groupOrJobId, bookings, today = todayISO()) {
  * Purely future-only jobs stay quiet via my_jobs; locked groups without a
  * positive share stay quiet; switch off (enabled !== true) returns [].
  */
-export function groupPromptsFor(groupsData, bookings, { today = todayISO(), bookingsPending = false } = {}) {
+export function groupPromptsFor(groupsData, bookings, { today = todayISO(), bookingsPending = false, hoursList = null } = {}) {
   if (!groupsData || groupsData.enabled !== true) return [];
   const list = Array.isArray(groupsData.groups) ? groupsData.groups : [];
   return list
@@ -215,7 +250,7 @@ export function groupPromptsFor(groupsData, bookings, { today = todayISO(), book
       if (a === 'frozen' && !(num(g.my_share) > 0)) return false;
       if (a === 'needs_join' || a === 'needs_hours') {
         if (bookingsPending) return false;
-        if (isFutureOnlyGroup(g, bookings, today)) return false;
+        if (isFutureOnlyGroup(g, bookings, today, hoursList)) return false;
       }
       return true;
     })
@@ -224,11 +259,11 @@ export function groupPromptsFor(groupsData, bookings, { today = todayISO(), book
 }
 
 /** Plain prompts on Home and Pay for every open group work order waiting on this trade. */
-export function GroupPrompts({ groupsData, bookings, bookingsPending = false }) {
+export function GroupPrompts({ groupsData, bookings, bookingsPending = false, hoursList = null }) {
   const today = todayISO();
   const items = useMemo(
-    () => groupPromptsFor(groupsData, bookings, { today, bookingsPending }),
-    [groupsData, bookings, today, bookingsPending]
+    () => groupPromptsFor(groupsData, bookings, { today, bookingsPending, hoursList }),
+    [groupsData, bookings, today, bookingsPending, hoursList]
   );
   if (!items.length) return null;
   return html`<${Section} label="Group work orders" right=${html`<span class="t-small t-strong nums">${items.length}</span>`}>

@@ -22,7 +22,8 @@ export function Today() {
   const today = todayISO();
   const monday = mondayOf(today);
   const { bookings, loading, error, refetch, refreshing, data } = useMyBookings();
-  const groups = useGroups();
+  // my_group_work_orders scans all past allocations on the server; keep Home's read cached for 10 min.
+  const groups = useGroups({ ttl: 600000 });
   const byDate = useMemo(() => bookingsByDate(bookings), [bookings]);
   const { changes, dismiss } = useBookingChanges(bookings, Boolean(data) && !refreshing && !error);
   const daysOff = useMyDaysOff(monday);

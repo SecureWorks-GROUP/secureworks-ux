@@ -9,7 +9,7 @@ import { invoiceForWeek, sentBackForWeek, invoicePays, buildLines, isLiveInvoice
 import { useMyBookings } from '../lib/data.js';
 import { bookingState } from '../lib/model.js';
 import { Page, Section, KV, StatusBadge, Badge, JobLine, Button, Sheet, SkelRows, LoadError, openOverlay } from '../ui/kit.js';
-import { cash, hrs, plural, sheetRows, sheetSummary, groupDays, InvoiceBadge } from '../ui/paybits.js';
+import { cash, hrs, num, plural, sheetRows, sheetSummary, groupDays, InvoiceBadge } from '../ui/paybits.js';
 import { useCharges, needsCheck } from './charges.js';
 
 // ---------- reads the pay screens share ----------
@@ -25,7 +25,7 @@ export function loadDraft(monday) {
 export function useMoney() { return useQuery('money', () => api('my_money', { months: 12 }), { persist: true, ttl: 60000 }); }
 export const usePayHistory = () => useQuery('payhistory', () => api('my_pay_history', { years: 2 }), { ttl: 60000 });
 export function useExpenses() { return useQuery('expenses', () => api('list_expenses', { limit: 100 }), { persist: true, ttl: 60000 }); }
-export function useGroups() { return useQuery('groups', () => api('my_group_work_orders', null, null, { keepSession: true }), { ttl: 120000 }); }
+export function useGroups({ ttl = 120000 } = {}) { return useQuery('groups', () => api('my_group_work_orders', null, null, { keepSession: true }), { ttl }); }
 /**
  * The jobs this week that are paid through a group work order, each with the
  * days the trade has put on it. One read a job; a failed read leaves the days empty.
@@ -149,11 +149,12 @@ export function groupWords(g) {
   if (a === 'awaiting_others') return 'Waiting on the rest of the crew';
   if (a === 'awaiting_rate') return 'Waiting on the office';
   if (a === 'ready') return 'Lock in the shares';
-  if (a === 'frozen') return 'Invoice my share';
+  if (a === 'frozen') return num(g.my_share) > 0 ? 'Invoice my share' : 'Shares are locked in';
   return (g.discovery && g.discovery.message) || 'Open to see what is next';
 }
 
 const GROUP_PROMPT_ORDER = { needs_join: 0, needs_hours: 1, ready: 2, frozen: 3 };
+const PRE_START_JOB_STATUSES = new Set(['', 'draft', 'lead', 'new', 'quoted', 'accepted', 'processing', 'order_materials', 'scheduled']);
 
 /** Plain job label for a group row, matching GroupsSheet and the Group screen. */
 export function groupJobName(g) {
@@ -165,22 +166,43 @@ export function groupPromptText(g) {
   if (!g || g.submitted) return '';
   const a = g.awaiting;
   if (!(a in GROUP_PROMPT_ORDER)) return '';
+  if (a === 'frozen' && !(num(g.my_share) > 0)) return '';
   const step = groupWords(g);
   if (a === 'needs_join' || a === 'needs_hours') return `${step} on ${groupJobName(g)}`;
   return step;
 }
 
-/** True when my_jobs shows only upcoming or unscheduled bookings for this job (not worked yet). */
-export function isFutureOnlyGroup(jobId, bookings, today = todayISO()) {
+/**
+ * True only when the job is purely future-only (not started yet): my_jobs has
+ * only upcoming or unscheduled bookings on a pre-start job, no crew hours are
+ * logged on the group, the customer has not signed off, and there are no
+ * server-suggested worked days. A job worked >30 days ago that also has a
+ * follow-up booking ahead stays prompted.
+ */
+export function isFutureOnlyGroup(groupOrJobId, bookings, today = todayISO()) {
+  const g = groupOrJobId && typeof groupOrJobId === 'object' ? groupOrJobId : null;
+  const jobId = g ? g.job_id : groupOrJobId;
+  if (g) {
+    if (Array.isArray(g.crew_hours) && g.crew_hours.some((c) => Number(c && c.hours) > 0)) return false;
+    if (g.client_signed === true || Boolean(g.client_signoff)) return false;
+    if (g.claim && Array.isArray(g.claim.my_suggested_days) && g.claim.my_suggested_days.length > 0) return false;
+  }
   const own = (bookings || []).filter((b) => b && b.mine !== false && String(b.jobId) === String(jobId));
   if (!own.length) return false;
-  return own.every((b) => bookingState(b) === 'booked' && (!b.date || b.date > today));
+  return own.every((b) => {
+    if (bookingState(b) !== 'booked') return false;
+    if (b.date && b.date <= today) return false;
+    const job = b.job || {};
+    if (job.archived === true) return false;
+    return PRE_START_JOB_STATUSES.has(String(job.status || '').toLowerCase());
+  });
 }
 
 /**
  * Actionable open group work orders for this trade, ordered by step:
  * Join -> Add your days -> Lock in the shares -> Invoice my share.
- * Future-only jobs stay quiet via my_jobs; switch off (enabled !== true) returns [].
+ * Purely future-only jobs stay quiet via my_jobs; locked groups without a
+ * positive share stay quiet; switch off (enabled !== true) returns [].
  */
 export function groupPromptsFor(groupsData, bookings, { today = todayISO(), bookingsPending = false } = {}) {
   if (!groupsData || groupsData.enabled !== true) return [];
@@ -190,9 +212,10 @@ export function groupPromptsFor(groupsData, bookings, { today = todayISO(), book
       if (!g || !g.job_id || g.submitted) return false;
       const a = g.awaiting;
       if (!(a in GROUP_PROMPT_ORDER)) return false;
+      if (a === 'frozen' && !(num(g.my_share) > 0)) return false;
       if (a === 'needs_join' || a === 'needs_hours') {
         if (bookingsPending) return false;
-        if (isFutureOnlyGroup(g.job_id, bookings, today)) return false;
+        if (isFutureOnlyGroup(g, bookings, today)) return false;
       }
       return true;
     })

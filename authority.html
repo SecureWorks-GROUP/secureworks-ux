@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>SecureWorks: authority to proceed</title>
+  <style>
+    body { margin: 0; font-family: Helvetica, Arial, sans-serif; background: #F4F6F7; color: #293C46; }
+    header { background: #293C46; color: #fff; padding: 14px 16px; border-bottom: 3px solid #F15A29; }
+    header b { font-size: 17px; }
+    header span { display: block; font-size: 12px; opacity: .75; margin-top: 2px; }
+    main { max-width: 560px; margin: 0 auto; padding: 18px 16px 48px; }
+    h1 { font-size: 20px; margin: 0 0 10px; line-height: 1.25; }
+    .card { background: #fff; border: 1px solid #D5DDE2; border-radius: 8px; padding: 14px; margin: 12px 0; }
+    .facts div { font-size: 14px; margin: 2px 0; }
+    .facts b { display: inline-block; min-width: 92px; }
+    h2 { font-size: 15px; margin: 14px 0 4px; }
+    p { font-size: 14px; line-height: 1.5; margin: 6px 0; }
+    label { display: block; font-size: 14px; font-weight: 700; margin-top: 14px; }
+    input[type=text] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; font-size: 16px; border: 1px solid #8a9aa4; border-radius: 6px; }
+    .agree { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; }
+    .agree input { width: 22px; height: 22px; margin-top: 1px; flex: none; }
+    canvas { display: block; width: 100%; height: 170px; margin-top: 6px; background: #fff; border: 1px solid #293C46; border-radius: 6px; touch-action: none; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
+    .link { background: none; border: 0; color: #293C46; text-decoration: underline; font-size: 14px; padding: 6px 0; }
+    .primary { display: block; width: 100%; margin-top: 18px; padding: 14px; font-size: 17px; font-weight: 700; color: #fff; background: #F15A29; border: 0; border-radius: 8px; }
+    .primary:disabled { opacity: .5; }
+    .msg { font-size: 14px; padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
+    .err { background: #fdecea; color: #8a1c10; }
+    .ok { background: #e8f5ec; color: #17602e; }
+  </style>
+</head>
+<body>
+  <header><b>SecureWorks Group</b><span>Restoration works</span></header>
+  <main id="app"><p>Loading…</p></main>
+  <script>
+  (function () {
+    var API = 'https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/client-authority';
+    var app = document.getElementById('app');
+    var token = new URLSearchParams(location.search).get('t') || '';
+    var drew = false;
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function when(iso) { try { return new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Perth', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso; } }
+    function show(html) { app.innerHTML = html; }
+
+    function facts(d) {
+      return '<div class="card facts">' +
+        '<div><b>Job</b> ' + esc(d.job_number) + '</div>' +
+        '<div><b>Property</b> ' + esc(d.site_address) + '</div>' +
+        (d.builder_reference ? '<div><b>Claim</b> ' + esc(d.builder_reference) + '</div>' : '') +
+        '</div>';
+    }
+
+    function wording(w) {
+      var h = '<div class="card"><p>' + esc(w.intro) + '</p>';
+      w.clauses.forEach(function (c) { h += '<h2>' + esc(c.heading) + '</h2><p>' + esc(c.text) + '</p>'; });
+      return h + '<p><b>' + esc(w.declaration) + '</b></p></div>';
+    }
+
+    function signed(d) {
+      show('<h1>Thank you, this is signed</h1>' + facts(d) +
+        '<div class="msg ok">Signed by ' + esc(d.signed_name || '') + (d.signed_at ? ' on ' + esc(when(d.signed_at)) : '') +
+        '. A copy is saved on your job. You can close this page.</div>');
+    }
+
+    function form(d) {
+      show('<h1>' + esc(d.wording.title) + '</h1>' + facts(d) + wording(d.wording) +
+        '<div class="card">' +
+        '<label for="nm">Your full name</label><input id="nm" type="text" autocomplete="name" value="' + esc(d.signer_name || '') + '">' +
+        '<div class="row"><label for="pad">Sign here with your finger</label><button class="link" id="clr" type="button">Clear</button></div>' +
+        '<canvas id="pad"></canvas>' +
+        '<label class="agree"><input id="ag" type="checkbox"><span>I have read this and I agree to it.</span></label>' +
+        '<button class="primary" id="go" type="button">Sign and send</button>' +
+        '<div id="out"></div></div>');
+      var pad = document.getElementById('pad');
+      var ctx = pad.getContext('2d');
+      function size() {
+        var r = pad.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+        pad.width = Math.round(r.width * k); pad.height = Math.round(r.height * k);
+        ctx.setTransform(k, 0, 0, k, 0, 0); ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#141e3c';
+        drew = false;
+      }
+      size();
+      var drawing = false;
+      function pt(ev) { var r = pad.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
+      pad.addEventListener('pointerdown', function (ev) { drawing = true; pad.setPointerCapture(ev.pointerId); var p = pt(ev); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+      pad.addEventListener('pointermove', function (ev) { if (!drawing) return; var p = pt(ev); ctx.lineTo(p.x, p.y); ctx.stroke(); drew = true; });
+      pad.addEventListener('pointerup', function () { drawing = false; });
+      pad.addEventListener('pointercancel', function () { drawing = false; });
+      document.getElementById('clr').onclick = function () { ctx.clearRect(0, 0, pad.width, pad.height); drew = false; };
+      document.getElementById('go').onclick = function () {
+        var out = document.getElementById('out');
+        var name = document.getElementById('nm').value.trim();
+        if (name.length < 2) { out.innerHTML = '<div class="msg err">Please type your full name.</div>'; return; }
+        if (!drew) { out.innerHTML = '<div class="msg err">Please sign in the box.</div>'; return; }
+        if (!document.getElementById('ag').checked) { out.innerHTML = '<div class="msg err">Please tick that you have read and agree.</div>'; return; }
+        var btn = this; btn.disabled = true; btn.textContent = 'Saving…'; out.innerHTML = '';
+        fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ t: token, signed_name: name, agree: true, signature: pad.toDataURL('image/png') }) })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (res && res.ok) { d.signed_name = res.signed_name || name; d.signed_at = res.signed_at; signed(d); return; }
+            btn.disabled = false; btn.textContent = 'Sign and send';
+            out.innerHTML = '<div class="msg err">' + esc((res && res.error) || 'That did not save. Please try again.') + '</div>';
+          })
+          .catch(function () { btn.disabled = false; btn.textContent = 'Sign and send'; out.innerHTML = '<div class="msg err">No connection. Please try again.</div>'; });
+      };
+    }
+
+    if (!token) { show('<h1>This link is not complete</h1><p>Please open the link from your text message again, or call us on 0489 267 771.</p>'); return; }
+    fetch(API + '?t=' + encodeURIComponent(token))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) { show('<h1>We could not open this</h1><p>' + esc((d && d.error) || 'Please try again.') + ' If it keeps happening, call us on 0489 267 771.</p>'); return; }
+        if (d.status === 'signed') { signed(d); return; }
+        if (d.status === 'expired') { show('<h1>This link has expired</h1>' + facts(d) + '<p>Please ask us for a new link, or call 0489 267 771.</p>'); return; }
+        form(d);
+      })
+      .catch(function () { show('<h1>No connection</h1><p>Please check your signal and open the link again.</p>'); });
+  })();
+  </script>
+</body>
+</html>

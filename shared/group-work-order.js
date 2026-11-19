@@ -144,7 +144,7 @@ var GroupWorkOrderCore = (function () {
       h += '<p data-group-wo-msg>' + esc(message || 'That could not be read.') + '</p>';
     } else {
       var view = closedShare(raw);
-      h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : 'Waiting for the client’s confirmation.') + '</p>';
+      h += '<p data-group-wo-signed>' + (view.client_signed ? 'Client sign-off recorded.' : view.awaiting === 'awaiting_signoff' ? 'Waiting for the client’s confirmation.' : 'No client sign-off recorded.') + '</p>';
       if (view.pot_total != null) h += '<p data-group-wo-total>' + (allInBasis(view.pay_basis) ? 'Crew total (pay and super) ' : 'Crew total ') + esc(money(view.pot_total)) + '</p>';
       if (view.my_budget != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_budget)) + '</p><p data-group-wo-split>Pay ' + esc(money(view.my_cash_pay)) + ' · ' + (view.pay_basis === 'all_in_12_v2' ? 'Super 12% ' : 'Super ') + esc(money(view.my_super)) + '</p>';
       else if (view.my_share != null) h += '<p data-group-wo-share>Your share ' + esc(money(view.my_share)) + '</p>';
@@ -154,7 +154,7 @@ var GroupWorkOrderCore = (function () {
         awaiting_others: 'Waiting for the remaining crew hours.',
         awaiting_rate: 'The office needs to confirm crew rates.',
         awaiting_crew_approval: view.my_hours_approved ? 'Waiting for the rest of the crew to confirm their hours.' : 'Confirm your hours to unlock the shares.',
-        ready: 'Hours and sign-off are ready. Your share has not been finalised yet.',
+        ready: view.client_signed ? 'Hours and sign-off are ready. Your share has not been finalised yet.' : 'Ready to finalise. Your share has not been finalised yet.',
         frozen: 'Your share is finalised.'
       };
       if (waiting[view.awaiting]) h += '<p data-group-wo-status>' + esc(waiting[view.awaiting]) + '</p>';
@@ -261,7 +261,7 @@ var GroupWorkOrderCore = (function () {
     var h = '<section data-office-group-wo-card aria-label="Group work order">';
     h += '<div class="gwo-title">Group work order</div>';
     if (finiteOrNull(read.pot_total) != null) h += '<p data-office-group-total>Total ' + esc(money(read.pot_total)) + '</p>';
-    h += '<p>' + (read.client_signed ? (read.client_signoff_method === 'office_waiver' ? 'Historical office approval recorded.' : 'Client sign-off recorded.') : 'Waiting for the client’s confirmation.') + '</p>';
+    h += '<p>' + (read.client_signed ? (read.client_signoff_method === 'office_waiver' ? 'Historical office approval recorded.' : 'Client sign-off recorded.') : read.awaiting === 'awaiting_signoff' ? 'Waiting for the client’s confirmation.' : 'No client sign-off recorded.') + '</p>';
     if (read.client_signoff_method === 'office_waiver') {
       h += '<p data-office-group-override>Historical office approval: ' + esc(read.client_signoff_reason || '') + '</p>';
     }
@@ -287,10 +287,10 @@ var GroupWorkOrderCore = (function () {
       h += '<p>This approves everyone\'s hours on behalf of the crew. It is not a crew signature. Anyone on this crew cannot approve it.</p>';
       h += '<button type="submit">Approve hours for the crew</button></form>';
     }
-    if (!read.client_signed) h += '<p>Use Client sign-off above to record the client’s signed copy or written confirmation. A general office waiver does not unlock a new group.</p>';
+    if (!read.client_signed) h += '<p>' + (read.awaiting === 'awaiting_signoff' ? 'Use Client sign-off above to record the client’s signed copy or written confirmation. A general office waiver does not unlock a new group.' : 'Use Client sign-off above to record the client’s signed copy or written confirmation.') + '</p>';
     h += '<p data-office-group-message role="status" aria-live="polite"></p>';
     var shares = Array.isArray(read.shares) ? read.shares : [];
-    if (!shares.length) h += '<p data-office-group-shares>' + (read.client_signed ? 'Sign-off recorded. Shares have not been finalised yet.' : 'Shares are waiting for sign-off.') + '</p>';
+    if (!shares.length) h += '<p data-office-group-shares>' + (read.client_signed ? 'Sign-off recorded. Shares have not been finalised yet.' : read.awaiting === 'awaiting_signoff' ? 'Shares are waiting for sign-off.' : 'Shares have not been finalised yet.') + '</p>';
     else {
       h += '<ul data-office-group-shares>';
       shares.forEach(function (row) {

@@ -88,3 +88,20 @@ test('office client confirmation distinguishes historical waivers and escapes al
  assert.match(html,/Historical office waiver/);assert.match(html,/current client confirmation/);assert.match(html,/Client-signed copy/);assert.match(html,/Client’s written confirmation/);assert.doesNotMatch(html,/<script>|<img|<b>client note/);assert.doesNotMatch(html,/data-office-signoff-form|waive_client_signoff|agreed_labour|\$/);
  const frozen=ui.officeHtml({form:{job_number:'ZZTEST'},split_frozen:true,can_record_copy:false});assert.match(frozen,/Reopening it will require fresh client confirmation/);assert.doesNotMatch(frozen,/data-client-so-form/);
 });
+
+test('shared group-work-order words match server awaiting when client_signed is false',()=>{
+ const core=require('../../shared/group-work-order.js');
+ const readyTrade=core.tradeHtml('share',{enabled:true,group_id:'ZZTEST-g1',awaiting:'ready',client_signed:false,pot_total:1000,my_share:500});
+ assert.match(readyTrade,/No client sign-off recorded\./);
+ assert.doesNotMatch(readyTrade,/Waiting for the client/);
+ assert.match(readyTrade,/Ready to finalise\. Your share has not been finalised yet\./);
+ const holdTrade=core.tradeHtml('share',{enabled:true,group_id:'ZZTEST-g1',awaiting:'awaiting_signoff',client_signed:false,pot_total:1000,my_share:500});
+ assert.match(holdTrade,/Waiting for the client’s confirmation\./);
+ const readyOffice=core.officeHtml({enabled:true,group_id:'ZZTEST-g1',awaiting:'ready',client_signed:false,pot_total:1000,shares:[]});
+ assert.match(readyOffice,/No client sign-off recorded\./);
+ assert.match(readyOffice,/Shares have not been finalised yet\./);
+ assert.doesNotMatch(readyOffice,/Shares are waiting for sign-off/);
+ const holdOffice=core.officeHtml({enabled:true,group_id:'ZZTEST-g1',awaiting:'awaiting_signoff',client_signed:false,pot_total:1000,shares:[]});
+ assert.match(holdOffice,/Waiting for the client’s confirmation\./);
+ assert.match(holdOffice,/Shares are waiting for sign-off\./);
+});

@@ -20,8 +20,10 @@
 // with the AI reader's best guess, its reason and which keys agreed or disagreed
 // (materials_ai_placements view=left). Decide here opens Bill Reconciliation's own decision
 // panel inside the card (ops.html BillsToPlace: the same state, checks and writes, never a copy),
-// so a bill is placed, split or filed without leaving the list. The message cards above still
-// only say which job something belongs to.
+// so a bill is placed, split or filed without leaving the list. When Cost lines to place
+// (modules/ops-reconcile-place.js) is active in this view, the old Bills to place queue stays
+// hidden so two queues never stack, with a one-click button to open old Bill Reconciliation.
+// The message cards above still only say which job something belongs to.
 // Every rule the screen applies lives in the pure ReconCore between the sentinels below.
 // Guards: npm run test:recon (in test:e2e) and tests/e2e/ops-recon.spec.js.
 
@@ -458,8 +460,10 @@ var ReconCore = (function () {
     if (t.body_source === 'preview_only') v.bodyNote = 'Only the start of this message was kept.';
     return v;
   }
+  // When Cost lines to place is active in the same view, hide the old Bills to place queue.
+  function hideOldBills(newPlacingActive) { return newPlacingActive === true; }
   return {
-    tabVisible: tabVisible, tabSwitch: tabSwitch, probeAnswer: probeAnswer,
+    tabVisible: tabVisible, tabSwitch: tabSwitch, probeAnswer: probeAnswer, hideOldBills: hideOldBills,
     billGuess: billGuess, billGuessWords: billGuessWords, billReason: billReason, billKeys: billKeys, billRows: billRows,
     billTotalEx: billTotalEx, billUnknownCount: billUnknownCount, needsWords: needsWords, bandOf: bandOf, money: money, waitWords: waitWords, jobWords: jobWords,
     actionFor: actionFor, bodyFor: bodyFor, confirmWords: confirmWords, heldWith: heldWith,
@@ -559,9 +563,23 @@ function rcCss() {
     '#viewRecon .np-agree,#viewRecon .np-disagree,#viewRecon .np-seen{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin:0 4px 2px 0;}',
     '#viewRecon .np-agree{background:#eaf6ee;color:#1d5b33;}',
     '#viewRecon .np-disagree{background:#fdecec;color:#8a1c1c;}',
-    '#viewRecon .np-seen{background:var(--sw-bg,#f3f3f3);color:var(--sw-text-sec);}'
+    '#viewRecon .np-seen{background:var(--sw-bg,#f3f3f3);color:var(--sw-text-sec);}',
+    '#viewRecon .np-replaced{margin:20px 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}'
   ].join('\n');
   document.head.appendChild(st);
+}
+
+function npHiddenByNewPlacing() {
+  var rp = typeof window !== 'undefined' && window.ReconcilePlace;
+  return ReconCore.hideOldBills(!!(rp && typeof rp.isActive === 'function' && rp.isActive()));
+}
+function rcLedeText() {
+  if (npHiddenByNewPlacing()) {
+    return 'Everything waiting for a person to say which job it belongs to: messages and invoices to match, most at stake first. ' +
+      'A match here is recorded under your name. It never moves money, sends anything or changes an invoice.';
+  }
+  return 'Everything waiting for a person to say which job it belongs to: messages and invoices to match, most at stake first, then supplier bills to place. ' +
+    'A match here is recorded under your name. It never moves money, sends anything or changes an invoice.';
 }
 
 // showView('recon') calls this.
@@ -570,7 +588,7 @@ function loadRecon() {
   if (!rcRoot()) return;
   rcBind();
   rcRead(!!RC.items);
-  npRead(NP.read);
+  if (!npHiddenByNewPlacing()) npRead(NP.read);
 }
 
 // TP-11 Needs a person: the Bills to place side. Bills come from Financials > Bill
@@ -654,6 +672,12 @@ function npBillCard(b, open) {
 }
 
 function npSummaryHtml() {
+  if (npHiddenByNewPlacing()) {
+    return rcEsc(ReconCore.needsWords({
+      matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
+      billsErr: false, billCount: null, billEx: null, billUnknown: 0, billsFull: false
+    }));
+  }
   var st = npState();
   return rcEsc(ReconCore.needsWords({
     matchErr: !!RC.err, matchCount: RC.items ? RC.items.length : null, matchMore: RC.more === true || RC.more === null,
@@ -663,6 +687,11 @@ function npSummaryHtml() {
 }
 
 function npSectionInner() {
+  if (npHiddenByNewPlacing()) {
+    return '<div class="rc-meta np-replaced" data-np-replaced>' +
+      '<span>Supplier bills and credits are placed in Cost lines to place above.</span>' +
+      '<button type="button" class="btn btn-sm" data-np-open-legacy>Open old Bill Reconciliation</button></div>';
+  }
   var st = npState();
   var B = npBills();
   var h = '<div class="rc-band" data-np-band>Bills to place' + (st.rows ? ' (' + (st.full ? 'at least ' : '') + st.rows.length + ')' : '') +
@@ -695,6 +724,8 @@ function npRepaint() {
   var sec = root.querySelector('[data-np-bills]');
   var sum = root.querySelector('[data-np-summary]');
   if (!sec || !sum) return;
+  var lede = root.querySelector('[data-rc-lede]');
+  if (lede) lede.textContent = rcLedeText();
   // Keep a job search the person is typing on an open card (a slow AI read can land mid-word).
   var B = npBills();
   var typed = B ? B.keepTyped(sec) : null;
@@ -822,8 +853,7 @@ function rcRender() {
   if (!root) return;
   var h = '<div class="rc-wrap"><div class="rc-head"><h2>Needs a person</h2>' +
     '<button type="button" data-rc-reload class="btn btn-sm">Read again</button></div>' +
-    '<div class="rc-lede">Everything waiting for a person to say which job it belongs to: messages and invoices to match, most at stake first, then supplier bills to place. ' +
-    'A match here is recorded under your name. It never moves money, sends anything or changes an invoice.</div>';
+    '<div class="rc-lede" data-rc-lede>' + rcEsc(rcLedeText()) + '</div>';
   h += '<div class="rc-meta np-summary" data-np-summary>' + npSummaryHtml() + '</div>';
   if (RC.msg) h += '<div class="rc-msg" data-rc-msg>' + rcEsc(RC.msg) + '</div>';
   RC.recorded.forEach(function (line) { h += '<div class="rc-done" data-rc-recorded>' + rcEsc(line) + '</div>'; });
@@ -937,7 +967,8 @@ function rcBind() {
     if (!t || !root.contains(t)) return;
     var card = t.closest('[data-rc-subject]');
     var id = card && card.getAttribute('data-rc-subject');
-    if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); npRead(false); return; }
+    if (t.hasAttribute('data-rc-reload')) { RC.msg = null; RC.pick = null; rcRead(false); if (!npHiddenByNewPlacing()) npRead(false); return; }
+    if (t.hasAttribute('data-np-open-legacy')) { if (typeof jpOpenBillsToPlace === 'function') jpOpenBillsToPlace(); return; }
     if (t.hasAttribute('data-np-open')) { npOpenBill(t.getAttribute('data-np-open')); return; }
     if (t.hasAttribute('data-np-more')) { NP.shown += NP_PAGE; npRepaint(); return; }
     if (t.hasAttribute('data-rc-yes')) { rcRecord(); return; }
@@ -979,6 +1010,15 @@ function reconOpenJob(number) {
   rcReadJob(number, false);
 }
 if (typeof window !== 'undefined') window.reconOpenJob = reconOpenJob;
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('sw:reconcile-place-state', function () {
+    var root = rcRoot();
+    if (!root || !root.querySelector('[data-np-bills]')) return;
+    npRepaint();
+    if (!npHiddenByNewPlacing() && !NP.read && !NP.loading) npRead(false);
+  });
+}
 
 if (typeof document !== 'undefined' && document.addEventListener) {
   var rcStart = function () { if (rcRoot()) rcBind(); reconProbeVisibility(); };

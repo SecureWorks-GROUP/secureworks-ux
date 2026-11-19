@@ -571,3 +571,92 @@ test('TP-11: a repaint of the bill section keeps a job search being typed on the
   await expect(box).toHaveValue('SWP-30');
   expect(await billPosts(page)).toEqual([]);
 });
+
+// Cost lines to place active vs off: two bill queues never stack in #viewRecon, and old Bill
+// Reconciliation stays reachable in one click. ZZTEST fixtures only.
+const ZZ_JOB_ID = '99999999-0000-4000-8000-000000000001';
+const ZZ_PLACE_BILL = {
+  id: 'ZZTEST-rp-1', kind: 'bill', card: 'cost', kind_words: 'Bill', party: 'ZZTEST Supplier',
+  document_number: 'ZZTEST-101', document_date: '2026-11-03', amount_ex: 100, waiting_days: 1,
+  shown_hash: 'ZZTEST-hash-1', reason_words: 'One reason found',
+  suggestion: { outcome: 'job', job_id: ZZ_JOB_ID, job_number: 'ZZTEST-001', job_site: 'ZZTEST Site' },
+  clues: [], against: [], lines: [{ line_id: 'ZZTEST-L1', description: 'ZZTEST item', amount_ex: 100 }], held: null,
+};
+const ZZ_OLD_BILLS = {
+  ok: true, status: 'open', proposals: 'ok', stats: { open: 1 },
+  rows: [{ id: 'ZZTEST-old-1', status: 'open', xero_invoice_id: 'ZZTEST-x1', contact_name: 'ZZTEST Supplier', invoice_number: 'ZZTEST-101', invoice_date: '2026-11-03', sub_total: 100, suggestion_reason: 'no_ref_no_po' }],
+};
+
+async function openReconWithPlacing(page, { url = '/ops.html?reconcile_place=1', placeEnabled = true, placeItems = [ZZ_PLACE_BILL] } = {}) {
+  await page.goto(url);
+  await revealOpsStaticFixture(page);
+  await page.evaluate(({ placeEnabled, placeItems, oldBills, daily }) => {
+    const main = document.getElementById('mainApp');
+    if (main) main.style.display = '';
+    window.__zzPlace = { enabled: placeEnabled, items: placeItems };
+    window.__zzReads = [];
+    window.SECUREWORKS_CLOUD = Object.assign({}, window.SECUREWORKS_CLOUD, {
+      auth: { isLoggedIn: () => true, getRole: () => 'ops_manager', getUser: () => ({ id: 'ZZTEST-office' }) },
+      on() {},
+    });
+    window.opsFetch = (action, params) => {
+      window.__zzReads.push({ action, params });
+      if (action === 'reconcile_list') {
+        if (!window.__zzPlace.enabled) return Promise.resolve({ ok: true, enabled: false });
+        const items = params && params.tab === 'bills' ? window.__zzPlace.items : [];
+        return Promise.resolve(JSON.parse(JSON.stringify({ ok: true, enabled: true, tab: params.tab, items, counts: { bills: items.length, card_bank: 0, receipts: 0 }, next: null })));
+      }
+      if (action === 'recon_daily_list') return Promise.resolve(JSON.parse(JSON.stringify(daily)));
+      if (action === 'materials_recon_queue') return Promise.resolve(JSON.parse(JSON.stringify(oldBills)));
+      if (action === 'materials_ai_placements') return Promise.resolve({ ok: true, view: 'left', placements: [] });
+      if (action === 'materials_ai_status') return Promise.resolve({ ok: true, status: { enabled: false } });
+      return Promise.resolve({ items: [] });
+    };
+    window.opsPost = () => Promise.resolve({ ok: true });
+    showView('recon');
+  }, { placeEnabled, placeItems, oldBills: ZZ_OLD_BILLS, daily: list() });
+  await expect(page.locator('#viewRecon')).toBeVisible();
+}
+
+test('hides old Bills to place when Cost lines to place is active, and opens old Bill Reconciliation in one click', async ({ page }) => {
+  await openReconWithPlacing(page, { placeEnabled: true });
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-id="ZZTEST-rp-1"]')).toBeVisible();
+  await expect(page.locator('#reconRoot [data-np-band]')).toHaveCount(0);
+  await expect(page.locator('#reconRoot [data-np-bill]')).toHaveCount(0);
+  await expect(page.locator('#reconRoot [data-np-jump]')).toHaveCount(0);
+  await expect(page.locator('#reconRoot [data-np-summary]')).toContainText('3 messages or invoices to match');
+  await expect(page.locator('#reconRoot [data-np-summary]')).not.toContainText('bill');
+  await expect(page.locator('#reconRoot [data-rc-lede]')).not.toContainText('then supplier bills to place');
+  // Messages and invoices to match still show as before.
+  await expect(page.locator('#reconRoot [data-rc-band]')).toHaveCount(3);
+  // No banned long dashes or emoji introduced.
+  expect(await page.evaluate(() => ReconCore.hasBanned(document.getElementById('reconRoot').textContent))).toBe(false);
+  // Old Bill Reconciliation is reachable in one click.
+  await expect(page.locator('#reconRoot [data-np-replaced]')).toBeVisible();
+  await page.locator('#reconRoot [data-np-open-legacy]').click();
+  await expect(page.locator('#subBillrecon')).toBeVisible();
+});
+
+test('keeps old Bills to place hidden even when active Cost lines to place has zero items', async ({ page }) => {
+  await openReconWithPlacing(page, { placeEnabled: true, placeItems: [] });
+  await expect(page.locator('#reconcilePlaceRoot')).toContainText('Nothing to place.');
+  await expect(page.locator('#reconRoot [data-np-band]')).toHaveCount(0);
+  await expect(page.locator('#reconRoot [data-np-bill]')).toHaveCount(0);
+  await expect(page.locator('#reconRoot [data-np-open-legacy]')).toBeVisible();
+});
+
+test('keeps old Bills to place visible when Cost lines to place is switched off on the server, and restores it if switched off mid-session', async ({ page }) => {
+  await openReconWithPlacing(page, { placeEnabled: false });
+  await expect(page.locator('#reconcilePlaceRoot [data-rp-off]')).toBeVisible();
+  await expect(page.locator('#reconRoot [data-np-band]')).toContainText('Bills to place (1)');
+  await expect(page.locator('#reconRoot [data-np-bill="ZZTEST-old-1"]')).toBeVisible();
+  await expect(page.locator('#reconRoot [data-np-replaced]')).toHaveCount(0);
+
+  // Start active, then flip server switch off and re-read: old Bills to place returns cleanly.
+  await openReconWithPlacing(page, { placeEnabled: true });
+  await expect(page.locator('#reconRoot [data-np-bill]')).toHaveCount(0);
+  await page.evaluate(() => { window.__zzPlace.enabled = false; return window.ReconcilePlace.refresh(); });
+  await expect(page.locator('#reconRoot [data-np-band]')).toContainText('Bills to place (1)');
+  await expect(page.locator('#reconRoot [data-np-bill="ZZTEST-old-1"]')).toBeVisible();
+  await expect(page.locator('#reconRoot [data-np-replaced]')).toHaveCount(0);
+});

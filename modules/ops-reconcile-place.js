@@ -807,12 +807,23 @@
     read: function (action, params) { return window.opsFetch(action, params); },
     post: function (action, body) { return window.opsPost(action, body); }
   };
-  var api = create(host), shown = false;
-  window.ReconcilePlace = { refresh: api.refresh };
+  var api = create(host), shown = false, placingActive = false, activeOwner = null;
+  function syncActive() {
+    var who = host.identity(), phase = api.state().phase;
+    var next = !!(who && (phase === 'list' || (placingActive && activeOwner === who && phase === 'loading')));
+    activeOwner = next ? who : null;
+    if (next === placingActive) return;
+    placingActive = next;
+    if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('sw:reconcile-place-state', { detail: { active: placingActive } }));
+    }
+  }
+  window.ReconcilePlace = { refresh: api.refresh, isActive: function () { return placingActive; } };
   function sync(force) {
     var now = !!(host.visible() && host.identity());
     if (now && (force === true || !shown)) api.refresh();
     shown = now;
+    syncActive();
   }
   function start() {
     var view = document.getElementById('viewRecon');
@@ -843,6 +854,7 @@
       '@media(max-width:599px){.rp-acts button{flex:1 1 100%}}';
     document.head.appendChild(style);
     api.mount(root);
+    new MutationObserver(syncActive).observe(root, { childList: true, attributes: true, attributeFilter: ['hidden'] });
     new MutationObserver(function () { sync(); }).observe(view, { attributes: true, attributeFilter: ['class'] });
     var cloud = window.SECUREWORKS_CLOUD;
     if (cloud && cloud.on) { cloud.on('auth:login', function () { sync(true); }); cloud.on('auth:logout', function () { shown = false; api.refresh(); }); }

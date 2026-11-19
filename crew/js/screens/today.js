@@ -13,6 +13,7 @@ import { buildLines, lineHours } from '../lib/invoice.js';
 import { Page, Section, Sheet, Button, Field, Picks, Skel, LoadError, JobLine, StatusBadge, toast, openOverlay } from '../ui/kit.js';
 import { clockOn, openClockOff, openBreak, useElapsed, isForgottenClock } from './clock.js';
 import { NeedsOk, needsOk, bookingStatus, useBookingChanges, ChangesBanner, markOnTheWay, useMyDaysOff, useCrewWith, BookingItem, openBooking, openBookingJob } from './bookings.js';
+import { useGroups, GroupPrompts } from './pay.js';
 import { fmtClock, fmtHrs, fmtDayYear, fmtWeekShort, fmtElapsed } from './words.js';
 
 export function Today() {
@@ -21,6 +22,7 @@ export function Today() {
   const today = todayISO();
   const monday = mondayOf(today);
   const { bookings, loading, error, refetch, refreshing, data } = useMyBookings();
+  const groups = useGroups();
   const byDate = useMemo(() => bookingsByDate(bookings), [bookings]);
   const { changes, dismiss } = useBookingChanges(bookings, Boolean(data) && !refreshing && !error);
   const daysOff = useMyDaysOff(monday);
@@ -68,6 +70,8 @@ export function Today() {
       ${rest.length ? html`<${Section} label=${clock || upNext ? 'Also today' : 'Today'}>
         <div class="list flat">${rest.map((b) => html`<${BookingItem} key=${b.id} booking=${b} day=${true} />`)}</div>
       <//>` : null}
+
+      <${GroupPrompts} groupsData=${groups.data} bookings=${bookings} bookingsPending=${loading && !data} />
 
       ${showNext ? html`<${Section} label=${fmtRelDay(next.date) === 'Tomorrow' ? 'Tomorrow' : 'Next booking'}>
         <div class="block card"><button type="button" class="item" onClick=${() => openBooking(next)}>

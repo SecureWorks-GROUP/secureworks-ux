@@ -26,6 +26,7 @@
 
 /* ---------- Pay: the week in two steps ---------- */
 .pay-weekcard { display: grid; gap: 12px; }
+.sec + .pay-weekcard { margin-top: 20px; }
 .pay-steps { display: grid; }
 .pay-step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 56px; padding: 8px 0; width: 100%; text-align: left; }
 .pay-step + .pay-step { border-top: 1px solid var(--mist); }

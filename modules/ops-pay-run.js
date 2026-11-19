@@ -313,7 +313,8 @@
     var dis = busy ? ' disabled' : '';
     var invId = esc(i.invoice_id);
     if (pending && pending.invoiceId === i.invoice_id && pending.kind === 'push') {
-      return '<div class="pr-confirm" data-pr-confirm="push"><p>Push ' + esc(i.invoice_number) + ' (' + esc(i.trade_name) + ', ' +
+      var pushWeek = /^\d{4}-\d{2}-\d{2}$/.test(i.week_start || '') ? i.week_start : d.week_start;
+      return '<div class="pr-confirm" data-pr-confirm="push"><p>Push ' + esc(i.invoice_number) + ' (' + esc(i.trade_name) + ', week of ' + esc(dayText(pushWeek)) + ', ' +
         esc(isMoney(i.into_bank) ? money(i.into_bank) + ' into bank' : 'figure not read') + ') to Xero as a draft bill?</p>' +
         '<div class="pr-act-row"><button type="button" class="pr-primary" data-pr-act="push_yes" data-pr-invoice="' + invId + '"' + dis + '>' +
         (busy === 'push' ? 'Pushing...' : 'Yes, push draft bill') + '</button>' +
@@ -383,11 +384,13 @@
           var result = i.verdict === 'clean'
             ? '<span class="pr-clean">Clean</span>'
             : '<span class="pr-stopped">Stopped</span><ul class="pr-stops">' + i.stops.map(function (s) { return '<li>' + esc(s && s.words) + '</li>'; }).join('') + '</ul>';
-          var notes = notesOf(i);
-          if (notes.length) {
-            result += '<ul class="pr-notes" data-notes>' + notes.map(function (n) {
-              return '<li><span class="pr-warn-tag">Warning</span> ' + esc(n.words) + '</li>';
-            }).join('') + '</ul>';
+          if (d.enabled === true) {
+            var notes = notesOf(i);
+            if (notes.length) {
+              result += '<ul class="pr-notes" data-notes>' + notes.map(function (n) {
+                return '<li><span class="pr-warn-tag">Warning</span> ' + esc(n.words) + '</li>';
+              }).join('') + '</ul>';
+            }
           }
           result += rowActionsHtml(d, i);
           return '<tr data-invoice="' + esc(i.invoice_number) + '" data-verdict="' + i.verdict + '"><td>' + esc(i.trade_name) + '</td><td>' + esc(i.invoice_number) + follow + '</td>' +
@@ -440,7 +443,7 @@
     var reread = false;
     try {
       var answer = await window.opsPost(action, body);
-      if (reqRead !== readNumber) return;
+      if (reqRead !== readNumber) { busy = false; draw(); return; }
       if (!answer || answer.ok !== true) {
         throw Object.assign(new Error('Unconfirmed answer'), { status: 502, body: answer });
       }
@@ -448,7 +451,7 @@
       busy = false; pending = null; notice = okMessage; actionError = '';
       return read(reqWeek, { keepStatus: true });
     } catch (err) {
-      if (reqRead !== readNumber) return;
+      if (reqRead !== readNumber) { busy = false; draw(); return; }
       busy = false; pending = null;
       actionError = writeErrorWords(err, failFallback);
       reread = !!(err && err.status === 409);

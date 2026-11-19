@@ -320,10 +320,25 @@ async function openRunWithWrites(page, answer, { role = 'owner', onPost = null }
   }, { answer, role, onPostSrc: onPost ? onPost.toString() : null });
 }
 
-test('pay run actions: hidden when enabled is false or absent, and hidden for non-approver roles', async ({ page }) => {
-  await openRunWithWrites(page, payRunAnswer({ enabled: false }), { role: 'owner' });
+test('pay run actions: hidden when enabled is false or absent (no warnings either), and hidden for non-approver roles', async ({ page }) => {
+  // enabled absent (today's server), even when invoice carries notes: renders exact today's screen, no warnings, no write buttons.
+  const withNotes = payRunAnswer({
+    invoices: [
+      invoice(4, 'Repair crew', { verdict: 'stopped', stops: [{ code: 'no_times', words: 'ZZTEST stop.' }] }),
+      invoice(1, 'Fencing crew', { notes: [{ code: 'hourly_no_agreed_amount', words: 'ZZTEST warning: job work order has no agreed amount.' }] })
+    ]
+  });
+  await openRunWithWrites(page, withNotes, { role: 'owner' });
   const run = page.locator('[data-pay-run]');
   await expect(run.locator('[data-pay-run-actions]')).toHaveCount(0);
+  await expect(run.locator('[data-notes]')).toHaveCount(0);
+  await expect(run).not.toContainText('ZZTEST warning');
+  await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
+
+  // enabled false also hides warnings and write buttons.
+  await openRunWithWrites(page, { ...withNotes, enabled: false }, { role: 'owner' });
+  await expect(run.locator('[data-pay-run-actions]')).toHaveCount(0);
+  await expect(run.locator('[data-notes]')).toHaveCount(0);
   await expect(run.locator('button')).toHaveText(['← Previous', 'Next →']);
 
   // Non-approver role gets no write buttons even when enabled is true.
@@ -383,8 +398,9 @@ test('pay run actions: work-order warning shows on a clean row and never blocks 
   await expect(run.locator('[data-pr-notice]')).toHaveText('Pay run approved.');
   await expect(run.locator('[data-run-status]')).toContainText('Pay run approved');
 
-  // Push the clean invoice with the work-order warning: never blocked.
+  // Push the clean invoice with the work-order warning: confirm names invoice, trade, week and figure; never blocked.
   await row1.getByRole('button', { name: 'Push to Xero' }).click();
+  await expect(row1.locator('[data-pr-confirm="push"]')).toContainText('Push ZZTEST-INV-1 (Fencing crew, week of Mon 16 Nov 2026, $1,000.00 into bank) to Xero as a draft bill?');
   await row1.getByRole('button', { name: 'Yes, push draft bill' }).click();
   await expect(run.locator('[data-pr-notice]')).toHaveText('Pushed ZZTEST-INV-1 to Xero as a draft bill.');
   await expect(row1.locator('[data-pushed]')).toHaveText('Pushed to Xero');
@@ -475,4 +491,29 @@ test('pay run actions: release requires a reason, surfaces server 409 words, and
   }), { role: 'owner' });
   await expect(run.locator('[data-run-status]')).toContainText('Super marked paid on 19 Nov 2026');
   await expect(run.getByRole('button', { name: 'Mark super paid' })).toHaveCount(0);
+});
+
+test('pay run actions: a read during an in-flight write re-enables buttons when the write finishes', async ({ page }) => {
+  await openRunWithWrites(page, payRunAnswer({ enabled: true }), { role: 'owner' });
+  const run = page.locator('[data-pay-run]');
+
+  // Hold opsPost open while a concurrent PayRun.read() completes, then resolve (and also verify rejection).
+  await page.evaluate(() => {
+    window.__releaseWrite = null;
+    window.opsPost = () => new Promise((resolve, reject) => { window.__releaseWrite = { resolve, reject }; });
+  });
+  await run.getByRole('button', { name: 'Approve pay run' }).click();
+  await run.getByRole('button', { name: 'Yes, approve pay run' }).click();
+  await page.evaluate(() => PayRun.read());
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeDisabled();
+  await page.evaluate(() => window.__releaseWrite.resolve({ ok: true }));
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeEnabled();
+  await expect(run.getByRole('button', { name: 'Previous week' })).toBeEnabled();
+
+  await run.getByRole('button', { name: 'Approve pay run' }).click();
+  await run.getByRole('button', { name: 'Yes, approve pay run' }).click();
+  await page.evaluate(() => PayRun.read());
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeDisabled();
+  await page.evaluate(() => window.__releaseWrite.reject(Object.assign(new Error('fail'), { status: 500 })));
+  await expect(run.getByRole('button', { name: 'Approve pay run' })).toBeEnabled();
 });

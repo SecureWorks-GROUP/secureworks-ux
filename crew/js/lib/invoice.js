@@ -11,7 +11,9 @@ const LIVE_OFF = ['draft', 'failed', 'ops-reject'];
 export function isLiveInvoice(inv) { return inv && !LIVE_OFF.includes(String(inv.status || '').toLowerCase()); }
 export function invoiceForWeek(invoices, monday) {
   const rows = (invoices || []).filter((i) => (i.week_start || '').slice(0, 10) === monday);
-  return rows.find(isLiveInvoice) || null;
+  // A follow-on (lines the office approved later) or holding invoice shares the week; when the
+  // list names its kind, the week's own invoice comes first. Without the field nothing changes.
+  return rows.find((i) => isLiveInvoice(i) && i.invoice_kind !== 'follow_on' && i.invoice_kind !== 'held') || rows.find(isLiveInvoice) || null;
 }
 export function sentBackForWeek(invoices, monday) {
   return (invoices || []).find((i) => (i.week_start || '').slice(0, 10) === monday && String(i.status).toLowerCase() === 'ops-reject') || null;

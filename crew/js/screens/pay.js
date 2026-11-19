@@ -11,6 +11,8 @@ import { bookingState } from '../lib/model.js';
 import { Page, Section, KV, StatusBadge, Badge, JobLine, Button, Sheet, SkelRows, LoadError, openOverlay } from '../ui/kit.js';
 import { cash, hrs, num, plural, sheetRows, sheetSummary, groupDays, InvoiceBadge } from '../ui/paybits.js';
 import { useCharges, needsCheck } from './charges.js';
+import { HeldOnPay } from '../ui/held.js';
+import { isHeldInvoice, isFollowOn } from '../lib/held.js';
 
 // ---------- reads the pay screens share ----------
 export function useInvoices() { return useQuery('invoices', () => api('my_trade_invoices'), { persist: true, ttl: 60000 }); }
@@ -114,6 +116,8 @@ export function Pay() {
 
     ${lastOwing || lastBack ? html`<button type="button" class=${'block note-banner pay-notice ' + (lastBack ? 'bad' : '')} onClick=${() => go('/pay/week/' + lastMonday)}>
       <span><span class="t-strong">${lastBack ? 'Last week was sent back' : 'Last week is not invoiced'}</span><span class="pay-noticesub">Pay week ${fmtWeek(lastMonday)}. Open it to ${lastBack ? 'fix it' : 'send it'}.</span></span></button>` : null}
+
+    <${HeldOnPay} userId=${user && user.id} />
 
     <${Section} label="Invoices" right=${html`<button type="button" class="link tap" onClick=${() => go('/pay/invoices')}>All invoices</button>`}>
       ${invoices.loading ? html`<${SkelRows} n=${2} />` : invoices.error && !list.length ? html`<${LoadError} error=${invoices.error} onRetry=${invoices.refetch} what="your invoices" />`
@@ -280,8 +284,11 @@ export function GroupPrompts({ groupsData, bookings, bookingsPending = false, ho
 }
 
 /** One invoice in a list: the pay week, its number and date, its state and what it pays. */
-export function InvoiceRow({ inv, from, note }) {
-  const pays = invoicePays(inv);
+export function InvoiceRow({ inv, from, note: given }) {
+  // A holding invoice pays nothing itself; a follow-on pays lines the office approved later. Only when the list says so.
+  const held = isHeldInvoice(inv);
+  const note = given || (held ? 'Lines waiting on office' : isFollowOn(inv) ? 'Lines the office approved later' : '');
+  const pays = held ? null : invoicePays(inv);
   const week = (inv.week_start || '').slice(0, 10);
   const day = inv.paid_at ? 'paid ' + fmtDate(tsToDate(inv.paid_at)) : inv.submitted_at ? fmtDate(tsToDate(inv.submitted_at)) : '';
   return html`<button type="button" class="item pay-inv" onClick=${() => go('/pay/invoice/' + inv.id + (from ? '?from=' + from : ''))}>

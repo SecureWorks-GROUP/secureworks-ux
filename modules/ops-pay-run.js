@@ -147,6 +147,14 @@
 // only gate: PayRun.probe() reads pay_run once after sign in, shows the tab when it
 // answers, hides it on a refusal (403), and on any other failure keeps what this
 // browser last saw (sw_payrun_seen). Loading this file alone performs no read or write.
+//
+// P1-05.13: the held lines panel. Only when pay_run answers enabled === true
+// (trade_pay_run_v1 on), and only for office staff (admin, owner, ops manager, the
+// list's own rule), does this screen read ops-api held_trade_lines, after each pay run read. Approve, Query and Decline show only while that read answers
+// enabled === true (trade_line_hold_v1 on); each posts decide_held_trade_line with
+// a reason of 3 to 500 characters, Approve and Decline after a second press. The
+// list's refusal (403) is shown in the panel and never hides the Pay run tab. With
+// both switches off the screen is exactly as before: no held read, no panel.
 (function () {
   'use strict';
   var CHECKS = [
@@ -163,6 +171,25 @@
   var host, section, tab, data = null, state = 'idle', week = null, readNumber = 0, refusal = '';
   var probing = null, probeAnswered = false;
   var pending = null, busy = false, notice = '', actionError = '', superMarkedAt = {};
+  // The held lines panel: its own read, separate from the pay run's (a refusal here never hides the tab).
+  var HELD_REASON_MIN = 3, HELD_REASON_MAX = 500;
+  var HELD_WORDS = {
+    no_work_order: 'The job has no work order yet.',
+    no_amount: 'The job\'s work order has no amount yet.',
+    over_amount: 'More than the job\'s work order has left.',
+    hourly_no_maximum: 'The job has no maximum for hourly work yet.',
+    no_job: 'Not on a job.',
+    not_job_work: 'Work that is not on a job, waiting for approval.',
+    reimbursement: 'A receipt waiting for approval.',
+    not_on_crew: 'The trade added themselves to this job and that is not accepted yet.',
+    commission_no_figure: 'The job\'s commission has no figure yet.',
+    rate_above_rule: 'Above the usual rate.'
+  };
+  var HELD_TYPE_WORDS = { labour: 'Labour', travel: 'Travel', materials: 'Materials', equipment: 'Equipment', commission: 'Commission',
+    reimbursement: 'Reimbursement', 'work order': 'Work order', work_order: 'Work order', other: 'Other' };
+  var HOURS_KINDS = ['labour', 'fencing', 'patio', 'makesafe', 'generallabour', 'decking'];
+  var held = { state: 'idle', data: null, words: '' }, heldRead = 0;
+  var heldPending = null, heldBusy = false, heldNotice = '', heldError = '';
   function seen(value) {
     try {
       if (value === undefined) return localStorage.getItem('sw_payrun_seen');
@@ -263,14 +290,14 @@
   function figure(value) { return isMoney(value) ? money(value) : '<span class="pr-none">Not read</span>'; }
   function weekBar() {
     var label = week ? 'Week of ' + esc(dayText(week)) : 'Pay week';
-    var off = state === 'loading' || busy || !week ? ' disabled' : '';
+    var off = state === 'loading' || busy || heldBusy || !week ? ' disabled' : '';
     return '<div class="pr-week"><button type="button" data-week="-7" aria-label="Previous week"' + off + '>&larr; Previous</button>' +
       '<strong data-week-label>' + label + '</strong>' +
       '<button type="button" data-week="7" aria-label="Next week"' + off + '>Next &rarr;</button></div>';
   }
   function actionsBarHtml(d) {
     if (!canAct(d)) return '';
-    var dis = busy ? ' disabled' : '';
+    var dis = busy || heldBusy ? ' disabled' : '';
     var out = '<div class="pr-actions" data-pay-run-actions>';
     if (notice) out += '<p class="pr-notice" role="status" data-pr-notice>' + esc(notice) + '</p>';
     if (actionError) out += '<p class="pr-error" role="alert" data-pr-error>' + esc(actionError) + '</p>';
@@ -310,7 +337,7 @@
     if (!canAct(d) || !d.run || !d.run.id) return '';
     if (i.pushed) return '<div class="pr-row-status"><span class="pr-pushed" data-pushed>Pushed to Xero</span></div>';
     if (hasStopCode(i, 'released_from_run') || hasStopCode(i, 'xero_bill_found_at_release')) return '';
-    var dis = busy ? ' disabled' : '';
+    var dis = busy || heldBusy ? ' disabled' : '';
     var invId = esc(i.invoice_id);
     if (pending && pending.invoiceId === i.invoice_id && pending.kind === 'push') {
       var pushWeek = /^\d{4}-\d{2}-\d{2}$/.test(i.week_start || '') ? i.week_start : d.week_start;
@@ -398,8 +425,8 @@
             '</td><td class="pr-num">' + figure(i.into_bank) + '</td><td>' + result + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
-    // The held lines panel (P1-05.13) is not built yet, so this line links nowhere.
     html += '<p class="pr-office" data-held-lines>Still with the office: ' + plural(d.held.lines_waiting, 'line', 'lines') + ', ' + money(d.held.amount_ex) + '</p>';
+    if (d.enabled === true && heldStaff()) html += heldPanelHtml();
     html += '<h4>Super for this run</h4><div class="data-table-wrap"><table class="data-table pr-table" data-super-table><thead><tr><th>Trade</th><th class="pr-num">Super</th></tr></thead><tbody>' +
       d.super_by_person.map(function (p) { return '<tr><td>' + esc(p.trade_name) + '</td><td class="pr-num">' + money(p.super_amount) + '</td></tr>'; }).join('') +
       '<tr class="pr-total"><td>Total</td><td class="pr-num">' + money(d.totals.super) + '</td></tr></tbody></table></div>';
@@ -416,6 +443,8 @@
       if (request !== readNumber) return;
       if (!readable(answer)) throw new Error('Unreadable pay run');
       data = answer; week = answer.week_start; state = 'ready';
+      if (answer.enabled === true && heldStaff()) readHeld();
+      else { heldRead++; held = { state: 'idle', data: null, words: '' }; heldPending = null; heldBusy = false; }
     } catch (err) {
       if (request !== readNumber) return;
       data = null; state = 'error';
@@ -427,6 +456,217 @@
       }
     }
     draw();
+  }
+  // ---- held lines (P1-05.13) ----
+  // The held list is for office staff (admin, owner, ops manager); the server refuses anyone else.
+  var HELD_STAFF_ROLES = ['admin', 'owner', 'ops_manager'];
+  function heldStaff() {
+    var auth = window.SECUREWORKS_CLOUD && window.SECUREWORKS_CLOUD.auth;
+    if (!auth || typeof auth.getRole !== 'function') return true;
+    return HELD_STAFF_ROLES.indexOf(String(auth.getRole() || '').toLowerCase()) >= 0;
+  }
+  function heldReadable(a) {
+    return !!a && a.ok === true && typeof a.enabled === 'boolean' && Array.isArray(a.lines) &&
+      a.lines.every(function (l) { return l && typeof l.id === 'string' && l.id; });
+  }
+  async function readHeld() {
+    var request = ++heldRead;
+    held = { state: 'loading', data: held.data, words: '' };
+    try {
+      var answer = await window.opsFetch('held_trade_lines');
+      if (request !== heldRead) return;
+      if (!heldReadable(answer)) throw new Error('Unreadable held lines');
+      held = { state: 'ready', data: answer, words: '' };
+      if (heldPending && !heldLine(heldPending.lineId)) heldPending = null;
+    } catch (err) {
+      if (request !== heldRead) return;
+      var words = serverWords(err);
+      held = refused(err)
+        ? { state: 'refused', data: null, words: words || 'Only office staff can see the held lines.' }
+        : { state: 'error', data: null, words: '' };
+      heldPending = null;
+    }
+    draw();
+  }
+  function heldLine(id) {
+    var lines = held.data && Array.isArray(held.data.lines) ? held.data.lines : [];
+    for (var idx = 0; idx < lines.length; idx++) if (lines[idx].id === id) return lines[idx];
+    return null;
+  }
+  function heldKind(l) { return String(l.line_type || '').trim().toLowerCase(); }
+  function heldReasonWords(l) { return HELD_WORDS[l.hold_reason] || 'Held for the office.'; }
+  function heldCanDecide() { return !!(held.state === 'ready' && held.data && held.data.enabled === true); }
+  // An approval may lower the amount or the hours; it never pays more than the trade sent.
+  function heldAmountEditable(l) { return isMoney(l.sent_amount_ex) && l.hold_reason !== 'commission_no_figure'; }
+  function heldHoursEditable(l) {
+    return typeof l.total_hours === 'number' && isFinite(l.total_hours) && HOURS_KINDS.indexOf(heldKind(l).replace(/\s/g, '')) >= 0;
+  }
+  function heldDecisionWords(kind) { return kind === 'approve' ? 'Approve' : kind === 'decline' ? 'Decline' : 'Query'; }
+  function heldFormHtml(l) {
+    var p = heldPending, dis = heldBusy ? ' disabled' : '';
+    var who = (l.job_number ? l.job_number : 'No job') + (l.trade_name ? ', ' + l.trade_name : '');
+    if (p.confirm) {
+      var lead = 'Decline this line (' + who + ')? The trade sees it as not approved, with your reason.';
+      if (p.kind === 'approve') {
+        var change = heldChanges(l, p);
+        var pays = 'line_total_ex' in change ? 'It pays ' + money(change.line_total_ex) + ' ex GST'
+          : 'total_hours' in change ? 'It pays ' + change.total_hours + ' hours; the office system works the amount out again from them'
+          : isMoney(l.line_total_ex) && l.hold_reason !== 'commission_no_figure' ? 'It pays ' + money(l.line_total_ex) + ' ex GST'
+          : 'It pays the amount the office system works out';
+        if ('line_total_ex' in change && 'total_hours' in change) pays += ' for ' + change.total_hours + ' hours';
+        lead = 'Approve this line (' + who + ')? ' + pays + ', on a follow-on invoice.';
+      }
+      return '<div class="pr-confirm" data-hl-confirm="' + p.kind + '"><p>' + esc(lead) + '</p><p class="pr-muted">Reason: ' + esc(p.reason) + '</p>' +
+        '<div class="pr-act-row"><button type="button" class="pr-primary" data-hl-act="yes" data-hl-line="' + esc(l.id) + '"' + dis + '>' +
+        (heldBusy ? 'Saving...' : 'Yes, ' + (p.kind === 'approve' ? 'approve' : 'decline') + ' this line') + '</button>' +
+        '<button type="button" data-hl-act="back" data-hl-line="' + esc(l.id) + '"' + dis + '>Back</button></div></div>';
+    }
+    var out = '<form class="pr-confirm" data-hl-form="' + p.kind + '" data-hl-line="' + esc(l.id) + '" novalidate>' +
+      '<label>Reason the trade and the office will see (3 to 500 characters)' +
+      '<input type="text" name="reason" maxlength="' + HELD_REASON_MAX + '" autocomplete="off" value="' + esc(p.reason || '') + '"' + dis + '></label>';
+    if (p.kind === 'approve' && heldAmountEditable(l)) {
+      out += '<label>Pay a lower amount, ex GST (optional, at most ' + esc(money(l.sent_amount_ex)) + ')' +
+        '<input type="number" name="amount" inputmode="decimal" step="0.01" min="0" max="' + esc(l.sent_amount_ex) + '" value="' + (p.amount === null ? '' : esc(p.amount)) + '"' + dis + '></label>';
+    }
+    if (p.kind === 'approve' && heldHoursEditable(l)) {
+      out += '<label>Change the hours (optional, sent ' + esc(l.total_hours) + ')' +
+        '<input type="number" name="hours" inputmode="decimal" step="0.25" min="0" value="' + (p.hours === null ? '' : esc(p.hours)) + '"' + dis + '></label>';
+    }
+    return out + '<div class="pr-act-row"><button type="submit" class="pr-primary"' + dis + '>' +
+      (heldBusy ? 'Saving...' : p.kind === 'query' ? 'Send the query' : heldDecisionWords(p.kind) + '...') + '</button>' +
+      '<button type="button" data-hl-act="cancel"' + dis + '>Cancel</button></div></form>';
+  }
+  function heldLineHtml(l) {
+    var kind = heldKind(l);
+    var head = '<strong>' + esc(l.job_number || 'No job') + '</strong> &middot; ' + esc(l.trade_name || 'Trade not named') +
+      ' &middot; ' + esc(HELD_TYPE_WORDS[kind] || (kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : 'Line'));
+    var facts = [];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(l.week_start || '')) facts.push('Week of ' + dayText(l.week_start));
+    if (l.invoice_number) facts.push(String(l.invoice_number));
+    if (typeof l.total_hours === 'number' && isFinite(l.total_hours) && l.total_hours > 0) facts.push(l.total_hours + ' h');
+    var out = '<li class="hl-line" data-hl-line-row="' + esc(l.id) + '" data-hl-reason="' + esc(l.hold_reason || '') + '">' +
+      '<div class="hl-top"><span>' + head + '</span><span class="pr-num" data-hl-sent>' +
+      (isMoney(l.sent_amount_ex) ? 'Sent ' + money(l.sent_amount_ex) + ' ex GST' : 'Sent amount not known') +
+      (isMoney(l.sent_amount_ex) && isMoney(l.line_total_ex) && Math.round(l.line_total_ex * 100) !== Math.round(l.sent_amount_ex * 100) ? ' (held ' + money(l.line_total_ex) + ')' : '') + '</span></div>' +
+      '<p class="hl-why" data-hl-why>' + esc(heldReasonWords(l)) + '</p>' +
+      (facts.length ? '<p class="pr-muted">' + esc(facts.join(' \u00b7 ')) + '</p>' : '') +
+      (l.description ? '<p class="pr-muted">' + esc(l.description) + '</p>' : '') +
+      (l.office_review_status === 'queried' ? '<p class="hl-queried" data-hl-queried><span class="pr-warn-tag">Queried</span> ' + esc(l.office_review_note || 'The office asked a question.') + '</p>' : '');
+    if (heldCanDecide()) {
+      if (heldPending && heldPending.lineId === l.id) out += heldFormHtml(l);
+      else {
+        var dis = heldBusy || heldPending ? ' disabled' : '';
+        out += '<div class="pr-row-acts">' + ['approve', 'query', 'decline'].map(function (k) {
+          return '<button type="button"' + (k === 'approve' ? ' class="pr-primary"' : '') + ' data-hl-act="' + k + '" data-hl-line="' + esc(l.id) + '"' + dis + '>' + heldDecisionWords(k) + '</button>';
+        }).join('') + '</div>';
+      }
+    }
+    return out + '</li>';
+  }
+  function heldPanelHtml() {
+    var out = '<section class="hl-panel" data-held-panel aria-label="Held lines"><h4>Held lines waiting for the office</h4>';
+    if (heldNotice) out += '<p class="pr-notice" role="status" data-hl-notice>' + esc(heldNotice) + '</p>';
+    if (heldError) out += '<p class="pr-error" role="alert" data-hl-error>' + esc(heldError) + '</p>';
+    if (held.state === 'loading' && !held.data) return out + '<p role="status">Reading the held lines...</p></section>';
+    if (held.state === 'refused') return out + '<p class="pr-muted" data-hl-refused>' + esc(held.words) + '</p></section>';
+    if (held.state === 'error' || !held.data) {
+      return out + '<p role="alert" class="pr-error" data-hl-unread>The held lines could not be read, so none are shown. Try again.</p>' +
+        '<button type="button" data-hl-act="retry">Read the held lines again</button></section>';
+    }
+    var lines = held.data.lines;
+    if (held.data.enabled !== true) out += '<p class="pr-muted" data-hl-off>Deciding held lines is switched off, so they are shown only.</p>';
+    if (!lines.length) return out + '<p class="pr-muted" data-hl-empty>No lines are waiting for the office.</p></section>';
+    return out + '<p class="pr-muted">Every company line still waiting, any week. Approved lines are paid on a follow-on invoice.</p>' +
+      '<ul class="hl-list" data-hl-list>' + lines.map(heldLineHtml).join('') + '</ul></section>';
+  }
+  function heldNumber(raw) {
+    var t = String(raw == null ? '' : raw).trim();
+    if (t === '') return null;
+    var n = Number(t);
+    return isFinite(n) ? n : NaN;
+  }
+  function heldFormRead(form) {
+    var p = heldPending;
+    var el = form.elements || {};
+    p.reason = String((el.reason && el.reason.value) || '').trim();
+    p.amount = el.amount ? heldNumber(el.amount.value) : null;
+    p.hours = el.hours ? heldNumber(el.hours.value) : null;
+  }
+  function twoPlaces(n) { return Math.abs(Math.round(n * 100) - n * 100) < 1e-6; }
+  function heldProblem(l, p) {
+    if (p.reason.length < HELD_REASON_MIN || p.reason.length > HELD_REASON_MAX) return 'Give a reason of 3 to 500 characters.';
+    if (p.kind !== 'approve') return '';
+    if (p.amount !== null) {
+      if (!isFinite(p.amount) || p.amount < 0 || !twoPlaces(p.amount)) return 'Type the amount in dollars and cents, or leave it blank.';
+      if (Math.round(p.amount * 100) > Math.round(l.sent_amount_ex * 100)) return 'An approval cannot pay more than the trade sent (' + money(l.sent_amount_ex) + ').';
+    }
+    if (p.hours !== null && (!isFinite(p.hours) || p.hours < 0 || !twoPlaces(p.hours))) return 'Type the hours to two decimal places at most, or leave them blank.';
+    return '';
+  }
+  // What an approval changes: an amount that differs from the line's held amount, hours that differ from its hours.
+  function heldChanges(l, p) {
+    var changes = {};
+    if (p.amount !== null && isFinite(p.amount) && (!isMoney(l.line_total_ex) || Math.round(p.amount * 100) !== Math.round(l.line_total_ex * 100))) changes.line_total_ex = Math.round(p.amount * 100) / 100;
+    if (p.hours !== null && isFinite(p.hours) && Math.round(p.hours * 100) !== Math.round(Number(l.total_hours) * 100)) changes.total_hours = Math.round(p.hours * 100) / 100;
+    return changes;
+  }
+  async function heldDecide(l) {
+    var p = heldPending;
+    var body = { line_id: l.id, decision: p.kind, reason: p.reason };
+    if (p.kind === 'approve') {
+      var changes = heldChanges(l, p);
+      if (Object.keys(changes).length) body.changes = changes;
+    }
+    heldBusy = true; heldError = ''; heldNotice = ''; draw();
+    var request = heldRead;
+    try {
+      var answer = await window.opsPost('decide_held_trade_line', body);
+      if (!answer || answer.ok !== true) throw Object.assign(new Error('Unconfirmed answer'), { status: 502, body: answer });
+      heldBusy = false; heldPending = null;
+      heldNotice = p.kind === 'approve' ? 'Line approved. It is paid on a follow-on invoice.' : p.kind === 'decline' ? 'Line declined.' : 'Query sent.';
+      // Both reads again: the panel and the pay run's own count.
+      return read(week, { keepStatus: true });
+    } catch (err) {
+      heldBusy = false;
+      if (request !== heldRead) { draw(); return; }
+      heldError = !err || !err.status
+        ? 'The connection dropped before an answer came back. Read the held lines again before pressing again.'
+        : serverWords(err) || (err.status === 403 ? 'Only office staff can decide a held line.' : 'The decision could not be saved. Read the held lines again before trying again.');
+      if (err && err.status === 409) { heldPending = null; draw(); return readHeld(); }
+      if (heldPending) heldPending.confirm = false;
+      draw();
+    }
+  }
+  function heldAction(act, lineId) {
+    if (heldBusy) return;
+    if (act === 'retry') { heldError = ''; return readHeld(); }
+    if (act === 'cancel') { heldPending = null; heldError = ''; draw(); return; }
+    var l = heldLine(lineId);
+    if (!l || !heldCanDecide()) return;
+    if (act === 'back') { if (heldPending && heldPending.lineId === l.id) heldPending.confirm = false; draw(); return; }
+    if (act === 'yes') {
+      if (!heldPending || heldPending.lineId !== l.id || !heldPending.confirm || heldPending.kind === 'query') return;
+      return heldDecide(l);
+    }
+    if (act === 'approve' || act === 'query' || act === 'decline') {
+      if (heldPending) return;
+      heldNotice = ''; heldError = '';
+      heldPending = { lineId: l.id, kind: act, reason: '', amount: null, hours: null, confirm: false };
+      draw();
+      var input = section && section.querySelector('[data-hl-form] input[name="reason"]');
+      if (input) input.focus();
+    }
+  }
+  function heldSubmit(form) {
+    if (heldBusy || !heldPending || !heldCanDecide()) return;
+    var l = heldLine(form.getAttribute('data-hl-line'));
+    if (!l || l.id !== heldPending.lineId) return;
+    heldFormRead(form);
+    var problem = heldProblem(l, heldPending);
+    if (problem) { heldError = problem; draw(); return; }
+    heldError = '';
+    if (heldPending.kind === 'query') return heldDecide(l);
+    heldPending.confirm = true; draw();
   }
   function findInvoice(invoiceId) {
     if (!data || !Array.isArray(data.invoices)) return null;
@@ -460,7 +700,7 @@
     if (reread) return read(reqWeek, { keepStatus: true });
   }
   async function handleAction(act, invoiceId) {
-    if (!data || !canAct(data) || busy) return;
+    if (!data || !canAct(data) || busy || heldBusy) return;
     actionError = ''; notice = '';
     if (act === 'cancel') { pending = null; draw(); return; }
     if (act === 'approve') {
@@ -547,7 +787,7 @@
     if (!hostEl) throw new Error('A Pay run host is required');
     if (!document.getElementById('pay-run-style')) {
       var style = document.createElement('style'); style.id = 'pay-run-style';
-      style.textContent = '[data-pay-run]{color:var(--text,#1e293b);font-size:14px;line-height:1.5} [data-pay-run] h3{font-size:18px;margin:0 0 12px} [data-pay-run] h4{font-size:15px;margin:24px 0 8px} [data-pay-run] p{margin:6px 0} [data-pay-run] .pr-top{font-weight:600} [data-pay-run] .pr-week{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px} [data-pay-run] button{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:inherit;border-radius:6px;min-height:40px;padding:6px 14px;cursor:pointer} [data-pay-run] button:disabled{opacity:.55;cursor:wait} [data-pay-run] button:focus-visible,[data-pay-run] input:focus-visible{outline:2px solid #2563eb;outline-offset:2px} [data-pay-run] .pr-primary{background:#1f5fbf;color:#fff;border-color:#1f5fbf} [data-pay-run] .pr-actions{margin:12px 0} [data-pay-run] .pr-act-row,[data-pay-run] .pr-row-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px} [data-pay-run] .pr-confirm{margin-top:8px;padding:12px;border-radius:8px;background:#f3f7ff;border:1px solid #c9dcf7} [data-pay-run] .pr-confirm label{display:block;font-size:13px} [data-pay-run] .pr-confirm input{display:block;width:100%;max-width:420px;box-sizing:border-box;min-height:40px;margin-top:6px;padding:6px 8px;border:1px solid #94a3b8;border-radius:6px;background:#fff;color:inherit} [data-pay-run] .pr-notice{background:#eaf6ee;color:#1d5b33;padding:8px 12px;border-radius:6px;font-weight:600} [data-pay-run] .pr-run-status{font-size:14px} [data-pay-run] .pr-pushed{color:#15803d;font-weight:600;font-size:13px} [data-pay-run] .pr-row-status{margin-top:4px} [data-pay-run] .pr-notes{margin:4px 0 0;padding-left:18px;color:#8a4b00;font-size:13px} [data-pay-run] .pr-warn-tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;background:#fff4e5;color:#8a4b00;margin-right:4px} [data-pay-run] .pr-warn-line{color:#8a4b00;font-weight:600} [data-pay-run] .pr-checks{list-style:none;padding:0;margin:12px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 16px} [data-pay-run] .pr-checks li{display:grid;grid-template-columns:20px 1fr;column-gap:8px} [data-pay-run] .pr-checks li .pr-muted{grid-column:2} [data-pay-run] .pr-pass>span:first-child{color:#15803d;font-weight:700} [data-pay-run] .pr-fail>span:first-child{color:#b91c1c;font-weight:700} [data-pay-run] .pr-muted{color:var(--text-secondary,#526071);font-size:13px} [data-pay-run] .pr-held-out{color:#925c08;font-weight:600} [data-pay-run] .pr-counts{display:flex;flex-wrap:wrap;gap:8px 24px;margin:16px 0;padding:12px 0;border-top:1px solid var(--border,#e2e8f0);border-bottom:1px solid var(--border,#e2e8f0)} [data-pay-run] .pr-counts b{font-variant-numeric:tabular-nums;margin-left:4px} [data-pay-run] .pr-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap} [data-pay-run] .pr-clean{color:#15803d;font-weight:600} [data-pay-run] .pr-stopped{color:#b91c1c;font-weight:600} [data-pay-run] .pr-stops{margin:4px 0 0;padding-left:18px;color:#7f1d1d;font-size:13px} [data-pay-run] .pr-none{color:var(--text-secondary,#526071)} [data-pay-run] .pr-total td{font-weight:700} [data-pay-run] .pr-error{color:#9f2424} [data-pay-run] .pr-blocked{background:#fef2f2;border:2px solid #b91c1c;color:#7f1d1d;border-radius:8px;padding:12px 16px;margin:0 0 16px} [data-pay-run] .pr-blocked strong{font-size:16px} [data-pay-run] .data-table-wrap{overflow-x:auto}';
+      style.textContent = '[data-pay-run]{color:var(--text,#1e293b);font-size:14px;line-height:1.5} [data-pay-run] h3{font-size:18px;margin:0 0 12px} [data-pay-run] h4{font-size:15px;margin:24px 0 8px} [data-pay-run] p{margin:6px 0} [data-pay-run] .pr-top{font-weight:600} [data-pay-run] .pr-week{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px} [data-pay-run] button{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:inherit;border-radius:6px;min-height:40px;padding:6px 14px;cursor:pointer} [data-pay-run] button:disabled{opacity:.55;cursor:wait} [data-pay-run] button:focus-visible,[data-pay-run] input:focus-visible{outline:2px solid #2563eb;outline-offset:2px} [data-pay-run] .pr-primary{background:#1f5fbf;color:#fff;border-color:#1f5fbf} [data-pay-run] .pr-actions{margin:12px 0} [data-pay-run] .pr-act-row,[data-pay-run] .pr-row-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px} [data-pay-run] .pr-confirm{margin-top:8px;padding:12px;border-radius:8px;background:#f3f7ff;border:1px solid #c9dcf7} [data-pay-run] .pr-confirm label{display:block;font-size:13px} [data-pay-run] .pr-confirm input{display:block;width:100%;max-width:420px;box-sizing:border-box;min-height:40px;margin-top:6px;padding:6px 8px;border:1px solid #94a3b8;border-radius:6px;background:#fff;color:inherit} [data-pay-run] .pr-notice{background:#eaf6ee;color:#1d5b33;padding:8px 12px;border-radius:6px;font-weight:600} [data-pay-run] .pr-run-status{font-size:14px} [data-pay-run] .pr-pushed{color:#15803d;font-weight:600;font-size:13px} [data-pay-run] .pr-row-status{margin-top:4px} [data-pay-run] .pr-notes{margin:4px 0 0;padding-left:18px;color:#8a4b00;font-size:13px} [data-pay-run] .pr-warn-tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;background:#fff4e5;color:#8a4b00;margin-right:4px} [data-pay-run] .pr-warn-line{color:#8a4b00;font-weight:600} [data-pay-run] .pr-checks{list-style:none;padding:0;margin:12px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 16px} [data-pay-run] .pr-checks li{display:grid;grid-template-columns:20px 1fr;column-gap:8px} [data-pay-run] .pr-checks li .pr-muted{grid-column:2} [data-pay-run] .pr-pass>span:first-child{color:#15803d;font-weight:700} [data-pay-run] .pr-fail>span:first-child{color:#b91c1c;font-weight:700} [data-pay-run] .pr-muted{color:var(--text-secondary,#526071);font-size:13px} [data-pay-run] .pr-held-out{color:#925c08;font-weight:600} [data-pay-run] .pr-counts{display:flex;flex-wrap:wrap;gap:8px 24px;margin:16px 0;padding:12px 0;border-top:1px solid var(--border,#e2e8f0);border-bottom:1px solid var(--border,#e2e8f0)} [data-pay-run] .pr-counts b{font-variant-numeric:tabular-nums;margin-left:4px} [data-pay-run] .pr-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap} [data-pay-run] .pr-clean{color:#15803d;font-weight:600} [data-pay-run] .pr-stopped{color:#b91c1c;font-weight:600} [data-pay-run] .pr-stops{margin:4px 0 0;padding-left:18px;color:#7f1d1d;font-size:13px} [data-pay-run] .pr-none{color:var(--text-secondary,#526071)} [data-pay-run] .pr-total td{font-weight:700} [data-pay-run] .pr-error{color:#9f2424} [data-pay-run] .pr-blocked{background:#fef2f2;border:2px solid #b91c1c;color:#7f1d1d;border-radius:8px;padding:12px 16px;margin:0 0 16px} [data-pay-run] .pr-blocked strong{font-size:16px} [data-pay-run] .data-table-wrap{overflow-x:auto} [data-pay-run] .hl-panel{margin:12px 0 8px;padding:12px 16px;border:1px solid var(--border,#e2e8f0);border-radius:8px} [data-pay-run] .hl-panel h4{margin:0 0 6px} [data-pay-run] .hl-list{list-style:none;margin:8px 0 0;padding:0} [data-pay-run] .hl-line{padding:12px 0;border-top:1px solid var(--border,#e2e8f0);overflow-wrap:anywhere} [data-pay-run] .hl-top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 16px} [data-pay-run] .hl-why{color:#925c08;font-weight:600} [data-pay-run] .hl-queried{font-size:13px} [data-pay-run] .hl-panel form label{margin-top:6px}';
       document.head.appendChild(style);
     }
     if (hostEl !== host) {
@@ -560,12 +800,15 @@
         var button = event.target.closest('button');
         if (!button || button.disabled || button.type === 'submit') return;
         if (button.hasAttribute('data-retry')) { read(); return; }
-        if (button.hasAttribute('data-week') && week) { read(stepWeek(week, Number(button.getAttribute('data-week')))); return; }
+        if (button.hasAttribute('data-week') && week && !heldBusy) { read(stepWeek(week, Number(button.getAttribute('data-week')))); return; }
+        var hl = button.getAttribute('data-hl-act');
+        if (hl) { heldAction(hl, button.getAttribute('data-hl-line')); return; }
         var act = button.getAttribute('data-pr-act');
         if (act) handleAction(act, button.getAttribute('data-pr-invoice'));
       };
       section.onsubmit = function (event) {
         var form = event.target;
+        if (form && form.hasAttribute('data-hl-form')) { event.preventDefault(); heldSubmit(form); return; }
         if (!form || !form.hasAttribute('data-pr-release-form')) return;
         event.preventDefault();
         handleReleaseSubmit(form);

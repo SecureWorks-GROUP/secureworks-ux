@@ -308,3 +308,17 @@ test('the Undo confirm of a credit names its amount ex GST and its job, without 
   await expect(recent.locator('[data-rp-undo-confirm]')).toHaveCount(0);
   expect((await page.evaluate(() => window.__posts)).filter((p) => p.action === 'reconcile_undo')).toEqual([]);
 });
+
+test('F3d: a bill with its Xero id opens it in Xero in a new tab; a bill without one and a credit show no link', async ({ page }) => {
+  const XID = 'aaaaaaaa-0000-4000-8000-000000000101';
+  await open(page, { lists: { bills: [{ ...BILL, xero_invoice_id: XID }, { ...CREDIT, xero_invoice_id: XID }, { ...WAITING_CREDIT, id: 'ZZTEST-bill-2', kind: 'bill', amount_ex: 40, bill: null, bills: undefined }] } });
+  const link = card(page, 'ZZTEST-bill').locator('a[data-rp-xero]');
+  await expect(link).toHaveText('Open in Xero');
+  await expect(link).toHaveAttribute('href', 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + XID);
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(card(page, 'ZZTEST-credit').locator('a[data-rp-xero]')).toHaveCount(0);
+  await expect(card(page, 'ZZTEST-bill-2').locator('a[data-rp-xero]')).toHaveCount(0);
+  await expect(page.locator('#reconcilePlaceRoot a[href*="xero"]')).toHaveCount(1);
+  expect(await decidePosts(page)).toEqual([]);
+});

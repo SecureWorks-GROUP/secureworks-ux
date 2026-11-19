@@ -93,3 +93,6 @@ jobs:
 
       - name: Test trade invoice money split and PDF flow
         run: node scripts/test-trade-invoice-pdf-flow.js
+
+      - name: Test CEO live alerts reuses signed-in client
+        run: node --test tests/unit/ceo-alerts-client.test.cjs

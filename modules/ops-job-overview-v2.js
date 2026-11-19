@@ -4,9 +4,10 @@
 // docs/job-overview-v2.md. Layout: customer header with the money, a strip of real
 // files, then three columns: timeline, the story, the conversation.
 //
-// Switch (off by default): ?overview=v2 (or =1) turns it on for that load and
-// ?overview=classic (or =0) turns it off; otherwise localStorage sw_overview_v2 = '1'.
-// Staff also get a small "Try the new Overview" / "Back to classic" link.
+// Switch: default for staff when ops-api job_detail returns job_overview_v2_enabled === true
+// (server switch job_overview_v2, seeded OFF). When absent or false, off by default unless
+// ?overview=v2 (or =1) or localStorage sw_overview_v2 = '1'. ?overview=classic (or =0) turns
+// it off. Staff always get a one-click "Back to classic" / "Try the new Overview" link.
 //
 // Reads:  job_detail (already loaded by openJobDetail) and ops-api job_overview
 //         (slow: the story card takes 10 to 20 seconds, so it is cached per job for
@@ -252,9 +253,17 @@ var JobOverviewV2Core = (function () {
 
   // ── The switch ──
 
+  // Server switch on ops-api job_detail (key job_overview_v2, seeded OFF).
+  // Strictly true only; absent, false or any non-boolean keeps the classic default.
+  function serverSwitchOn(detail) {
+    return !!(detail && detail.job_overview_v2_enabled === true);
+  }
+
   // ?overview=v2 or =1 turns it on, ?overview=classic or =0 turns it off; the URL wins over
-  // the browser setting both ways. Otherwise localStorage sw_overview_v2 === '1'. Off by default.
-  function flagOn(search, stored) {
+  // both the browser setting and the server default. Otherwise an explicit browser choice
+  // (sw_overview_v2 === '1' or '0') wins over the server default; otherwise serverDefault
+  // (true only when job_detail says job_overview_v2_enabled === true for staff).
+  function flagOn(search, stored, serverDefault) {
     var m = /[?&]overview=([^&#]*)/.exec(str(search));
     if (m) {
       var v = m[1];
@@ -263,7 +272,10 @@ var JobOverviewV2Core = (function () {
       if (v === 'v2' || v === '1' || v === 'new' || v === 'on') return true;
       if (v === 'classic' || v === '0' || v === 'v1' || v === 'off') return false;
     }
-    return str(stored) === '1';
+    var s = str(stored);
+    if (s === '1') return true;
+    if (s === '0') return false;
+    return serverDefault === true;
   }
 
   // An action ops-api does not know yet: the backend part has not been deployed.
@@ -1499,7 +1511,7 @@ var JobOverviewV2Core = (function () {
     toMs: toMs, pt: pt, dayLabel: dayLabel, timeWords: timeWords, when: when, stamp: stamp,
     shortWhen: shortWhen, shortDate: shortDate, longDate: longDate, perthDayKey: perthDayKey,
     clean: clean, cut: cut, firstSentence: firstSentence, headlineFrom: headlineFrom, firstName: firstName, money: money,
-    humanStatus: humanStatus, hasBanned: hasBanned, flagOn: flagOn, isNotDeployed: isNotDeployed,
+    humanStatus: humanStatus, hasBanned: hasBanned, serverSwitchOn: serverSwitchOn, flagOn: flagOn, isNotDeployed: isNotDeployed,
     storyText: storyText, storyBook: storyBook, paragraphs: paragraphs, rewriteWords: rewriteWords, rewriteAccepted: rewriteAccepted, sourceFailures: sourceFailures,
     customerName: customerName, whoseMove: whoseMove, openItems: openItems, ledgerWords: ledgerWords,
     invoices: invoices, moneySummary: moneySummary, valueAuthority: valueAuthority, plainFields: plainFields, recordRef: recordRef, futureMoney: futureMoney, quoteRows: quoteRows, quotedValue: quotedValue, files: files,
@@ -1541,11 +1553,13 @@ var JobOverviewV2 = (function () {
   function writeStore(k, v) { try { window.localStorage.setItem(k, v); return true; } catch (e) { return false; } }
   function logErr(what, e) { try { console.error('[JobOverviewV2] ' + what, e); } catch (x) { /* nothing */ } }
 
-  function isOn() {
+  function isOn(data) {
     if (override !== null) return override;
     var search = '';
     try { search = window.location.search || ''; } catch (e) { /* none */ }
-    return C.flagOn(search, readStore(FLAG_KEY));
+    var d = data !== undefined ? data : g('_currentJobData');
+    var serverDefault = !!(api.isStaffViewer() && C.serverSwitchOn(d));
+    return C.flagOn(search, readStore(FLAG_KEY), serverDefault);
   }
   function getFilter() {
     var f = readStore(FILTER_KEY) || memFilter;
@@ -2467,7 +2481,7 @@ var JobOverviewV2 = (function () {
     try {
       if (!data || !data.job || !data.job.id) return false;
       if (String(data.job.type || '') === 'makesafe') return false;
-      if (!isOn()) return false;
+      if (!isOn(data)) return false;
       var el = document.getElementById('jdOverview');
       if (!el) return false;
       ensureCss();

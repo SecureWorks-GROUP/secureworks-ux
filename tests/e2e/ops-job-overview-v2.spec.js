@@ -26,7 +26,7 @@ const { JOB_ID, OTHER_JOB_ID, IDS, buildJobDetail, buildJobOverview } = require(
 test.use({ viewport: { width: 1360, height: 1000 } });
 
 // Boots ops.html with every backend call stubbed. overview: 'ok' | 'notdeployed' | 'error' | 'pending'.
-async function boot(page, { url = '/ops.html?overview=v2', staff = true, overview = 'ok', overviewOpts = {}, overviewData = null, detailOpts = {}, storage = null, otherJob = false } = {}) {
+async function boot(page, { url = '/ops.html?overview=v2', staff = true, overview = 'ok', overviewOpts = {}, overviewData = null, detailOpts = {}, detailExtra = null, storage = null, otherJob = false } = {}) {
   const sent = [];
   const stray = [];
   await page.route('**/functions/v1/**', async (route) => {
@@ -44,8 +44,9 @@ async function boot(page, { url = '/ops.html?overview=v2', staff = true, overvie
   }
   await page.goto(url);
   await revealOpsStaticFixture(page);
-  const detail = buildJobDetail(detailOpts);
-  const other = buildJobDetail();
+  const detail = Object.assign(buildJobDetail(detailOpts), detailExtra || {});
+  if (detailExtra && detailExtra.job) detail.job = Object.assign({}, buildJobDetail(detailOpts).job, detailExtra.job);
+  const other = Object.assign(buildJobDetail(), detailExtra && !detailExtra.job ? detailExtra : {});
   other.job = Object.assign({}, other.job, { id: OTHER_JOB_ID, job_number: 'SWF-990202', client_name: 'Riley Shaw', ghl_contact_id: 'ghl-contact-e2e-002' });
   const ov = overviewData || buildJobOverview(overviewOpts);
   await page.evaluate(({ detail, other, ov, mode, staff, otherJob }) => {
@@ -618,4 +619,81 @@ test('CTX-T22: a failed Matching read and a failed decisions read say so, never 
   await expect(matching).toHaveText('Could not read how many messages wait in Matching for this job.');
   await expect(matching.getByRole('button')).toHaveCount(0);
   await expect(page.locator('#ov2DecisionsUnread')).toContainText('Matching decisions could not be read.');
+});
+
+test('server switch job_overview_v2_enabled === true: default Overview v2 for staff with no browser flag, classic one click away', async ({ page }) => {
+  await boot(page, { url: '/ops.html', staff: true, detailExtra: { job_overview_v2_enabled: true } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toBeVisible();
+  await expect(page.locator('#ov2Toggle')).toHaveText('Back to classic');
+  expect(await overviewFetches(page)).toBe(1);
+
+  // Classic is one click away and remembered across reloads.
+  await page.locator('#ov2Toggle').click();
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).toContainText('Progress');
+  expect(await page.evaluate(() => localStorage.getItem('sw_overview_v2'))).toBe('0');
+
+  await boot(page, { url: '/ops.html', staff: true, detailExtra: { job_overview_v2_enabled: true } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).toContainText('Progress');
+  expect(await overviewFetches(page)).toBe(0);
+
+  // One click returns to Overview v2.
+  await page.locator('#jdOverview [data-ov2-act="try"]').click();
+  await expect(page.locator('#ov2Root')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('sw_overview_v2'))).toBe('1');
+});
+
+test('server switch off, absent or non-boolean keeps classic Overview and zero job_overview reads', async ({ page }) => {
+  await boot(page, { url: '/ops.html', staff: true, detailExtra: { job_overview_v2_enabled: false } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).toContainText('Progress');
+  expect(await overviewFetches(page)).toBe(0);
+
+  // Pure contract checks: strictly boolean true only, and URL/browser precedence.
+  const checks = await page.evaluate(() => {
+    const C = window.JobOverviewV2Core;
+    return {
+      absent: C.serverSwitchOn({}),
+      off: C.serverSwitchOn({ job_overview_v2_enabled: false }),
+      strTrue: C.serverSwitchOn({ job_overview_v2_enabled: 'true' }),
+      numOne: C.serverSwitchOn({ job_overview_v2_enabled: 1 }),
+      on: C.serverSwitchOn({ job_overview_v2_enabled: true }),
+      srvOnFresh: C.flagOn('', null, true),
+      srvOnOptOut: C.flagOn('', '0', true),
+      srvOnUrlOff: C.flagOn('?overview=classic', null, true),
+      srvOffFresh: C.flagOn('', null, false),
+      srvOffStoredOn: C.flagOn('', '1', false),
+    };
+  });
+  expect(checks).toEqual({
+    absent: false, off: false, strTrue: false, numOne: false, on: true,
+    srvOnFresh: true, srvOnOptOut: false, srvOnUrlOff: false, srvOffFresh: false, srvOffStoredOn: true,
+  });
+});
+
+test('server switch on: ?overview=classic wins, non-staff stays classic, and make-safe stays make-safe', async ({ page }) => {
+  // ?overview=classic wins over server switch.
+  await boot(page, { url: '/ops.html?overview=classic', staff: true, detailExtra: { job_overview_v2_enabled: true } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).toContainText('Progress');
+  expect(await overviewFetches(page)).toBe(0);
+
+  // Non-staff viewer stays on classic even with server switch on.
+  await boot(page, { url: '/ops.html', staff: false, detailExtra: { job_overview_v2_enabled: true } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  await expect(page.locator('#jdOverview')).toContainText('Progress');
+  await expect(page.locator('#jdOverview [data-ov2-act="try"]')).toHaveCount(0);
+  expect(await overviewFetches(page)).toBe(0);
+
+  // Make-safe jobs keep their own detail even with server switch on.
+  await boot(page, { url: '/ops.html', staff: true, detailExtra: { job_overview_v2_enabled: true, job: { type: 'makesafe', job_number: 'ZZTEST-MS-1', client_name: 'ZZTEST Client' } } });
+  await openJob(page);
+  await expect(page.locator('#ov2Root')).toHaveCount(0);
+  expect(await overviewFetches(page)).toBe(0);
 });

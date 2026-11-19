@@ -12,12 +12,23 @@ const raw = (extra = {}) => ({
   against: [], lines: [{ line_id: 'L1', description: 'Posts', amount_ex: 1000, tag: 'Fencing' }], held: null, ...extra,
 });
 
-test('the switch is off unless the address or this browser turns it on', () => {
+test('the switch defaults to server mode for admin, owner and ops_manager; every other role stays off', () => {
+  assert.equal(P.switchMode('', null), 'off');
+  assert.equal(P.switchMode('', null, 'sales'), 'off');
+  assert.equal(P.switchMode('', null, 'trade'), 'off');
+  assert.equal(P.switchMode('', null, 'installer'), 'off');
+  assert.equal(P.switchMode('', null, 'admin'), 'server');
+  assert.equal(P.switchMode('', null, 'owner'), 'server');
+  assert.equal(P.switchMode('', null, 'ops_manager'), 'server');
+  assert.equal(P.switchMode('?reconcile_place=0', null, 'owner'), 'off');
+  assert.equal(P.switchMode('', '0', 'ops_manager'), 'off');
+  assert.equal(P.switchMode('?reconcile_place=1', '0', 'sales'), 'on');
   assert.equal(P.switchOn('', null), false);
-  assert.equal(P.switchOn('?x=1', '0'), false);
+  assert.equal(P.switchOn('?x=1', '0', 'admin'), false);
   assert.equal(P.switchOn('', '1'), true);
   assert.equal(P.switchOn('?reconcile_place=1', null), true);
-  assert.equal(P.switchOn('?reconcile_place=0', '1'), false);
+  assert.equal(P.switchOn('?reconcile_place=0', '1', 'owner'), false);
+  assert.equal(P.switchOn('', null, 'ops_manager'), true);
 });
 
 test('only cost items are kept; a line the server marks not counted is left out', () => {
@@ -628,4 +639,78 @@ test('the Undo confirm names the document, the amount ex GST and the job, for pl
   await sp.api.press('ZZTEST-item-1', 'record');
   assert.equal(await undoText(sp), 'Undo this? Bill ZZTEST Supplier ZZ-1, recorded as: Split $1,000.00 ex GST: Posts, $600.00 ex GST on SWF-990001; Posts, $400.00 ex GST on SWP-990002. Undoing puts it back on the list as it was before.');
   assert.equal(P.undoWords({ document: '', recorded: 'Put $5.00 ex GST on SWF-990001.' }), 'Undo this? Recorded as: Put $5.00 ex GST on SWF-990001. Undoing puts it back on the list as it was before.');
+});
+
+test('server-switch mode stays hidden while reconcile_list_v1 is off, undeployed or without enabled:true, and renders when enabled:true', async () => {
+  const f = fixture();
+  f.host.mode = () => 'server';
+  f.host.read = async (action, params) => { f.calls.push({ action, params }); return { ok: true, enabled: false }; };
+  await f.api.refresh();
+  assert.equal(f.root.hidden, true);
+  assert.equal(f.root.innerHTML, '');
+  assert.deepEqual(f.calls.map((c) => c.params.tab), ['bills'], 'stops after the first tab when server switch is off');
+
+  // Missing enabled: true fails closed in server mode.
+  const missing = fixture();
+  missing.host.mode = () => 'server';
+  missing.host.read = async (action, params) => { missing.calls.push({ action, params }); return { items: [raw()] }; };
+  await missing.api.refresh();
+  assert.equal(missing.root.hidden, true);
+  assert.equal(missing.root.innerHTML, '');
+
+  // Undeployed / failing initial read before switch confirmed stays hidden.
+  const errFirst = fixture();
+  errFirst.host.mode = () => 'server';
+  errFirst.host.read = async () => { throw Object.assign(new Error('Unknown action'), { status: 400 }); };
+  await errFirst.api.refresh();
+  assert.equal(errFirst.root.hidden, true);
+  assert.equal(errFirst.root.innerHTML, '');
+
+  // Enabled: true renders all three tabs; a later read error stays visible, and turning switch off hides cleanly.
+  const on = fixture();
+  let reply = (params) => ({ ok: true, enabled: true, items: params.tab === 'bills' ? [raw()] : [], next: null });
+  on.host.mode = () => 'server';
+  on.host.read = async (action, params) => { on.calls.push({ action, params }); return reply(params); };
+  await on.api.refresh();
+  assert.equal(on.root.hidden, false);
+  assert.deepEqual(on.calls.map((c) => c.params.tab), ['bills', 'card_bank', 'receipts']);
+  assert.match(on.root.innerHTML, /Cost lines to place/);
+  assert.match(on.root.innerHTML, /data-rp="use_old">Old bill screen</);
+
+  reply = () => { throw Object.assign(new Error('down'), { status: 503 }); };
+  await on.api.refresh();
+  assert.equal(on.root.hidden, false, 'error stays visible once server switch was confirmed on');
+  assert.match(on.root.innerHTML, /The list could not be read/);
+
+  reply = () => ({ ok: true, enabled: false });
+  await on.api.refresh();
+  assert.equal(on.root.hidden, true, 'turning server switch back off hides cleanly');
+  assert.equal(on.root.innerHTML, '');
+});
+
+test('one-click switch to old bill screen, open Bill Reconciliation, and switch back', async () => {
+  const f = fixture();
+  let mode = 'server', openedBillRecon = 0, stored = null;
+  f.host.mode = () => mode;
+  f.host.showOldBar = () => stored === '0';
+  f.host.setOldScreen = (off) => { stored = off ? '0' : null; mode = off ? 'off' : 'server'; };
+  f.host.openBillRecon = () => { openedBillRecon += 1; };
+  f.host.read = async (action, params) => { f.calls.push({ action, params }); return { ok: true, enabled: true, items: params.tab === 'bills' ? [raw()] : [], next: null }; };
+  await f.api.refresh();
+  assert.match(f.root.innerHTML, /ZZTEST Supplier/);
+
+  await f.api.press(null, 'use_old');
+  assert.equal(stored, '0');
+  assert.equal(f.root.hidden, false);
+  assert.match(f.root.innerHTML, /data-rp-old-bar/);
+  assert.match(f.root.innerHTML, /data-rp="open_bill_recon">Open Bill Reconciliation</);
+  assert.match(f.root.innerHTML, /data-rp="use_new">Use Cost lines to place</);
+  assert.doesNotMatch(f.root.innerHTML, /ZZTEST Supplier/);
+
+  await f.api.press(null, 'open_bill_recon');
+  assert.equal(openedBillRecon, 1);
+
+  await f.api.press(null, 'use_new');
+  assert.equal(stored, null);
+  assert.match(f.root.innerHTML, /ZZTEST Supplier/);
 });

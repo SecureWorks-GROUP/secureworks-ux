@@ -6548,9 +6548,9 @@ __swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}, {t:'js', u
 <script>
 __swOpsStampAssets([{t:'js', u:'modules/ops-agent-proposals.js?v=1'}]);
 </script>
-<!-- Cost lines to place on a job, split or not for a job (modules/ops-reconcile-place.js, P2-03.10/11). Off unless ?reconcile_place=1 or sw_reconcile_place = '1'. -->
+<!-- Cost lines to place on a job, split or not for a job (modules/ops-reconcile-place.js, P2-03.10/11). Default for admin, owner and ops_manager behind server switch reconcile_list_v1; ?reconcile_place=0 or sw_reconcile_place = '0' keeps the old screen. -->
 <script>
-__swOpsStampAssets([{t:'js', u:'modules/ops-reconcile-split.js?v=1'}, {t:'js', u:'modules/ops-reconcile-place.js?v=1'}]);
+__swOpsStampAssets([{t:'js', u:'modules/ops-reconcile-split.js?v=1'}, {t:'js', u:'modules/ops-reconcile-place.js?v=2'}]);
 </script>
 <!-- Receipts not booked on their job: the office confirm (modules/ops-receipt-confirm.js, backend #1656). -->
 <script>

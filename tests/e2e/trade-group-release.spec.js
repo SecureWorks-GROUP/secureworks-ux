@@ -141,7 +141,8 @@ test('the group shows once with its one hours form; the job card links to it', a
   const rows = card.locator('[data-group-crew-row]');
   await expect(rows).toHaveText([/Henry\s*\(you\)\s*18h$/, /Isaac\s*18h\s*✓ Confirmed/, /Ryan\s*18\.5h\s*✓ Confirmed/]);
   await expect(card.locator('[data-group-signed="no"]')).toContainText('Not signed yet');
-  await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the crew’s hours are confirmed and the client has signed.');
+  // Gate follows server awaiting ('awaiting_crew_approval' !== 'awaiting_signoff').
+  await expect(card.locator('[data-group-locked]')).toHaveText('Unlocks when the crew’s hours are confirmed.');
   await expect(card.locator('[data-group-allocation]')).toHaveCount(0);
   await expect(card).not.toContainText('911.56');
   await noOtherPay(card);

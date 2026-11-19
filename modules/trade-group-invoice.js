@@ -65,13 +65,17 @@
     return crew.length > 0 && crew.every(function(c) { return approvedRow(g, c); });
   }
   function signed(g) { return g.client_signed === true; }
-  // Follow the server's awaiting (matching crew/js/screens/group.js): 'ready' or 'frozen'
-  // unlocks Finalise and Submit even when client_signed is false (sign-off switch off);
-  // 'awaiting_signoff' waits for the client signature.
+  // Follow the server's awaiting (matching crew/js/screens/group.js): only
+  // 'awaiting_signoff' holds for the client signature.
   function signoffOk(g) {
-    if (g.awaiting === 'awaiting_signoff') return false;
-    if (g.awaiting === 'ready' || g.awaiting === 'frozen') return true;
-    return signed(g);
+    return g.awaiting !== 'awaiting_signoff';
+  }
+  function missingHoursCount(g) {
+    return crewHours(g).filter(function(c) { return !(Number(c.hours) > 0); }).length;
+  }
+  function needsHoursWords(g) {
+    var n = missingHoursCount(g);
+    return n > 0 ? 'Waiting on ' + n + ' crew to add their days' : 'Waiting on your crew to add their days';
   }
   function unlocked(g) { return signoffOk(g) && hoursOk(g); }
   function myTurn(g) { return !g.submitted && asksApproval(g) && g.my_hours_approved !== true && g.awaiting !== 'needs_hours' && g.awaiting !== 'needs_join'; }
@@ -234,10 +238,10 @@
     if (removed(g)) return pill('Removed by office','no','data-group-pill');
     if (notMember(g)) return pill('Office to check','no','data-group-pill');
     if (g.awaiting === 'needs_join') return pill('Join to invoice','info','data-group-pill');
-    if (notHappy(g) && g.awaiting !== 'ready' && g.awaiting !== 'frozen') return pill('Office to sort out','wait','data-group-pill');
+    if (notHappy(g) && !signoffOk(g)) return pill('Office to sort out','wait','data-group-pill');
     if (myTurn(g)) return pill('Confirm hours','wait','data-group-pill');
-    if (!signoffOk(g) && g.awaiting !== 'needs_hours') return pill('Needs sign-off','wait','data-group-pill');
-    if (!hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
+    if (!signoffOk(g)) return pill('Needs sign-off','wait','data-group-pill');
+    if (g.awaiting === 'needs_hours' || g.awaiting === 'awaiting_others' || !hoursOk(g)) return pill('Waiting on crew','no','data-group-pill');
     if (g.awaiting === 'frozen') return pill('Ready to invoice','ok','data-group-pill');
     if (g.awaiting === 'ready') return pill('Ready to finalise','info','data-group-pill');
     return pill('In progress','no','data-group-pill');
@@ -349,13 +353,15 @@
     }
     if (notHappy(g)) {
       return '<div class="gw-unhappy" data-group-signed="not-happy"><b>Client not happy with the work</b>'
-        + '<div class="gw-sub">The office will sort it out with the client. Your share stays locked until then.</div></div>';
+        + '<div class="gw-sub">'+(signoffOk(g)
+          ? 'The office will sort it out with the client.'
+          : 'The office will sort it out with the client. Your share stays locked until then.')+'</div></div>';
     }
     return '<div class="gw-line" data-group-signed="no"><span>Not signed yet</span>'+pill(signoffOk(g) ? 'Optional' : 'Waiting','no')+'</div>'
       + '<button type="button" class="btn btn-secondary gw-btn" data-group-sign-open="'+esc(g.group_id)+'" onclick="GroupWorkOrderInvoice.openSign(this.getAttribute(\'data-group-sign-open\'))">Hand phone to client to sign</button>'
       + '<div class="gw-sub gw-hint">Client can’t sign? The office can sign off instead.</div>';
   }
-  // 3 · Your share: locked until hours are approved and the client has signed.
+  // 3 · Your share: follows the server's awaiting state.
   function shareHtml(g) {
     var allIn = allInBasis(g), id = esc(g.group_id), h = '', note = submitted[owner+':'+g.group_id];
     if (g.submitted) {
@@ -364,8 +370,11 @@
       if (g.submitted.invoice_number) h += '<div class="gw-note">Invoice '+esc(g.submitted.invoice_number)+'</div>';
       return h + crewLine(g);
     }
+    if (g.awaiting === 'needs_hours' || g.awaiting === 'awaiting_others') {
+      return '<div class="gw-locked" data-group-acceptance>'+esc(needsHoursWords(g))+'</div>';
+    }
     if (!unlocked(g)) {
-      if (notHappy(g)) return '<div class="gw-locked" data-group-locked>Locked while the office sorts it out with the client.</div>';
+      if (notHappy(g) && !signoffOk(g)) return '<div class="gw-locked" data-group-locked>Locked while the office sorts it out with the client.</div>';
       var text = !signoffOk(g) && !hoursOk(g) ? 'Unlocks when the crew’s hours are confirmed and the client has signed.'
         : !signoffOk(g) ? 'Unlocks when the client has signed.' : 'Unlocks when the crew’s hours are confirmed.';
       return '<div class="gw-locked" data-group-locked>'+text+'</div>';
@@ -385,7 +394,7 @@
       h += '<button type="button" class="btn btn-primary gw-btn" data-invoice-group-finalise="'+id+'" '+(busy ? 'disabled ' : '')+'onclick="GroupWorkOrderInvoice.finalise(this.getAttribute(\'data-invoice-group-finalise\'))">'+(busy === g.group_id ? 'Finalising…' : 'Finalise group shares')+'</button>';
       return h + crewLine(g);
     }
-    var messages = {needs_hours:'Add your hours in step 1 to see your share.', awaiting_others:'Waiting for the rest of the crew’s hours.', awaiting_rate:'The office needs to confirm a crew pay rate.', awaiting_signoff:'Needs a current sign-off before shares can be finalised.', awaiting_office:'Already finalised. Ask the office to check your share.'};
+    var messages = {needs_hours:needsHoursWords(g), awaiting_others:needsHoursWords(g), awaiting_rate:'The office needs to confirm a crew pay rate.', awaiting_signoff:'Needs a current sign-off before shares can be finalised.', awaiting_office:'Already finalised. Ask the office to check your share.'};
     return '<div class="gw-locked" data-group-acceptance>'+esc(messages[g.awaiting] || 'Not ready to invoice yet.')+'</div>';
   }
   function links(g) {
@@ -550,7 +559,9 @@
       + '<button type="button" role="radio" aria-checked="false" data-gw-happy="no">Not happy</button></div>';
     h += '<div data-gw-unhappy-box hidden style="margin-top:14px"><label class="gw-label" for="gwSignReason" style="display:block">What is the client not happy with?</label>'
       + '<textarea class="gw-field" id="gwSignReason" data-gw-sign-reason rows="3" maxlength="2000" placeholder="A short reason, in the client’s words"></textarea>'
-      + '<div class="gw-sub">The office will sort it out with the client. The crew’s shares stay locked until then.</div></div>';
+      + '<div class="gw-sub">'+(signoffOk(g)
+        ? 'The office will sort it out with the client.'
+        : 'The office will sort it out with the client. The crew’s shares stay locked until then.')+'</div></div>';
     h += '<div data-gw-happy-box hidden style="margin-top:14px"><div class="gw-label">How did we go?</div>';
     RATINGS.forEach(function(pair) {
       h += '<div class="gw-rate"><span id="gwRate_'+pair[0]+'">'+esc(pair[1])+'</span><span class="gw-stars" role="radiogroup" aria-labelledby="gwRate_'+pair[0]+'" data-gw-rating="'+pair[0]+'">';

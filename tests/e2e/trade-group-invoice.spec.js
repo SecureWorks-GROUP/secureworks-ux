@@ -217,3 +217,67 @@ test('sign-off switch on: server awaiting_signoff waits for client signature wit
   await expect(card.getByRole('button', { name: 'Submit my group share', exact: true })).toHaveCount(0);
   expect(writes).toEqual([]);
 });
+
+test('needs_hours with client_signed false never says Needs sign-off and shows waiting-on-crew count or fallback', async ({ appPage: page }) => {
+  const zzGroupA = 'aaaa0003-0000-4000-8000-000000000003';
+  const zzJobA = 'bbbb0003-0000-4000-8000-000000000003';
+  const zzGroupB = 'aaaa0004-0000-4000-8000-000000000004';
+  const zzJobB = 'bbbb0004-0000-4000-8000-000000000004';
+  const zzGroupC = 'aaaa0005-0000-4000-8000-000000000005';
+  const zzJobC = 'bbbb0005-0000-4000-8000-000000000005';
+  await page.route('**/functions/v1/ops-api?**', async route => {
+    const req = route.request(), action = new URL(req.url()).searchParams.get('action');
+    const reply = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (action === 'my_group_work_orders') {
+      return reply({
+        enabled: true, group_job_ids: [zzJobA, zzJobB, zzJobC],
+        groups: [
+          {
+            group_id: zzGroupA, job_id: zzJobA, job_number: 'ZZTEST-GRP-3', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+            pot_total: 1000, needs_hours: true, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+            client_signed: false, client_signoff: null, awaiting: 'needs_hours',
+            crew_hours: [
+              { name: 'ZZTEST One', me: true, hours: 8, approved: true },
+              { name: 'ZZTEST Two', me: false, hours: 0, approved: false },
+              { name: 'ZZTEST Three', me: false, hours: 0, approved: false },
+            ],
+          },
+          {
+            group_id: zzGroupB, job_id: zzJobB, job_number: 'ZZTEST-GRP-4', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+            pot_total: 1000, needs_hours: true, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+            client_signed: false, client_signoff: null, awaiting: 'needs_hours',
+            crew_hours: [],
+          },
+          {
+            group_id: zzGroupC, job_id: zzJobC, job_number: 'ZZTEST-GRP-5', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+            pot_total: 1000, needs_hours: false, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+            client_signed: false, client_not_happy: true, client_signoff: null, awaiting: 'ready',
+            projected_my_share: 500, projected_my_budget: 560, projected_cash_pay: 500, projected_super: 60,
+          },
+        ],
+      });
+    }
+    return route.fallback();
+  });
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+
+  const cardA = page.locator(`[data-invoice-group="${zzGroupA}"]`);
+  await expect(cardA.locator('[data-group-pill]')).toHaveText('Waiting on crew');
+  await expect(cardA).not.toContainText('Needs sign-off');
+  await expect(cardA.locator('[data-group-acceptance]')).toHaveText('Waiting on 2 crew to add their days');
+  await expect(cardA.getByRole('button', { name: 'Finalise group shares', exact: true })).toHaveCount(0);
+
+  const cardB = page.locator(`[data-invoice-group="${zzGroupB}"]`);
+  await expect(cardB.locator('[data-group-pill]')).toHaveText('Waiting on crew');
+  await expect(cardB).not.toContainText('Needs sign-off');
+  await expect(cardB.locator('[data-group-acceptance]')).toHaveText('Waiting on your crew to add their days');
+
+  const cardC = page.locator(`[data-invoice-group="${zzGroupC}"]`);
+  await expect(cardC.locator('[data-group-pill]')).toHaveText('Ready to finalise');
+  await expect(cardC.locator('[data-group-signed="not-happy"]')).toContainText('The office will sort it out with the client.');
+  await expect(cardC.locator('[data-group-signed="not-happy"]')).not.toContainText('stays locked');
+  await expect(cardC.getByRole('button', { name: 'Finalise group shares', exact: true })).toBeVisible();
+});

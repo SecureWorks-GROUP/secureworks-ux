@@ -140,3 +140,80 @@ test('future allocated group is discoverable and joinable before hours without e
  expect(writes).toEqual([{group_id:groupId}]);
  await expect(card.getByRole('button',{name:'Finalise group shares',exact:true})).toHaveCount(0);
 });
+
+test('sign-off switch off: server awaiting ready then frozen shows Finalise and Submit even when client_signed is false', async ({ appPage: page }) => {
+  const zzGroup = '99999999-1111-4111-8111-111111111111';
+  const zzJob = '99999999-2222-4222-8222-222222222222';
+  let phase = 'ready';
+  const writes = [];
+  await page.route('**/functions/v1/ops-api?**', async route => {
+    const req = route.request(), action = new URL(req.url()).searchParams.get('action');
+    const reply = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    const row = {
+      group_id: zzGroup, job_id: zzJob, job_number: 'ZZTEST-GRP-1', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+      pot_total: 1000, needs_hours: false, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+      client_signed: false, client_signoff: null, awaiting: phase,
+      projected_my_share: 500, projected_my_budget: 560, projected_cash_pay: 500, projected_super: 60,
+      my_share: phase === 'frozen' ? 500 : null, my_budget: phase === 'frozen' ? 560 : null,
+      my_cash_pay: phase === 'frozen' ? 500 : null, my_super: phase === 'frozen' ? 60 : null,
+    };
+    if (action === 'my_group_work_orders') return reply({ enabled: true, group_job_ids: [zzJob], groups: [row] });
+    if (action === 'freeze_group_work_order') { writes.push({ action, body: req.postDataJSON() }); phase = 'frozen'; return reply({ ...row, awaiting: 'frozen', my_share: 500, my_budget: 560, my_cash_pay: 500, my_super: 60 }); }
+    if (action === 'generate_trade_invoice') { writes.push({ action, body: req.postDataJSON() }); return reply({ success: true, invoice_id: 'ZZTEST-inv-1', group_release: { released: false } }); }
+    return route.fallback();
+  });
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  const card = page.locator('[data-invoice-group]');
+  await expect(card).toContainText('ZZTEST-GRP-1');
+  await expect(card.locator('[data-group-pill]')).toHaveText('Ready to finalise');
+  await expect(card.locator('[data-group-locked]')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Finalise group shares', exact: true })).toBeVisible();
+  page.once('dialog', d => d.accept());
+  await card.getByRole('button', { name: 'Finalise group shares', exact: true }).click();
+  await expect(card.locator('[data-group-pill]')).toHaveText('Ready to invoice');
+  await expect(card.getByRole('button', { name: 'Submit my group share', exact: true })).toBeVisible();
+  page.once('dialog', d => d.accept());
+  await card.getByRole('button', { name: 'Submit my group share', exact: true }).click();
+  await expect(card.locator('[data-group-submit-note]')).toBeVisible();
+  expect(writes).toEqual([
+    { action: 'freeze_group_work_order', body: { group_id: zzGroup } },
+    { action: 'generate_trade_invoice', body: { extra_items: [{ type: 'group share', group_id: zzGroup }], gst_on: false } },
+  ]);
+});
+
+test('sign-off switch on: server awaiting_signoff waits for client signature with no Finalise or Submit', async ({ appPage: page }) => {
+  const zzGroup = '99999999-3333-4333-8333-333333333333';
+  const zzJob = '99999999-4444-4444-8444-444444444444';
+  const writes = [];
+  await page.route('**/functions/v1/ops-api?**', async route => {
+    const req = route.request(), action = new URL(req.url()).searchParams.get('action');
+    const reply = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (action === 'my_group_work_orders') {
+      return reply({
+        enabled: true, group_job_ids: [zzJob],
+        groups: [{
+          group_id: zzGroup, job_id: zzJob, job_number: 'ZZTEST-GRP-2', client_name: 'ZZTEST Client', site_suburb: 'ZZTEST Suburb',
+          pot_total: 1000, needs_hours: false, group_share_office_review_required: true, pay_basis: 'all_in_12_v2', budget_includes_super: true,
+          client_signed: false, client_signoff: null, awaiting: 'awaiting_signoff',
+          projected_my_share: 500, projected_my_budget: 560, projected_cash_pay: 500, projected_super: 60,
+        }],
+      });
+    }
+    if (action === 'freeze_group_work_order' || action === 'generate_trade_invoice') writes.push(action);
+    return route.fallback();
+  });
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  const card = page.locator('[data-invoice-group]');
+  await expect(card).toContainText('ZZTEST-GRP-2');
+  await expect(card.locator('[data-group-pill]')).toHaveText('Needs sign-off');
+  await expect(card.locator('[data-group-locked]')).toContainText('Unlocks when the client has signed.');
+  await expect(card.getByRole('button', { name: 'Finalise group shares', exact: true })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Submit my group share', exact: true })).toHaveCount(0);
+  expect(writes).toEqual([]);
+});

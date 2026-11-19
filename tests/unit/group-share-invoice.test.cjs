@@ -19,6 +19,20 @@ test('old backend cannot offer or submit invoice',async()=>{const s=setup({...fr
 test('own server-priced share submits once for review with explicit GST',async()=>{let resolve;const s=setup(frozen,()=>new Promise(r=>resolve=r));await s.paint();s.click('invoice');s.click('invoice');assert.equal(s.calls.length,2);assert.deepEqual(JSON.parse(JSON.stringify(s.calls[1])),{action:'generate_trade_invoice',body:{extra_items:[{type:'group share',group_id:'group'}],gst_on:true}});resolve({success:true,invoice_id:'inv',office_review:'held',xero_bill_id:null});await settle();assert.match(s.msg.textContent,/saved for office review/);s.click('invoice');assert.equal(s.calls.length,2)});
 test('lost invoice response does not invite another submission',async()=>{const s=setup(frozen,()=>Promise.reject(Error('network')));await s.paint();s.click('invoice');await settle();assert.match(s.msg.textContent,/office check/);s.click('invoice');assert.equal(s.calls.length,2)});
 test('missing signoff cannot freeze or invoice',async()=>{const s=setup({...frozen,awaiting:'awaiting_signoff',client_signed:false},()=>{throw Error('unexpected')});await s.paint();s.click('freeze');s.click('invoice');assert.equal(s.calls.length,1)});
+test('signoff switch off: server awaiting ready or frozen unlocks freeze and invoice with client_signed false',async()=>{
+  const s1=setup({...frozen,awaiting:'ready',client_signed:false},()=>Promise.resolve({awaiting:'frozen'}));
+  await s1.paint();
+  assert.match(s1.controls[0].innerHTML,/data-group-wo-action="freeze"/);
+  s1.click('freeze');
+  await settle();
+  assert.equal(s1.calls[1].action,'freeze_group_work_order');
+  const s2=setup({...frozen,awaiting:'frozen',client_signed:false},()=>Promise.resolve({success:true,invoice_id:'ZZTEST-inv',office_review:'held',xero_bill_id:null}));
+  await s2.paint();
+  assert.match(s2.controls[0].innerHTML,/data-group-wo-action="invoice"/);
+  s2.click('invoice');
+  await settle();
+  assert.equal(s2.calls[1].action,'generate_trade_invoice');
+});
 test('ready split freezes only on explicit click and rereads server',async()=>{const s=setup({...frozen,awaiting:'ready'},()=>Promise.resolve({awaiting:'frozen'}));await s.paint();assert.equal(s.calls.length,1);s.click('freeze');await settle();assert.equal(s.calls[1].action,'freeze_group_work_order');assert.equal(s.calls[2].action,'group_work_order_my_share')});
 
 test('before freezing, explains weighted pool rather than hourly entitlement',async()=>{const s=setup({...frozen,awaiting:'ready',pot_total:2160},()=>Promise.resolve({}));await s.paint();const html=s.controls[0].innerHTML;assert.match(html,/\$2160\.00 before GST/);assert.match(html,/each person’s hours and agreed rate/);assert.match(html,/not an hourly rate/);assert.equal(s.calls.length,1)});

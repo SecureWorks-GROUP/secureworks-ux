@@ -290,14 +290,14 @@
   function figure(value) { return isMoney(value) ? money(value) : '<span class="pr-none">Not read</span>'; }
   function weekBar() {
     var label = week ? 'Week of ' + esc(dayText(week)) : 'Pay week';
-    var off = state === 'loading' || busy || !week ? ' disabled' : '';
+    var off = state === 'loading' || busy || heldBusy || !week ? ' disabled' : '';
     return '<div class="pr-week"><button type="button" data-week="-7" aria-label="Previous week"' + off + '>&larr; Previous</button>' +
       '<strong data-week-label>' + label + '</strong>' +
       '<button type="button" data-week="7" aria-label="Next week"' + off + '>Next &rarr;</button></div>';
   }
   function actionsBarHtml(d) {
     if (!canAct(d)) return '';
-    var dis = busy ? ' disabled' : '';
+    var dis = busy || heldBusy ? ' disabled' : '';
     var out = '<div class="pr-actions" data-pay-run-actions>';
     if (notice) out += '<p class="pr-notice" role="status" data-pr-notice>' + esc(notice) + '</p>';
     if (actionError) out += '<p class="pr-error" role="alert" data-pr-error>' + esc(actionError) + '</p>';
@@ -337,7 +337,7 @@
     if (!canAct(d) || !d.run || !d.run.id) return '';
     if (i.pushed) return '<div class="pr-row-status"><span class="pr-pushed" data-pushed>Pushed to Xero</span></div>';
     if (hasStopCode(i, 'released_from_run') || hasStopCode(i, 'xero_bill_found_at_release')) return '';
-    var dis = busy ? ' disabled' : '';
+    var dis = busy || heldBusy ? ' disabled' : '';
     var invId = esc(i.invoice_id);
     if (pending && pending.invoiceId === i.invoice_id && pending.kind === 'push') {
       var pushWeek = /^\d{4}-\d{2}-\d{2}$/.test(i.week_start || '') ? i.week_start : d.week_start;
@@ -506,12 +506,16 @@
     var p = heldPending, dis = heldBusy ? ' disabled' : '';
     var who = (l.job_number ? l.job_number : 'No job') + (l.trade_name ? ', ' + l.trade_name : '');
     if (p.confirm) {
-      var changed = [];
-      if (p.amount !== null) changed.push('pays ' + money(p.amount) + ' ex GST instead of ' + money(l.sent_amount_ex));
-      if (p.hours !== null) changed.push((Math.round(p.hours * 100) / 100) + ' hours instead of ' + l.total_hours);
-      var lead = p.kind === 'approve'
-        ? 'Approve this line (' + who + ')? It is paid on a follow-on invoice' + (changed.length ? ' and ' + changed.join(' and ') : '') + '.'
-        : 'Decline this line (' + who + ')? The trade sees it as not approved, with your reason.';
+      var lead = 'Decline this line (' + who + ')? The trade sees it as not approved, with your reason.';
+      if (p.kind === 'approve') {
+        var change = heldChanges(l, p);
+        var pays = 'line_total_ex' in change ? 'It pays ' + money(change.line_total_ex) + ' ex GST'
+          : 'total_hours' in change ? 'It pays ' + change.total_hours + ' hours; the office system works the amount out again from them'
+          : isMoney(l.line_total_ex) && l.hold_reason !== 'commission_no_figure' ? 'It pays ' + money(l.line_total_ex) + ' ex GST'
+          : 'It pays the amount the office system works out';
+        if ('line_total_ex' in change && 'total_hours' in change) pays += ' for ' + change.total_hours + ' hours';
+        lead = 'Approve this line (' + who + ')? ' + pays + ', on a follow-on invoice.';
+      }
       return '<div class="pr-confirm" data-hl-confirm="' + p.kind + '"><p>' + esc(lead) + '</p><p class="pr-muted">Reason: ' + esc(p.reason) + '</p>' +
         '<div class="pr-act-row"><button type="button" class="pr-primary" data-hl-act="yes" data-hl-line="' + esc(l.id) + '"' + dis + '>' +
         (heldBusy ? 'Saving...' : 'Yes, ' + (p.kind === 'approve' ? 'approve' : 'decline') + ' this line') + '</button>' +
@@ -542,7 +546,8 @@
     if (typeof l.total_hours === 'number' && isFinite(l.total_hours) && l.total_hours > 0) facts.push(l.total_hours + ' h');
     var out = '<li class="hl-line" data-hl-line-row="' + esc(l.id) + '" data-hl-reason="' + esc(l.hold_reason || '') + '">' +
       '<div class="hl-top"><span>' + head + '</span><span class="pr-num" data-hl-sent>' +
-      (isMoney(l.sent_amount_ex) ? 'Sent ' + money(l.sent_amount_ex) + ' ex GST' : 'Sent amount not known') + '</span></div>' +
+      (isMoney(l.sent_amount_ex) ? 'Sent ' + money(l.sent_amount_ex) + ' ex GST' : 'Sent amount not known') +
+      (isMoney(l.sent_amount_ex) && isMoney(l.line_total_ex) && Math.round(l.line_total_ex * 100) !== Math.round(l.sent_amount_ex * 100) ? ' (held ' + money(l.line_total_ex) + ')' : '') + '</span></div>' +
       '<p class="hl-why" data-hl-why>' + esc(heldReasonWords(l)) + '</p>' +
       (facts.length ? '<p class="pr-muted">' + esc(facts.join(' \u00b7 ')) + '</p>' : '') +
       (l.description ? '<p class="pr-muted">' + esc(l.description) + '</p>' : '') +
@@ -598,13 +603,18 @@
     if (p.hours !== null && (!isFinite(p.hours) || p.hours < 0 || !twoPlaces(p.hours))) return 'Type the hours to two decimal places at most, or leave them blank.';
     return '';
   }
+  // What an approval changes: an amount that differs from the line's held amount, hours that differ from its hours.
+  function heldChanges(l, p) {
+    var changes = {};
+    if (p.amount !== null && isFinite(p.amount) && (!isMoney(l.line_total_ex) || Math.round(p.amount * 100) !== Math.round(l.line_total_ex * 100))) changes.line_total_ex = Math.round(p.amount * 100) / 100;
+    if (p.hours !== null && isFinite(p.hours) && Math.round(p.hours * 100) !== Math.round(Number(l.total_hours) * 100)) changes.total_hours = Math.round(p.hours * 100) / 100;
+    return changes;
+  }
   async function heldDecide(l) {
     var p = heldPending;
     var body = { line_id: l.id, decision: p.kind, reason: p.reason };
     if (p.kind === 'approve') {
-      var changes = {};
-      if (p.amount !== null && Math.round(p.amount * 100) !== Math.round(l.sent_amount_ex * 100)) changes.line_total_ex = Math.round(p.amount * 100) / 100;
-      if (p.hours !== null && p.hours !== l.total_hours) changes.total_hours = Math.round(p.hours * 100) / 100;
+      var changes = heldChanges(l, p);
       if (Object.keys(changes).length) body.changes = changes;
     }
     heldBusy = true; heldError = ''; heldNotice = ''; draw();
@@ -690,7 +700,7 @@
     if (reread) return read(reqWeek, { keepStatus: true });
   }
   async function handleAction(act, invoiceId) {
-    if (!data || !canAct(data) || busy) return;
+    if (!data || !canAct(data) || busy || heldBusy) return;
     actionError = ''; notice = '';
     if (act === 'cancel') { pending = null; draw(); return; }
     if (act === 'approve') {
@@ -790,7 +800,7 @@
         var button = event.target.closest('button');
         if (!button || button.disabled || button.type === 'submit') return;
         if (button.hasAttribute('data-retry')) { read(); return; }
-        if (button.hasAttribute('data-week') && week) { read(stepWeek(week, Number(button.getAttribute('data-week')))); return; }
+        if (button.hasAttribute('data-week') && week && !heldBusy) { read(stepWeek(week, Number(button.getAttribute('data-week')))); return; }
         var hl = button.getAttribute('data-hl-act');
         if (hl) { heldAction(hl, button.getAttribute('data-hl-line')); return; }
         var act = button.getAttribute('data-pr-act');

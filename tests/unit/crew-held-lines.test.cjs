@@ -66,3 +66,13 @@ test('the phone keeps at most ten recent holding invoices per trade, newest firs
   assert.deepEqual(H.livePointers([{ id: 'a', at: t }, { id: 'b', at: t - 60 * day }, { id: '', at: t }, null], t).map((p) => p.id), ['a']);
   assert.equal(H.heldKey('ZZTEST-user'), 'held:ZZTEST-user');
 });
+
+test('the week\'s own invoice comes before a follow-on or holding invoice of the same week, when the list names the kind', async () => {
+  const { invoiceForWeek } = await import('../../crew/js/lib/invoice.js');
+  const own = { id: 'ZZTEST-own', week_start: '2026-11-09', status: 'pushed_to_xero' };
+  const follow = { id: 'ZZTEST-fo', week_start: '2026-11-09', status: 'pending_ops_review', invoice_kind: 'follow_on' };
+  assert.equal(invoiceForWeek([follow, own], '2026-11-09').id, 'ZZTEST-own');
+  assert.equal(invoiceForWeek([follow], '2026-11-09').id, 'ZZTEST-fo');
+  // Today's list carries no kind: the first live row, as before.
+  assert.equal(invoiceForWeek([{ ...follow, invoice_kind: undefined }, own], '2026-11-09').id, 'ZZTEST-fo');
+});

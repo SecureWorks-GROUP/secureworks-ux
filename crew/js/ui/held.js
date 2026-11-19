@@ -51,7 +51,8 @@ export function HeldOnPay({ userId }) {
   const ids = list.map((p) => p.id);
   // One read of each kept holding invoice (the trade's own, filtered by the server).
   const q = useQuery(ids.length ? 'held:pay:' + ids.join(',') : null, () => Promise.all(ids.map((id) => api('get_trade_invoice', { invoice_id: id })
-    .then((r) => [id, (r && r.invoice) || null])
+    // Only the counts are kept (and saved on the phone), never the lines themselves.
+    .then((r) => [id, r && r.invoice ? heldCounts(r.invoice) : null])
     .catch((err) => {
       if (err instanceof ApiError && err.status === 404) { forgetHeld(userId, id); return [id, 'gone']; }
       return [id, 'unread'];
@@ -62,7 +63,7 @@ export function HeldOnPay({ userId }) {
     const title = p.monday ? fmtWeek(p.monday) : 'Lines with the office';
     if (inv === 'unread') return { p, title, words: 'Could not check these lines. Open to try again.', badge: null };
     if (!inv || inv === 'gone') return null;
-    const c = heldCounts(inv);
+    const c = inv;
     if (!c.waiting && !c.notApproved) return null;
     return {
       p, title,

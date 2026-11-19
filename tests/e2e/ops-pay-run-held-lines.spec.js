@@ -138,8 +138,7 @@ test('approve: a reason of 3 to 500 characters, never above what was sent, then 
   await form.locator('input[name="hours"]').fill('7.25');
   await form.getByRole('button', { name: 'Approve...' }).click();
   const confirm = row.locator('[data-hl-confirm="approve"]');
-  await expect(confirm).toContainText('pays $180.50 ex GST instead of $200.00');
-  await expect(confirm).toContainText('7.25 hours instead of 8');
+  await expect(confirm).toContainText('It pays $180.50 ex GST for 7.25 hours, on a follow-on invoice.');
   await pictures(page, testInfo, 'held-lines-approve-confirm');
   expect(await page.evaluate(() => ZZ.writes)).toEqual([]);
   await confirm.getByRole('button', { name: 'Yes, approve this line' }).click();
@@ -149,6 +148,28 @@ test('approve: a reason of 3 to 500 characters, never above what was sent, then 
   expect(await page.evaluate(() => ZZ.writes)).toEqual([{ action: 'decide_held_trade_line',
     body: { line_id: L1, decision: 'approve', reason: 'ZZTEST agreed with the lead', changes: { line_total_ex: 180.5, total_hours: 7.25 } } }]);
   expect(await page.evaluate(() => ZZ.reads)).toEqual(['pay_run', 'held_trade_lines', 'pay_run', 'held_trade_lines']);
+});
+
+test('an unchanged approval names the held amount it pays; a held amount below what was sent is shown', async ({ page }) => {
+  const held = heldAnswer();
+  held.lines[0] = { ...held.lines[0], line_total_ex: 150 };
+  await openRun(page, { run: payRunAnswer({ enabled: true }), held });
+  const row = page.locator(`[data-hl-line-row="${L1}"]`);
+  await expect(row.locator('[data-hl-sent]')).toHaveText('Sent $200.00 ex GST (held $150.00)');
+  await row.getByRole('button', { name: 'Approve', exact: true }).click();
+  await row.locator('input[name="reason"]').fill('ZZTEST as held');
+  await row.getByRole('button', { name: 'Approve...' }).click();
+  await expect(row.locator('[data-hl-confirm="approve"]')).toContainText('It pays $150.00 ex GST, on a follow-on invoice.');
+  // A typed amount equal to what was sent still differs from the held amount, so it is sent as a change.
+  await row.getByRole('button', { name: 'Back' }).click();
+  await row.locator('input[name="amount"]').fill('200');
+  await row.getByRole('button', { name: 'Approve...' }).click();
+  await expect(row.locator('[data-hl-confirm="approve"]')).toContainText('It pays $200.00 ex GST, on a follow-on invoice.');
+  await expect(page.locator('[data-week="7"]')).toBeEnabled();
+  await row.getByRole('button', { name: 'Yes, approve this line' }).click();
+  await expect(page.locator('[data-hl-notice]')).toBeVisible();
+  expect(await page.evaluate(() => ZZ.writes)).toEqual([{ action: 'decide_held_trade_line',
+    body: { line_id: L1, decision: 'approve', reason: 'ZZTEST as held', changes: { line_total_ex: 200 } } }]);
 });
 
 test('query is one press with a reason; decline asks again; no amount box on a commission with no figure', async ({ page }) => {

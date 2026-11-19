@@ -972,15 +972,20 @@ async function sendMagicLink() {
   }
 }
 
-function unlockReport() {
+var _ceoAlertsSubscribed = false;
+async function unlockReport() {
   document.getElementById('authGate').style.display = 'none';
   document.getElementById('mainApp').style.display = '';
   loadReport();
 
-  // Supabase Realtime: subscribe to ai_alerts for proactive notifications
+  // Supabase Realtime: reuse the signed-in client once a session is present
   try {
-    var _supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-    _supabase.channel('ceo-alerts').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ai_alerts' }, function(payload) {
+    if (_ceoAlertsSubscribed || !_supaAuth || !_supaAuth.auth || typeof _supaAuth.auth.getSession !== 'function') return;
+    var result = await _supaAuth.auth.getSession();
+    var session = result && result.data && result.data.session;
+    if (!session || _ceoAlertsSubscribed) return;
+    _ceoAlertsSubscribed = true;
+    _supaAuth.channel('ceo-alerts').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ai_alerts' }, function(payload) {
       loadCeoAlerts();
       if (payload.new && payload.new.severity === 'red') {
         showToast('Critical alert: ' + (payload.new.title || payload.new.message || 'New alert'), 'warning');
@@ -991,7 +996,8 @@ function unlockReport() {
       if (icon) { icon.classList.add('pulse'); }
     }).subscribe();
   } catch (e) {
-    console.log('[ceo] Realtime subscription failed:', e.message);
+    _ceoAlertsSubscribed = false;
+    console.log('[ceo] Realtime subscription failed:', e && e.message);
   }
 }
 

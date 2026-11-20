@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>SecureWorks trade app: getting started</title>
+  <style>
+    :root {
+      --sw-orange: #F15A29;
+      --sw-dark: #293C46;
+      --sw-mid: #4C6A7C;
+      --sw-light: #F0F4F7;
+      --sw-bg: #F7F8FA;
+      --sw-border: #EAEDF0;
+      --sw-text: #1A2332;
+      --sw-red: #E74C3C;
+      --sw-font: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sw-font);
+      background: var(--sw-bg);
+      color: var(--sw-text);
+      line-height: 1.45;
+      padding: 20px 16px 48px;
+    }
+    main { max-width: 520px; margin: 0 auto; }
+    .logo { font-size: 20px; font-weight: 800; color: var(--sw-dark); }
+    .logo span { color: var(--sw-orange); }
+    h1 { font-size: 24px; color: var(--sw-dark); margin: 14px 0 6px; line-height: 1.2; }
+    .lead { font-size: 16px; color: var(--sw-mid); margin-bottom: 18px; }
+    video {
+      display: block; width: 100%; max-height: 72vh; background: #000;
+      border-radius: 14px; margin-bottom: 8px;
+    }
+    .video-note { font-size: 13px; color: var(--sw-mid); margin-bottom: 22px; }
+    h2 { font-size: 18px; color: var(--sw-dark); margin: 0 0 10px; }
+    ol.steps { list-style: none; counter-reset: step; }
+    ol.steps > li {
+      counter-increment: step; position: relative;
+      background: #fff; border: 1px solid var(--sw-border); border-radius: 12px;
+      padding: 14px 14px 14px 54px; margin-bottom: 10px; font-size: 16px;
+    }
+    ol.steps > li::before {
+      content: counter(step); position: absolute; left: 14px; top: 14px;
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--sw-dark); color: #fff; font-weight: 700; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    ol.steps strong { color: var(--sw-dark); }
+    ol.steps p + p { margin-top: 6px; }
+    .warn {
+      background: #FDF1EF; border: 1px solid #F5C6BF; border-radius: 12px;
+      padding: 14px; margin: 18px 0; font-size: 16px;
+    }
+    .warn strong { color: #A93226; }
+    .btn {
+      display: block; width: 100%; padding: 16px; margin-top: 20px;
+      background: var(--sw-orange); color: #fff; text-align: center;
+      border-radius: 12px; font-size: 17px; font-weight: 700; text-decoration: none;
+    }
+    .btn:focus-visible { outline: 3px solid var(--sw-dark); outline-offset: 2px; }
+    .help { font-size: 15px; color: var(--sw-mid); margin-top: 16px; text-align: center; }
+  </style>
+</head>
+<body>
+<!-- Sent to every new trade: the backend invite-trade-user welcome email links to this page.
+     It must work signed out, with no script. If a step in trade.html changes, change it here too. -->
+<main>
+  <div class="logo">Secure<span>Works</span></div>
+  <h1>Getting started with the trade app</h1>
+  <p class="lead">This is how you see your jobs and get paid. Watch the video, then follow the steps.</p>
+
+  <video id="welcomeVideo" controls playsinline preload="metadata"
+         aria-label="Getting started with the SecureWorks trade app. Captions on screen, no sound.">
+    <source src="onboarding/trade-app-getting-started.mp4#t=0.1" type="video/mp4">
+    Your phone cannot play this video. Follow the steps below instead.
+  </video>
+  <p class="video-note">About 90 seconds. No sound: the words are on screen. The pay rate shown is made up.</p>
+
+  <h2>The steps</h2>
+  <ol class="steps" id="welcomeSteps">
+    <li>
+      <p><strong>Open your invite email and tap the link.</strong> It opens the app and signs you in.</p>
+    </li>
+    <li>
+      <p><strong>Set a password.</strong> If the app asks for one, choose it now. If it does not, go to Profile, then Password.</p>
+      <p>Locked out later? Tap <strong>Forgot password?</strong> on the sign-in screen.</p>
+    </li>
+    <li>
+      <p><strong>Add the app to your home screen.</strong> iPhone: Share, then Add to Home Screen. Android: the menu (three dots), then Add to Home screen.</p>
+    </li>
+    <li>
+      <p><strong>Fill in My Details.</strong> Go to Profile, then My Details. Enter your ABN, BSB and account number, pick your GST status and tap Save Details.</p>
+      <p>Check it says <strong>Saved to your account</strong>. No details, no pay.</p>
+    </li>
+    <li>
+      <p><strong>Check your pay rate.</strong> Profile shows My Hourly Rate. If it is blank or says Not set yet, tell the office.</p>
+    </li>
+    <li>
+      <p><strong>Enter your times for each job.</strong> Jobs you are booked on show up on that week's invoice.</p>
+      <p>Go to Pay, then Weekly Invoice. On each job, enter the date and your start and finish times.</p>
+      <p>On a patio job, open the job, find Group work order, tap Join and save your hours there.</p>
+    </li>
+    <li>
+      <p><strong>Send one invoice a week.</strong> At the end of the week go to Pay, then Weekly Invoice, and tap Submit Invoice. No invoice means no pay for that week.</p>
+    </li>
+  </ol>
+
+  <div class="warn" id="welcomeWarn">
+    <strong>Do not type your pay into the amount box at the bottom of the invoice.</strong>
+    That box takes money <strong>off</strong> your invoice. It is for things like a loan repayment. Your pay comes from the times you enter on each job.
+  </div>
+
+  <a class="btn" id="welcomeOpenApp" href="trade.html">Open the trade app</a>
+  <p class="help">Stuck, or a job you worked is missing? Call the office.</p>
+</main>
+</body>
+</html>

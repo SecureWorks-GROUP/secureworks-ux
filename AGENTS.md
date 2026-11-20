@@ -1045,9 +1045,20 @@ is true; ops-api sends true unless `users.trade_details.runningInvoiceDraft`
 is false. `?invdraft=1` shows Save on one browser and `?invdraft=0` hides it. Save posts `save_running_invoice_draft`
 and does not call `generate_trade_invoice`. Submit stays `#invSubmitBtn`.
 GST, super and the weekly deduction are still worked out only on submit.
-Search `modules/trade-invoice-running-draft.js`. Guards:
+Search `modules/trade-invoice-running-draft.js`. Opening that week's draft from
+Invoice history opens the weekly builder for its week from the saved builder,
+never a rebuilt copy of its priced lines (`// <running-draft-open>`). A save
+refused 409 `draft_replaced` drops the stale draft id (memory and phone copy),
+reads the week again (`get_running_invoice_draft`; the 409's `current_draft_id`
+only when the read names none), keeps the person's edits on top of the fresh
+draft and saves once more. No other save goes out while that read runs: a save
+with no draft id replaces the week's draft unread. A second refusal is shown,
+autosave stops, and only a pressed Save reads again (`// <running-draft-replaced>`). A week sent elsewhere meanwhile is not
+saved over. Deductions alone are not something to invoice: Submit refuses
+"A deduction takes money off. Add the job and the hours first." Guards:
 `scripts/test-trade-invoice-running-draft.js`,
-`tests/e2e/trade-invoice-running-draft.spec.js`.
+`tests/e2e/trade-invoice-running-draft.spec.js`,
+`tests/e2e/trade-invoice-draft-recovery.spec.js`.
 
 A daily hours nudge uses that same flag (`// <daily-hours-nudge>`,
 `modules/trade-daily-hours-nudge.js`). Calendar and Pay show "Add today's
@@ -1125,7 +1136,11 @@ invoice it (Marnin, 11 Nov 2026). Picking a job in the invoice's "+ Add job"
 is unchanged; when ops-api refuses the invoice with `extra_job_not_allowed`
 (403, nothing saved), the app asks to add the trade to each refused job for
 the day worked (`self_allocate_for_invoice`, which books only the caller,
-never texts) and then opens the one-invoice confirm again. Never book the
+never texts) and then opens the one-invoice confirm again. The refusal's
+`refused_jobs` (`{job_id, job_number}`) lists the jobs adding yourself would
+fix, empty when it would not (commission, another company's job); a line typed
+with only a job number is booked with the id it gives. Older servers send only
+`jobs` (job numbers), read when `refused_jobs` is absent. Crew does the same (`crew/js/screens/review.js`). Never book the
 trade at pick time: the app cannot see an invoice-any-job grant, and those
 trades' searched-in cards move between days and weeks. Search
 `// <invoice-self-allocate>`; contract in `trade-app.md` → "Pay tab: adding

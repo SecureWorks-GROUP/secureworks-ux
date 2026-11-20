@@ -20,6 +20,43 @@ const round2 = (n) => Math.round(n * 100) / 100;
 const dayWords = (d) => (d ? `${fmtDow(d)} ${fmtDom(d)}` : '');
 const EXPENSE_STATE = { pending_extraction: 'being read', pending: 'with the office', approved: 'approved', queried: 'the office has a question', rejected: 'not accepted', pushed_to_xero: 'approved' };
 
+// The jobs a send was refused on because the trade is not booked on them.
+// ops-api gives { job_id, job_number } in `refused_jobs`, so a line holding
+// only a job number can still be booked. Any shape, or none, is fine.
+export function refusedJobs(body) {
+  const out = [];
+  const add = (e) => {
+    if (e == null) return;
+    if (typeof e !== 'object') { out.push({ job_id: '', job_number: '', ref: String(e) }); return; }
+    const id = String(e.job_id || e.id || '').trim(); const num = String(e.job_number || e.number || '').trim();
+    if (id || num) out.push({ job_id: id, job_number: num, ref: '' });
+  };
+  // refused_jobs lists the jobs adding yourself would fix (empty when it would
+  // not); older servers send only `jobs`, read when refused_jobs is absent.
+  if (body && Array.isArray(body.refused_jobs)) body.refused_jobs.forEach(add);
+  else if (body && Array.isArray(body.jobs)) body.jobs.forEach(add);
+  return out;
+}
+// [jobId, day] for each refused line: the line's own job id, else the id the
+// refusal gives for its job number. A line with no id either way is left out.
+export function selfBookPairs(items, refused) {
+  const low = (v) => String(v || '').trim().toLowerCase();
+  const named = new Set(); const idByNumber = {};
+  for (const j of refused) {
+    for (const v of [j.ref, j.job_id, j.job_number]) if (v) named.add(low(v));
+    if (j.job_number && j.job_id) idByNumber[low(j.job_number)] = j.job_id;
+  }
+  const seen = new Set(); const out = [];
+  for (const x of items || []) {
+    if (!x || !(named.has(low(x.job_number)) || named.has(low(x.job_id)))) continue;
+    const jobId = x.job_id || idByNumber[low(x.job_number)];
+    const day = String(x.work_date || x.date || '').slice(0, 10);
+    if (!jobId || !/^\d{4}-\d{2}-\d{2}$/.test(day) || seen.has(jobId + '#' + day)) continue;
+    seen.add(jobId + '#' + day); out.push([jobId, day]);
+  }
+  return out;
+}
+
 export function Review({ monday: mondayParam }) {
   const expenses = useExpenses();
   const w = useWeek(mondayParam, expenses);
@@ -76,8 +113,10 @@ export function Review({ monday: mondayParam }) {
     }
     if (code === 'WEEK_ALREADY_INVOICED') { invalidate('invoices'); toast('This week already has an invoice, so this one was not saved.', { kind: 'bad', ms: 6000 }); return; }
     if (code === 'extra_job_not_allowed') {
-      const names = (err.body.jobs || []).join(', ');
-      const pairs = body.extra_items.filter((x) => x.job_id && (err.body.jobs || []).some((j) => String(j).toLowerCase() === String(x.job_number || x.job_id).toLowerCase())).map((x) => [x.job_id, x.work_date || x.date]);
+      const refused = refusedJobs(err.body);
+      const named = refused.length ? refused.map((j) => j.job_number || j.ref || j.job_id) : (Array.isArray(err.body && err.body.jobs) ? err.body.jobs.map(String) : []);
+      const names = [...new Set(named.filter(Boolean))].join(', ') || 'this job';
+      const pairs = selfBookPairs(body.extra_items, refused);
       if (pairs.length && await ask({ title: `Add yourself to ${names}?`, body: 'You are not booked on it, so the invoice was not sent. Add yourself for the day you worked and it will send. The office will see you added yourself.', yes: 'Add me and send' })) {
         for (const [jobId, d] of pairs) { const r = await bookMyself(jobId, [d]); if (!r.ok) { toast(r.message, { kind: 'bad' }); return; } }
         await hours.refetch(); toast('You are on it now. Check the invoice and press Send again.');

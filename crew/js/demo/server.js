@@ -248,8 +248,11 @@ export function createDemoServer(persona) {
         lines.push({ id: db.id('l'), line_date: m.work_date, work_date: m.work_date, start_time: m.start_time, finish_time: m.finish_time, break_minutes: m.break_minutes || 0, job_number: j.job_number, client_name: j.client_name, description: m.description || 'Labour', line_type: 'labour', total_hours: hrs, hourly_rate: rate, line_total_ex: round2(hrs * rate), office_review_status: typed && rate > db.rate ? 'awaiting' : null });
         gross += hrs * rate; hoursTotal += hrs;
       }
-      const notBooked = (b.extra_items || []).filter((x) => x.job_id && !onJob(x.job_id) && !manages(db.job(x.job_id) || {}));
-      if (notBooked.length) fail(403, { ok: false, code: 'extra_job_not_allowed', jobs: notBooked.map((x) => x.job_number), error: 'You are not booked on one of these jobs.' });
+      // A line may carry only a job number (typed in the old app); the server reads its job from that.
+      const lineJob = (x) => (x.job_id ? db.job(x.job_id) : x.job_number ? db.jobs.find((j) => j.job_number === x.job_number) : null);
+      const notBooked = (b.extra_items || []).filter((x) => { const j = lineJob(x); return j && !onJob(j.id) && !manages(j); });
+      const refusedJobs = [...new Map(notBooked.map((x) => { const j = lineJob(x); return [j.id, { job_id: j.id, job_number: j.job_number }]; })).values()];
+      if (notBooked.length) fail(403, { ok: false, code: 'extra_job_not_allowed', jobs: refusedJobs.map((j) => j.job_number), refused_jobs: refusedJobs, error: 'You are not booked on one of these jobs.' });
       for (const x of b.extra_items || []) {
         if (x.type === 'reimbursement') {
           if (receiptIds.has(x.expense_receipt_id)) continue;

@@ -11,10 +11,10 @@ import { todayISO, mondayOf, addDays, fmtDay, fmtMoney, hoursBetween, fmtDow, fm
 import { verticalOf, jobTitle } from '../lib/model.js';
 import {
   buildLines, lineProblem, estimate, pickableDays, invoiceForWeek, sentBackForWeek, invoicePays, readMode,
-  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, UNKNOWN_MODE_WORDS
+  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, oldAppLines, withoutOldAppLines, UNKNOWN_MODE_WORDS
 } from '../lib/invoice.js';
 import { receiptsEnabled, receiptProblem, receiptLine } from '../lib/reimbursements.js';
-import { bookMyself } from '../lib/data.js';
+import { bookMyself, useJob } from '../lib/data.js';
 import { Icon } from '../ui/icons.js';
 import { Page, Button, Sheet, StatusBadge, JobLine, KV, Field, Picks, TimeInput, BREAKS, Toggle, SkelRows, Empty, LoadError, toast, openOverlay, buzz, IconButton } from '../ui/kit.js';
 import { cash, hrs, plural, weekWords, sheetRows, sheetSummary, DayCell, InvoiceBadge } from '../ui/paybits.js';
@@ -107,7 +107,7 @@ export function useWeek(mondayParam, expenses) {
   const gstOn = gstFor(draft);
   const deduction = data && data.recurring_deduction_week;
   const est = estimate(lines, { gstOn, deduction, basis: data && data.money && data.money.super_basis });
-  const ctx = { monday, rateEditable };
+  const ctx = { monday, rateEditable, userId: user.id };
   const problems = lines.filter((l) => lineProblem(l, ctx));
   const latest = useRef({}); latest.current = { data, serverOn, linesFor, gstFor };
 
@@ -280,7 +280,24 @@ export function useWeek(mondayParam, expenses) {
     local.del('week:' + monday);
     if (id && latest.current.serverOn) api('delete_trade_invoice', null, { invoice_id: id }).catch(() => {});
   };
-  return { user, monday, thisMonday, hours, data, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: () => save({ press: true }), held: Boolean(draft.held), sent, syncWords, foreign: draft.foreign || 0 };
+  // Lines typed in the old app that this app cannot bill: taken out of the saved draft on the trade's word.
+  const removeOldLines = () => setDraft((d) => ({ ...d, base: withoutOldAppLines(d.base), foreign: 0 }));
+  return { user, monday, thisMonday, hours, data, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: () => save({ press: true }), held: Boolean(draft.held), sent, syncWords, foreign: draft.foreign || 0, oldLines: draft.foreign ? oldAppLines(draft.base) : [], removeOldLines };
+}
+
+/**
+ * Lines on this week that were typed in the old app and cannot be billed from
+ * here. Each is said in words, with one press to take them off, so a week is
+ * never stuck. The trade adds them again here (Add job, Add another item).
+ */
+export function OldLinesNote({ w }) {
+  if (!w.foreign) return null;
+  const many = w.foreign !== 1;
+  return html`<div class="block note-banner pay-gap" data-old-lines><div class="stack tight">
+    <span><span class="t-strong">${plural(w.foreign, 'line')} from the old app cannot be sent.</span> Add ${many ? 'them' : 'it'} again here with Add job or Add another item, then remove the old ${many ? 'ones' : 'one'}.</span>
+    ${(w.oldLines || []).map((l) => html`<span class="t-small" key=${l.where + l.index}>${l.words || 'A line with no details'}</span>`)}
+    <div><${Button} kind="line" small onClick=${() => { w.removeOldLines(); toast(many ? 'Old lines removed.' : 'Old line removed.'); }}>Remove the old ${many ? 'lines' : 'line'}<//></div>
+  </div></div>`;
 }
 
 /** How the week's draft stands on the account, with Save while autosave is held. */
@@ -330,7 +347,7 @@ export function Timesheet({ monday: mondayParam }) {
     ${sentBack ? html`<div class="block note-banner bad pay-gap"><span><span class="t-strong">The office sent this back.</span> ${sentBack.office_note || 'Check each line, fix what is wrong and send it again.'}</span></div>` : null}
     ${hours.loading ? html`<${SkelRows} n=${3} />` : hours.error && !data ? html`<${LoadError} error=${hours.error} onRetry=${hours.refetch} what="this week" />` : html`
       ${data && data.rate_resolved === false && !w.rateEditable ? html`<div class="block note-banner pay-gap"><span>No pay rate is set for you yet. Call the office to have it set before you send.</span></div>` : null}
-      ${w.foreign ? html`<div class="block note-banner pay-gap"><span>${plural(w.foreign, 'line')} on this week ${w.foreign === 1 ? 'was' : 'were'} added in the Trade App and cannot be shown here. Send this week from the Trade App, or remove ${w.foreign === 1 ? 'it' : 'them'} there.</span></div>` : null}
+      <${OldLinesNote} w=${w} />
       <div class="pay-thead" aria-hidden="true"><span>Day</span><span>Job and time</span><span>Hours</span></div>
       <div class="pay-rows">
         ${rows.map((r) => html`<button type="button" class=${cx('pay-row', r.tone)} key=${r.key} onClick=${() => (r.open === 'group' ? go('/pay/group/' + r.jobId) : w.edit(r.line))}>
@@ -388,6 +405,12 @@ function LineSheet({ line, ctx, onSave, onClose }) {
     buzz(8); shut();
   };
   const helper = (i, k, v) => set('helpers', f.helpers.map((x, idx) => (idx === i ? { ...x, [k]: v } : x)));
+  // Helpers are the people booked on this job, never a typed name.
+  const jobQ = useJob(line.kind === 'work_order' && line.jobId ? line.jobId : null);
+  const crewNames = [...new Set(((jobQ.data && jobQ.data.crew) || [])
+    .filter((c) => c && c.name && String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer' && c.user_id !== ctx.userId)
+    .map((c) => String(c.name).trim()))];
+  const crewKnown = Boolean(jobQ.data);
   const recorded = (line.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0);
 
   return html`<${Sheet} title=${line.title} sub=${line.client || ''} onClose=${onClose}
@@ -408,19 +431,29 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         <${Field} label=${line.added ? 'What you did' : 'What you did (optional)'}><input class="input" value=${f.description} placeholder="e.g. Set posts, hung gates" onInput=${(e) => set('description', e.currentTarget.value)} /><//>
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
-        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Record anything you paid other crew as an adjustment.</p>`
+        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
         ${recorded > 0 ? html`<p class="t-small">${hrs(recorded)} recorded on this job this week. The hours are a record only. The pay is the work order amount.</p>` : null}
         ${(line.charges || []).length ? html`<${Field} label="Crew already billed on this job">
           <div class="stack tight">${line.charges.map((c) => html`<${Toggle} label=${c.trade_name + ' ' + cash(Math.abs(c.amount_ex))} hint=${c.description || 'Crew paid separately'} checked=${f.chargeIds.includes(c.line_id)} onChange=${(on) => set('chargeIds', on ? [...f.chargeIds, c.line_id] : f.chargeIds.filter((x) => x !== c.line_id))} />`)}</div><//>` : null}
         <${Field} label="Helpers you pay from this job">
           <div class="stack tight">${f.helpers.map((hp, i) => html`<div class="pay-helper">
-            <input class="input" placeholder="Name" value=${hp.name || ''} onInput=${(e) => helper(i, 'name', e.currentTarget.value)} />
+            <select class="input" aria-label="Helper" value=${hp.name || ''} onChange=${(e) => helper(i, 'name', e.currentTarget.value)}>
+              <option value="">Pick who</option>
+              ${hp.name && !crewNames.includes(hp.name) ? html`<option value=${hp.name}>${hp.name} (not booked on this job)</option>` : null}
+              ${crewNames.map((n) => html`<option value=${n}>${n}</option>`)}
+            </select>
             <input class="input" type="number" inputmode="decimal" placeholder="Hours" value=${hp.hours || ''} onInput=${(e) => helper(i, 'hours', e.currentTarget.value)} />
             <input class="input" type="number" inputmode="decimal" placeholder="Rate" value=${hp.rate || ''} onInput=${(e) => helper(i, 'rate', e.currentTarget.value)} />
             <${IconButton} name="trash" label="Remove helper" size=${18} onClick=${() => set('helpers', f.helpers.filter((_, idx) => idx !== i))} /></div>`)}
-            <${Button} kind="line" small onClick=${() => set('helpers', [...f.helpers, { name: '', hours: '', rate: '' }])}>Add a helper<//></div><//>
+            ${crewKnown && !crewNames.length ? html`<p class="t-small">Nobody else is booked on this job. Ask the office to book your crew on it, then add them here.</p>`
+              : !crewKnown && jobQ.error ? html`<p class="t-small">The crew on this job could not be read. Try again when you have signal.</p>`
+              : html`<${Button} kind="line" small disabled=${!crewKnown} onClick=${() => set('helpers', [...f.helpers, { name: '', hours: '', rate: '' }])}>Add a helper<//>`}
+            ${f.helpers.some((hp) => hp.name && crewKnown && !crewNames.includes(hp.name)) ? html`<p class="t-small">A helper here is not booked on this job. Pick someone from the crew, or ask the office to book them on.</p>` : null}</div><//>
         <${Field} label="Note (optional)"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>
+      ` : line.kind === 'deduction' ? html`
+        <div class="card pay-out"><span class="t-cap">${line.title}</span><b class="t-figure">${cash(line.amount)}</b></div>
+        <p class="t-small">An amount taken off the whole invoice cannot be sent from this app. Remove it. If money needs to come off your pay, tell the office and they will do it.</p>
       ` : html`
         <${Field} label=${line.kind === 'commission' ? 'Commission amount (before GST)' : line.kind === 'deduction' ? 'Adjustment amount (before GST)' : 'Amount (before GST)'}><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>
         ${line.kind !== 'commission' ? html`<${Field} label="What it is for"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>` : null}

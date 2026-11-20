@@ -213,7 +213,8 @@ export function lineAmount(line) {
 export function lineProblem(line, { monday, rateEditable }) {
   if (line.off || line.ahead || line.unknown) return '';
   if (line.kind === 'reimbursement') return line.receiptProblem || '';
-  if (line.kind === 'deduction') return !line.description ? 'Say what it is for' : line.amount > 0 ? '' : 'Add the amount';
+  // An amount taken off the whole invoice cannot go through the weekly invoice: the server refuses it.
+  if (line.kind === 'deduction') return 'This cannot be sent. Remove it and tell the office';
   const today = todayISO(); const sunday = addDays(monday, 6);
   if (line.kind === 'hours') {
     if (!line.start || !line.finish) return 'Add your start and finish times';
@@ -298,12 +299,8 @@ export function buildSubmit(lines, { monday, gstOn, notes, rateEditable }) {
       if (!l.receiptProblem && l.receiptId) extra_items.push({ type: 'reimbursement', expense_receipt_id: l.receiptId });
       continue;
     }
-    if (l.kind === 'deduction') {
-      // Same row the current Trade App sends for an amount taken off the invoice.
-      extra_items.push({ type: 'Deduction', row_type: 'lump_sum', line_kind: 'lump_sum', description: l.description, quantity: 1, unit: 'ea', hours: 1, rate: -Math.abs(Number(l.amount)),
-        job_id: null, job_number: '', assignment_id: null, scheduled_date: null, date: null, division: '', client_name: '', manually_added: true, source: 'invoice_final_deduction', rate_source: 'client_entered', client_rate_entered: true });
-      continue;
-    }
+    // An amount taken off the whole invoice is never sent (the server refuses it): see lineProblem.
+    if (l.kind === 'deduction') continue;
     const jobRef = { job_id: l.jobId || null, job_number: l.jobNumber || '', division: l.jobType || '', client_name: l.client || '' };
     if (l.kind === 'hours') {
       const hours = lineHours(l);
@@ -371,12 +368,44 @@ export function draftSourceKey(card) {
   return '';
 }
 const crewRow = (r) => r && r._source === 'crew_app';
-/** Lines in a saved draft that this app cannot show or send (made in the current Trade App). */
-export function foreignDraftLines(builder) {
-  if (!builder) return 0;
-  const rows = (builder.invRows || []).filter((r) => r && !crewRow(r) && r._source !== 'clock' && r._source !== 'server_labour' && (Number(r.hours) > 0 || r.description || r.job_text || r.start_time)).length;
-  const cards = (builder.jobCards || []).filter((c) => c && c.included !== false && ((Array.isArray(c.wo_lump_lines) && c.wo_lump_lines.some((l) => l && Number(l.amount) > 0)) || Number(c.travel_amount) > 0)).length;
-  return rows + cards;
+const money2 = (n) => '$' + (Math.round(Number(n) * 100) / 100).toFixed(2);
+/**
+ * Lines in a saved draft that were typed in the old app and that this app
+ * cannot bill: typed rows (hours with no job picked, old clock rows), travel
+ * typed on a job card, an amount taken off a work order card. Each one in
+ * plain words, so the trade can add it again here and remove the old one.
+ */
+export function oldAppLines(builder) {
+  if (!builder) return [];
+  const out = [];
+  (builder.invRows || []).forEach((r, i) => {
+    if (!r || crewRow(r) || r._source === 'server_labour') return;
+    const hours = Number(r.hours) > 0;
+    if (r._source === 'clock' && !hours) return;
+    if (!(hours || r.description || r.job_text || r.start_time)) return;
+    const bits = [r.job_text, r.date, hours ? `${Number(r.hours)} h` : '', Number(r.amount) > 0 ? money2(r.amount) : '', String(r.description || '').trim()].filter(Boolean);
+    out.push({ where: 'row', index: i, words: bits.join(', ') });
+  });
+  (builder.jobCards || []).forEach((c, i) => {
+    if (!c || c.included === false) return;
+    if (Number(c.travel_amount) > 0) out.push({ where: 'travel', index: i, words: [c.job_number, 'travel ' + money2(c.travel_amount), String(c.travel_note || '').trim()].filter(Boolean).join(', ') });
+    const off = (Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : []).filter((l) => l && Number(l.amount) > 0);
+    if (off.length) out.push({ where: 'card_lump', index: i, words: [c.job_number, money2(off.reduce((s, l) => s + Number(l.amount), 0)) + ' taken off the work order'].filter(Boolean).join(', ') });
+  });
+  return out;
+}
+/** How many lines in a saved draft this app cannot send. */
+export function foreignDraftLines(builder) { return oldAppLines(builder).length; }
+/** The saved draft with the old app's lines taken out (the trade pressed Remove). */
+export function withoutOldAppLines(builder) {
+  if (!builder) return builder;
+  const gone = oldAppLines(builder);
+  const rows = new Set(gone.filter((g) => g.where === 'row').map((g) => g.index));
+  const travel = new Set(gone.filter((g) => g.where === 'travel').map((g) => g.index));
+  const lumps = new Set(gone.filter((g) => g.where === 'card_lump').map((g) => g.index));
+  return { ...builder,
+    invRows: (builder.invRows || []).filter((_, i) => !rows.has(i)),
+    jobCards: (builder.jobCards || []).map((c, i) => (travel.has(i) || lumps.has(i) ? { ...c, ...(travel.has(i) ? { travel_amount: null, travel_km: null, travel_note: '' } : {}), ...(lumps.has(i) ? { wo_lump_lines: [] } : {}) } : c)) };
 }
 
 /** Server draft -> this app's draft. `hours` is my_hours for the same week. */

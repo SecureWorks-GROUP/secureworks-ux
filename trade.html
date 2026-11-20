@@ -22565,6 +22565,9 @@
   // Set when the week's draft was replaced twice in a row: autosave stops and
   // only a pressed Save reads the week again. [running-draft-replaced]
   var _invRunningReplacedHold = false;
+  // The re-read after draft_replaced, while it runs. No other save goes out
+  // then: one with no draft id would replace the week's draft unread.
+  var _invRunningRecovery = null;
   var _runningInvoiceDraftServer = null;
   var _dailyHoursWeekSubmitted = false;
   var _dailyHoursDecision = null;
@@ -24540,7 +24543,15 @@
     return { cards: cards, dismissed: Object.keys(dismissed), added: added };
   }
 
-  function _recoverReplacedRunningDraft(opts) {
+  function _recoverReplacedRunningDraft(opts, hintId) {
+    if (_invRunningRecovery) return _invRunningRecovery;
+    var run = _recoverReplacedRunningDraftOnce(opts, hintId);
+    _invRunningRecovery = run;
+    var done = function() { if (_invRunningRecovery === run) _invRunningRecovery = null; };
+    run.then(done, done);
+    return run;
+  }
+  function _recoverReplacedRunningDraftOnce(opts, hintId) {
     var week = _hoursWeekStart;
     var weekEnd = _hoursWeekEnd || _weeklyDatePlusDays(week, 6);
     var ctx = _invoiceApiContext();
@@ -24550,7 +24561,9 @@
     if (!opts.quiet) _paintRunningSaveState('Saving...');
     return api('get_running_invoice_draft', { week_start: week }).then(function(res) {
       if (!stillHere()) return false;
-      var freshId = (res && (res.current_draft_id || res.draft_id)) || null;
+      // The re-read is what the week holds now; the 409's id only fills in
+      // when the read names none.
+      var freshId = (res && (res.current_draft_id || res.draft_id)) || hintId || null;
       var builder = res && res.draft_builder && Array.isArray(res.draft_builder.jobCards) ? res.draft_builder : null;
       var weekSent = freshId ? Promise.resolve(false) : api('my_trade_invoices').then(function(list) {
         return (list && list.invoices || []).some(function(inv) {
@@ -24607,6 +24620,10 @@
     if (jobCentricEnabled() && !invoiceGroupsReady()) { if (!opts.quiet) toast('Wait a moment while your group jobs are checked, then save.', true); return Promise.resolve(false); }
     var core = window.TradeInvoiceRunningDraft;
     if (!core) return Promise.resolve(false);
+    if (_invRunningRecovery && !opts.replacedRetry) {
+      if (opts.quiet) return Promise.resolve(false);
+      return _invRunningRecovery;
+    }
     if (_invRunningReplacedHold && !opts.replacedRetry) {
       // Saving now would write over the other place's newer draft unread.
       if (opts.quiet) return Promise.resolve(false);
@@ -24640,7 +24657,8 @@
         // and the phone copy so the next open does not bring it back.
         _draftInvoiceId = null;
         _saveInvDraft();
-        if (!opts.replacedRetry) return _recoverReplacedRunningDraft(opts);
+        var hintId = err && err.body && err.body.current_draft_id ? String(err.body.current_draft_id) : null;
+        if (!opts.replacedRetry) return _recoverReplacedRunningDraft(opts, hintId);
         _invRunningReplacedHold = true;
       }
       var text = _runningDraftReplaced(err)
@@ -27137,10 +27155,11 @@
   // and then send again. Nothing is booked unless the trade says yes, and a
   // trade the server already lets bill the job (office grant, a manager of
   // that division) is never asked.
-  // The refusal names the jobs. Older servers send `jobs` as job numbers (or
-  // ids); newer ones also send `refused_jobs` (or `jobs`) as
-  // { job_id, job_number }, which lets a line typed with only a job number
-  // be offered too. Every shape is read; a missing one changes nothing.
+  // The refusal names the jobs. ops-api sends `refused_jobs` as
+  // { job_id, job_number }: the jobs adding yourself would fix (empty when it
+  // would not, such as commission or another company's job), which lets a line
+  // typed with only a job number be offered too. Older servers send only
+  // `jobs` (job numbers), read when `refused_jobs` is absent.
   function _selfAllocateRefusedJobs(refusal) {
     var out = [];
     var add = function(entry) {
@@ -27155,7 +27174,7 @@
       if (id || number) out.push({ job_id: id, job_number: number, ref: '' });
     };
     if (refusal && Array.isArray(refusal.refused_jobs)) refusal.refused_jobs.forEach(add);
-    if (refusal && Array.isArray(refusal.jobs)) refusal.jobs.forEach(add);
+    else if (refusal && Array.isArray(refusal.jobs)) refusal.jobs.forEach(add);
     return out;
   }
   function _selfAllocatePairs(body, refused) {

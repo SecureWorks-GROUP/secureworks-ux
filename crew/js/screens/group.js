@@ -316,9 +316,11 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
   const [busy, setBusy] = useState(false);
   const breakMin = brk === 'other' ? Math.max(0, Math.round(Number(other) || 0)) : brk;
   const hours = brk == null ? NaN : hoursBetween(start, finish, breakMin);
-  // Any past day can be entered (the server takes any day up to today); this
-  // week and last week are one tap, an older day comes from the date box.
-  const ok = date && date <= today && !isNaN(hours) && hours > 0 && hours <= 24;
+  // Any day up to today and no more than a year back, as everywhere a trade
+  // gives a day worked. This week and last week are one tap; an older day
+  // comes from the date box.
+  const earliest = addDays(today, -365);
+  const ok = date && date <= today && date >= earliest && !isNaN(hours) && hours > 0 && hours <= 24;
   const thisWeek = mondayOf(today);
   const weekLabel = week === thisWeek ? 'This week' : week === addDays(thisWeek, -7) ? 'Last week' : `Week of ${fmtDay(week)}`;
   const has = (d) => taken.some((t) => t.work_date === d);
@@ -349,8 +351,8 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
         <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === thisWeek ? addDays(thisWeek, -7) : thisWeek); setDate(null); }}>${week === thisWeek ? 'It was last week' : 'Back to this week'}</button>
       <//>
       <${Field} label="An earlier day">
-        <input class="input" type="date" data-group-day-date max=${today} value=${date || ''}
-          onInput=${(e) => { const v = e.currentTarget.value; if (!v || v > today) { setDate(null); return; } setWeek(mondayOf(v)); pick(v); }} />
+        <input class="input" type="date" data-group-day-date min=${earliest} max=${today} value=${date || ''}
+          onInput=${(e) => { const v = e.currentTarget.value; if (!v || v > today || v < earliest) { setDate(null); return; } setWeek(mondayOf(v)); pick(v); }} />
       <//>
       <div class="pay-two"><${TimeInput} label="Started" value=${start} onInput=${setStart} /><${TimeInput} label="Finished" value=${finish} onInput=${setFinish} /></div>
       <${Field} label="Break"><${Picks} value=${brk} options=${[...BREAKS, ['other', 'Other']]} onChange=${setBrk} /><//>

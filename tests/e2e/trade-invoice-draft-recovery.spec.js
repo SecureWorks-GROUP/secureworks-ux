@@ -55,6 +55,7 @@ async function stubWeek(page, state) {
     if (action === 'get_trade_invoice') return reply({ invoice: state.invoice });
     if (action === 'get_running_invoice_draft') {
       state.reads = (state.reads || 0) + 1;
+      if (state.readDelayMs && state.reads > 1) await new Promise((r) => setTimeout(r, state.readDelayMs));
       return reply(Object.assign({ ok: true, status: 'draft', draft_id: state.draftId, draft_builder: state.builder, suggested: [], claimed: [] }, state.readExtra || {}));
     }
     if (action === 'save_running_invoice_draft') {
@@ -151,6 +152,35 @@ test('a replaced draft is read again, the typed edit is kept on the fresh draft,
   expect(phoneIds).not.toContain('old-draft');
 });
 
+test('no save goes out while the replaced week is being read again', async ({ appPage: page }) => {
+  const ws = week();
+  const day = addIsoDays(ws, 1);
+  const state = { draftId: 'old-draft', builder: builderWith([savedCard(day)]), refuseSaves: 1, readDelayMs: 5000 };
+  state.onRefuse = () => { state.draftId = 'fresh-draft'; state.readExtra = { current_draft_id: 'fresh-draft' }; };
+  const posts = await stubWeek(page, state);
+  await signIn(page, PERSONAS.installer);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  const card = page.locator('.jc-card').filter({ hasText: 'SWF-30001' });
+  await card.locator('[data-carddesc]').fill('First edit');
+  await card.locator('[data-carddesc]').blur();
+  await page.locator('#invSaveBtn').click();
+  await expect.poll(() => saves(posts).length).toBe(1);
+  // Typing while the week is read again would autosave with no draft id.
+  await card.locator('[data-carddesc]').fill('Second edit');
+  await card.locator('[data-carddesc]').blur();
+  await page.locator('#invSaveBtn').click();
+  await page.waitForTimeout(3200);
+  expect(saves(posts)).toHaveLength(1);
+  await expect(page.locator('#invSaveState')).toContainText('Saved', { timeout: 8000 });
+  const all = saves(posts);
+  expect(all).toHaveLength(2);
+  expect(all[1].body.draft_id).toBe('fresh-draft');
+  expect(all[1].body.draft_builder.jobCards[0].description).toBe('Second edit');
+  expect(all.every((p) => p.body.draft_id)).toBe(true);
+});
+
 test('a second draft_replaced is shown and not retried, and the stale id is dropped', async ({ appPage: page }) => {
   const ws = week();
   const day = addIsoDays(ws, 1);
@@ -210,6 +240,28 @@ test('a line typed with only a job number is offered Add yourself from the refus
   await expect.poll(() => posts.filter((p) => p.action === 'self_allocate_for_invoice').length).toBe(1);
   expect(posts.find((p) => p.action === 'self_allocate_for_invoice').body).toEqual({ job_id: 'job-typed-404', work_date: day });
   expect(refused).toBe(1);
+});
+
+test('an empty refused_jobs offers no Add yourself, even when jobs names the job', async ({ appPage: page }) => {
+  const ws = week();
+  const day = addIsoDays(ws, 1);
+  const typedRow = { date: day, job_id: null, job_text: 'SWF-40404', description: 'Typed job', division: 'Fencing', hours: 8,
+    start_time: '07:00', finish_time: '15:00', break_minutes: 0, rate: 50, amount: 400, _source: 'manual' };
+  const state = { draftId: 'fixture-draft', builder: builderWith([], { invRows: [typedRow] }) };
+  state.generate = (route, send) => send({ status: 403, body: { ok: false, saved: false, code: 'extra_job_not_allowed', jobs: ['SWF-40404'], refused_jobs: [],
+    error: 'This invoice was not saved. You cannot claim commission on job SWF-40404.' } });
+  const posts = await stubWeek(page, state);
+  await signIn(page, PERSONAS.installer);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.locator('#invSubmitBtn').click();
+  await page.locator('#confirmAck').check();
+  await page.locator('#confirmOk').click();
+  await expect(page.locator('#toast')).toContainText('SWF-40404');
+  await page.waitForTimeout(800);
+  await expect(page.locator('#confirmTitle')).not.toHaveText(/Add yourself/);
+  expect(posts.some((p) => p.action === 'self_allocate_for_invoice')).toBe(false);
 });
 
 test('a deduction alone is not something to invoice', async ({ appPage: page }) => {

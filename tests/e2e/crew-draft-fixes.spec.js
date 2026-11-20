@@ -30,6 +30,7 @@ test('a group day can be any past day, picked from the date box', async ({ page 
 
   const box = day.locator('[data-group-day-date]');
   await expect(box).toHaveAttribute('max', '2026-11-13');
+  await expect(box).toHaveAttribute('min', '2025-11-13');
   // A day after today is not taken.
   await box.fill('2026-11-20');
   await day.locator('input[type="time"]').first().fill('07:00');

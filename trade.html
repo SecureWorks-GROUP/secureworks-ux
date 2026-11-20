@@ -24613,82 +24613,6 @@
   }
   // </running-draft-replaced>
 
-  // <running-draft-restored>
-  // A save with no draft id can come back with restored_agent_keys: agent lines
-  // the server put back because this phone's copy did not have them. The next
-  // save names the draft and the server takes it as whole, so it would drop
-  // them. Read the week again and rebuild the cards from it before any further
-  // save (none goes out while the read runs), keeping typing done since that
-  // save. A restored line at a key this phone holds wins unless the person
-  // typed on that card since the save. A missing field counts as empty.
-  function _restoredAgentKeys(res) {
-    return res && Array.isArray(res.restored_agent_keys) ? res.restored_agent_keys.map(String).filter(Boolean) : [];
-  }
-  function _reloadRestoredRunningDraft(opts, sentCards, restoredKeys) {
-    var run = _reloadRestoredRunningDraftOnce(opts, sentCards, restoredKeys);
-    // Inside a replaced recovery the outer run already holds every other save.
-    if (_invRunningRecovery) return run;
-    _invRunningRecovery = run;
-    var done = function() { if (_invRunningRecovery === run) _invRunningRecovery = null; };
-    run.then(done, done);
-    return run;
-  }
-  function _reloadRestoredRunningDraftOnce(opts, sentCards, restoredKeys) {
-    var core = window.TradeInvoiceRunningDraft;
-    var week = _hoursWeekStart;
-    var ctx = _invoiceApiContext();
-    var stillHere = function() {
-      return _invoiceBuilderOpen && _hoursWeekStart === week && _invoiceApiCurrent(ctx);
-    };
-    var keyOf = function(card) { return core ? core.sourceKey(card) : ''; };
-    return api('get_running_invoice_draft', { week_start: week }).then(function(res) {
-      if (!stillHere()) return false;
-      var builder = res && res.draft_builder && Array.isArray(res.draft_builder.jobCards) ? res.draft_builder : null;
-      _syncRowsFromDOM();
-      _syncInvLumpLinesFromDOM();
-      if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
-      var typedSince = core.hashSnapshot(_runningInvoiceSnapshot()) !== opts.sentHash;
-      if (builder) {
-        var sentByKey = {};
-        (sentCards || []).forEach(function(card) { var key = keyOf(card); if (key) sentByKey[key] = JSON.stringify(card); });
-        var serverByKey = {};
-        builder.jobCards.forEach(function(card) { var key = keyOf(card); if (key && !serverByKey[key]) serverByKey[key] = card; });
-        var restored = {};
-        restoredKeys.forEach(function(key) { restored[key] = 1; });
-        var local = _serializeJobCardsDraft(_jobCards).map(function(card) {
-          var key = keyOf(card);
-          if (!key || !restored[key] || !serverByKey[key]) return card;
-          // Typed on since the save: the person's card stays.
-          if (sentByKey[key] !== JSON.stringify(card)) return card;
-          return serverByKey[key];
-        });
-        var merged = _mergeReplacedDraftCards(local, builder.jobCards, _invDismissedKeys,
-          builder.dismissedKeys || (res && res.dismissed_source_keys) || []);
-        _jobCards = _restoreJobCardsDraft(merged.cards);
-        _invDismissedKeys = merged.dismissed;
-        if (builder.manualLock === true) _invManualLock = true;
-        renderInvoiceBuilder();
-      }
-      if (res && res.created_by_agent) _invCreatedByAgent = true;
-      var freshId = res && (res.current_draft_id || res.draft_id);
-      if (freshId) _draftInvoiceId = freshId;
-      _saveInvDraft();
-      // Nothing typed since the save: the account already holds these lines.
-      _invRunningSavedHash = typedSince ? '' : core.hashSnapshot(_runningInvoiceSnapshot());
-      if (typedSince) _scheduleRunningInvoiceAutosave();
-      return true;
-    }).catch(function() {
-      if (!stillHere()) return false;
-      // Saving now would drop the lines put back; only a pressed Save reads again.
-      _invRunningReplacedHold = true;
-      _invRunningSaveWarned = true;
-      toast('Saved, but lines added for you in another place could not be loaded. Press Save to load them.', true);
-      _paintRunningSaveState('Saved. Press Save to load the added lines.');
-      return false;
-    });
-  }
-  // </running-draft-restored>
-
   window.saveRunningInvoiceDraft = function(opts) {
     opts = opts || {};
     if (!runningInvoiceDraftOn()) return Promise.resolve(false);
@@ -24718,7 +24642,6 @@
       return Promise.resolve(false);
     }
     if (!opts.quiet) _paintRunningSaveState('Saving...');
-    var sentCards = JSON.parse(JSON.stringify(snap.jobCards || []));
     return api('save_running_invoice_draft', null, body).then(function(res) {
       if (res && res.draft_id) _draftInvoiceId = res.draft_id;
       if (res && res.created_by_agent) _invCreatedByAgent = true;
@@ -24727,8 +24650,6 @@
       _saveInvDraft();
       _paintRunningSaveState('Saved. Not sent.');
       if (!opts.quiet) toast('Saved. This invoice has not been sent.');
-      var restored = _restoredAgentKeys(res);
-      if (restored.length) return _reloadRestoredRunningDraft({ sentHash: _invRunningSavedHash }, sentCards, restored);
       return true;
     }).catch(function(err) {
       if (_runningDraftReplaced(err)) {

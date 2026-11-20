@@ -7,8 +7,6 @@
 //  3. A line typed with a job number but no job id is offered "Add yourself"
 //     when the refusal names the job's id.
 //  4. Deductions alone are not something to invoice.
-//  5. A save answered with restored_agent_keys reads the week again before
-//     any further save, so the next save (which names the draft) keeps them.
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
@@ -48,7 +46,6 @@ async function stubWeek(page, state) {
     const action = new URL(req.url()).searchParams.get('action');
     const reply = (body, status) => route.fulfill({ status: status || 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (req.method() === 'POST') posts.push({ action, body: req.postDataJSON() });
-    if (action === 'save_running_invoice_draft') (state.log = state.log || []).push('save');
     const ws = week();
     if (action === 'my_hours') {
       return reply({ assignments: state.assignments || [], rate: 50, rate_resolved: true, invoice_type: 'hourly', running_invoice_draft: true,
@@ -58,19 +55,11 @@ async function stubWeek(page, state) {
     if (action === 'get_trade_invoice') return reply({ invoice: state.invoice });
     if (action === 'get_running_invoice_draft') {
       state.reads = (state.reads || 0) + 1;
-      (state.log = state.log || []).push('read');
       if (state.readDelayMs && state.reads > 1) await new Promise((r) => setTimeout(r, state.readDelayMs));
       return reply(Object.assign({ ok: true, status: 'draft', draft_id: state.draftId, draft_builder: state.builder, suggested: [], claimed: [] }, state.readExtra || {}));
     }
     if (action === 'save_running_invoice_draft') {
       const body = req.postDataJSON();
-      if (state.restore && !body.draft_id) {
-        // The server keeps the agent's lines this phone's copy did not have.
-        const answer = state.restore(body.draft_builder);
-        state.builder = answer.draft_builder;
-        state.draftId = answer.draft_id;
-        return reply(Object.assign({ ok: true, status: 'draft', xero: false }, answer));
-      }
       if (state.refuseSaves > 0) {
         state.refuseSaves -= 1;
         if (state.onRefuse) state.onRefuse();
@@ -219,57 +208,6 @@ test('a second draft_replaced is shown and not retried, and the stale id is drop
   expect(saves(posts)[2].body.draft_id).toBe('fresh-draft');
   const phoneIds = await page.evaluate(() => Object.keys(sessionStorage).map((k) => { try { return JSON.parse(sessionStorage.getItem(k)).draftId; } catch (e) { return undefined; } }).filter((v) => v !== undefined));
   expect(phoneIds).not.toContain('old-draft');
-});
-
-test('agent lines put back on a save are read again, win over an untouched card, and are kept by the next save', async ({ appPage: page }) => {
-  const ws = week();
-  const day = addIsoDays(ws, 1);
-  // This phone opened the week before the office loaded lines: no draft id, an empty card.
-  const empty = savedCard(day, { work_date: '', start_time: '', finish_time: '', break_minutes: 0, hours: 0, description: '' });
-  const state = { draftId: null, builder: builderWith([empty]), readDelayMs: 2500 };
-  state.restore = (sent) => {
-    const agentSaved = savedCard(day, { start_time: '06:30', finish_time: '12:00', break_minutes: 0, hours: 5.5, description: 'Agent line', added_by_agent: true });
-    const agentOther = savedCard(addIsoDays(ws, 2), { assignment_id: 'as-agent', job_id: 'job-agent', job_number: 'SWF-30002', source_key: 'as:as-agent',
-      description: 'Added by the office', added_by_agent: true });
-    const cards = sent.jobCards.map((c) => (c.source_key === 'as:as-saved' || c.assignment_id === 'as-saved' ? agentSaved : c)).concat([agentOther]);
-    return { draft_id: 'fresh-draft', draft_builder: Object.assign({}, sent, { jobCards: cards, manualLock: true }), restored_agent_keys: ['as:as-saved', 'as:as-agent'] };
-  };
-  const posts = await stubWeek(page, state);
-  await signIn(page, PERSONAS.installer);
-  await page.locator('[data-view="hours"]').click();
-  await page.getByRole('button', { name: /Weekly Invoice/ }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.locator('.jc-card').filter({ hasText: 'SWF-30001' })).toHaveCount(1);
-  await page.waitForTimeout(1000);
-  expect(saves(posts)).toHaveLength(0);
-  const from = (state.log || []).length;
-
-  await page.locator('#invSaveBtn').click();
-  await expect.poll(() => state.log.slice(from).join(',')).toBe('save,read');
-  // A pressed Save while the week is read again sends nothing.
-  await page.locator('#invSaveBtn').click();
-  await expect(page.locator('.jc-card').filter({ hasText: 'SWF-30002' })).toHaveCount(1, { timeout: 8000 });
-  expect(saves(posts)).toHaveLength(1);
-  expect(state.log.slice(from)).toEqual(['save', 'read']);
-  const first = page.locator('.jc-card').filter({ hasText: 'SWF-30001' });
-  await expect(first.locator('[data-cardstart]')).toHaveValue('06:30');
-  await expect(first.locator('[data-carddesc]')).toHaveValue('Agent line');
-
-  // The next save names the draft and carries the agent's lines.
-  const other = page.locator('.jc-card').filter({ hasText: 'SWF-30002' });
-  await other.locator('[data-carddesc]').fill('Typed after the read');
-  await other.locator('[data-carddesc]').blur();
-  await page.locator('#invSaveBtn').click();
-  await expect(page.locator('#invSaveState')).toContainText('Saved');
-  const all = saves(posts);
-  expect(all).toHaveLength(2);
-  expect(all[1].body.draft_id).toBe('fresh-draft');
-  const cards = all[1].body.draft_builder.jobCards;
-  const saved = cards.find((c) => c.job_number === 'SWF-30001');
-  expect(saved.start_time).toBe('06:30');
-  expect(saved.description).toBe('Agent line');
-  expect(cards.find((c) => c.job_number === 'SWF-30002').description).toBe('Typed after the read');
-  expect(cards.filter((c) => c.job_number === 'SWF-30001')).toHaveLength(1);
 });
 
 test('a line typed with only a job number is offered Add yourself from the refused job id', async ({ appPage: page }) => {

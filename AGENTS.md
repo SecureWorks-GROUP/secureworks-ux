@@ -1054,12 +1054,7 @@ only when the read names none), keeps the person's edits on top of the fresh
 draft and saves once more. No other save goes out while that read runs: a save
 with no draft id replaces the week's draft unread. A second refusal is shown,
 autosave stops, and only a pressed Save reads again (`// <running-draft-replaced>`). A week sent elsewhere meanwhile is not
-saved over. A save answered with a non-empty `restored_agent_keys` (agent lines the
-server put back because the phone's copy lacked them) reads the week again
-before any further save and keeps typing done since that save; a restored line
-wins over the card at its key unless that card was typed on since
-(`// <running-draft-restored>`). Without it the next save, which names the
-draft, drops those lines. Deductions alone are not something to invoice: Submit refuses
+saved over. Deductions alone are not something to invoice: Submit refuses
 "A deduction takes money off. Add the job and the hours first." Guards:
 `scripts/test-trade-invoice-running-draft.js`,
 `tests/e2e/trade-invoice-running-draft.spec.js`,
@@ -1441,10 +1436,13 @@ figure (anything computed in the app is labelled an estimate), an invoice is
 never sent twice, the app never guesses how a job is billed (`invoice_mode`
 from the server; unknown asks the office), expenses stay outside the invoice
 total, and the week's draft is the server's saved weekly draft in the shape
-`trade.html` writes, so either app picks up the other's. Crew follows the same
-`draft_replaced` and `restored_agent_keys` rules in `useWeek`
-(`crew/js/screens/timesheet.js`); a held week shows a Save button under the
-draft line. Guard: `tests/e2e/crew-draft-fixes.spec.js`. `?demo` runs it on
+`trade.html` writes, so either app picks up the other's. In `useWeek`
+(`crew/js/screens/timesheet.js`) a save refused `draft_replaced` reads the week
+again, puts the typing on top and saves once (a second refusal holds autosave
+until a Save button under the draft line is pressed), and a save answered with
+a non-empty `restored_agent_keys` reads the week again before any further save,
+keeping typing done since. Without that re-read the next save, which names the
+draft, drops the agent's lines. Guard: `tests/e2e/crew-draft-fixes.spec.js`. `?demo` runs it on
 made-up data with no network (`crew/js/demo/`), and that is what
 `tests/e2e/crew-*.spec.js` drive (every screen at 360, 390 and 430 wide).
 Three behaviours depend on ops-api switches that ship off (secureworks-backend

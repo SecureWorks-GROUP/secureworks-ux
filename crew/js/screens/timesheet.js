@@ -11,17 +11,48 @@ import { todayISO, mondayOf, addDays, fmtDay, fmtMoney, hoursBetween, fmtDow, fm
 import { verticalOf, jobTitle } from '../lib/model.js';
 import {
   buildLines, lineProblem, estimate, pickableDays, invoiceForWeek, sentBackForWeek, invoicePays, readMode,
-  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, UNKNOWN_MODE_WORDS
+  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, oldAppLines, withoutOldAppLines, UNKNOWN_MODE_WORDS
 } from '../lib/invoice.js';
 import { receiptsEnabled, receiptProblem, receiptLine } from '../lib/reimbursements.js';
-import { bookMyself } from '../lib/data.js';
+import { bookMyself, useJob } from '../lib/data.js';
 import { Icon } from '../ui/icons.js';
 import { Page, Button, Sheet, StatusBadge, JobLine, KV, Field, Picks, TimeInput, BREAKS, Toggle, SkelRows, Empty, LoadError, toast, openOverlay, buzz, IconButton } from '../ui/kit.js';
 import { cash, hrs, plural, weekWords, sheetRows, sheetSummary, DayCell, InvoiceBadge } from '../ui/paybits.js';
 import { useInvoices, useHours, loadDraft, useGroupWeek } from './pay.js';
 
 const hasWork = (d) => Object.keys(d.edits || {}).length > 0 || (d.added || []).length > 0 || (d.lumps || []).length > 0 || Boolean(d.notes) || d.gst != null;
-const draftOff = (err) => { const code = (err && ((err.body && err.body.code) || err.code)) || ''; return err instanceof ApiError && (code === 'running_draft_off' || code === 'operator_access_required' || err.status === 404 || /unknown action|not switched on/i.test(err.message || '')); };
+const codeOf = (err) => (err && ((err.body && err.body.code) || err.code)) || '';
+const draftOff = (err) => { const code = codeOf(err); return err instanceof ApiError && (code === 'running_draft_off' || code === 'operator_access_required' || err.status === 404 || /unknown action|not switched on/i.test(err.message || '')); };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const AGAIN_WORDS = 'This week changed in another place again, so it was not saved. What you typed is still here. Press Save to try again.';
+
+/**
+ * What this person typed, put on top of a fresh copy of the week's draft
+ * (first open, a draft replaced elsewhere, agent lines the server put back).
+ * Their edits win key by key, lines only one side has are kept, and lines
+ * named in `gone` (removed here) stay off.
+ */
+function onTop(theirs, mine, gone = { added: [], lumps: [] }) {
+  const edits = { ...theirs.edits };
+  for (const [k, e] of Object.entries(mine.edits || {})) edits[k] = { ...(theirs.edits[k] || {}), ...e };
+  const theirKeys = new Set(theirs.added.map((a) => a.key));
+  const myLumps = new Set((mine.lumps || []).map((l) => l.id));
+  return { ...theirs, edits,
+    added: [...theirs.added.filter((a) => !gone.added.includes(a.key)), ...(mine.added || []).filter((a) => !theirKeys.has(a.key))],
+    lumps: [...theirs.lumps.filter((l) => !myLumps.has(l.id) && !gone.lumps.includes(l.id)), ...(mine.lumps || [])],
+    gst: mine.gst == null ? theirs.gst : mine.gst, notes: mine.notes || theirs.notes };
+}
+/** What changed on this phone between two copies of its draft: typing done while a save was out. */
+function typedSince(was, now) {
+  const edits = {};
+  for (const [k, e] of Object.entries(now.edits || {})) if (!same(e, (was.edits || {})[k])) edits[k] = e;
+  const had = new Set(was.added.map((a) => a.key)); const has = new Set(now.added.map((a) => a.key));
+  const hadLumps = new Map(was.lumps.map((l) => [l.id, l])); const hasLumps = new Set(now.lumps.map((l) => l.id));
+  return {
+    typed: { edits, added: now.added.filter((a) => !had.has(a.key)), lumps: now.lumps.filter((l) => !same(l, hadLumps.get(l.id))), gst: now.gst === was.gst ? null : now.gst, notes: now.notes === was.notes ? '' : now.notes },
+    gone: { added: [...had].filter((k) => !has.has(k)), lumps: [...hadLumps.keys()].filter((id) => !hasLumps.has(id)) }
+  };
+}
 
 /**
  * One pay week: the server's hours, the trade's draft, the lines made from
@@ -39,6 +70,9 @@ export function useWeek(mondayParam, expenses) {
   const draftRef = useRef(draft);
   const [sync, setSync] = useState({ state: '', words: '' });
   const stop = useRef(false); const saving = useRef(null); const didRead = useRef(false);
+  // Stale: agent lines came back on a save and the re-read failed, so the next
+  // save reads the week first. (A held week is `draft.held`: see holdWith.)
+  const stale = useRef(false);
 
   const list = (invoices.data && invoices.data.invoices) || [];
   const live = invoiceForWeek(list, monday);
@@ -60,40 +94,48 @@ export function useWeek(mondayParam, expenses) {
     if (!modesQ.data || !Array.isArray(modesQ.data.jobs)) return null;
     return Object.fromEntries(modesQ.data.jobs.map((r) => [String(r.job_id), r]));
   }, [modesQ.data, addedIds]);
-  const lines = useMemo(() => {
+  // A save builds its lines from the draft it sends, never from the last render:
+  // a draft just merged from a re-read has not been drawn yet.
+  const linesFor = (dr) => {
     if (!data) return [];
-    const built = buildLines(data, draft, { workOrders: (wos.data && wos.data.work_orders) || [], perMetre: user.perMetre, jobModes, receiptRows, userId: user.id });
+    const built = buildLines(data, dr, { workOrders: (wos.data && wos.data.work_orders) || [], perMetre: user.perMetre, jobModes, receiptRows, userId: user.id });
     return modesQ.error && !jobModes ? built.map((l) => (l.unknown && l.added ? { ...l, modePending: false, modeFailed: true } : l)) : built;
-  }, [data, draft, wos.data, jobModes, modesQ.error, receiptRows]);
+  };
+  const lines = useMemo(() => linesFor(draft), [data, draft, wos.data, jobModes, modesQ.error, receiptRows]);
   const groups = useGroupWeek(data);
-  const gstOn = draft.gst == null ? (data && typeof data.gst_on === 'boolean' ? data.gst_on : user.gstDefault) : draft.gst;
+  const gstFor = (dr) => (dr.gst == null ? (data && typeof data.gst_on === 'boolean' ? data.gst_on : user.gstDefault) : dr.gst);
+  const gstOn = gstFor(draft);
   const deduction = data && data.recurring_deduction_week;
   const est = estimate(lines, { gstOn, deduction, basis: data && data.money && data.money.super_basis });
-  const ctx = { monday, rateEditable };
+  const ctx = { monday, rateEditable, userId: user.id };
   const problems = lines.filter((l) => lineProblem(l, ctx));
-  const latest = useRef({}); latest.current = { data, lines, gstOn, serverOn };
+  const latest = useRef({}); latest.current = { data, serverOn, linesFor, gstFor };
 
   const commit = (next) => { draftRef.current = next; local.set('week:' + monday, next); setDraftState(next); };
   const setDraft = (fn) => commit({ ...(typeof fn === 'function' ? fn(draftRef.current) : fn), dirty: true, savedAt: Date.now() });
 
   // ---- the saved weekly draft: read when the week opens ----
+  /** The week's draft as the account holds it now, in this app's shape. Throws on a failed read. */
+  const fetchWeek = async () => {
+    const res = await api('get_running_invoice_draft', { week_start: monday });
+    const builder = res && res.draft_builder && Array.isArray(res.draft_builder.jobCards) ? res.draft_builder : null;
+    const draftId = (res && (res.current_draft_id || res.draft_id)) || null;
+    return { draftId, theirs: builder ? { ...draftFromBuilder(builder, latest.current.data), base: builder, serverHash: JSON.stringify(builder), draftId, foreign: foreignDraftLines(builder), dirty: false } : null };
+  };
   const read = useCallback(async () => {
-    let res;
-    try { res = await api('get_running_invoice_draft', { week_start: monday }); } catch (err) {
+    let got;
+    try { got = await fetchWeek(); } catch (err) {
       if (draftOff(err)) { stop.current = true; setSync({ state: 'off', words: '' }); } else if (err instanceof ApiError && err.refused) { stop.current = true; setSync({ state: 'refused', words: friendly(err) }); } else setSync({ state: 'phone', words: '' });
       return;
     }
-    const builder = res && res.draft_builder && Array.isArray(res.draft_builder.jobCards) ? res.draft_builder : null;
+    const { draftId, theirs } = got;
     const mine = draftRef.current;
-    const draftId = (res && res.draft_id) || null;
-    if (!builder) { commit({ ...mine, base: null, serverHash: '', draftId, foreign: 0, dirty: hasWork(mine) }); return; }
-    const hash = JSON.stringify(builder);
-    const theirs = { ...draftFromBuilder(builder, latest.current.data), base: builder, serverHash: hash, draftId, foreign: foreignDraftLines(builder), dirty: false };
-    if (mine.serverHash === undefined && hasWork(mine)) {
-      // Work typed on this phone before it was ever saved to the account: keep it on top of the saved draft.
-      const keys = new Set(theirs.added.map((a) => a.key));
-      commit({ ...theirs, edits: { ...theirs.edits, ...mine.edits }, added: [...theirs.added, ...mine.added.filter((a) => !keys.has(a.key))], gst: mine.gst == null ? theirs.gst : mine.gst, notes: mine.notes || theirs.notes, dirty: true, savedAt: Date.now() });
-    } else if (mine.serverHash === hash) commit({ ...mine, draftId, foreign: theirs.foreign });
+    if (!theirs) { commit({ ...mine, base: null, serverHash: '', draftId, foreign: 0, dirty: hasWork(mine) }); return; }
+    // Typing that never reached the account's copy: never saved, refused as replaced, or saved
+    // while agent lines came back and the week could not be read again. Keep it on top.
+    const unsynced = mine.serverHash === undefined || mine.serverHash === 'replaced' || mine.serverHash === 'stale' || mine.held;
+    if (unsynced && hasWork(mine)) commit({ ...onTop(theirs, mine), held: mine.held, dirty: true, savedAt: Date.now() });
+    else if (mine.serverHash === theirs.serverHash) commit({ ...mine, draftId, foreign: theirs.foreign });
     else {
       // The account's copy is newer than this phone's: it wins.
       if (mine.dirty && hasWork(mine)) toast('This week was changed in another place. Showing the saved version.', { ms: 5000 });
@@ -107,42 +149,102 @@ export function useWeek(mondayParam, expenses) {
   }, [Boolean(data), serverOn, Boolean(live)]);
 
   // ---- and written when the trade changes it ----
-  const save = useCallback(async () => {
-    if (saving.current) await saving.current;
-    const cur = draftRef.current; const { data: d, lines: ls, gstOn: g, serverOn: on } = latest.current;
-    if (!d || !on || stop.current || !cur.dirty || cur.serverHash === undefined) return !cur.dirty;
-    const stamp = cur.savedAt;
-    const snap = builderFromDraft(d, cur, ls, { monday, gstOn: g });
-    const run = (async () => {
-      try {
-        const res = await api('save_running_invoice_draft', null, draftSaveBody(snap, cur.draftId));
-        const now = draftRef.current; const saved = (res && res.draft_builder) || snap;
-        commit({ ...now, base: saved, serverHash: JSON.stringify(saved), draftId: (res && res.draft_id) || now.draftId, dirty: now.savedAt !== stamp });
-        setSync({ state: 'ok', words: '' });
-        return true;
-      } catch (err) {
-        const code = (err && ((err.body && err.body.code) || err.code)) || '';
-        if (code === 'draft_replaced') { commit({ ...draftRef.current, draftId: null, serverHash: 'replaced' }); await read(); return false; }
-        if (draftOff(err)) { stop.current = true; setSync({ state: 'off', words: '' }); return false; }
-        if (err instanceof ApiError && err.refused) { stop.current = true; setSync({ state: 'refused', words: friendly(err) }); toast(friendly(err) + ' Your draft is still on this phone.', { kind: 'bad', ms: 6500 }); return false; }
-        setSync({ state: 'phone', words: '' });
+  /** Autosave stops until the person presses Save. */
+  const holdWith = (words) => {
+    commit({ ...draftRef.current, held: true, dirty: true });
+    setSync({ state: 'held', words });
+    toast(words, { kind: 'bad', ms: 6500 });
+  };
+  /**
+   * The week read again before the next save goes out. `replaced`: this phone's
+   * copy was refused as replaced, so all of its typing goes on top of the fresh
+   * draft. `was`: the save just made is on the account (with agent lines the
+   * server put back), so only typing done since that save goes on top.
+   * Returns false when nothing may be saved now.
+   */
+  const refresh = async ({ replaced = false, was = null, hint = null } = {}) => {
+    let got;
+    try { got = await fetchWeek(); } catch (err) {
+      if (replaced) holdWith('This week was changed in another place and could not be read again. What you typed is still on this phone. Press Save to try again.');
+      else { stale.current = true; commit({ ...draftRef.current, serverHash: 'stale' }); setSync({ state: 'phone', words: '' }); }
+      return false;
+    }
+    const draftId = got.draftId || hint || null;
+    if (replaced && !draftId) {
+      // The week holds no draft now: it may have been sent from another place.
+      let list;
+      try { list = await api('my_trade_invoices'); } catch (err) { holdWith('This week was changed in another place and could not be checked. What you typed is still on this phone. Press Save to try again.'); return false; }
+      if (invoiceForWeek((list && list.invoices) || [], monday)) {
+        stop.current = true;
+        primeQuery('invoices', list, { persist: true });
+        toast('This week was already sent from another place, so these changes were not saved.', { kind: 'bad', ms: 6500 });
         return false;
       }
-    })();
+    }
+    const mine = draftRef.current;
+    let next;
+    if (!got.theirs) next = { ...mine, base: null, serverHash: '', draftId, foreign: 0, dirty: true };
+    else if (!was) next = { ...onTop({ ...got.theirs, draftId }, mine), dirty: true, savedAt: Date.now() };
+    else if (mine.savedAt === was.savedAt) next = { ...got.theirs, draftId };
+    else { const { typed, gone } = typedSince(was, mine); next = { ...onTop({ ...got.theirs, draftId }, typed, gone), dirty: true, savedAt: Date.now() }; }
+    stale.current = false;
+    commit({ ...next, held: false });
+    return true;
+  };
+  const save = useCallback(async ({ press = false } = {}) => {
+    while (saving.current) await saving.current;
+    const first = draftRef.current; const { data: d, serverOn: on } = latest.current;
+    if (!d || !on || stop.current || first.serverHash === undefined) return !first.dirty;
+    if (first.held && !press) return false;
+    if (!first.dirty && !first.held && !stale.current) return true;
+    const run = (async () => {
+      // A pressed Save on a held week reads it again first, and that counts as the one retry.
+      let retried = Boolean(first.held);
+      if ((first.held || stale.current) && !(await refresh({ replaced: Boolean(first.held) }))) return false;
+      for (;;) {
+        const cur = draftRef.current; const stamp = cur.savedAt; const L = latest.current;
+        const snap = builderFromDraft(L.data, cur, L.linesFor(cur), { monday, gstOn: L.gstFor(cur) });
+        let res;
+        try { res = await api('save_running_invoice_draft', null, draftSaveBody(snap, cur.draftId)); } catch (err) {
+          if (codeOf(err) === 'draft_replaced') {
+            // The id this phone holds is no longer the week's draft: drop it here and in the phone copy,
+            // read the week again (no other save goes out meanwhile) and save once more under the fresh id.
+            commit({ ...draftRef.current, draftId: null, serverHash: 'replaced' });
+            if (retried) { holdWith(AGAIN_WORDS); return false; }
+            retried = true;
+            if (!(await refresh({ replaced: true, hint: (err.body && err.body.current_draft_id) || null }))) return false;
+            continue;
+          }
+          if (draftOff(err)) { stop.current = true; setSync({ state: 'off', words: '' }); return false; }
+          if (err instanceof ApiError && err.refused) { stop.current = true; setSync({ state: 'refused', words: friendly(err) }); toast(friendly(err) + ' Your draft is still on this phone.', { kind: 'bad', ms: 6500 }); return false; }
+          setSync({ state: 'phone', words: '' });
+          return false;
+        }
+        const now = draftRef.current; const saved = (res && res.draft_builder) || snap;
+        commit({ ...now, base: saved, serverHash: JSON.stringify(saved), draftId: (res && res.draft_id) || now.draftId, dirty: now.savedAt !== stamp, held: false });
+        // Agent lines the server put back because this phone's copy did not have them. The next
+        // save names the draft and would drop them, so read the week before any further save.
+        const restored = res && Array.isArray(res.restored_agent_keys) ? res.restored_agent_keys : [];
+        if (restored.length && !(await refresh({ was: cur }))) return false;
+        setSync({ state: 'ok', words: '' });
+        return true;
+      }
+    })().catch(() => { setSync({ state: 'phone', words: '' }); return false; });
     saving.current = run.finally(() => { saving.current = null; });
     return run;
   }, [monday]);
   useEffect(() => {
-    if (!draft.dirty || !serverOn || draft.serverHash === undefined) return undefined;
-    const t = setTimeout(save, 2500);
+    if (!draft.dirty || draft.held || !serverOn || draft.serverHash === undefined) return undefined;
+    const t = setTimeout(() => save(), 2500);
     return () => clearTimeout(t);
-  }, [draft.savedAt, draft.dirty, draft.serverHash, serverOn]);
+  }, [draft.savedAt, draft.dirty, draft.held, draft.serverHash, serverOn]);
   // Leaving the screen: send what is not saved yet.
   useEffect(() => () => { save(); }, []);
   useEffect(() => { const fn = () => { if (draftRef.current.dirty) save(); }; window.addEventListener('online', fn); return () => window.removeEventListener('online', fn); }, []);
 
   const syncWords = !data || live ? '' : !serverOn || sync.state === 'off' ? 'Your draft is kept on this phone.'
     : sync.state === 'refused' ? `${sync.words} Your draft is kept on this phone.`
+    : draft.held ? (sync.state === 'held' && sync.words) || AGAIN_WORDS
     : sync.state === 'phone' ? 'No signal. Your draft is kept on this phone and saved when you are back in range.'
     : draft.dirty ? 'Saving your draft.' : draft.serverHash ? 'Draft saved to your account. Not sent.' : '';
 
@@ -178,7 +280,31 @@ export function useWeek(mondayParam, expenses) {
     local.del('week:' + monday);
     if (id && latest.current.serverOn) api('delete_trade_invoice', null, { invoice_id: id }).catch(() => {});
   };
-  return { user, monday, thisMonday, hours, data, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: save, sent, syncWords, foreign: draft.foreign || 0 };
+  // Lines typed in the old app that this app cannot bill: taken out of the saved draft on the trade's word.
+  const removeOldLines = () => setDraft((d) => ({ ...d, base: withoutOldAppLines(d.base), foreign: 0 }));
+  return { user, monday, thisMonday, hours, data, receiptRows, reimbursementsOn, invoices, live, sentBack, draft, setDraft, lines, groups, gstOn, deduction, est, ctx, problems, rateEditable, edit, addLine, flush: () => save({ press: true }), held: Boolean(draft.held), sent, syncWords, foreign: draft.foreign || 0, oldLines: draft.foreign ? oldAppLines(draft.base) : [], removeOldLines };
+}
+
+/**
+ * Lines on this week that were typed in the old app and cannot be billed from
+ * here. Each is said in words, with one press to take them off, so a week is
+ * never stuck. The trade adds them again here (Add job, Add another item).
+ */
+export function OldLinesNote({ w }) {
+  if (!w.foreign) return null;
+  const many = w.foreign !== 1;
+  return html`<div class="block note-banner pay-gap" data-old-lines><div class="stack tight">
+    <span><span class="t-strong">${plural(w.foreign, 'line')} from the old app cannot be sent.</span> Add ${many ? 'them' : 'it'} again here with Add job or Add another item, then remove the old ${many ? 'ones' : 'one'}.</span>
+    ${(w.oldLines || []).map((l) => html`<span class="t-small" key=${l.where + l.index}>${l.words || 'A line with no details'}</span>`)}
+    <div><${Button} kind="line" small onClick=${() => { w.removeOldLines(); toast(many ? 'Old lines removed.' : 'Old line removed.'); }}>Remove the old ${many ? 'lines' : 'line'}<//></div>
+  </div></div>`;
+}
+
+/** How the week's draft stands on the account, with Save while autosave is held. */
+export function SyncNote({ w }) {
+  if (!w.syncWords) return null;
+  return html`<p class="block t-small pay-note" role="status">${w.syncWords}</p>
+    ${w.held ? html`<div class="block"><${Button} kind="line" small onClick=${() => w.flush()}>Save<//></div>` : null}`;
 }
 
 export function Timesheet({ monday: mondayParam }) {
@@ -221,7 +347,7 @@ export function Timesheet({ monday: mondayParam }) {
     ${sentBack ? html`<div class="block note-banner bad pay-gap"><span><span class="t-strong">The office sent this back.</span> ${sentBack.office_note || 'Check each line, fix what is wrong and send it again.'}</span></div>` : null}
     ${hours.loading ? html`<${SkelRows} n=${3} />` : hours.error && !data ? html`<${LoadError} error=${hours.error} onRetry=${hours.refetch} what="this week" />` : html`
       ${data && data.rate_resolved === false && !w.rateEditable ? html`<div class="block note-banner pay-gap"><span>No pay rate is set for you yet. Call the office to have it set before you send.</span></div>` : null}
-      ${w.foreign ? html`<div class="block note-banner pay-gap"><span>${plural(w.foreign, 'line')} on this week ${w.foreign === 1 ? 'was' : 'were'} added in the Trade App and cannot be shown here. Send this week from the Trade App, or remove ${w.foreign === 1 ? 'it' : 'them'} there.</span></div>` : null}
+      <${OldLinesNote} w=${w} />
       <div class="pay-thead" aria-hidden="true"><span>Day</span><span>Job and time</span><span>Hours</span></div>
       <div class="pay-rows">
         ${rows.map((r) => html`<button type="button" class=${cx('pay-row', r.tone)} key=${r.key} onClick=${() => (r.open === 'group' ? go('/pay/group/' + r.jobId) : w.edit(r.line))}>
@@ -237,7 +363,7 @@ export function Timesheet({ monday: mondayParam }) {
       </div>
       ${ahead ? html`<p class="block t-small pay-note">${plural(ahead, 'booked day')} later this week ${ahead === 1 ? 'is' : 'are'} not listed yet. ${ahead === 1 ? 'It shows' : 'They show'} here once worked.</p>` : null}
       ${unknown ? html`<p class="block t-small pay-note">${plural(unknown, 'job')} cannot go on the invoice until the office says how ${unknown === 1 ? 'it is' : 'they are'} billed.</p>` : null}
-      ${w.syncWords ? html`<p class="block t-small pay-note" role="status">${w.syncWords}</p>` : null}
+      <${SyncNote} w=${w} />
     `}
   <//>`;
 }
@@ -279,6 +405,12 @@ function LineSheet({ line, ctx, onSave, onClose }) {
     buzz(8); shut();
   };
   const helper = (i, k, v) => set('helpers', f.helpers.map((x, idx) => (idx === i ? { ...x, [k]: v } : x)));
+  // Helpers are the people booked on this job, never a typed name.
+  const jobQ = useJob(line.kind === 'work_order' && line.jobId ? line.jobId : null);
+  const crewNames = [...new Set(((jobQ.data && jobQ.data.crew) || [])
+    .filter((c) => c && c.name && String(c.status).toLowerCase() !== 'cancelled' && c.role !== 'observer' && c.user_id !== ctx.userId)
+    .map((c) => String(c.name).trim()))];
+  const crewKnown = Boolean(jobQ.data);
   const recorded = (line.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0);
 
   return html`<${Sheet} title=${line.title} sub=${line.client || ''} onClose=${onClose}
@@ -299,19 +431,29 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         <${Field} label=${line.added ? 'What you did' : 'What you did (optional)'}><input class="input" value=${f.description} placeholder="e.g. Set posts, hung gates" onInput=${(e) => set('description', e.currentTarget.value)} /><//>
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
-        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Record anything you paid other crew as an adjustment.</p>`
+        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
         ${recorded > 0 ? html`<p class="t-small">${hrs(recorded)} recorded on this job this week. The hours are a record only. The pay is the work order amount.</p>` : null}
         ${(line.charges || []).length ? html`<${Field} label="Crew already billed on this job">
           <div class="stack tight">${line.charges.map((c) => html`<${Toggle} label=${c.trade_name + ' ' + cash(Math.abs(c.amount_ex))} hint=${c.description || 'Crew paid separately'} checked=${f.chargeIds.includes(c.line_id)} onChange=${(on) => set('chargeIds', on ? [...f.chargeIds, c.line_id] : f.chargeIds.filter((x) => x !== c.line_id))} />`)}</div><//>` : null}
         <${Field} label="Helpers you pay from this job">
           <div class="stack tight">${f.helpers.map((hp, i) => html`<div class="pay-helper">
-            <input class="input" placeholder="Name" value=${hp.name || ''} onInput=${(e) => helper(i, 'name', e.currentTarget.value)} />
+            <select class="input" aria-label="Helper" value=${hp.name || ''} onChange=${(e) => helper(i, 'name', e.currentTarget.value)}>
+              <option value="">Pick who</option>
+              ${hp.name && !crewNames.includes(hp.name) ? html`<option value=${hp.name}>${hp.name} (not booked on this job)</option>` : null}
+              ${crewNames.map((n) => html`<option value=${n}>${n}</option>`)}
+            </select>
             <input class="input" type="number" inputmode="decimal" placeholder="Hours" value=${hp.hours || ''} onInput=${(e) => helper(i, 'hours', e.currentTarget.value)} />
             <input class="input" type="number" inputmode="decimal" placeholder="Rate" value=${hp.rate || ''} onInput=${(e) => helper(i, 'rate', e.currentTarget.value)} />
             <${IconButton} name="trash" label="Remove helper" size=${18} onClick=${() => set('helpers', f.helpers.filter((_, idx) => idx !== i))} /></div>`)}
-            <${Button} kind="line" small onClick=${() => set('helpers', [...f.helpers, { name: '', hours: '', rate: '' }])}>Add a helper<//></div><//>
+            ${crewKnown && !crewNames.length ? html`<p class="t-small">Nobody else is booked on this job. Ask the office to book your crew on it, then add them here.</p>`
+              : !crewKnown && jobQ.error ? html`<p class="t-small">The crew on this job could not be read. Try again when you have signal.</p>`
+              : html`<${Button} kind="line" small disabled=${!crewKnown} onClick=${() => set('helpers', [...f.helpers, { name: '', hours: '', rate: '' }])}>Add a helper<//>`}
+            ${f.helpers.some((hp) => hp.name && crewKnown && !crewNames.includes(hp.name)) ? html`<p class="t-small">A helper here is not booked on this job. Pick someone from the crew, or ask the office to book them on.</p>` : null}</div><//>
         <${Field} label="Note (optional)"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>
+      ` : line.kind === 'deduction' ? html`
+        <div class="card pay-out"><span class="t-cap">${line.title}</span><b class="t-figure">${cash(line.amount)}</b></div>
+        <p class="t-small">An amount taken off the whole invoice cannot be sent from this app. Remove it. If money needs to come off your pay, tell the office and they will do it.</p>
       ` : html`
         <${Field} label=${line.kind === 'commission' ? 'Commission amount (before GST)' : line.kind === 'deduction' ? 'Adjustment amount (before GST)' : 'Amount (before GST)'}><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>
         ${line.kind !== 'commission' ? html`<${Field} label="What it is for"><input class="input" value=${f.description} onInput=${(e) => set('description', e.currentTarget.value)} /><//>` : null}

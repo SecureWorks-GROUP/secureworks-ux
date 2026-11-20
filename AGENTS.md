@@ -1436,7 +1436,20 @@ figure (anything computed in the app is labelled an estimate), an invoice is
 never sent twice, the app never guesses how a job is billed (`invoice_mode`
 from the server; unknown asks the office), expenses stay outside the invoice
 total, and the week's draft is the server's saved weekly draft in the shape
-`trade.html` writes, so either app picks up the other's. `?demo` runs it on
+`trade.html` writes, so either app picks up the other's. In `useWeek`
+(`crew/js/screens/timesheet.js`) a save refused `draft_replaced` reads the week
+again, puts the typing on top and saves once (a second refusal holds autosave
+until a Save button under the draft line is pressed), and a save answered with
+a non-empty `restored_agent_keys` reads the week again before any further save,
+keeping typing done since. Without that re-read the next save, which names the
+draft, drops the agent's lines. Guard: `tests/e2e/crew-draft-fixes.spec.js`. Lines
+typed in the old app that Crew cannot bill (typed rows, card travel, an amount
+off a work order card) are listed in words with one Remove press
+(`oldAppLines` / `withoutOldAppLines`, `OldLinesNote`); never tell a trade to
+send from the old app. A lump deduction is never sent (the server refuses it):
+it is a line problem with Remove. Work order helpers are picked from the job's
+booked crew (`trade_job_detail` crew), never typed. Check:
+`node tests/unit/crew-old-app-lines.test.mjs`. `?demo` runs it on
 made-up data with no network (`crew/js/demo/`), and that is what
 `tests/e2e/crew-*.spec.js` drive (every screen at 360, 390 and 430 wide).
 Three behaviours depend on ops-api switches that ship off (secureworks-backend

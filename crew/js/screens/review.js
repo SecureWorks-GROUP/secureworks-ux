@@ -11,7 +11,7 @@ import { refreshReceiptLine, receiptSendFacts } from '../lib/reimbursements.js';
 import { bookMyself } from '../lib/data.js';
 import { Page, Button, StatusBadge, Field, Toggle, SkelRows, LoadError, toast, ask, buzz } from '../ui/kit.js';
 import { cash, hrs, plural, weekWords, PayGroup, PayLine, PayRows, DoneScreen, superNote, num } from '../ui/paybits.js';
-import { useWeek, openAddOther } from './timesheet.js';
+import { useWeek, openAddOther, SyncNote, OldLinesNote } from './timesheet.js';
 import { useExpenses, groupWords } from './pay.js';
 import { allHeld, sendHeldLines } from '../lib/held.js';
 import { SendSplit, SendHeldLines, rememberHeldSend } from '../ui/held.js';
@@ -160,7 +160,7 @@ export function Review({ monday: mondayParam }) {
   };
 
   return html`<${Page} title="Invoice" back="Timesheet" onBack=${() => (route.query && route.query.from === 'pay' ? go('/pay/week/' + monday, { replace: true }) : back('/pay/week/' + monday))} right=${html`<${StatusBadge} status=${sentBack ? 'sent_back' : 'draft'} />`} flush
-    foot=${html`${w.foreign ? html`<p class="t-small">This week has lines from the Trade App that cannot be sent from here.</p>`
+    foot=${html`${w.foreign ? html`<p class="t-small">This week has lines from the old app. Remove them above to send.</p>`
         : problems.length ? html`<p class="t-small">${problems.length === 1 ? `${problems[0].title}: ${lineProblem(problems[0], ctx).toLowerCase()}` : `${problems.length} lines still need something`}</p>` : null}
       <${Button} block class="big" busy=${sending} disabled=${!est.count || problems.length > 0 || w.foreign > 0 || moneyUnavailable} onClick=${send}>Send invoice<//>`}>
     <div class="pay-who t-num">Pay week ${weekWords(monday)} · ${user.name}</div>
@@ -168,7 +168,7 @@ export function Review({ monday: mondayParam }) {
     ${sentBack ? html`<div class="block note-banner bad pay-gap"><span><span class="t-strong">The office sent this back.</span> ${sentBack.office_note || 'Check each line, fix what is wrong and send it again.'}</span></div>` : null}
     ${hours.loading ? html`<${SkelRows} n=${3} />` : hours.error && !data ? html`<${LoadError} error=${hours.error} onRetry=${hours.refetch} what="this week" />` : html`
       ${data && data.rate_resolved === false && !w.rateEditable ? html`<div class="block note-banner pay-gap"><span>No pay rate is set for you yet. Call the office to have it set before you send.</span></div>` : null}
-      ${w.foreign ? html`<div class="block note-banner pay-gap"><span>${plural(w.foreign, 'line')} on this week ${w.foreign === 1 ? 'was' : 'were'} added in the Trade App and cannot be shown here. Send this week from the Trade App, or remove ${w.foreign === 1 ? 'it' : 'them'} there.</span></div>` : null}
+      <${OldLinesNote} w=${w} />
       <div class="pay-rows">
         ${!on.length ? html`<p class="pay-empty">Nothing to invoice yet. Add your times on the timesheet first.</p>` : null}
         ${hourly.length ? html`<${PayGroup} label=${`Hourly${hourlyHours ? ' · ' + hrs(hourlyHours) : ''}`} right=${sub(hourly)}>${hourly.map(line)}<//>` : null}
@@ -217,7 +217,7 @@ export function Review({ monday: mondayParam }) {
         <${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gstOn} onChange=${(v) => setDraft((d) => ({ ...d, gst: v }))} />
         <${Field} label="Note for the office (optional)"><textarea class="input pay-notebox" value=${draft.notes || ''} onInput=${(e) => { const v = e.currentTarget.value; setDraft((d) => ({ ...d, notes: v })); }} /><//>
       </div>
-      ${w.syncWords ? html`<p class="block t-small pay-note" role="status">${w.syncWords}</p>` : null}
+      <${SyncNote} w=${w} />
     `}
   <//>`;
 }

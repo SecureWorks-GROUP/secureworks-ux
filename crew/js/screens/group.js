@@ -311,6 +311,7 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
   const today = todayISO();
   const [week, setWeek] = useState(mondayOf(today));
   const [date, setDate] = useState(null);
+  const [typedDay, setTypedDay] = useState(''); // what is in the date box, kept so a refused day is said, not cleared
   const [start, setStart] = useState(''); const [finish, setFinish] = useState('');
   const [brk, setBrk] = useState(null); const [other, setOther] = useState('');
   const [busy, setBusy] = useState(false);
@@ -321,11 +322,13 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
   // comes from the date box.
   const earliest = addDays(today, -365);
   const ok = date && date <= today && date >= earliest && !isNaN(hours) && hours > 0 && hours <= 24;
+  const dayNote = !typedDay ? '' : typedDay < earliest ? 'That day is more than a year ago, so it cannot be added here. Ask the office to add it.'
+    : typedDay > today ? 'That day has not come yet. Pick a day up to today.' : '';
   const thisWeek = mondayOf(today);
   const weekLabel = week === thisWeek ? 'This week' : week === addDays(thisWeek, -7) ? 'Last week' : `Week of ${fmtDay(week)}`;
   const has = (d) => taken.some((t) => t.work_date === d);
-  const pick = (d) => {
-    setDate(d);
+  const pick = (d, typed = '') => {
+    setDate(d); setTypedDay(typed);
     const t = taken.find((x) => x.work_date === d);
     if (t && t.start_time) { setStart(String(t.start_time).slice(0, 5)); setFinish(String(t.finish_time || '').slice(0, 5)); const b = Number(t.break_minutes) || 0; if (BREAKS.some(([v]) => v === b)) setBrk(b); else { setBrk('other'); setOther(String(b)); } }
   };
@@ -348,11 +351,11 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
       <${Field} label=${weekLabel}>
         <div class="daypicks">${weekDays(week).map((d) => html`<button type="button" class=${cx('daypick', d === today && 'today')} disabled=${d > today} aria-pressed=${String(date === d)} onClick=${() => pick(d)}>
           <span class="dow">${fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>${has(d) ? html`<span class="t-small">in</span>` : null}</button>`)}</div>
-        <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === thisWeek ? addDays(thisWeek, -7) : thisWeek); setDate(null); }}>${week === thisWeek ? 'It was last week' : 'Back to this week'}</button>
+        <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === thisWeek ? addDays(thisWeek, -7) : thisWeek); setDate(null); setTypedDay(''); }}>${week === thisWeek ? 'It was last week' : 'Back to this week'}</button>
       <//>
-      <${Field} label="An earlier day">
-        <input class="input" type="date" data-group-day-date min=${earliest} max=${today} value=${date || ''}
-          onInput=${(e) => { const v = e.currentTarget.value; if (!v || v > today || v < earliest) { setDate(null); return; } setWeek(mondayOf(v)); pick(v); }} />
+      <${Field} label="An earlier day" error=${dayNote}>
+        <input class="input" type="date" data-group-day-date min=${earliest} max=${today} value=${typedDay || date || ''}
+          onInput=${(e) => { const v = e.currentTarget.value; if (!v || v > today || v < earliest) { setDate(null); setTypedDay(v); return; } setWeek(mondayOf(v)); pick(v, v); }} />
       <//>
       <div class="pay-two"><${TimeInput} label="Started" value=${start} onInput=${setStart} /><${TimeInput} label="Finished" value=${finish} onInput=${setFinish} /></div>
       <${Field} label="Break"><${Picks} value=${brk} options=${[...BREAKS, ['other', 'Other']]} onChange=${setBrk} /><//>

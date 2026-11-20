@@ -11,7 +11,7 @@ import { refreshReceiptLine, receiptSendFacts } from '../lib/reimbursements.js';
 import { bookMyself } from '../lib/data.js';
 import { Page, Button, StatusBadge, Field, Toggle, SkelRows, LoadError, toast, ask, buzz } from '../ui/kit.js';
 import { cash, hrs, plural, weekWords, PayGroup, PayLine, PayRows, DoneScreen, superNote, num } from '../ui/paybits.js';
-import { useWeek, openAddOther } from './timesheet.js';
+import { useWeek, openAddOther, SyncNote } from './timesheet.js';
 import { useExpenses, groupWords } from './pay.js';
 import { allHeld, sendHeldLines } from '../lib/held.js';
 import { SendSplit, SendHeldLines, rememberHeldSend } from '../ui/held.js';
@@ -217,7 +217,7 @@ export function Review({ monday: mondayParam }) {
         <${Toggle} label="Add GST" hint="Only if you are registered for GST." checked=${gstOn} onChange=${(v) => setDraft((d) => ({ ...d, gst: v }))} />
         <${Field} label="Note for the office (optional)"><textarea class="input pay-notebox" value=${draft.notes || ''} onInput=${(e) => { const v = e.currentTarget.value; setDraft((d) => ({ ...d, notes: v })); }} /><//>
       </div>
-      ${w.syncWords ? html`<p class="block t-small pay-note" role="status">${w.syncWords}</p>` : null}
+      <${SyncNote} w=${w} />
     `}
   <//>`;
 }

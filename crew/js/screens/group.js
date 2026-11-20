@@ -316,7 +316,11 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
   const [busy, setBusy] = useState(false);
   const breakMin = brk === 'other' ? Math.max(0, Math.round(Number(other) || 0)) : brk;
   const hours = brk == null ? NaN : hoursBetween(start, finish, breakMin);
-  const ok = date && !isNaN(hours) && hours > 0 && hours <= 24;
+  // Any past day can be entered (the server takes any day up to today); this
+  // week and last week are one tap, an older day comes from the date box.
+  const ok = date && date <= today && !isNaN(hours) && hours > 0 && hours <= 24;
+  const thisWeek = mondayOf(today);
+  const weekLabel = week === thisWeek ? 'This week' : week === addDays(thisWeek, -7) ? 'Last week' : `Week of ${fmtDay(week)}`;
   const has = (d) => taken.some((t) => t.work_date === d);
   const pick = (d) => {
     setDate(d);
@@ -339,10 +343,14 @@ function DaySheet({ idBody, taken, onSaved, onClose }) {
   return html`<${Sheet} title="Add a day you worked" sub="Hours are worked out from your start, finish and break." onClose=${onClose}
     foot=${(shut) => html`<${Button} block busy=${busy} disabled=${!ok} onClick=${() => save(shut)}>${ok ? `Save ${fmtDay(date)} · ${hrs(hours)}` : 'Save the day'}<//>`}>
     <div class="stack">
-      <${Field} label=${week === mondayOf(today) ? 'This week' : 'Last week'}>
+      <${Field} label=${weekLabel}>
         <div class="daypicks">${weekDays(week).map((d) => html`<button type="button" class=${cx('daypick', d === today && 'today')} disabled=${d > today} aria-pressed=${String(date === d)} onClick=${() => pick(d)}>
           <span class="dow">${fmtDow(d)}</span><span class="dom">${fmtDom(d)}</span>${has(d) ? html`<span class="t-small">in</span>` : null}</button>`)}</div>
-        <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === mondayOf(today) ? addDays(week, -7) : mondayOf(today)); setDate(null); }}>${week === mondayOf(today) ? 'It was last week' : 'Back to this week'}</button>
+        <button type="button" class="link tap pay-linkrow" onClick=${() => { setWeek(week === thisWeek ? addDays(thisWeek, -7) : thisWeek); setDate(null); }}>${week === thisWeek ? 'It was last week' : 'Back to this week'}</button>
+      <//>
+      <${Field} label="An earlier day">
+        <input class="input" type="date" data-group-day-date max=${today} value=${date || ''}
+          onInput=${(e) => { const v = e.currentTarget.value; if (!v || v > today) { setDate(null); return; } setWeek(mondayOf(v)); pick(v); }} />
       <//>
       <div class="pay-two"><${TimeInput} label="Started" value=${start} onInput=${setStart} /><${TimeInput} label="Finished" value=${finish} onInput=${setFinish} /></div>
       <${Field} label="Break"><${Picks} value=${brk} options=${[...BREAKS, ['other', 'Other']]} onChange=${setBrk} /><//>

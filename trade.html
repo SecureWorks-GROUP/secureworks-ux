@@ -22562,6 +22562,9 @@
   var _invRunningLoadSeq = 0;
   var _invRunningSaveTimer = null;
   var _invRunningSaveWarned = false;
+  // Set when the week's draft was replaced twice in a row: autosave stops and
+  // only a pressed Save reads the week again. [running-draft-replaced]
+  var _invRunningReplacedHold = false;
   var _runningInvoiceDraftServer = null;
   var _dailyHoursWeekSubmitted = false;
   var _dailyHoursDecision = null;
@@ -22609,6 +22612,7 @@
     _invClaimed = [];
     _invCreatedByAgent = false;
     _invRunningSavedHash = '';
+    _invRunningReplacedHold = false;
     _pmDraftIsPerMetre = false;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
     _invGst = _invoiceGstDefault(_hoursData);
@@ -22640,6 +22644,17 @@
     renderInvoiceBuilder();
   };
 
+  // A draft is the week's running draft when it belongs to a week and either
+  // carries a saved builder or this account saves running drafts (the server
+  // keeps one draft per week, so that draft is the running one).
+  function _isRunningWeeklyDraft(inv) {
+    if (!inv || String(inv.status || '') !== 'draft' || !inv.week_start) return false;
+    if (!jobCentricEnabled()) return false;
+    var builder = inv.draft_builder;
+    if (builder && typeof builder === 'object' && Array.isArray(builder.jobCards)) return true;
+    return runningInvoiceDraftOn();
+  }
+
   // Load a draft invoice for editing
   window.openInvoiceDraft = function(draftId) {
     var req = { ctx: _invoiceApiContext(), seq: ++_invoiceViewSeq };
@@ -22655,6 +22670,24 @@
         openWeeklyWorkOrderInvoice({ weekEnd: _hoursWeekEnd, invoice: inv });
         return;
       }
+      // <running-draft-open> The week's running draft opens in the weekly
+      // builder for its own week, the same path as opening that week, so the
+      // saved builder (times, breaks, removed lines) is what shows. Rebuilding
+      // it here from the priced lines made rows that were never priced or
+      // sent, and autosave then wrote that copy over the saved draft.
+      if (_isRunningWeeklyDraft(inv)) {
+        _invoiceBuilderOpen = false;
+        _hoursWeekStart = String(inv.week_start).slice(0, 10);
+        _hoursWeekEnd = inv.week_end ? String(inv.week_end).slice(0, 10) : _weeklyDatePlusDays(_hoursWeekStart, 6);
+        if (_invoicedWeek(_hoursWeekEnd)) {
+          toast(formatWeekRange(_hoursWeekEnd) + ' is already invoiced. You can send one invoice per week.', true);
+          loadHoursView();
+          return;
+        }
+        loadAndOpenInvoice();
+        return;
+      }
+      // </running-draft-open>
       _draftInvoiceId = inv.id;
       // A saved draft posts under its OWN week, not whatever week the Pay
       // hub was last showing. [invoice-week-choice]
@@ -24148,6 +24181,7 @@
     _invClaimed = [];
     _invCreatedByAgent = false;
     _invRunningSavedHash = '';
+    _invRunningReplacedHold = false;
     _invRunningHydrating = false;
     _invRunningLoadSeq++;
     if (_invRunningSaveTimer) {
@@ -24461,6 +24495,111 @@
     return msg || 'Could not save this invoice.';
   }
 
+  // <running-draft-replaced>
+  // The week's draft was replaced elsewhere (the other app, another phone, an
+  // assistant), so the server refused our save with draft_replaced (409).
+  // Re-read the week, keep what this person typed on top of the fresh draft
+  // (their lines win, lines that only the fresh draft has are added), and
+  // save once more under the fresh draft's id. A second refusal is shown and
+  // never retried, so this cannot loop.
+  function _runningDraftReplaced(err) {
+    return !!err && (err.code === 'draft_replaced' || !!(err.body && err.body.code === 'draft_replaced'));
+  }
+
+  function _mergeReplacedDraftCards(localCards, serverCards, localDismissed, serverDismissed) {
+    var core = window.TradeInvoiceRunningDraft;
+    var keyOf = function(card) { return core ? core.sourceKey(card) : ''; };
+    var cards = (localCards || []).slice();
+    var localKeys = {};
+    var localJson = {};
+    cards.forEach(function(card) {
+      var key = keyOf(card);
+      if (key) localKeys[key] = 1;
+      try { localJson[JSON.stringify(card)] = 1; } catch (e) {}
+    });
+    var dismissed = {};
+    (localDismissed || []).forEach(function(key) { if (key) dismissed[String(key)] = 1; });
+    (serverDismissed || []).forEach(function(key) {
+      if (key && !localKeys[String(key)]) dismissed[String(key)] = 1;
+    });
+    var added = 0;
+    (serverCards || []).forEach(function(card) {
+      if (!card || typeof card !== 'object') return;
+      var key = keyOf(card);
+      if (key) {
+        if (localKeys[key] || dismissed[key]) return;
+        localKeys[key] = 1;
+      } else {
+        var json = '';
+        try { json = JSON.stringify(card); } catch (e) {}
+        if (json && localJson[json]) return;
+      }
+      cards.push(card);
+      added++;
+    });
+    return { cards: cards, dismissed: Object.keys(dismissed), added: added };
+  }
+
+  function _recoverReplacedRunningDraft(opts) {
+    var week = _hoursWeekStart;
+    var weekEnd = _hoursWeekEnd || _weeklyDatePlusDays(week, 6);
+    var ctx = _invoiceApiContext();
+    var stillHere = function() {
+      return _invoiceBuilderOpen && _hoursWeekStart === week && _invoiceApiCurrent(ctx);
+    };
+    if (!opts.quiet) _paintRunningSaveState('Saving...');
+    return api('get_running_invoice_draft', { week_start: week }).then(function(res) {
+      if (!stillHere()) return false;
+      var freshId = (res && (res.current_draft_id || res.draft_id)) || null;
+      var builder = res && res.draft_builder && Array.isArray(res.draft_builder.jobCards) ? res.draft_builder : null;
+      var weekSent = freshId ? Promise.resolve(false) : api('my_trade_invoices').then(function(list) {
+        return (list && list.invoices || []).some(function(inv) {
+          if (!inv || _INVOICE_RELEASED_STATUSES[String(inv.status || '')]) return false;
+          return _invoiceWeekEndOf(inv) === weekEnd;
+        });
+      });
+      return weekSent.then(function(sent) {
+        if (!stillHere()) return false;
+        if (sent) {
+          _recordInvoicedWeek(weekEnd, '');
+          _invRunningReplacedHold = true;
+          _invRunningSaveWarned = true;
+          toast('This week was already sent from another place, so these changes were not saved. Check Invoice history.', true);
+          _paintRunningSaveState('Not saved. This week was already sent.');
+          return false;
+        }
+        _syncRowsFromDOM();
+        _syncInvLumpLinesFromDOM();
+        if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
+        if (builder) {
+          var merged = _mergeReplacedDraftCards(
+            _serializeJobCardsDraft(_jobCards),
+            builder.jobCards,
+            _invDismissedKeys,
+            builder.dismissedKeys || (res && res.dismissed_source_keys) || []
+          );
+          _invDismissedKeys = merged.dismissed;
+          if (merged.added) {
+            _jobCards = _restoreJobCardsDraft(merged.cards);
+            renderInvoiceBuilder();
+          }
+        }
+        _draftInvoiceId = freshId;
+        _invRunningSavedHash = '';
+        _saveInvDraft();
+        return window.saveRunningInvoiceDraft({ quiet: opts.quiet, replacedRetry: true });
+      });
+    }).catch(function(err) {
+      if (!stillHere()) return false;
+      _invRunningReplacedHold = true;
+      _invRunningSaveWarned = true;
+      toast('This week was changed in another place and could not be read again: ' + friendlyError(err) + '. What you typed is still on this phone.', true);
+      _paintRunningSaveState('Not saved.');
+      return false;
+    });
+  }
+  // </running-draft-replaced>
+
   window.saveRunningInvoiceDraft = function(opts) {
     opts = opts || {};
     if (!runningInvoiceDraftOn()) return Promise.resolve(false);
@@ -24468,6 +24607,12 @@
     if (jobCentricEnabled() && !invoiceGroupsReady()) { if (!opts.quiet) toast('Wait a moment while your group jobs are checked, then save.', true); return Promise.resolve(false); }
     var core = window.TradeInvoiceRunningDraft;
     if (!core) return Promise.resolve(false);
+    if (_invRunningReplacedHold && !opts.replacedRetry) {
+      // Saving now would write over the other place's newer draft unread.
+      if (opts.quiet) return Promise.resolve(false);
+      _invRunningReplacedHold = false;
+      return _recoverReplacedRunningDraft(opts);
+    }
     _syncRowsFromDOM();
     _syncInvLumpLinesFromDOM();
     if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
@@ -24490,7 +24635,17 @@
       if (!opts.quiet) toast('Saved. This invoice has not been sent.');
       return true;
     }).catch(function(err) {
-      var text = _runningDraftSaveFailedMessage(err);
+      if (_runningDraftReplaced(err)) {
+        // The id we hold is no longer the week's draft. Drop it from memory
+        // and the phone copy so the next open does not bring it back.
+        _draftInvoiceId = null;
+        _saveInvDraft();
+        if (!opts.replacedRetry) return _recoverReplacedRunningDraft(opts);
+        _invRunningReplacedHold = true;
+      }
+      var text = _runningDraftReplaced(err)
+        ? 'This week changed in another place again, so it was not saved. What you typed is still here. Press Save to try again.'
+        : _runningDraftSaveFailedMessage(err);
       if (opts.quiet && _invRunningSaveWarned) return false;
       _invRunningSaveWarned = true;
       toast(text, true);
@@ -26982,21 +27137,53 @@
   // and then send again. Nothing is booked unless the trade says yes, and a
   // trade the server already lets bill the job (office grant, a manager of
   // that division) is never asked.
-  function _selfAllocatePairs(body, jobs) {
-    var wanted = {};
-    (jobs || []).forEach(function(ref) { if (ref) wanted[String(ref).toLowerCase()] = true; });
+  // The refusal names the jobs. Older servers send `jobs` as job numbers (or
+  // ids); newer ones also send `refused_jobs` (or `jobs`) as
+  // { job_id, job_number }, which lets a line typed with only a job number
+  // be offered too. Every shape is read; a missing one changes nothing.
+  function _selfAllocateRefusedJobs(refusal) {
+    var out = [];
+    var add = function(entry) {
+      if (!entry) return;
+      if (typeof entry === 'string' || typeof entry === 'number') {
+        out.push({ job_id: '', job_number: '', ref: String(entry) });
+        return;
+      }
+      if (typeof entry !== 'object') return;
+      var id = String(entry.job_id || entry.id || '').trim();
+      var number = String(entry.job_number || entry.number || '').trim();
+      if (id || number) out.push({ job_id: id, job_number: number, ref: '' });
+    };
+    if (refusal && Array.isArray(refusal.refused_jobs)) refusal.refused_jobs.forEach(add);
+    if (refusal && Array.isArray(refusal.jobs)) refusal.jobs.forEach(add);
+    return out;
+  }
+  function _selfAllocatePairs(body, refused) {
+    var byRef = {};
+    var idByNumber = {};
+    (refused || []).forEach(function(job) {
+      if (job.ref) byRef[job.ref.toLowerCase()] = true;
+      if (job.job_id) byRef[job.job_id.toLowerCase()] = true;
+      if (job.job_number) byRef[job.job_number.toLowerCase()] = true;
+      if (job.job_number && job.job_id) idByNumber[job.job_number.toLowerCase()] = job.job_id;
+    });
     var seen = {};
     var pairs = [];
     (body && body.extra_items || []).forEach(function(item) {
-      if (!item || !item.job_id) return;
-      var hit = wanted[String(item.job_number || '').toLowerCase()] || wanted[String(item.job_id).toLowerCase()];
+      if (!item) return;
+      var number = String(item.job_number || '').trim();
+      var itemId = String(item.job_id || '').trim();
+      var hit = (number && byRef[number.toLowerCase()]) || (itemId && byRef[itemId.toLowerCase()]);
       if (!hit) return;
+      // A line typed with only a job number takes its id from the refusal.
+      var jobId = itemId || (number ? idByNumber[number.toLowerCase()] || '' : '');
+      if (!jobId) return;
       var day = String(item.work_date || item.scheduled_date || item.date || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
-      var key = item.job_id + '#' + day;
+      var key = jobId + '#' + day;
       if (seen[key]) return;
       seen[key] = true;
-      pairs.push({ job_id: item.job_id, job_number: item.job_number || '', work_date: day });
+      pairs.push({ job_id: jobId, job_number: number, work_date: day });
     });
     return pairs;
   }
@@ -27006,8 +27193,7 @@
     return (status === 404 && !(err && err.body && err.body.code)) || /unknown action/i.test(msg);
   }
   function _offerSelfAllocateAndResend(refusal, body) {
-    var jobs = (refusal && Array.isArray(refusal.jobs)) ? refusal.jobs : [];
-    var pairs = _selfAllocatePairs(body, jobs);
+    var pairs = _selfAllocatePairs(body, _selfAllocateRefusedJobs(refusal));
     if (!pairs.length) return false;
     var names = [];
     pairs.forEach(function(p) { if (p.job_number && names.indexOf(p.job_number) === -1) names.push(p.job_number); });
@@ -28261,8 +28447,10 @@
         return;
       }
     }
-    if (built.includedCount === 0 && extraItems.length === 0 && !_invFinalDeductions().length) {
-      toast('Select a job or add an extra', true);
+    // The server bills nothing without a job card or a line: a final
+    // deduction only takes money off, so it never counts as something to send.
+    if (built.includedCount === 0 && extraItems.length === 0) {
+      toast(_invFinalDeductions().length ? 'A deduction takes money off. Add the job and the hours first.' : 'Select a job or add an extra', true);
       return;
     }
 

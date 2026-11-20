@@ -224,7 +224,39 @@ async function runDynamicHelperCheck() {
     gst: 8.8,
     total_inc: 96.8,
   })
-  assert.strictEqual(gstOnLegacyAmount.complete, false, 'GST-on money rejects legacy gst without authoritative gst_amount')
+  // 2026-11-11: `gst` is not a legacy name. It is the name ops-api gives the
+  // GST figure on every money answer (tradeInvoiceMoneyResponse). Refusing it
+  // left every GST-registered trade's submitted invoice at "totals are
+  // unavailable". Search `<invoice-gst-figure>` in trade.html.
+  assert.strictEqual(gstOnLegacyAmount.complete, true, 'GST-on money reads the server gst figure')
+  assert.strictEqual(gstOnLegacyAmount.gst_amount, 8.8, 'the server gst figure is the GST amount')
+  assert.strictEqual(gstOnLegacyAmount.total_inc, 96.8, 'with no trade_payable the total is the server total_inc')
+  const gstOnServerShape = context._invoicePersistedMoney({
+    gross_earned: 400,
+    super_rate: 0.12,
+    super_amount: 48,
+    net_pay: 376,
+    amount_payable: 376,
+    worker_withhold: 24,
+    company_contribution: 24,
+    gst_on: true,
+    gst: 40,
+    total_inc: 440,
+    trade_payable: 416,
+  })
+  assert.strictEqual(gstOnServerShape.complete, true, 'the live GST-on answer is complete')
+  assert.strictEqual(gstOnServerShape.total_inc, 416, 'the GST-on invoice total is the bill (trade_payable), not earned plus GST')
+  const gstOnServerHtml = context._invoiceMoneySummaryHtml(gstOnServerShape)
+  assert(gstOnServerHtml.includes('<span>GST</span><span>$40.00</span>') && gstOnServerHtml.includes('<span>Invoice total</span><span>$416.00</span>'), 'the GST-on summary shows the GST and the bill total')
+  assert(!gstOnServerHtml.includes('$440.00'), 'earned plus GST is never shown as the invoice total')
+  const gstOnNoTotal = context._invoicePersistedMoney({
+    gross_earned: 400, super_rate: 0.12, super_amount: 48, net_pay: 376, gst_on: true, gst: 40,
+  })
+  assert.strictEqual(gstOnNoTotal.complete, false, 'GST-on money with no server total stays unavailable; the app adds nothing up')
+  const gstOnBooleanGst = context._invoicePersistedMoney({
+    gross_earned: 400, super_rate: 0.12, super_amount: 48, net_pay: 376, gst_on: true, gst: true, total_inc: 440, trade_payable: 416,
+  })
+  assert.strictEqual(gstOnBooleanGst.complete, false, 'a true/false gst is a choice, never an amount')
   const generatedPending = context._invoiceGeneratedStatusMessage({
     code: 'XERO_PUSH_FAILED',
     success: true,

@@ -296,7 +296,7 @@ test.describe('a trade with no deduction: an older server response without the n
 
 // Today's server, for a trade with no deduction: it names the GST figure
 // `gst`, always answers `trade_payable`, and sends no `recurring_deduction`
-// key. This change reads none of that for him, so he sees what main shows.
+// key. He sees no deduction row either way.
 test.describe('a trade with no deduction: today\'s server', () => {
   test.use({ persona: 'installer', feedScenario: 'trade-invoice-super-gst-payable', appWeekDay: 6, ...MOBILE });
 
@@ -332,13 +332,13 @@ test.describe('a trade with no deduction: today\'s server', () => {
     await expect(page.locator(DEDUCTION_MARKS)).toHaveCount(0);
   });
 
-  // Known gap, older than the weekly deduction and out of scope here: the app
-  // reads the GST figure only as `gst_amount`, so a GST-on invoice with no
-  // deduction reads unavailable and builds no PDF. What its face should show
-  // (the bill is net pay plus GST, $416.00; total_inc is gross plus GST,
-  // $440.00) is a decision filed as its own task. Until then this change must
-  // not switch on a total that disagrees with the bill.
-  test('with GST on, the submitted invoice reads as on main and no PDF is built for the bill', async ({ appPage: page, feedRequests }) => {
+  // The app once read the GST figure only as `gst_amount`, so every
+  // GST-registered trade's submitted invoice read "totals are unavailable"
+  // and no PDF was built for the bill. The server's `gst` is read now, and the
+  // invoice total is the bill he is paid: trade_payable, what he gets paid
+  // plus GST ($416.00). total_inc is earned plus GST ($440.00), more than the
+  // bill, so it is never shown as his total. Search `<invoice-gst-figure>`.
+  test('with GST on, the submitted invoice and the PDF show the GST and the total of the bill', async ({ appPage: page, feedRequests }) => {
     await openBuilderWithDay(page);
     await page.getByRole('switch', { name: 'Add GST to this invoice' }).click();
     const confirm = await submitAndReadConfirm(page);
@@ -346,11 +346,27 @@ test.describe('a trade with no deduction: today\'s server', () => {
 
     expect(await page.locator('[data-invoice-money-summary]').evaluate((el) => el.outerHTML)).toBe(
       '<div class="inv-money-summary" data-invoice-money-summary="">'
-      + '<div class="inv-money-note">Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.</div></div>'
+      + '<div class="inv-money-row"><span>Earned</span><span>$400.00</span></div>'
+      + '<div class="inv-money-row"><span>Super (12%) paid into your super fund</span><span>$48.00</span></div>'
+      + '<div class="inv-money-row"><span>Your share of super (6%)</span><span>−$24.00</span></div>'
+      + '<div class="inv-money-row"><span>Company covers the other 6%</span><span>$24.00</span></div>'
+      + '<div class="inv-money-row net"><span>You get paid</span><span>$376.00</span></div>'
+      + '<div class="inv-money-row"><span>GST</span><span>$40.00</span></div>'
+      + '<div class="inv-money-row total"><span>Invoice total</span><span>$416.00</span></div>'
+      + '<div class="inv-money-note">' + SUPER_NOTE + '</div></div>'
     );
+    await expect(page.locator('#hoursContent')).not.toContainText('totals are unavailable');
     await expect(page.locator('#hoursContent')).not.toContainText('$440.00');
-    expect(await page.evaluate(() => window.__invoicePdfText)).toEqual([]);
-    expect(feedRequests.some((entry) => entry.method === 'POST' && entry.action === 'attach_invoice_pdf')).toBe(false);
+    expect(await pdfTotals(page)).toEqual([
+      'Earned', '$400.00',
+      'Super (12%) paid into your super fund', '$48.00',
+      'Your share of super (6%)', '-$24.00',
+      'Company covers the other 6%', '$24.00',
+      'You get paid', '$376.00',
+      'GST', '$40.00',
+      'TOTAL', '$416.00'
+    ]);
+    expect(feedRequests.some((entry) => entry.method === 'POST' && entry.action === 'attach_invoice_pdf')).toBe(true);
     await expect(page.locator(DEDUCTION_MARKS)).toHaveCount(0);
   });
 });

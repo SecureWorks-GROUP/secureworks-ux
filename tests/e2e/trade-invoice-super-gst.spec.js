@@ -136,6 +136,7 @@ test('installer Hours cards can take an amount off the hours', async ({ appPage:
   await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
   await expect(page.locator('#btnAddInvLump')).toBeVisible();
   await expect(page.locator('#btnAddInvLump')).toHaveText('+ Take an amount off');
+  await expect(page.locator('#invLumpHelp')).toContainText('Takes an amount off this invoice');
 
   await card.getByRole('button', { name: '+ Take an amount off' }).click();
   await card.locator('[data-cardlumpdesc]').fill('Materials');

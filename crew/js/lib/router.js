@@ -57,7 +57,12 @@ export function back(fallback = '/today') {
 }
 export function useRoute() {
   const [route, setRoute] = useState(current);
-  useEffect(() => { subs.add(setRoute); return () => subs.delete(setRoute); }, []);
+  useEffect(() => {
+    subs.add(setRoute);
+    // A route change between the first render and this effect reached no one: catch up.
+    if (current !== route) setRoute(current);
+    return () => subs.delete(setRoute);
+  }, []);
   return route;
 }
 export function currentRoute() { return current; }

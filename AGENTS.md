@@ -400,6 +400,16 @@ from the price-free `restoration` block on the canonical `makesafe_board` row
 re-derives the phase or moves the card. Guard:
 `tests/e2e/ops-makesafe-restoration-phase.spec.js`.
 
+## Restoration first visit: the trade books it (`trade.html`)
+
+A new restoration job comes in with its crew on it and no date (owner,
+20 Nov 2026). On the make-safe report screen, a trade whose own booking on a
+restoration job has no date sees "Book the visit" (`// <restoration-book-visit>`):
+date (today on) and an optional start time, posted to ops-api
+`book_restoration_visit`, which dates his and Marnin's undated bookings. A dated
+booking is the office's to move, so the card then disappears. Guard:
+`tests/e2e/trade-restoration-book-visit.spec.js`.
+
 ## Add job photos page (`job-photos.html`)
 
 One job's photo upload from a link (`job-photos.html?jobId=<job uuid>`), for a

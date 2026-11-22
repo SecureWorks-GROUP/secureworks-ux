@@ -9,6 +9,11 @@ const searchRequests = (feedRequests) => feedRequests
 async function expectHiddenMakesafeOpened(page) {
   await expect(page.locator('#viewReport')).toHaveClass(/active/);
   await expect(page.locator('#makesafeWorkOrderDirect')).toContainText(HIDDEN_REF);
+  // <makesafe-client-and-brief>: the trade sees who the client is and what
+  // the work order asks for, without the priced PDF.
+  await expect(page.locator('#makesafeWorkOrderDirect [data-ms-client-name]')).toContainText('Search Fixture Client');
+  await expect(page.locator('#makesafeWorkOrderDirect [data-ms-client-phone] a')).toHaveAttribute('href', 'tel:0400000111');
+  await expect(page.locator('#makesafeWorkOrderDirect [data-ms-wo-brief]')).toContainText('dry the wet laundry walls');
 }
 
 test.describe('Trade MakeSafe search visibility', () => {

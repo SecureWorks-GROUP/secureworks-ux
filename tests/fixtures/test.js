@@ -630,6 +630,7 @@ const test = base.extend({
       id: 'e2e-makesafe-search-only',
       job_number: 'E2E-MS-HIDDEN-001',
       client_name: 'Search Fixture Client',
+      client_phone: '0400 000 111',
       site_suburb: 'Searchville',
       site_address: '1 Search Lane, Searchville WA 6000',
       type: 'makesafe',
@@ -1186,6 +1187,12 @@ const test = base.extend({
               media: [],
               notes: [],
               serviceReport: null,
+              // Price-free work order words (ops-api trade_work_order_brief.ts).
+              work_order_briefs: [{
+                document_id: 'e2e-wo-brief-doc',
+                file_name: 'work_order_E2E.pdf',
+                text: 'Supervisor Name Sam Example\nPlease attend and quote to dry the wet laundry walls.'
+              }],
               makesafe_details: searchableMakesafeJob.makesafe_details
             };
           }

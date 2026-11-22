@@ -108,7 +108,8 @@ export function Job({ jobId, tab: tabParam }) {
       <div class="jr-acts">
         <a class="jr-act" href=${mapsUrl(job)} target="_blank" rel="noopener" onClick=${() => { const r = myRows.find((x) => x.date === today); if (r) markOnTheWay({ ...r, jobId, job }); }}>Navigate</a>
         ${phone ? html`<a class="jr-act" href=${'tel:' + phone}>Call</a>` : null}
-        ${canText ? html`<button type="button" class="jr-act" onClick=${() => openText(job)}>Message</button>` : null}
+        ${canText ? html`<button type="button" class="jr-act" onClick=${() => openText(job)}>Message</button>`
+          : phone ? html`<a class="jr-act" data-job-text href=${'sms:' + phone}>Text</a>` : null}
         ${viewOnly ? null : html`<button type="button" class="jr-act" onClick=${() => openProblem(job)}>Problem</button>`}
       </div>
     </div>

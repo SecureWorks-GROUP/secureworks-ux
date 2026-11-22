@@ -217,6 +217,13 @@ function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewO
   const crewWords = people.map((p) => (p.id === user.id ? 'You' : shortName(p.name)) + (p.lead ? ' (lead)' : '')).join(', ');
   const siteNotes = noPrices(job.notes || (typeof data.scopeSummary === 'string' ? data.scopeSummary : '') || '', money).trim();
   const stage = STATUS[jobStageKey(job.status)] || ['', ''];
+  // Who the client is, in words, and the builder's work order as the server
+  // sends it with every money line taken out (work_order_briefs). The priced
+  // PDF stays office-only. Owner, 22 Nov 2026.
+  const clientName = String(job.client_name || '').trim();
+  const clientPhone = viewOnly ? '' : String(job.client_phone || '').trim();
+  const briefs = (Array.isArray(data.work_order_briefs) ? data.work_order_briefs : [])
+    .map((b) => noPrices(String((b && b.text) || ''), money).trim()).filter(Boolean);
 
   // Sign-off, or the report on a make safe.
   const reportJob = isReportJob(vertical);
@@ -239,6 +246,8 @@ function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewO
   return html`
     <${Section} label="Details" right=${html`<button type="button" class="link jr-call" onClick=${onRefresh}>${refreshing ? 'Checking' : 'Refresh'}</button>`}>
       <div class="block card">
+        ${clientName ? (clientName.length > 34 ? html`<div class="jr-stack" data-job-client><span class="k">Client</span><span class="v">${clientName}</span></div>` : html`<${KV} k="Client" v=${clientName} />`) : null}
+        ${clientPhone ? html`<${KV} k="Client phone" v=${html`<a class="link" data-job-client-phone href=${'tel:' + clientPhone.replace(/[^0-9+]/g, '')}>${clientPhone}</a>`} />` : null}
         <${KV} k="Stage" v=${stage[1] || 'Not set'} />
         <${KV} k="Booked" v=${booked || 'Not booked yet'} />
         <${KV} k="Crew" v=${crewWords || 'Nobody yet'} onClick=${() => openCrew(jobId)} />
@@ -248,6 +257,12 @@ function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewO
           : html`<${KV} k="Sign-off" v=${signoffWords} onClick=${canSignOff ? () => go(`/job/${jobId}/finish`) : null} />`}
       </div>
     <//>
+
+    ${briefs.length && !viewOnly ? html`<${Section} label="Work order details">
+      <div class="block card">
+        ${briefs.map((text, i) => html`<div class="jr-stack" key=${i} data-job-wo-brief><span class="v" style="white-space:pre-wrap">${text}</span></div>`)}
+      </div>
+    <//>` : null}
 
     ${onJob && key ? html`<${Section} label="Your work on this job">
       <div class="block card">

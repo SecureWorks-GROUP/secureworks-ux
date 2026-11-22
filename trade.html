@@ -16933,6 +16933,23 @@
     }
     var addr = [job.site_address, job.site_suburb].filter(Boolean).join(', ');
     if (addr) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Site:</strong> ' + esc(addr) + '</div>';
+    // <makesafe-client-and-brief> Owner, 22 Nov 2026: a trade on a make-safe or
+    // restoration job needs to know who they are ringing, and what the work
+    // order asks for. The priced PDF stays office-only; the words come from
+    // trade_job_detail work_order_briefs, which carries no money line.
+    var msClientName = String(job.client_name || '').trim();
+    var msClientPhone = String(job.client_phone || '').trim();
+    if (msClientName) h += '<div data-ms-client-name style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Client:</strong> ' + esc(msClientName) + '</div>';
+    if (msClientPhone) h += '<div data-ms-client-phone style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Phone:</strong> <a href="tel:' + esc(msClientPhone.replace(/[^0-9+]/g, '')) + '" style="color:var(--sw-mid);font-weight:700">' + esc(msClientPhone) + '</a></div>';
+    var msBriefs = Array.isArray(data.work_order_briefs) ? data.work_order_briefs : [];
+    if (!woUrl) {
+      msBriefs.forEach(function(brief) {
+        var briefText = brief && brief.text ? redactTradePriceText(String(brief.text)) : '';
+        if (!briefText) return;
+        h += '<div data-ms-wo-brief style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Work order details</strong>\n' + esc(briefText) + '</div>';
+      });
+    }
+    // </makesafe-client-and-brief>
     var makesafeJob = Object.assign({}, job, { makesafe_details: ms });
     var company = getTradeMakesafeBuilderName(makesafeJob);
     var familyLabel = getTradeMakesafeTypeLabel(makesafeJob);

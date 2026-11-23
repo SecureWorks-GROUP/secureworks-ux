@@ -16992,9 +16992,69 @@
     return h;
   }
 
+  // <restoration-book-visit>
+  // Owner, 20 Nov 2026: a new restoration job is not booked for the day it
+  // comes in. The trade is put on it with no date, calls the client, and books
+  // the visit here (ops-api book_restoration_visit). Shown only on a
+  // restoration job where the signed-in trade's own booking has no date yet;
+  // the server checks everything again. A booked visit is moved by the office.
+  function restorationBookVisitMine(data) {
+    if (!data || !data.job || !_user || !_user.id) return null;
+    if (tradeJobFamily(data.job) !== 'restoration') return null;
+    var crew = data.crew || [];
+    for (var i = 0; i < crew.length; i++) {
+      var c = crew[i] || {};
+      if (String(c.user_id || '') !== String(_user.id)) continue;
+      if (String(c.status || '').toLowerCase() === 'cancelled') continue;
+      if (c.is_ghost === true || String(c.role || '').toLowerCase() === 'observer') continue;
+      if (!c.scheduled_date) return c;
+    }
+    return null;
+  }
+  function restorationBookVisitHTML(data) {
+    if (!restorationBookVisitMine(data)) return '';
+    var today = awstDateStr();
+    var h = '<div class="detail-section" data-restoration-book style="border:1px solid var(--sw-border);border-radius:10px;padding:12px 14px;margin-bottom:12px">';
+    h += '<h3 style="margin:0 0 4px">Book the visit</h3>';
+    h += '<div style="font-size:13px;color:var(--sw-text-sec);margin-bottom:10px">Call the client to arrange a time, then set the date here. It books you and Marnin.</div>';
+    h += '<label style="display:block;font-size:13px;margin-bottom:8px">Date<input type="date" id="restoBookDate" min="' + esc(today) + '" style="display:block;width:100%;margin-top:4px;min-height:44px"></label>';
+    h += '<label style="display:block;font-size:13px;margin-bottom:10px">Start time (optional)<input type="time" id="restoBookTime" style="display:block;width:100%;margin-top:4px;min-height:44px"></label>';
+    h += '<button class="btn" id="restoBookBtn" onclick="restorationBookVisit()" style="min-height:44px">Book the visit</button>';
+    h += '<div id="restoBookMsg" style="font-size:13px;margin-top:8px"></div>';
+    h += '</div>';
+    return h;
+  }
+  window.restorationBookVisit = function restorationBookVisit() {
+    var data = _currentJob;
+    var dateEl = document.getElementById('restoBookDate');
+    var timeEl = document.getElementById('restoBookTime');
+    var msg = document.getElementById('restoBookMsg');
+    var btn = document.getElementById('restoBookBtn');
+    var day = dateEl ? String(dateEl.value || '') : '';
+    var start = timeEl ? String(timeEl.value || '') : '';
+    if (!data || !data.job || !data.job.id) return;
+    if (!day) { if (msg) msg.textContent = 'Pick the date you agreed with the client.'; return; }
+    if (btn) btn.disabled = true;
+    if (msg) msg.textContent = 'Booking...';
+    var body = { job_id: data.job.id, date: day };
+    if (start) body.start_time = start;
+    api('book_restoration_visit', null, body).then(function(res) {
+      if (!res || res.ok !== true) throw new Error((res && res.error) || 'The visit was not booked.');
+      if (msg) msg.textContent = 'Booked for ' + formatDate(res.date) + (res.start_time ? ' at ' + res.start_time : '') + '.';
+      toast('Visit booked');
+      try { _invalidateAssignmentLifecycleCaches(); } catch (e) {}
+      try { loadMakesafeReport(data.job.id); } catch (e) {}
+    }).catch(function(err) {
+      if (btn) btn.disabled = false;
+      if (msg) msg.textContent = friendlyError(err);
+    });
+  };
+  // </restoration-book-visit>
+
   function renderMakesafeReportDirect(data, limited) {
     var container = document.getElementById('reportContent');
     container.innerHTML = '<div style="padding:0 0 12px"><button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button>' +
+      '<div id="restorationBookVisit">' + restorationBookVisitHTML(data) + '</div>' +
       '<div id="makesafeReattendBar">' + makesafeReattendBarHTML(data) + '</div>' +
       '<div id="makesafeCancelBar">' + makesafeCancelBarHTML(data) + '</div>' +
       '<div id="makesafeWorkOrderDirect"></div>' +

@@ -110,3 +110,12 @@
 .jr-live i { width: 8px; height: 8px; background: var(--ok-text); animation: pulse 1.8s ease-in-out infinite; }
 .jr-quick { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--card); text-align: left; }
 .jr-quick:active { background: var(--press); }
+
+/* Work order details, laid out to read: numbered items, quantity, steps. */
+.wo-brief + .wo-brief { margin-top: 10px; }
+.wo-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--mist); }
+.wo-item-n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--mist); display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--mid); }
+.wo-item-t { font-weight: 700; overflow-wrap: anywhere; }
+.wo-item-m { font-size: 13px; line-height: 18px; color: var(--mid); margin-top: 2px; }
+.wo-item-l { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; list-style: disc; }
+.wo-item-l li { overflow-wrap: anywhere; }

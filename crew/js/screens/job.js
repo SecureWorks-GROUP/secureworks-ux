@@ -224,7 +224,18 @@ function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewO
   const clientName = String(job.client_name || '').trim();
   const clientPhone = viewOnly ? '' : String(job.client_phone || '').trim();
   const briefs = (Array.isArray(data.work_order_briefs) ? data.work_order_briefs : [])
-    .map((b) => noPrices(String((b && b.text) || ''), money).trim()).filter(Boolean);
+    .map((b) => {
+      // The server lays the words out to read (layout); without one, or with
+      // one this app cannot read, the plain text is shown as before.
+      const np = (t) => noPrices(String(t || ''), money).trim();
+      const lay = b && b.layout;
+      const items = (lay && Array.isArray(lay.items) ? lay.items : [])
+        .map((it) => ({ title: np(it && it.title), crew: np(it && it.crew), qty: np(it && it.qty), lines: (Array.isArray(it && it.lines) ? it.lines : []).map(np).filter(Boolean) }))
+        .filter((it) => it.title);
+      const facts = (lay && Array.isArray(lay.facts) ? lay.facts : [])
+        .map((f) => ({ label: np(f && f.label), value: np(f && f.value) })).filter((f) => f.label && f.value);
+      return { text: np(b && b.text), facts, items };
+    }).filter((b) => b.text || b.items.length);
 
   // Sign-off, or the report on a make safe.
   const reportJob = isReportJob(vertical);
@@ -260,9 +271,19 @@ function Overview({ jobId, job, data, vertical, user, crew, myRows, onJob, viewO
     <//>
 
     ${briefs.length && !viewOnly ? html`<${Section} label="Work order details">
-      <div class="block card">
-        ${briefs.map((text, i) => html`<div class="jr-stack" key=${i} data-job-wo-brief><span class="v" style="white-space:pre-wrap">${text}</span></div>`)}
-      </div>
+      ${briefs.map((b, i) => b.items.length ? html`<div class="block card wo-brief" key=${i} data-job-wo-brief>
+        ${b.facts.map((f) => html`<${KV} k=${f.label} v=${f.value} />`)}
+        ${b.items.map((it, n) => html`<div class="wo-item" data-job-wo-item>
+          <div class="wo-item-n">${n + 1}</div>
+          <div class="wo-item-b">
+            <div class="wo-item-t">${it.title}</div>
+            ${it.crew || it.qty ? html`<div class="wo-item-m">${[it.crew, it.qty ? 'Qty ' + it.qty : ''].filter(Boolean).join(' · ')}</div>` : null}
+            ${it.lines.length ? html`<ul class="wo-item-l">${it.lines.map((l) => html`<li>${l}</li>`)}</ul>` : null}
+          </div>
+        </div>`)}
+      </div>` : html`<div class="block card" key=${i}>
+        <div class="jr-stack" data-job-wo-brief><span class="v" style="white-space:pre-wrap">${b.text}</span></div>
+      </div>`)}
     <//>` : null}
 
     ${onJob && key ? html`<${Section} label="Your work on this job">

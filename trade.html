@@ -16946,6 +16946,27 @@
       msBriefs.forEach(function(brief) {
         var briefText = brief && brief.text ? redactTradePriceText(String(brief.text)) : '';
         if (!briefText) return;
+        // The server lays the words out to read (layout): facts, then one
+        // numbered item per task or piece of equipment. No layout: plain text.
+        var lay = brief && brief.layout;
+        var layItems = (lay && Array.isArray(lay.items) ? lay.items : []).filter(function(it) { return it && it.title; });
+        if (layItems.length) {
+          var np = function(t) { return esc(redactTradePriceText(String(t || ''))); };
+          var lh = '<div data-ms-wo-brief style="font-size:13px;line-height:1.45;color:var(--sw-text);margin:8px 0;padding:10px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Work order details</strong>';
+          (Array.isArray(lay.facts) ? lay.facts : []).forEach(function(f) {
+            if (f && f.label && f.value) lh += '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:4px"><span style="color:var(--sw-text-sec)">' + np(f.label) + '</span><span style="font-weight:600;text-align:right">' + np(f.value) + '</span></div>';
+          });
+          layItems.forEach(function(it, n) {
+            var meta = [it.crew, it.qty ? 'Qty ' + it.qty : ''].filter(Boolean).join(' \u00b7 ');
+            lh += '<div data-ms-wo-item style="margin-top:10px;padding-top:10px;border-top:1px solid var(--sw-border)"><div style="font-weight:700">' + (n + 1) + '. ' + np(it.title) + '</div>';
+            if (meta) lh += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px">' + np(meta) + '</div>';
+            var ls = Array.isArray(it.lines) ? it.lines.filter(Boolean) : [];
+            if (ls.length) lh += '<ul style="margin:6px 0 0;padding-left:18px">' + ls.map(function(l) { return '<li style="margin-top:3px">' + np(l) + '</li>'; }).join('') + '</ul>';
+            lh += '</div>';
+          });
+          h += lh + '</div>';
+          return;
+        }
         h += '<div data-ms-wo-brief style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Work order details</strong>\n' + esc(briefText) + '</div>';
       });
     }

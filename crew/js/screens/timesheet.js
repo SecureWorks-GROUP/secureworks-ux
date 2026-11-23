@@ -431,7 +431,7 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         <${Field} label=${line.added ? 'What you did' : 'What you did (optional)'}><input class="input" value=${f.description} placeholder="e.g. Set posts, hung gates" onInput=${(e) => set('description', e.currentTarget.value)} /><//>
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
-        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>`
+        ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>${html`<${WoBilled} v=${line.billed} />`}`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
         ${recorded > 0 ? html`<p class="t-small">${hrs(recorded)} recorded on this job this week. The hours are a record only. The pay is the work order amount.</p>` : null}
         ${(line.charges || []).length ? html`<${Field} label="Crew already billed on this job">
@@ -575,4 +575,22 @@ function ReceiptPicker({ lines, addLine, userId, onClose }) {
         </button>`;
       })}</div>`}
   <//>`;
+}
+
+
+/**
+ * What the work order allows, what is billed on it so far and who billed it
+ * (owner, 23 Nov 2026). Every figure is the server's (work_order_billed); the
+ * app adds nothing up. No field: nothing is drawn.
+ */
+function WoBilled({ v }) {
+  if (!v || !isFinite(Number(v.allowed_ex)) || !isFinite(Number(v.billed_ex))) return null;
+  const by = Array.isArray(v.billed_by) ? v.billed_by : [];
+  const left = Number(v.left_ex);
+  return html`<div class="card" data-wo-billed>
+    <${KV} k="Work order allows" v=${cash(Number(v.allowed_ex))} />
+    ${by.length ? html`<${KV} k="Billed so far" v=${cash(Number(v.billed_ex))} />` : html`<p class="t-small">Nothing billed on it yet.</p>`}
+    ${by.map((b) => html`<${KV} k=${b && b.you ? 'You' : String((b && b.name) || 'Someone else')} v=${cash(Number((b && b.amount_ex) || 0))} />`)}
+    ${isFinite(left) ? (left >= 0 ? html`<${KV} k="Left to bill" v=${cash(left)} />` : html`<p class="t-small" data-wo-over>Over by ${cash(-left)}. Ask the office.</p>`) : null}
+  </div>`;
 }

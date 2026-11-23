@@ -24046,6 +24046,7 @@
       }
       delete fields.work_order_agreed_ex;
       delete fields.job_work_order_id;
+      delete fields.work_order_billed;
       var card = _newJobCard(fields);
       // New ordinary cards derive billable hours from times. A restored group
       // entry is a recovery record, including older hours without times.
@@ -26053,6 +26054,35 @@
     _fillCardsFromSavedTimes();
   }
 
+  // <work-order-billed> (owner, 23 Nov 2026) What the work order allows, what
+  // has been billed on it so far and who billed it, as ops-api sends it
+  // (work_order_billed on my_hours and trade_invoice_job_modes). The app adds
+  // nothing up. With no field the card is exactly as it was.
+  function _woBilledHtml(c) {
+    var v = c && c.work_order_billed;
+    if (!v || !Number.isFinite(Number(v.allowed_ex)) || !Number.isFinite(Number(v.billed_ex))) return '';
+    var money = function(n) { return '$' + Number(n).toFixed(2); };
+    var by = Array.isArray(v.billed_by) ? v.billed_by : [];
+    var left = Number(v.left_ex);
+    var h = '<div data-card-wo-billed="' + c._idx + '" style="flex-basis:100%;margin-top:6px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:12px;color:var(--sw-dark)">';
+    h += '<div style="font-weight:600">Work order allows ' + money(v.allowed_ex) + '</div>';
+    if (!by.length) {
+      h += '<div style="color:var(--sw-text-sec);margin-top:2px">Nothing billed on it yet.</div>';
+    } else {
+      h += '<div style="margin-top:2px">Billed so far ' + money(v.billed_ex) + '</div>';
+      by.forEach(function(b) {
+        h += '<div style="color:var(--sw-text-sec);margin-top:1px">' + esc(b && b.you ? 'You' : String((b && b.name) || 'Someone else')) + ' ' + money((b && b.amount_ex) || 0) + '</div>';
+      });
+    }
+    if (Number.isFinite(left)) {
+      h += left >= 0
+        ? '<div style="font-weight:600;margin-top:3px">Left to bill ' + money(left) + '</div>'
+        : '<div style="font-weight:600;margin-top:3px;color:var(--sw-red)">Over by ' + money(-left) + '. Ask the office.</div>';
+    }
+    return h + '</div>';
+  }
+  // </work-order-billed>
+
   // [invoice-job-mode] Put a server row's mode on a card. The mode is the
   // card's starting mode once (invoice_mode_applied); after that a switch the
   // trade made (mode_picked) or hours they typed stand, also in a saved draft.
@@ -26065,6 +26095,9 @@
     // The agreed work-order amount comes only from the server, every read.
     c.work_order_agreed_ex = r.agreed;
     c.job_work_order_id = r.jobWorkOrderId;
+    // [work-order-billed] What is billed on the work order and by whom: the
+    // server's, every read, never kept in a draft.
+    c.work_order_billed = (!unavailable && row && row.work_order_billed) || null;
     if (!r.mode) return;
     if (r.commission !== true && c.commission_mode) c.commission_mode = false;
     if (r.agreed != null) {
@@ -26699,6 +26732,7 @@
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
           if (agreedWo != null) {
             html += '<span data-card-wo-agreed="' + c._idx + '" style="font-size:13px;color:var(--sw-dark)">Agreed work order <b>$' + agreedWo.toFixed(2) + '</b> <span style="font-size:11px;color:var(--sw-text-sec)">ex GST, set by the office</span></span>';
+            html += _woBilledHtml(c);
           } else {
             html += '<label style="font-size:12px;color:var(--sw-text-sec)">Work-order amount $</label>';
             html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardwoalloc="' + c._idx + '" '

@@ -112,7 +112,7 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
     const clocked = card.hours_worked != null ? Number(card.hours_worked) : null;
     const base = {
       jobId: job.id, jobNumber: job.job_number || '', title: jobTitle(job), suburb: job.site_suburb || '', client: job.client_name || '', vertical: verticalOf(job), jobType: job.type || '',
-      mode: m.mode, canCommission: m.canCommission, agreed: m.agreed, bookedDate, sentBack: card.previous_entry || null
+      mode: m.mode, canCommission: m.canCommission, agreed: m.agreed, billed: card.work_order_billed || null, bookedDate, sentBack: card.previous_entry || null
     };
     if (!m.mode) {
       // Not known how this job is billed. Never opened as hours, never sent.
@@ -173,7 +173,7 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
     if (a.kind !== 'other') {
       // A job the trade added: how it is billed is asked of the server every time.
       const m = jobModes ? readMode(jobModes[a.jobId] || null, false) : { mode: null, canCommission: null, agreed: null };
-      merged.mode = m.mode; merged.canCommission = m.canCommission; merged.agreed = m.agreed;
+      merged.mode = m.mode; merged.canCommission = m.canCommission; merged.agreed = m.agreed; merged.billed = (jobModes && jobModes[a.jobId] && jobModes[a.jobId].work_order_billed) || null;
       if (!m.mode || m.mode === 'group_work_order') { lines.push({ ...merged, kind: 'unknown', unknown: true, viaGroup: m.mode === 'group_work_order', modePending: !jobModes }); continue; }
       const want = edit.kind || a.kind;
       const kind = want === 'commission' ? (m.canCommission === true ? 'commission' : null) : want === 'work_order' ? (m.mode === 'work_order' ? 'work_order' : null) : null;

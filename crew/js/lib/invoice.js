@@ -2,7 +2,7 @@
 // (hours, work order, group, commission) and owns every money figure; this
 // module turns the week's job cards into lines, checks them, and builds the
 // exact request the server expects. No screen code in here.
-import { hoursBetween, todayISO, addDays, fmtDay, fmtTime } from './dates.js';
+import { hoursBetween, todayISO, addDays, fmtDay, fmtTime, fmtMoney } from './dates.js';
 import { verticalOf, jobTitle } from './model.js';
 import { refreshReceiptLine } from './reimbursements.js';
 
@@ -54,12 +54,35 @@ export function normMode(mode) { const m = String(mode == null ? '' : mode).trim
  * stays off the invoice. Commission only where the server says true.
  */
 export function readMode(row, unavailable) {
-  if (!row || unavailable === true) return { mode: null, canCommission: null, agreed: null };
+  if (!row || unavailable === true) return { mode: null, canCommission: null, agreed: null, room: null };
   const mode = normMode(row.invoice_mode);
   const raw = row.work_order_agreed_ex;
   const n = Number(raw);
   const agreed = mode === 'work_order' && raw != null && raw !== '' && isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
-  return { mode, canCommission: row.can_claim_commission === true ? true : row.can_claim_commission === false ? false : null, agreed };
+  return { mode, canCommission: row.can_claim_commission === true ? true : row.can_claim_commission === false ? false : null, agreed, room: roomOf(row, agreed) };
+}
+/**
+ * Owner, 28 Nov 2026: a work order the server bills "up_to_left"
+ * (work_order_amount_rule) is typed by the trade, more than $0 and up to
+ * what is left for them on it (work_order_billed.most_now_ex). The most,
+ * never below 0, or null: no rule from the server keeps the agreed amount.
+ */
+export function roomOf(row, agreed) {
+  if (agreed == null || !row || String(row.work_order_amount_rule || '') !== 'up_to_left') return null;
+  const v = row.work_order_billed;
+  const raw = v ? v.most_now_ex : null;
+  const n = raw == null || raw === '' ? NaN : Number(raw);
+  return isFinite(n) ? Math.max(0, Math.round(n * 100) / 100) : null;
+}
+/** Plain words for a typed work order amount, or '' when it may be sent. */
+export function roomProblem(room, amount) {
+  if (room == null) return '';
+  const most = fmtMoney(room, { cents: true });
+  if (!(room > 0)) return 'This work order has been billed in full. Ask the office if it needs changing';
+  const n = amount == null || amount === '' ? NaN : Number(amount);
+  if (!isFinite(n) || Math.round(n * 100) <= 0) return `Add what you are billing this time, up to ${most}`;
+  if (Math.round(n * 100) > Math.round(room * 100)) return `That is more than is left. You can bill at most ${most} on this work order now`;
+  return '';
 }
 export const UNKNOWN_MODE_WORDS = 'Ask the office how this job is billed';
 /** Jobs this week that are paid through a group work order: never a line on the weekly invoice. */
@@ -112,7 +135,7 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
     const clocked = card.hours_worked != null ? Number(card.hours_worked) : null;
     const base = {
       jobId: job.id, jobNumber: job.job_number || '', title: jobTitle(job), suburb: job.site_suburb || '', client: job.client_name || '', vertical: verticalOf(job), jobType: job.type || '',
-      mode: m.mode, canCommission: m.canCommission, agreed: m.agreed, billed: card.work_order_billed || null, bookedDate, sentBack: card.previous_entry || null
+      mode: m.mode, canCommission: m.canCommission, agreed: m.agreed, room: m.room, billed: card.work_order_billed || null, bookedDate, sentBack: card.previous_entry || null
     };
     if (!m.mode) {
       // Not known how this job is billed. Never opened as hours, never sent.
@@ -136,8 +159,12 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
         const bound = kind === 'work_order' ? workOrders.find((w) => w.job_id === job.id && (w.can_add_to_weekly_invoice || w.can_invoice)) : null;
         line = { ...base, key: k, kind, assignmentIds: [], cardKeys: [], date: bookedDate, days: [], dayCards: [],
           workOrderId: bound ? bound.id : null, woNumber: bound ? bound.wo_number : '',
-          amount: kind === 'work_order' ? (base.agreed != null ? base.agreed : bound ? Number(bound.subtotal) || 0 : num(e2.amount)) : num(e2.amount),
-          amountLocked: kind === 'work_order' && (base.agreed != null || Boolean(bound)),
+          // Up to what is left: what the trade typed, else what is left.
+          amount: kind === 'work_order'
+            ? (base.room != null && !bound ? (num(e2.amount) != null ? num(e2.amount) : base.room)
+              : base.agreed != null ? base.agreed : bound ? Number(bound.subtotal) || 0 : num(e2.amount))
+            : num(e2.amount),
+          amountLocked: kind === 'work_order' && ((base.agreed != null && base.room == null) || Boolean(bound)),
           helpers: e2.helpers || [], charges: bound ? (bound.negative_charges || []) : [], chargeIds: e2.chargeIds || [],
           description: e2.description || '', off: Boolean(e2.off), picked: Boolean(picked) };
         woByJob.set(k, line); lines.push(line);
@@ -172,15 +199,15 @@ export function buildLines(hours, draft, { workOrders = [], perMetre = false, jo
     const merged = { ...a, ...edit, usualRate, rate: edit.rate != null && edit.rate !== '' ? Number(edit.rate) : a.rate != null ? a.rate : usualRate, added: true, off: false };
     if (a.kind !== 'other') {
       // A job the trade added: how it is billed is asked of the server every time.
-      const m = jobModes ? readMode(jobModes[a.jobId] || null, false) : { mode: null, canCommission: null, agreed: null };
-      merged.mode = m.mode; merged.canCommission = m.canCommission; merged.agreed = m.agreed; merged.billed = (jobModes && jobModes[a.jobId] && jobModes[a.jobId].work_order_billed) || null;
+      const m = jobModes ? readMode(jobModes[a.jobId] || null, false) : { mode: null, canCommission: null, agreed: null, room: null };
+      merged.mode = m.mode; merged.canCommission = m.canCommission; merged.agreed = m.agreed; merged.room = m.room; merged.billed = (jobModes && jobModes[a.jobId] && jobModes[a.jobId].work_order_billed) || null;
       if (!m.mode || m.mode === 'group_work_order') { lines.push({ ...merged, kind: 'unknown', unknown: true, viaGroup: m.mode === 'group_work_order', modePending: !jobModes }); continue; }
       const want = edit.kind || a.kind;
       const kind = want === 'commission' ? (m.canCommission === true ? 'commission' : null) : want === 'work_order' ? (m.mode === 'work_order' ? 'work_order' : null) : null;
       merged.kind = kind || (m.mode === 'work_order' && (m.agreed != null || perMetre) && want !== 'hours' ? 'work_order' : 'hours');
       if (merged.kind === 'work_order') {
-        merged.amount = m.agreed != null ? m.agreed : num(merged.amount);
-        merged.amountLocked = m.agreed != null;
+        merged.amount = m.room != null ? (num(merged.amount) != null ? num(merged.amount) : m.room) : m.agreed != null ? m.agreed : num(merged.amount);
+        merged.amountLocked = m.agreed != null && m.room == null;
         merged.helpers = merged.helpers || []; merged.charges = []; merged.chargeIds = [];
       } else if (merged.kind === 'commission') merged.amount = num(merged.amount);
     }
@@ -231,6 +258,7 @@ export function lineProblem(line, { monday, rateEditable }) {
     return '';
   }
   if (line.kind === 'work_order') {
+    if (line.room != null && !line.amountLocked) { const r = roomProblem(line.room, line.amount); if (r) return r; }
     if (!(line.amount > 0)) return 'Add the work order amount';
     if ((line.helpers || []).some((h) => !String(h.name || '').trim() || !(Number(h.hours) > 0) || !(Number(h.rate) > 0))) return 'Finish the helper line';
     if (lineAmount(line) == null) return 'Helpers add up to more than the job';
@@ -246,7 +274,7 @@ export function lineSummary(line) {
     const brk = line.breakMin ? `, ${line.breakMin} min break` : '';
     return `${fmtTime(line.start)} to ${fmtTime(line.finish)}${brk}`;
   }
-  if (line.kind === 'work_order') return line.amountLocked ? 'Work order, agreed with the office' : 'Work order';
+  if (line.kind === 'work_order') return line.amountLocked ? 'Work order, agreed with the office' : line.room != null ? 'Work order, up to what is left' : 'Work order';
   if (line.kind === 'commission') return 'Commission';
   if (line.kind === 'unknown') return UNKNOWN_MODE_WORDS;
   if (line.kind === 'deduction') return 'Adjustment';

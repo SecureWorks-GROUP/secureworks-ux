@@ -50,7 +50,16 @@ export function createDemoServer(persona) {
   }
   function modeRow(job) {
     const mode = modeOf(job); const wo = db.jobWorkOrders[job.id];
-    return { job_id: job.id, invoice_mode: mode, invoice_mode_reason: mode === 'hourly' ? 'other_job' : mode === 'work_order' ? 'fencing_job' : 'patio_job', can_claim_commission: manages(job), work_order_agreed_ex: mode === 'work_order' && wo && wo.agreed_labour_ex ? wo.agreed_labour_ex : null, job_work_order_id: wo ? wo.id : null, ...(mode === 'work_order' && wo && wo.agreed_labour_ex ? { work_order_billed: { allowed_ex: wo.agreed_labour_ex, billed_ex: 280, left_ex: Math.round((wo.agreed_labour_ex - 280) * 100) / 100, billed_by: [{ name: 'Sam Helper', amount_ex: 280, you: false }] } } : {}) };
+    // Owner, 28 Nov 2026: a work order is billed up to what is left on it
+    // (work_order_amount_rule up_to_left, work_order_billed.most_now_ex).
+    // wo.amount_rule 'agreed' plays an older server (or a restoration work
+    // order): the agreed amount, locked.
+    const agreed = mode === 'work_order' && wo && wo.agreed_labour_ex;
+    const left = agreed ? Math.round((wo.agreed_labour_ex - 280) * 100) / 100 : null;
+    const upToLeft = agreed && wo.amount_rule !== 'agreed';
+    return { job_id: job.id, invoice_mode: mode, invoice_mode_reason: mode === 'hourly' ? 'other_job' : mode === 'work_order' ? 'fencing_job' : 'patio_job', can_claim_commission: manages(job), work_order_agreed_ex: agreed ? wo.agreed_labour_ex : null, job_work_order_id: wo ? wo.id : null,
+      ...(upToLeft ? { work_order_amount_rule: 'up_to_left' } : {}),
+      ...(agreed ? { work_order_billed: { allowed_ex: wo.agreed_labour_ex, billed_ex: 280, left_ex: left, billed_by: [{ name: 'Sam Helper', amount_ex: 280, you: false }], ...(upToLeft ? { most_now_ex: Math.max(0, left), amount_rule: 'up_to_left' } : {}) } } : {}) };
   }
   // ---- the saved weekly draft
   db.running = {};
@@ -220,7 +229,7 @@ export function createDemoServer(persona) {
         const m = modeRow(j); const hours = a.hours_worked != null ? a.hours_worked : 0;
         cards.push({ id: a.id, scheduled_date: a.scheduled_date, start_time: a.start_time, status: a.status, role: a.role, assignment_type: a.assignment_type, started_at: a.started_at, completed_at: a.completed_at, hours_worked: a.hours_worked, break_minutes: a.break_minutes, clocked_on_at: a.clocked_on_at, clocked_off_at: a.clocked_off_at, invoiced_in: a.invoiced_in || null,
           jobs: { id: j.id, type: j.type, job_number: j.job_number, client_name: j.client_name, site_address: j.site_address, site_suburb: j.site_suburb }, hours, amount: round2(hours * db.rate), logged_time_entry: loggedFor(a), previous_entry: null,
-          invoice_mode: m.invoice_mode, invoice_mode_reason: m.invoice_mode_reason, can_claim_commission: m.can_claim_commission, work_order_agreed_ex: m.work_order_agreed_ex, job_work_order_id: m.job_work_order_id, ...(m.work_order_billed ? { work_order_billed: m.work_order_billed } : {}) });
+          invoice_mode: m.invoice_mode, invoice_mode_reason: m.invoice_mode_reason, can_claim_commission: m.can_claim_commission, work_order_agreed_ex: m.work_order_agreed_ex, job_work_order_id: m.job_work_order_id, ...(m.work_order_amount_rule ? { work_order_amount_rule: m.work_order_amount_rule } : {}), ...(m.work_order_billed ? { work_order_billed: m.work_order_billed } : {}) });
       }
       const total_hours = round2(cards.reduce((s, c) => s + c.hours, 0)); const subtotal = round2(total_hours * db.rate);
       return { assignments: cards, rate: db.rate, rate_resolved: db.rate > 0, is_per_metre: me.invoice_type === 'per_metre', week_ending: sunday, week_start: monday, total_hours, subtotal, ...money(subtotal, { gstOn: me.trade_details.gstRegistered === true }),

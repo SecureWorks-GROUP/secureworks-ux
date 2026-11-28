@@ -97,7 +97,11 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
 - The app never guesses how a job is billed. It reads `invoice_mode` from
   `my_hours` or `trade_invoice_job_modes`; a job with no known mode asks the
   office and stays off the invoice. Commission is offered only where the
-  server says so. An agreed work order amount is shown, never typed.
+  server says so. An agreed work order amount is shown, never typed, unless
+  the server sends `work_order_amount_rule: 'up_to_left'` (owner,
+  28 Nov 2026): then the trade types this bill, more than $0 and up to
+  `work_order_billed.most_now_ex`, refused in words over it
+  (`roomOf` / `roomProblem` in `js/lib/invoice.js`).
 - The week's draft is the server's saved weekly draft
   (`get_running_invoice_draft`, `save_running_invoice_draft`) in the shape the
   Trade App writes, so either app can pick up the other's. The phone copy is

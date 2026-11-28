@@ -11,7 +11,7 @@ import { todayISO, mondayOf, addDays, fmtDay, fmtMoney, hoursBetween, fmtDow, fm
 import { verticalOf, jobTitle } from '../lib/model.js';
 import {
   buildLines, lineProblem, estimate, pickableDays, invoiceForWeek, sentBackForWeek, invoicePays, readMode,
-  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, oldAppLines, withoutOldAppLines, UNKNOWN_MODE_WORDS
+  draftFromBuilder, builderFromDraft, draftSaveBody, foreignDraftLines, oldAppLines, withoutOldAppLines, UNKNOWN_MODE_WORDS, roomProblem
 } from '../lib/invoice.js';
 import { receiptsEnabled, receiptProblem, receiptLine } from '../lib/reimbursements.js';
 import { bookMyself, useJob } from '../lib/data.js';
@@ -432,6 +432,10 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
         ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>${html`<${WoBilled} v=${line.billed} />`}`
+          : line.room != null ? html`<${Field} label="This bill (before GST)" hint=${line.room > 0 ? `Up to ${cash(line.room)} left on this work order` : 'Nothing is left on this work order'}><input class="input big" type="number" inputmode="decimal" min="0" max=${line.room} value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" data-wo-room=${line.room} /><//>
+            ${roomProblem(line.room, f.amount) ? html`<p class="t-small" role="status" data-wo-room-warn>${roomProblem(line.room, f.amount)}.</p>` : null}
+            <p class="t-small">Bill part of it now and the rest later if you need to. Add as helpers only the crew who have not billed yet: what others billed is already off what is left.</p>
+            ${html`<${WoBilled} v=${line.billed} />`}`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
         ${recorded > 0 ? html`<p class="t-small">${hrs(recorded)} recorded on this job this week. The hours are a record only. The pay is the work order amount.</p>` : null}
         ${(line.charges || []).length ? html`<${Field} label="Crew already billed on this job">
@@ -485,7 +489,7 @@ function AddJobSheet({ monday, user, lines, addLine, refetch, onClose }) {
   const row = job && modeQ.data && Array.isArray(modeQ.data.jobs) ? modeQ.data.jobs.find((r) => String(r.job_id) === String(job.id)) || null : null;
   const settled = Boolean(job && (modeQ.data || modeQ.error));
   const m = readMode(row, false);
-  const modeWords = !settled ? 'Checking how this job is billed.' : m.mode === 'work_order' && m.agreed != null ? 'Paid as a work order, at the amount agreed with the office.' : MODE_WORDS[m.mode] || `${UNKNOWN_MODE_WORDS}. You can add the day, but it stays off the invoice until the office sorts it out.`;
+  const modeWords = !settled ? 'Checking how this job is billed.' : m.mode === 'work_order' && m.room != null ? 'Paid as a work order. You bill what you did, up to what is left on it.' : m.mode === 'work_order' && m.agreed != null ? 'Paid as a work order, at the amount agreed with the office.' : MODE_WORDS[m.mode] || `${UNKNOWN_MODE_WORDS}. You can add the day, but it stays off the invoice until the office sorts it out.`;
   const viaGroup = m.mode === 'group_work_order';
 
   const add = async (shut) => {

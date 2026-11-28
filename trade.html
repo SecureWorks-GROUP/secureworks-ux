@@ -24062,13 +24062,23 @@
       // A job the trade searched in asks ops-api again.
       if (fields.work_order_agreed_ex != null || fields.agreed_applied != null
           || String(fields.invoice_mode || '').trim().toLowerCase() === 'work_order') {
-        if ((fields.work_order_agreed_ex != null || fields.agreed_applied != null) && fields.wo_amount_typed !== true) fields.wo_allocated = null;
+        // <work-order-room> A figure saved under the up-to-left rule is kept
+        // unless this app only filled it in (what was left then): typed
+        // here, typed in the Crew app (wo_amount_typed), or saved without the
+        // mark. Kept figures are checked against what is left now.
+        var keepRoomAmount = fields.wo_amount_typed === true || (
+          String(fields.work_order_amount_rule || '') === 'up_to_left' && fields.wo_allocated != null && fields.wo_allocated !== '' &&
+          !(fields.wo_amount_autofilled != null && Number(fields.wo_allocated) === Number(fields.wo_amount_autofilled)));
+        if (keepRoomAmount) fields.wo_amount_typed = true;
+        if ((fields.work_order_agreed_ex != null || fields.agreed_applied != null) && !keepRoomAmount) fields.wo_allocated = null;
         if (!fields.assignment_id) fields.invoice_mode_checked = false;
       }
       delete fields.work_order_agreed_ex;
       delete fields.job_work_order_id;
       delete fields.work_order_billed;
       delete fields.work_order_amount_rule;
+      delete fields.work_order_billed_unavailable;
+      delete fields.wo_amount_autofilled;
       var card = _newJobCard(fields);
       // New ordinary cards derive billable hours from times. A restored group
       // entry is a recovery record, including older hours without times.
@@ -25302,19 +25312,26 @@
     // (work_order_billed.most_now_ex, the server's figure; the app works
     // none out). The most, or null: no rule from the server (an older
     // ops-api) keeps the agreed amount locked, as on 12 Nov.
+    // The server bills this card's work order up to what is left.
+    function upToLeftRule(card) {
+      return agreedOf(card) != null && String((card && card.work_order_amount_rule) || '') === 'up_to_left';
+    }
     function upToLeft(card) {
-      if (agreedOf(card) == null) return null;
-      if (String(card.work_order_amount_rule || '') !== 'up_to_left') return null;
+      if (!upToLeftRule(card)) return null;
       var v = card.work_order_billed;
       var n = v && v.most_now_ex != null && v.most_now_ex !== '' ? Number(v.most_now_ex) : NaN;
       return Number.isFinite(n) ? Math.max(0, Math.round(n * 100) / 100) : null;
     }
-    // The amount a card is pinned to, or null when the trade types it.
-    function pinned(card) { return upToLeft(card) != null ? null : agreedOf(card); }
+    // The amount a card is pinned to, or null when the trade types it. Under
+    // the up-to-left rule it is never pinned, even when what is left could
+    // not be read (then nothing is sent for it: roomProblem).
+    function pinned(card) { return upToLeftRule(card) ? null : agreedOf(card); }
+    var ROOM_UNREAD = 'What is left on this work order could not be read. Try again in a minute. Nothing can be sent for it until it is read.';
     // The words for a typed amount, or null when it may be sent.
     function roomProblem(card, amount) {
+      if (!upToLeftRule(card)) return null;
       var most = upToLeft(card);
-      if (most == null) return null;
+      if (most == null) return ROOM_UNREAD;
       var money = '$' + most.toFixed(2);
       var n = amount == null || amount === '' ? NaN : Number(amount);
       if (most <= 0) return 'This work order has been billed in full. Ask the office if it needs changing.';
@@ -25347,7 +25364,7 @@
     };
     return {
       norm: norm, read: read, known: known, current: current, switches: switches, agreed: agreed,
-      upToLeft: upToLeft, pinned: pinned, roomProblem: roomProblem,
+      upToLeft: upToLeft, upToLeftRule: upToLeftRule, pinned: pinned, roomProblem: roomProblem,
       label: function(mode) { return LABEL[mode] || LABEL.hours; },
       hint: function(mode) { return HINT[mode] || HINT.hours; }
     };
@@ -26115,6 +26132,7 @@
     var money = function(n) { return '$' + Number(n).toFixed(2); };
     var by = Array.isArray(v.billed_by) ? v.billed_by : [];
     var left = Number(v.left_ex);
+    var most = v.most_now_ex == null || v.most_now_ex === '' ? NaN : Number(v.most_now_ex);
     var h = '<div data-card-wo-billed="' + c._idx + '" style="flex-basis:100%;margin-top:6px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:12px;color:var(--sw-dark)">';
     h += '<div style="font-weight:600">Work order allows ' + money(v.allowed_ex) + '</div>';
     if (!by.length) {
@@ -26127,8 +26145,15 @@
     }
     if (Number.isFinite(left)) {
       h += left >= 0
-        ? '<div style="font-weight:600;margin-top:3px">Left to bill ' + money(left) + '</div>'
+        ? '<div style="font-weight:600;margin-top:3px">' + (!Number.isFinite(most) || most === left ? 'Left to bill ' : 'Left on the job ') + money(left) + '</div>'
         : '<div style="font-weight:600;margin-top:3px;color:var(--sw-red)">Over by ' + money(-left) + '. Ask the office.</div>';
+    }
+    // <work-order-room> When what this trade may bill differs from what is
+    // left on the job (a work order on it is named for another trade), both
+    // figures are named, never two figures called "left".
+    if (Number.isFinite(most) && Number.isFinite(left) && left >= 0 && most !== left) {
+      h += '<div data-card-wo-yours="' + c._idx + '" style="font-weight:600;margin-top:1px">Yours to bill now ' + money(most)
+        + ' <span style="font-weight:400;color:var(--sw-text-sec)">(another work order on this job is for another trade)</span></div>';
     }
     return h + '</div>';
   }
@@ -26161,14 +26186,20 @@
     c.work_order_billed = (!unavailable && row && row.work_order_billed) || null;
     // <work-order-room> How the work order is billed: the server's, every read.
     c.work_order_amount_rule = (!unavailable && row && row.work_order_amount_rule) || null;
+    c.work_order_billed_unavailable = !unavailable && !!row && row.work_order_billed_unavailable === true;
     if (!r.mode) return;
     if (r.commission !== true && c.commission_mode) c.commission_mode = false;
     if (r.agreed != null) {
       var roomMost = InvoiceJobModeCore.upToLeft(c);
-      // Up to what is left: the box starts at what is left, and a figure
-      // the trade typed stands. Otherwise the agreed amount, as before.
-      if (roomMost == null) c.wo_allocated = r.agreed;
-      else if (!c.wo_amount_typed) c.wo_allocated = roomMost;
+      // Up to what is left: the box starts at what is left (remembered as
+      // filled in, not typed), and a figure the trade typed stands. What is
+      // left not read: the box starts empty, never at the agreed amount.
+      // Otherwise the agreed amount, as before.
+      if (!InvoiceJobModeCore.upToLeftRule(c)) c.wo_allocated = r.agreed;
+      else if (!c.wo_amount_typed) {
+        c.wo_allocated = roomMost;
+        c.wo_amount_autofilled = roomMost;
+      }
       // A job with an agreed work order opens as that work order, once per
       // amount, unless the trade chose hours or typed their own hours.
       if (!c.mode_picked && !c.hours_user_edited && c.agreed_applied !== r.agreed && !_jobCardWorkOrderBlocked(c)) {
@@ -26634,7 +26665,7 @@
     InvoiceJobModeCore.switches(c, locks).forEach(function(sw) {
       h += '<button type="button" class="jc-mode-switch" data-card-mode-switch="' + esc(sw.to) + '" onclick="setJobCardMode(' + i + ',\'' + sw.to + '\')">' + esc(sw.label) + '</button>';
     });
-    var hintKey = (cardMode === 'work_order' && InvoiceJobModeCore.upToLeft(c) != null) ? 'work_order_up_to_left'
+    var hintKey = (cardMode === 'work_order' && InvoiceJobModeCore.upToLeftRule(c)) ? 'work_order_up_to_left'
       : (cardMode === 'work_order' && InvoiceJobModeCore.agreed(c) != null) ? 'work_order_agreed' : cardMode;
     h += '<span class="jc-mode-hint">' + esc(InvoiceJobModeCore.hint(hintKey)) + '</span>';
     return h + '</div>';
@@ -26813,7 +26844,7 @@
           var agreedWo = InvoiceJobModeCore.pinned(c);
           var roomMost = InvoiceJobModeCore.upToLeft(c);
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
-          if (roomMost != null) {
+          if (InvoiceJobModeCore.upToLeftRule(c)) {
             html += '<label for="woalloc-' + c._idx + '" style="font-size:12px;color:var(--sw-text-sec)">This bill $</label>';
             html += '<input id="woalloc-' + c._idx + '" type="number" min="0" step="0.01" inputmode="decimal" data-cardwoalloc="' + c._idx + '" '
               + 'value="' + (c.wo_allocated != null ? c.wo_allocated : '') + '" placeholder="0.00" '
@@ -26821,7 +26852,8 @@
               + 'onchange="setJobCardWoAllocated(' + c._idx + ',this.value)" '
               + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
             html += '<span id="woroom-' + c._idx + '" data-card-wo-room="' + c._idx + '" style="font-size:12px;color:var(--sw-dark)">'
-              + (roomMost > 0 ? 'Up to <b>$' + roomMost.toFixed(2) + '</b> left on this work order' : 'Nothing is left on this work order') + '</span>';
+              + (roomMost == null ? 'What is left on this work order could not be read'
+                : roomMost > 0 ? 'Up to <b>$' + roomMost.toFixed(2) + '</b> left on this work order' : 'Nothing is left on this work order') + '</span>';
             var roomWords = c.included ? InvoiceJobModeCore.roomProblem(c, c.wo_allocated) : null;
             html += '<div data-card-wo-room-warn="' + c._idx + '" role="status" style="flex-basis:100%;display:' + (roomWords ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600">' + esc(roomWords || '') + '</div>';
             html += _woBilledHtml(c);
@@ -27094,7 +27126,7 @@
         } else if (allocEl) {
           var n = parseFloat(allocEl.value);
           var typedNow = (isNaN(n) || n < 0) ? null : n;
-          if (InvoiceJobModeCore.upToLeft(c) != null && typedNow !== c.wo_allocated) c.wo_amount_typed = true;
+          if (InvoiceJobModeCore.upToLeftRule(c) && typedNow !== c.wo_allocated) c.wo_amount_typed = true;
           c.wo_allocated = typedNow;
         }
         var labourLines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
@@ -27487,7 +27519,7 @@
     if (InvoiceJobModeCore.pinned(c) != null) { c.wo_allocated = InvoiceJobModeCore.pinned(c); _refreshJobCardLine(idx); return; }
     var n = parseFloat(val);
     c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
-    if (InvoiceJobModeCore.upToLeft(c) != null) {
+    if (InvoiceJobModeCore.upToLeftRule(c)) {
       c.wo_amount_typed = true;
       _markDraftEdited(c);
       _paintWoRoomWarning(c);

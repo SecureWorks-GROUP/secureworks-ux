@@ -146,6 +146,10 @@ test.describe('a work-order job', () => {
 // a work order at the agreed amount. ops-api sends work_order_agreed_ex (ex
 // GST) and job_work_order_id; the card shows the agreed amount read only, and
 // the old "approved work order bills hours" rule no longer forces it to hours.
+// Owner, 28 Nov 2026: an ops-api that also sends work_order_amount_rule
+// "up_to_left" lets the trade type the amount (the describe after this one).
+// The locked amount below is kept ON PURPOSE as what an ops-api that sends no
+// rule (older, or a restoration work order) still gets.
 const OPS_API = 'https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api';
 const AGREED = { invoice_mode: 'work_order', can_claim_commission: false, work_order_agreed_ex: 1850, job_work_order_id: 'jwo-1' };
 
@@ -163,7 +167,7 @@ async function approvedJobWorkOrder(page) {
   });
 }
 
-test.describe('a work-order job with an agreed work order', () => {
+test.describe('a work-order job with an agreed work order and no amount rule (older ops-api or restoration)', () => {
   test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
     myHoursPatch: { assignments: { [ASSIGNMENT]: AGREED } } });
 
@@ -236,6 +240,186 @@ test.describe('a work-order job with an agreed work order', () => {
     await expect.poll(() => feedRequests.filter((e) => e.action === 'my_hours').length).toBeGreaterThan(hoursReadsBefore);
   });
 });
+
+// <work-order-room> Owner, 28 Nov 2026: the trade bills a work order in as
+// many bills as it takes, each more than $0 and up to what is left on it
+// after everyone's billing. Every figure is ops-api's (work_order_billed).
+const ROOM = (most, billed) => ({
+  ...AGREED,
+  work_order_amount_rule: 'up_to_left',
+  work_order_billed: {
+    allowed_ex: 1850,
+    billed_ex: billed,
+    left_ex: 1850 - billed,
+    billed_by: billed > 0 ? [{ name: 'ZZTEST Helper', amount_ex: billed, you: false }] : [],
+    most_now_ex: most,
+    amount_rule: 'up_to_left',
+  },
+});
+
+test.describe('a work order billed up to what is left', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
+    myHoursPatch: { assignments: { [ASSIGNMENT]: ROOM(1250, 600) } } });
+
+  test('the box starts at what is left, says so, and sends a smaller progress bill', async ({ appPage: page, feedRequests }) => {
+    await approvedJobWorkOrder(page);
+    const card = await openInvoice(page);
+    await expect(card.locator('[data-card-mode-label]')).toHaveText('Paid as a work order');
+    await expect(card.locator('[data-card-wo-agreed]')).toHaveCount(0);
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('1250');
+    await expect(card.locator('[data-card-wo-room]')).toHaveText('Up to $1250.00 left on this work order');
+    await expect(card).toContainText('Type what you are billing on this work order this time, up to what is left.');
+    // Who has drawn what, as the server sent it.
+    await expect(card.locator('[data-card-wo-billed]')).toContainText('Work order allows $1850.00');
+    await expect(card.locator('[data-card-wo-billed]')).toContainText('ZZTEST Helper $600.00');
+    await expect(card.locator('[data-card-wo-billed]')).toContainText('Left to bill $1250.00');
+
+    await card.locator('[data-cardwoalloc]').fill('800');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await expect(card.locator('[data-card-wo-room-warn]')).toBeHidden();
+    await submit(page);
+    await expect(page.getByText('Invoice Submitted')).toBeVisible();
+    const body = invoicePosts(feedRequests)[0].body;
+    const wo = (body.extra_items || []).find((x) => x.row_type === 'work_order');
+    expect(wo).toMatchObject({ wo_allocated: 800, rate: 800, job_id: 'e2e-wo-holder-job' });
+  });
+
+  test('more than is left is refused in words before anything is sent', async ({ appPage: page, feedRequests }) => {
+    const card = await openInvoice(page);
+    await card.locator('[data-cardwoalloc]').fill('1250.01');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await expect(card.locator('[data-card-wo-room-warn]')).toHaveText('That is more than is left. You can bill at most $1250.00 on this work order now.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('SWF-26767: That is more than is left. You can bill at most $1250.00 on this work order now.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+    // Nothing typed is refused too.
+    await card.locator('[data-cardwoalloc]').fill('');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await expect(card.locator('[data-card-wo-room-warn]')).toHaveText('Type what you are billing on this work order this time: more than $0.00, up to $1250.00.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+  });
+
+  test('a figure the trade typed survives the saved draft; the most is read again', async ({ appPage: page }) => {
+    const card = await openInvoice(page);
+    await card.locator('[data-cardwoalloc]').fill('500');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await page.reload();
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    const restored = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+    await expect(restored.locator('[data-cardwoalloc]')).toHaveValue('500');
+    await expect(restored.locator('[data-card-wo-room]')).toHaveText('Up to $1250.00 left on this work order');
+  });
+
+  test('the server\'s refusal is shown in words and not queued', async ({ appPage: page, feedRequests }) => {
+    await page.route(`${OPS_API}**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') !== 'generate_trade_invoice' || route.request().method() !== 'POST') return route.fallback();
+      return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+        ok: false, saved: false, code: 'work_order_amount_over_left',
+        userMessage: 'Job SWF-26767: up to $900.00 is left on its work order. Bill at most that this time, or ask the office.',
+      }) });
+    });
+    await openInvoice(page);
+    const hoursReadsBefore = feedRequests.filter((e) => e.action === 'my_hours').length;
+    await submit(page);
+    await expect(page.locator('#toast')).toContainText('Job SWF-26767: up to $900.00 is left on its work order.');
+    await expect(page.locator('#toast')).toContainText('Nothing was sent.');
+    await expect(page.getByText('Invoice Submitted')).toHaveCount(0);
+    const queued = await page.evaluate(() => JSON.parse(localStorage.getItem('sw_action_queue') || '[]'));
+    expect(queued).toEqual([]);
+    await expect.poll(() => feedRequests.filter((e) => e.action === 'my_hours').length).toBeGreaterThan(hoursReadsBefore);
+  });
+});
+
+// Review fix 2: an amount saved by the Crew app (marked typed) or saved under
+// the up-to-left rule without the mark is kept; one the Trade App only filled
+// in (what was left then) is filled again with what is left now.
+test.describe('a work order amount saved in the weekly draft', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
+    myHoursPatch: { assignments: { [ASSIGNMENT]: ROOM(1250, 600) } } });
+
+  async function reopenWith(page, card) {
+    await page.evaluate((fields) => {
+      const key = Object.keys(sessionStorage).find((k) => k.indexOf('sw_inv_draft_') === 0);
+      const draft = JSON.parse(sessionStorage.getItem(key));
+      for (const k of ['wo_amount_typed', 'wo_amount_autofilled']) delete draft.jobCards[0][k];
+      Object.assign(draft.jobCards[0], fields);
+      sessionStorage.setItem(key, JSON.stringify(draft));
+    }, card);
+    await page.reload();
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    return page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+  }
+
+  test('an amount the Crew app saved with the typed mark is kept', async ({ appPage: page }) => {
+    await openInvoice(page);
+    const card = await reopenWith(page, { wo_mode: true, wo_allocated: 700, wo_amount_typed: true });
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('700');
+  });
+
+  test('an amount saved under the up-to-left rule without the mark is kept', async ({ appPage: page }) => {
+    await openInvoice(page);
+    const card = await reopenWith(page, { wo_mode: true, wo_allocated: 640, work_order_amount_rule: 'up_to_left', wo_amount_autofilled: 1250 });
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('640');
+  });
+
+  test('an amount the app only filled in is filled again with what is left now', async ({ appPage: page }) => {
+    await openInvoice(page);
+    const card = await reopenWith(page, { wo_mode: true, wo_allocated: 1500, work_order_amount_rule: 'up_to_left', wo_amount_autofilled: 1500 });
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('1250');
+  });
+});
+
+// Review fix 3: the rule says up to what is left but the figure could not be
+// read. The box is never locked to the agreed amount, and nothing is sent.
+test.describe('a work order whose amount left could not be read', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
+    myHoursPatch: { assignments: { [ASSIGNMENT]: { ...AGREED, work_order_amount_rule: 'up_to_left', work_order_billed_unavailable: true } } } });
+
+  test('says so plainly and sends nothing', async ({ appPage: page, feedRequests }) => {
+    const card = await openInvoice(page);
+    await expect(card.locator('[data-card-wo-agreed]')).toHaveCount(0);
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('');
+    await expect(card.locator('[data-card-wo-room]')).toHaveText('What is left on this work order could not be read');
+    await card.locator('[data-cardwoalloc]').fill('300');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await expect(card.locator('[data-card-wo-room-warn]')).toHaveText('What is left on this work order could not be read. Try again in a minute. Nothing can be sent for it until it is read.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('What is left on this work order could not be read.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+  });
+});
+
+// Review fix 5: the job's left and this trade's most are never both called "left".
+test.describe('a work order with another trade\'s named work order on the job', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
+    myHoursPatch: { assignments: { [ASSIGNMENT]: { ...ROOM(1250, 600), work_order_billed: { ...ROOM(1250, 600).work_order_billed, most_now_ex: 950 } } } } });
+
+  test('names the job\'s left and what is yours to bill', async ({ appPage: page }) => {
+    const card = await openInvoice(page);
+    await expect(card.locator('[data-card-wo-room]')).toHaveText('Up to $950.00 left on this work order');
+    await expect(card.locator('[data-card-wo-billed]')).toContainText('Left on the job $1250.00');
+    await expect(card.locator('[data-card-wo-yours]')).toContainText('Yours to bill now $950.00');
+    await expect(card.locator('[data-card-wo-billed]')).not.toContainText('Left to bill');
+  });
+});
+
+test.describe('a work order billed in full', () => {
+  test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,
+    myHoursPatch: { assignments: { [ASSIGNMENT]: ROOM(0, 1850) } } });
+
+  test('says nothing is left and sends nothing', async ({ appPage: page, feedRequests }) => {
+    const card = await openInvoice(page);
+    await expect(card.locator('[data-card-wo-room]')).toHaveText('Nothing is left on this work order');
+    await expect(card.locator('[data-card-wo-room-warn]')).toHaveText('This work order has been billed in full. Ask the office if it needs changing.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('This work order has been billed in full.');
+    expect(invoicePosts(feedRequests)).toEqual([]);
+  });
+});
+// </work-order-room>
 
 test.describe('an older ops-api with no agreed amount on a job with an approved work order', () => {
   test.use({ persona: 'installer', feedScenario: 'wo-labour-explainer', appWeekDay: 6, ...PHONE,

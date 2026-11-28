@@ -124,6 +124,13 @@ export function Review({ monday: mondayParam }) {
       return;
     }
     if (code === 'work_order_amount_not_agreed') { await hours.refetch(); invalidate('jobmodes'); toast('A work order amount changed at the office. We have read it again: check and send again.', { kind: 'bad', ms: 7000 }); return; }
+    // Owner, 28 Nov 2026: more than is left, no amount, or the job twice. The server's own words.
+    if (code === 'work_order_amount_over_left' || code === 'work_order_amount_required' || code === 'work_order_line_twice') {
+      await hours.refetch(); invalidate('jobmodes');
+      const words = String((err.body && (err.body.userMessage || err.body.error)) || '').trim() || 'A work order amount is more than is left on it.';
+      toast(words + ' Nothing was sent. We have read the work orders again: check and send again.', { kind: 'bad', ms: 8000 });
+      return;
+    }
     if (code === 'RATE_NOT_CONFIGURED') { toast('No pay rate is set for you yet. Call the office to have it set, then send.', { kind: 'bad', ms: 7000 }); return; }
     toast(friendly(err) + ' Nothing was sent.', { kind: 'bad', ms: 7000 });
   };
@@ -147,7 +154,7 @@ export function Review({ monday: mondayParam }) {
     if (l.kind === 'hours') detail = `${dayWords(l.date)} · ${isNaN(lineHours(l)) ? 'no times yet' : `${hrs(lineHours(l))} at ${cash(l.rate)}`}`;
     else if (l.kind === 'work_order') {
       const rec = round2((l.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0));
-      detail = [l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
+      detail = [l.upToLeft ? 'up to what is left' : l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
     } else if (l.kind === 'commission') detail = inclusive ? 'commission, includes super' : 'commission, no super on it';
     else if (l.kind === 'reimbursement') detail = [l.description, l.date ? fmtDate(l.date) : '', 'no super or GST added'].filter(Boolean).join(' · ');
     else if (l.kind === 'other') detail = l.type || 'Other';

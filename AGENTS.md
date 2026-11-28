@@ -1163,7 +1163,22 @@ order) bills that amount read only, re-pinned from the server before every
 paint and submit and never kept from a saved draft; only without that field
 does an approved job work order still force hours (`tradeJobWoRetiresTypedBox`).
 ops-api's `work_order_amount_not_agreed` refusal is shown in words, never
-queued. The estimate takes no super on commission. Search `// <invoice-job-mode>`;
+queued. Owner, 28 Nov 2026: when the row also carries
+`work_order_amount_rule: 'up_to_left'` and `work_order_billed.most_now_ex`,
+the amount is typed, not locked: the box starts at what is left, says "Up to
+$X left on this work order", is refused in words over it or at $0 before
+sending, and a figure the trade typed survives the saved draft
+(`wo_amount_typed`; Crew writes the same mark, and a figure the app only filled
+in is `wo_amount_autofilled` and is filled again on reopen). A failed read of
+what is left (`work_order_billed_unavailable`) says so and sends nothing; it
+never locks the box to the agreed amount. When what this trade may bill differs
+from what is left on the job, the card names both ("Left on the job", "Yours to
+bill now"). Every figure is the server's (`InvoiceJobModeCore.upToLeft`,
+`pinned`, `roomProblem`, search `// <work-order-room>`); with no rule the
+amount stays locked, so either side can deploy first. The server's
+`work_order_amount_over_left` / `_required` / `work_order_line_twice` words
+are shown, never queued. Back end contract: secureworks-backend
+`docs/work-order-room-v1.md`. The estimate takes no super on commission. Search `// <invoice-job-mode>`;
 contract in `trade-app.md` → "Pay tab: the job decides how it is billed".
 Guard: `tests/e2e/trade-invoice-job-mode.spec.js`.
 

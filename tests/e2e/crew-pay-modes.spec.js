@@ -43,9 +43,62 @@ async function send(page) {
   return page.evaluate(() => window.__sent);
 }
 
-test('a work order is billed at the amount agreed with the office, with no box to change it', async ({ page }) => {
+// Owner, 28 Nov 2026: this test pinned the 12 Nov locked agreed amount. It is
+// changed ON PURPOSE: the trade types what they bill this time, up to what is
+// left. The locked amount is kept for a server that sends no amount rule
+// (older, or a restoration work order): the second test.
+test('a work order is billed up to what is left on it: the box starts there and a smaller bill goes', async ({ page }) => {
   const errors = watchErrors(page);
   await openWithSpy(page, 'crew', () => { window.__crewDemo.db.jobWorkOrders['j-joon'].agreed_labour_ex = 3200; });
+  await page.evaluate(() => { location.hash = '#/pay/week/2026-11-09'; });
+
+  const row = page.locator('.pay-row', { hasText: 'Joondalup' });
+  await expect(row).toContainText('Work order');
+  await row.click();
+  const sheet = page.getByRole('dialog', { name: 'Joondalup' });
+  // 3,200 allowed, 280 billed by a helper: 2,920 left.
+  const box = sheet.getByLabel('This bill (before GST)');
+  await expect(box).toHaveValue('2920');
+  await expect(sheet.getByText('Up to $2,920.00 left on this work order')).toBeVisible();
+  await expect(sheet.locator('[data-wo-billed]')).toContainText('Sam Helper');
+  // Over what is left is refused in words before anything is sent.
+  await box.fill('3000');
+  await expect(sheet.locator('[data-wo-room-warn]')).toHaveText('That is more than is left. You can bill at most $2,920.00 on this work order now.');
+  await box.fill('1500');
+  await expect(sheet.locator('[data-wo-room-warn]')).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await fillTimes(page, 'Wembley', '07:00', '14:00', '30 min');
+  await page.getByRole('button', { name: 'Review invoice' }).click();
+  await expect(page.locator('.pay-cap', { hasText: /^Work order/ })).toContainText('$1,500.00');
+
+  const sent = await send(page);
+  expect(sent).toHaveLength(1);
+  const wo = sent[0].extra_items.filter((x) => x.row_type === 'work_order');
+  expect(wo).toHaveLength(1);
+  expect(wo[0]).toMatchObject({ type: 'Work Order', job_id: 'j-joon', job_number: 'SWF-26767', rate: 1500, wo_allocated: 1500, wo_labour_deduction: 0 });
+  expect(sent[0].manual_assignments.map((a) => a.work_date)).toEqual(['2026-11-09', '2026-11-10', '2026-11-12']);
+  expect(errors).toEqual([]);
+});
+
+test('over what is left, the line says so and the invoice does not send', async ({ page }) => {
+  await openWithSpy(page, 'crew', () => { window.__crewDemo.db.jobWorkOrders['j-joon'].agreed_labour_ex = 3200; });
+  await page.evaluate(() => { location.hash = '#/pay/week/2026-11-09'; });
+  await page.locator('.pay-row', { hasText: 'Joondalup' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Joondalup' });
+  await sheet.getByLabel('This bill (before GST)').fill('3000');
+  await sheet.getByRole('button', { name: 'Save', exact: true }).click();
+  for (const name of ['Wembley', 'Morley', 'South Perth']) await leaveOff(page, name);
+  await page.getByRole('button', { name: 'Review invoice' }).click();
+  await expect(page.getByText('That is more than is left. You can bill at most $2,920.00 on this work order now').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send invoice' })).toBeDisabled();
+  expect(await page.evaluate(() => window.__sent)).toEqual([]);
+});
+
+test('a server with no amount rule keeps the agreed amount, with no box to change it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openWithSpy(page, 'crew', () => { Object.assign(window.__crewDemo.db.jobWorkOrders['j-joon'], { agreed_labour_ex: 3200, amount_rule: 'agreed' }); });
   await page.evaluate(() => { location.hash = '#/pay/week/2026-11-09'; });
 
   const row = page.locator('.pay-row', { hasText: 'Joondalup' });
@@ -63,12 +116,8 @@ test('a work order is billed at the amount agreed with the office, with no box t
   await expect(page.locator('.pay-cap', { hasText: /^Work order/ })).toContainText('$3,200.00');
 
   const sent = await send(page);
-  expect(sent).toHaveLength(1);
   const wo = sent[0].extra_items.filter((x) => x.row_type === 'work_order');
-  expect(wo).toHaveLength(1);
-  expect(wo[0]).toMatchObject({ type: 'Work Order', job_id: 'j-joon', job_number: 'SWF-26767', rate: 3200, wo_allocated: 3200, wo_labour_deduction: 0 });
-  // The other days are hours, one line a job a day, never folded into the work order.
-  expect(sent[0].manual_assignments.map((a) => a.work_date)).toEqual(['2026-11-09', '2026-11-10', '2026-11-12']);
+  expect(wo[0]).toMatchObject({ rate: 3200, wo_allocated: 3200 });
   expect(errors).toEqual([]);
 });
 

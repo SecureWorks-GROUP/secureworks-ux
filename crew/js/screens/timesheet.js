@@ -432,8 +432,8 @@ function LineSheet({ line, ctx, onSave, onClose }) {
         ${line.vertical === 'makesafe' && h > 2 ? html`<${Field} label="Why it took over 2 hours (optional)"><input class="input" value=${f.justification} onInput=${(e) => set('justification', e.currentTarget.value)} /><//>` : null}
       ` : line.kind === 'work_order' ? html`
         ${line.amountLocked ? html`<div class="card pay-out"><span class="t-cap">${line.woNumber ? 'Work order ' + line.woNumber : 'Agreed amount'}</span><b class="t-figure">${cash(line.amount)}</b></div><p class="t-small">This amount is set with the office. Add the crew you pay from this job as helpers below.</p>${html`<${WoBilled} v=${line.billed} />`}`
-          : line.room != null ? html`<${Field} label="This bill (before GST)" hint=${line.room > 0 ? `Up to ${cash(line.room)} left on this work order` : 'Nothing is left on this work order'}><input class="input big" type="number" inputmode="decimal" min="0" max=${line.room} value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" data-wo-room=${line.room} /><//>
-            ${roomProblem(line.room, f.amount) ? html`<p class="t-small" role="status" data-wo-room-warn>${roomProblem(line.room, f.amount)}.</p>` : null}
+          : line.upToLeft ? html`<${Field} label="This bill (before GST)" hint=${line.room == null ? 'What is left on this work order could not be read' : line.room > 0 ? `Up to ${cash(line.room)} left on this work order` : 'Nothing is left on this work order'}><input class="input big" type="number" inputmode="decimal" min="0" max=${line.room == null ? undefined : line.room} value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" data-wo-room=${line.room == null ? '' : line.room} /><//>
+            ${roomProblem(line.room, f.amount, true) ? html`<p class="t-small" role="status" data-wo-room-warn>${roomProblem(line.room, f.amount, true)}.</p>` : null}
             <p class="t-small">Bill part of it now and the rest later if you need to. Add as helpers only the crew who have not billed yet: what others billed is already off what is left.</p>
             ${html`<${WoBilled} v=${line.billed} />`}`
           : html`<${Field} label="Work order amount (before GST)"><input class="input big" type="number" inputmode="decimal" min="0" value=${f.amount} onInput=${(e) => set('amount', e.currentTarget.value)} placeholder="$" /><//>`}
@@ -489,7 +489,7 @@ function AddJobSheet({ monday, user, lines, addLine, refetch, onClose }) {
   const row = job && modeQ.data && Array.isArray(modeQ.data.jobs) ? modeQ.data.jobs.find((r) => String(r.job_id) === String(job.id)) || null : null;
   const settled = Boolean(job && (modeQ.data || modeQ.error));
   const m = readMode(row, false);
-  const modeWords = !settled ? 'Checking how this job is billed.' : m.mode === 'work_order' && m.room != null ? 'Paid as a work order. You bill what you did, up to what is left on it.' : m.mode === 'work_order' && m.agreed != null ? 'Paid as a work order, at the amount agreed with the office.' : MODE_WORDS[m.mode] || `${UNKNOWN_MODE_WORDS}. You can add the day, but it stays off the invoice until the office sorts it out.`;
+  const modeWords = !settled ? 'Checking how this job is billed.' : m.mode === 'work_order' && m.upToLeft ? 'Paid as a work order. You bill what you did, up to what is left on it.' : m.mode === 'work_order' && m.agreed != null ? 'Paid as a work order, at the amount agreed with the office.' : MODE_WORDS[m.mode] || `${UNKNOWN_MODE_WORDS}. You can add the day, but it stays off the invoice until the office sorts it out.`;
   const viaGroup = m.mode === 'group_work_order';
 
   const add = async (shut) => {
@@ -591,10 +591,13 @@ function WoBilled({ v }) {
   if (!v || !isFinite(Number(v.allowed_ex)) || !isFinite(Number(v.billed_ex))) return null;
   const by = Array.isArray(v.billed_by) ? v.billed_by : [];
   const left = Number(v.left_ex);
+  const most = v.most_now_ex == null || v.most_now_ex === '' ? NaN : Number(v.most_now_ex);
+  const split = isFinite(most) && isFinite(left) && left >= 0 && most !== left;
   return html`<div class="card" data-wo-billed>
     <${KV} k="Work order allows" v=${cash(Number(v.allowed_ex))} />
     ${by.length ? html`<${KV} k="Billed so far" v=${cash(Number(v.billed_ex))} />` : html`<p class="t-small">Nothing billed on it yet.</p>`}
     ${by.map((b) => html`<${KV} k=${b && b.you ? 'You' : String((b && b.name) || 'Someone else')} v=${cash(Number((b && b.amount_ex) || 0))} />`)}
-    ${isFinite(left) ? (left >= 0 ? html`<${KV} k="Left to bill" v=${cash(left)} />` : html`<p class="t-small" data-wo-over>Over by ${cash(-left)}. Ask the office.</p>`) : null}
+    ${isFinite(left) ? (left >= 0 ? html`<${KV} k=${split ? 'Left on the job' : 'Left to bill'} v=${cash(left)} />` : html`<p class="t-small" data-wo-over>Over by ${cash(-left)}. Ask the office.</p>`) : null}
+    ${split ? html`<${KV} k="Yours to bill now" v=${cash(most)} /><p class="t-small" data-wo-yours>Another work order on this job is for another trade.</p>` : null}
   </div>`;
 }

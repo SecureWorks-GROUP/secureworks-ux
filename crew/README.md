@@ -101,7 +101,10 @@ No build step. Plain ES modules, served as they are by GitHub Pages.
   the server sends `work_order_amount_rule: 'up_to_left'` (owner,
   28 Nov 2026): then the trade types this bill, more than $0 and up to
   `work_order_billed.most_now_ex`, refused in words over it
-  (`roomOf` / `roomProblem` in `js/lib/invoice.js`).
+  (`roomOf` / `roomProblem` in `js/lib/invoice.js`). A typed amount is saved
+  with `wo_amount_typed` so the Trade App keeps it; a failed read of what is
+  left blocks the line in words, never the agreed amount. Check:
+  `node tests/unit/crew-wo-room.test.mjs`.
 - The week's draft is the server's saved weekly draft
   (`get_running_invoice_draft`, `save_running_invoice_draft`) in the shape the
   Trade App writes, so either app can pick up the other's. The phone copy is

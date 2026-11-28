@@ -154,7 +154,7 @@ export function Review({ monday: mondayParam }) {
     if (l.kind === 'hours') detail = `${dayWords(l.date)} · ${isNaN(lineHours(l)) ? 'no times yet' : `${hrs(lineHours(l))} at ${cash(l.rate)}`}`;
     else if (l.kind === 'work_order') {
       const rec = round2((l.dayCards || []).reduce((s, d) => s + (d.saved ? hoursBetween(d.saved.start, d.saved.finish, d.saved.breakMin) || 0 : d.clocked || 0), 0));
-      detail = [l.room != null ? 'up to what is left' : l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
+      detail = [l.upToLeft ? 'up to what is left' : l.agreed != null ? 'agreed labour' : l.amountLocked ? `work order ${l.woNumber || ''}`.trim() : 'your amount, checked by the office', helpersTotal(l) ? 'after crew' : '', rec ? `${hrs(rec)} recorded` : ''].filter(Boolean).join(' · ');
     } else if (l.kind === 'commission') detail = inclusive ? 'commission, includes super' : 'commission, no super on it';
     else if (l.kind === 'reimbursement') detail = [l.description, l.date ? fmtDate(l.date) : '', 'no super or GST added'].filter(Boolean).join(' · ');
     else if (l.kind === 'other') detail = l.type || 'Other';
